@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -280,6 +281,11 @@ private fun ToolCall(call: ThreadItem.ToolCall) {
         return
     }
 
+    if (call.kind == "execute") {
+        CommandCard(call)
+        return
+    }
+
     Row(
         Modifier.fillMaxWidth().heightIn(min = Tokens.Size.ControlSm),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -339,6 +345,35 @@ private fun CardHead(content: @Composable RowScope.() -> Unit) {
             content()
         }
         Hairline()
+    }
+}
+
+@Composable
+private fun CommandCard(call: ThreadItem.ToolCall) {
+    val colors = MyTheme.colors
+    val output = call.output?.trimEnd().orEmpty()
+
+    Card(Modifier.semantics { contentDescription = "Command ${call.argument}" }) {
+        Row(
+            Modifier.fillMaxWidth().background(colors.bgPanel).padding(Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Label(call.argument, Modifier.weight(1f), Tokens.Type.Code)
+
+            when (call.status) {
+                ToolStatus.Running -> StatusMark("Running", Tone.Working, MyIcon.Working)
+                ToolStatus.Failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+                else -> {}
+            }
+        }
+
+        if (output.isNotEmpty()) {
+            Hairline()
+            Box(Modifier.fillMaxWidth().heightIn(max = Tokens.Size.CommandOutput).verticalScroll(rememberScrollState()).padding(Tokens.Space.S2)) {
+                Label(output, style = Tokens.Type.CodeSm, color = colors.textMuted)
+            }
+        }
     }
 }
 
