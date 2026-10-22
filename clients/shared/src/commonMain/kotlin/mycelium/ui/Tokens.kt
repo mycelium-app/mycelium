@@ -3,6 +3,8 @@ package mycelium.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -169,7 +171,7 @@ data class Fonts(val sans: FontFamily, val mono: FontFamily)
 
 val LocalFonts = staticCompositionLocalOf { Fonts(FontFamily.SansSerif, FontFamily.Monospace) }
 
-val LocalKeyboardNavigation = staticCompositionLocalOf { true }
+val LocalKeyboardNavigation = staticCompositionLocalOf<State<Boolean>> { mutableStateOf(true) }
 
 val LocalReducedMotion = staticCompositionLocalOf { false }
 

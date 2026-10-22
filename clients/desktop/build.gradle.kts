@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.compose.ui.test)
     testImplementation(libs.ktor.client.mock)
     testImplementation(libs.ktor.client.cio)
     testImplementation(libs.kotlinx.coroutines.test)

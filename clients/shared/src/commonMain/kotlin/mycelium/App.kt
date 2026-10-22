@@ -70,7 +70,7 @@ private fun AppContent(platform: Platform) {
     val saved = remember { platform.loadConnection() }
     var phase by remember { mutableStateOf<Phase>(Phase.Restoring) }
     var approveCode by remember { mutableStateOf(platform.approveCode()) }
-    var keyboardNavigation by remember { mutableStateOf(false) }
+    val keyboardNavigation = remember { mutableStateOf(false) }
     val root = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
@@ -104,7 +104,7 @@ private fun AppContent(platform: Platform) {
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
-                    keyboardNavigation = true
+                    keyboardNavigation.value = true
                 }
 
                 false
@@ -115,7 +115,7 @@ private fun AppContent(platform: Platform) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
 
                         if (event.type == PointerEventType.Press) {
-                            keyboardNavigation = false
+                            keyboardNavigation.value = false
                         }
                     }
                 }

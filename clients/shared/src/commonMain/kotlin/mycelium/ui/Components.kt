@@ -32,11 +32,13 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -107,14 +109,14 @@ fun VerticalHairline(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun Modifier.focusRing(focused: Boolean, shape: Shape = RectangleShape, inside: Boolean = false, always: Boolean = false): Modifier {
+fun Modifier.focusRing(focused: State<Boolean>, shape: Shape = RectangleShape, inside: Boolean = false, always: Boolean = false): Modifier {
     val ring = MyTheme.colors.focus
-    val shown = focused && (always || LocalKeyboardNavigation.current)
+    val keyboardNavigation = LocalKeyboardNavigation.current
 
     return drawWithContent {
         drawContent()
 
-        if (shown) {
+        if (focused.value && (always || keyboardNavigation.value)) {
             val stroke = Tokens.Size.FocusRing.toPx()
             val grow = if (inside) -stroke / 2 else Tokens.Size.FocusOffset.toPx() + stroke / 2
             val corner = if (shape is RoundedCornerShape) shape.topStart.toPx(size, this) else 0f
@@ -143,20 +145,23 @@ fun Modifier.pressable(
     ringInside: Boolean = false,
 ): Modifier {
     val source = remember { MutableInteractionSource() }
-    val hovered by source.collectIsHoveredAsState()
-    val focused by source.collectIsFocusedAsState()
+    val hovered = source.collectIsHoveredAsState()
+    val focused = source.collectIsFocusedAsState()
     val colors = MyTheme.colors
-    val background = when {
-        selected -> colors.bgSelected
-        hovered && base == Color.Transparent -> colors.bgHover
-        hovered -> lerp(base, colors.text, 0.12f)
-        else -> base
-    }
 
     return this
         .focusRing(focused, shape, ringInside)
         .clip(shape)
-        .background(background)
+        .drawBehind {
+            val background = when {
+                selected -> colors.bgSelected
+                hovered.value && base == Color.Transparent -> colors.bgHover
+                hovered.value -> lerp(base, colors.text, 0.12f)
+                else -> base
+            }
+
+            drawRect(background)
+        }
         .hoverable(source)
         .clickable(interactionSource = source, indication = null, role = role, onClick = onClick)
         .semantics {
@@ -339,7 +344,7 @@ fun TextInput(
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
-    val focused by source.collectIsFocusedAsState()
+    val focused = source.collectIsFocusedAsState()
     val height = touchMin(if (large) Tokens.Size.ControlLg else Tokens.Size.ControlMd)
     val borderColor = if (error != null) colors.statusFailed else colors.borderControl
     val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
