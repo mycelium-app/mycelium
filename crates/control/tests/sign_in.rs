@@ -215,3 +215,50 @@ async fn oidc_callback_rejects_an_id_token_issued_for_another_login() {
     assert_eq!(status, 401);
     assert_eq!(body["error"], "invalid_id_token");
 }
+
+async fn sign_in_as_ada(allowed_emails: &[&str]) -> (reqwest::Response, Server) {
+    let (issuer, provider) = start_provider().await;
+    let allowed: Vec<String> = allowed_emails.iter().map(|email| email.to_string()).collect();
+    let server = Server::start_with(|config| {
+        config.dev_login = None;
+        config.allowed_emails = allowed;
+        config.oidc = Some(OidcConfig { issuer: issuer.clone(), client_id: "mycelium".into(), client_secret: None });
+    })
+    .await;
+    let anonymous = server.anonymous();
+
+    let login = anonymous.get("/auth/login").send().await.unwrap();
+    let authorize = query_of(login.headers()["location"].to_str().unwrap());
+    *provider.challenge.lock().unwrap() = authorize["code_challenge"].clone();
+    *provider.nonce.lock().unwrap() = authorize["nonce"].clone();
+
+    let callback = anonymous.get("/auth/callback").query(&[("code", "the-code"), ("state", authorize["state"].as_str())]).header("cookie", oidc_cookie(&login)).send().await.unwrap();
+
+    (callback, server)
+}
+
+#[tokio::test]
+async fn an_account_missing_from_the_allowed_emails_cannot_sign_in() {
+    let (callback, server) = sign_in_as_ada(&["grace@example.com"]).await;
+
+    assert_eq!(callback.status(), 403);
+    assert!(callback.headers().get_all("set-cookie").iter().all(|value| !value.to_str().unwrap().starts_with("myc_session=")));
+    let body: Value = callback.json().await.unwrap();
+    assert_eq!(body["error"], "not_allowed");
+    let users = sqlx::query_scalar::<_, i64>("select count(*) from users").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(users, 0);
+}
+
+#[tokio::test]
+async fn an_allowed_email_signs_in() {
+    let (callback, _server) = sign_in_as_ada(&["grace@example.com", "ada@example.com"]).await;
+
+    assert_eq!(callback.status(), 303);
+}
+
+#[tokio::test]
+async fn every_account_signs_in_when_no_emails_are_listed() {
+    let (callback, _server) = sign_in_as_ada(&[]).await;
+
+    assert_eq!(callback.status(), 303);
+}

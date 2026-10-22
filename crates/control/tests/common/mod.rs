@@ -272,6 +272,7 @@ impl Server {
             data_dir: data_dir.clone(),
             oidc: None,
             dev_login: Some("dev@example.com".into()),
+            allowed_emails: Vec::new(),
             web_dir: web_dir.clone(),
             skip_migrations: false,
         };
@@ -344,7 +345,7 @@ impl Server {
         eventually("node agents", || async {
             let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
 
-            nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(id) && node["agents"].as_array().is_some_and(|agents| !agents.is_empty())).then_some(())
+            nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(id) && node["online"] == true && node["agents"].as_array().is_some_and(|agents| !agents.is_empty())).then_some(())
         })
         .await;
 

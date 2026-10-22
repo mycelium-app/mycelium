@@ -17,6 +17,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub oidc: Option<OidcConfig>,
     pub dev_login: Option<String>,
+    pub allowed_emails: Vec<String>,
     pub web_dir: PathBuf,
     pub skip_migrations: bool,
 }
@@ -69,6 +70,7 @@ impl Config {
             data_dir: optional(lookup, "MYCELIUM_DATA_DIR").unwrap_or_else(|| "/var/lib/mycelium".into()).into(),
             oidc,
             dev_login,
+            allowed_emails: optional(lookup, "MYCELIUM_ALLOWED_EMAILS").map(|emails| emails.split(',').map(|email| email.trim().to_lowercase()).filter(|email| !email.is_empty()).collect()).unwrap_or_default(),
             web_dir: optional(lookup, "MYCELIUM_WEB_DIR").unwrap_or_else(|| "/usr/share/mycelium/web".into()).into(),
             skip_migrations: optional(lookup, "MYCELIUM_SKIP_MIGRATIONS").is_some_and(|value| value == "true" || value == "1"),
         })
@@ -108,6 +110,19 @@ mod tests {
 
         assert!(config.oidc.is_none());
         assert_eq!(config.dev_login.as_deref(), Some("me@example.com"));
+    }
+
+    #[test]
+    fn allowed_emails_are_split_trimmed_and_lowercased() {
+        let config = config_from(&[
+            ("MYCELIUM_DATABASE_URL", "postgres://x"),
+            ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"),
+            ("MYCELIUM_DEV_LOGIN", "me@example.com"),
+            ("MYCELIUM_ALLOWED_EMAILS", " Me@Example.com, you@example.com ,"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.allowed_emails, ["me@example.com", "you@example.com"]);
     }
 
     #[test]

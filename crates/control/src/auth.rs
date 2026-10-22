@@ -232,6 +232,14 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "invalid_id_token", "The identity provider's answer could not be checked. Start the sign-in again."));
     }
 
+    let allowed_emails = &state.config.allowed_emails;
+    let verified = claims["email_verified"].as_bool() != Some(false);
+    let listed = claims["email"].as_str().is_some_and(|email| allowed_emails.contains(&email.to_lowercase()));
+
+    if !allowed_emails.is_empty() && !(listed && verified) {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "not_allowed", "This account is not allowed to use this control plane. Ask the person who runs it to add your email address."));
+    }
+
     let subject = claims["sub"].as_str().ok_or_else(|| ApiError::internal("id_token has no subject"))?;
     let email = claims["email"].as_str().unwrap_or(subject);
     let name = claims["name"].as_str().or(claims["preferred_username"].as_str()).unwrap_or(email);

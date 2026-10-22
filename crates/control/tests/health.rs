@@ -37,6 +37,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
             data_dir: directory.path().to_path_buf(),
             oidc: None,
             dev_login: Some("dev@example.com".into()),
+            allowed_emails: Vec::new(),
             web_dir: directory.path().to_path_buf(),
             skip_migrations: false,
         };
@@ -137,6 +138,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
         data_dir: directory.path().to_path_buf(),
         oidc: None,
         dev_login: Some("dev@example.com".into()),
+        allowed_emails: Vec::new(),
         web_dir: directory.path().to_path_buf(),
         skip_migrations: false,
     };

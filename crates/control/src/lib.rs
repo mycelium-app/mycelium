@@ -34,6 +34,10 @@ pub async fn serve() -> Result<()> {
 }
 
 pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
+    if config.oidc.is_some() && config.allowed_emails.is_empty() {
+        tracing::warn!("MYCELIUM_ALLOWED_EMAILS is empty, so every account at the identity provider can sign in and run agents on every node.");
+    }
+
     let state = boot::new_state(config)?;
 
     tokio::spawn(boot::migrate_until_ready(state.clone()));
