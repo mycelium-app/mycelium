@@ -119,6 +119,11 @@ fn git_commands_are_tagged_snake_case() {
     assert_eq!(round_trip(&GitCommand::StageAll), json!({"type": "stage_all"}));
     assert_eq!(round_trip(&GitCommand::Log { limit: 5 }), json!({"type": "log", "limit": 5}));
     assert_eq!(round_trip(&GitCommand::UndoLastCommit), json!({"type": "undo_last_commit"}));
+    assert_eq!(round_trip(&GitCommand::Register), json!({"type": "register"}));
+    assert_eq!(
+        round_trip(&GitCommand::Clone { url: "https://x/y.git".into(), credentials: Some(mycelium_proto::link::GitCredentials { username: "u".into(), password: "p".into() }) }),
+        json!({"type": "clone", "url": "https://x/y.git", "credentials": {"username": "u", "password": "p"}})
+    );
 }
 
 #[test]

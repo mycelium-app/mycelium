@@ -11,6 +11,7 @@ mod link;
 mod mcp;
 mod memories;
 mod nodes;
+mod projects;
 mod prompts;
 mod rate_limit;
 mod search;
@@ -106,6 +107,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/repositories", get(forges::repositories))
+        .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/imports", get(imports::list).post(imports::create))
         .route("/api/v1/indexing", get(search::indexing))
         .route("/api/v1/search", get(search::search))

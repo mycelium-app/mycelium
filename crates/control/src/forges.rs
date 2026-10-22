@@ -226,6 +226,12 @@ pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ForgeRow
     Ok(rows)
 }
 
+pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ForgeRow> {
+    let row = sqlx::query_as::<_, ForgeRow>(sqlx::AssertSqlSafe(format!("select {FORGE_COLUMNS} from forges where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
+
+    row.ok_or_else(|| ApiError::not_found("That forge"))
+}
+
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Forge>>> {
     let mut forges = Vec::new();
 

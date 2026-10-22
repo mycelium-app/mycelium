@@ -209,9 +209,10 @@ impl Daemon {
             }
             ControlToNode::Git { request_id, cwd, command } => {
                 let out = self.out.clone();
+                let root = self.config.projects_root.clone();
 
                 tokio::task::spawn_blocking(move || {
-                    let message = match crate::git::run(std::path::Path::new(&cwd), command) {
+                    let message = match crate::git::run_in(&root, &cwd, command) {
                         Ok(output) => NodeToControl::GitResult { request_id, ok: true, output, error: None },
                         Err(error) => NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some(error) },
                     };

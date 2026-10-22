@@ -134,7 +134,10 @@ pub struct ResizeTerminalRequest {
 pub struct CreateConversationRequest {
     pub node_id: Uuid,
     pub agent: AgentId,
+    #[serde(default)]
     pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -323,4 +326,26 @@ pub struct Repositories {
     pub repositories: Vec<Repository>,
     pub organisations: Vec<ForgeOrganisation>,
     pub failures: Vec<ForgeFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: Uuid,
+    pub node_id: Uuid,
+    pub name: String,
+    pub path: String,
+    pub forge_id: Option<Uuid>,
+    pub repository: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateProjectRequest {
+    pub node_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }

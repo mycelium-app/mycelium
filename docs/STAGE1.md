@@ -95,6 +95,8 @@ events           id bigserial pk, conversation_id, seq bigint, kind text, payloa
                  unique(conversation_id, seq)
 queued_prompts   id uuid pk, conversation_id, position int, text text, created_at
 transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
+projects         id uuid pk, owner uuid, node_id uuid, name text, path text, forge_id uuid null, repository text null,
+                 created_at, unique(node_id, path)
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
 ```
@@ -180,6 +182,10 @@ Forges:
 - `GET /api/v1/forges` → `[{id, kind: "github"|"gitlab", base_url, account, token_hint, organisations, created_at}]`; `POST /api/v1/forges` `{kind, base_url?, token}` → the forge (201). `base_url` defaults to `https://github.com` or `https://gitlab.com`. The token is checked against the forge's user endpoint first: 400 `forge_token_rejected`, `forge_unreachable`, `forge_failed`, `base_url_invalid` or `token_required`. Connecting an account again replaces its token. `DELETE /api/v1/forges/{id}` disconnects. Forges belong to the person who connected them.
 - `GET /api/v1/repositories?forge=&organisation=&q=` → `{repositories: [{forge_id, owner, name, full_name, description, private, default_branch}], organisations: [{forge_id, name}], failures: [{forge_id, message}]}`: the repositories of every connected forge (up to 500 each), fetched live; a forge that fails is reported in `failures` and does not hide the others.
 
+Projects:
+- `GET /api/v1/projects` → `[{id, node_id, name, path, forge_id, repository, created_at}]`, the caller's own. `POST /api/v1/projects` `{node_id, forge_id, repository: "owner/name"}` clones the repository on the node into `<projects_root>/projects/<owner>/<name>` with the forge's token; `{node_id, path}` registers an existing folder inside the node's projects root. 201 with the project; 409 `node_offline`, `git_failed` (git's own message) or `project_exists`; 400 `repository_invalid` or `project_source_required`.
+- `POST /api/v1/conversations` also takes `project_id` (instead of `cwd`): the conversation runs in the project's folder; the node must be the project's (400 `project_not_on_node`).
+
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
 
@@ -201,6 +207,15 @@ in `forges.token` in Postgres, in plain text, and no API response carries one: a
 four characters) and the `account` the forge's user endpoint named when the token was saved. The control plane makes every forge
 call itself (GitHub `/user`, `/user/orgs`, `/user/repos`; GitLab `/user`, `/groups`, `/projects`; GitHub Enterprise is
 `<base_url>/api/v3`, GitLab `<base_url>/api/v4`). Organisations always start with the account itself.
+
+### Projects
+
+A project is a folder on a node, set up by cloning a forge repository or by registering a folder that already exists. The control
+plane relays `clone` and `register` to the node as `git` requests (clone times out after 10 minutes). The node refuses any
+folder outside its `projects_root` (or containing `..`) and any clone address that is not http or https. For a clone the control
+plane sends the forge's token in the request; the node passes it to git as an `http.<origin>/.extraheader` setting through the
+environment, so it appears neither in arguments nor in `.git/config`, and it is not kept. Not done: later `git fetch` in a
+project's folder uses whatever git credentials the node itself has, not the forge's token.
 
 ### Live updates
 
@@ -242,7 +257,7 @@ send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logou
 `POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
-`POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer).
+`POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer), and `POST /projects` (the Projects page adds the answer).
 
 ### Events
 

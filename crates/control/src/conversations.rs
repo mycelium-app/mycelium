@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
+use crate::projects;
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, set_status, ConversationRow};
 use axum::Json;
@@ -44,7 +45,19 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
-    let cwd = request.cwd.trim().to_string();
+    let project = match request.project_id {
+        Some(project_id) => Some(projects::find_owned(&state, project_id, user.id).await?),
+        None => None,
+    };
+
+    if project.as_ref().is_some_and(|project| project.node_id != request.node_id) {
+        return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+    }
+
+    let cwd = match &project {
+        Some(project) => project.path.clone(),
+        None => request.cwd.trim().to_string(),
+    };
 
     if cwd.is_empty() {
         return Err(ApiError::bad_request("cwd_required", "Enter the folder the agent should work in."));

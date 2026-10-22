@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_LOG_LIMIT: u32 = 50;
 const MOST_LOG_ENTRIES: u32 = 200;
 
@@ -39,10 +40,13 @@ pub struct CommitRequest {
     message: String,
 }
 
-async fn run(state: &AppState, user: &AuthUser, id: Uuid, command: GitCommand) -> ApiResult<Json<Value>> {
-    let row = find_owned(&state.pool, id, user.id).await?;
-    let timeout = if command == GitCommand::Fetch { FETCH_TIMEOUT } else { GIT_TIMEOUT };
-    let Some((request_id, answered)) = state.hub.request_git(row.node_id, row.cwd, command) else {
+pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
+    let timeout = match command {
+        GitCommand::Fetch => FETCH_TIMEOUT,
+        GitCommand::Clone { .. } => CLONE_TIMEOUT,
+        _ => GIT_TIMEOUT,
+    };
+    let Some((request_id, answered)) = state.hub.request_git(node_id, cwd, command) else {
         return Err(node_offline());
     };
 
@@ -57,7 +61,13 @@ async fn run(state: &AppState, user: &AuthUser, id: Uuid, command: GitCommand) -
         return Err(ApiError::conflict("git_failed", answer.error.unwrap_or_else(|| "Git failed without saying why.".into())));
     }
 
-    Ok(Json(answer.output))
+    Ok(answer.output)
+}
+
+async fn run(state: &AppState, user: &AuthUser, id: Uuid, command: GitCommand) -> ApiResult<Json<Value>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+
+    Ok(Json(relay(state, row.node_id, row.cwd, command).await?))
 }
 
 pub async fn status(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
