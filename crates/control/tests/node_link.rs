@@ -337,3 +337,75 @@ fn base64_of(bytes: &[u8]) -> String {
 
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
+
+#[tokio::test]
+async fn sign_in_output_reaches_only_the_person_who_started_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let other = server.second_user("other@example.com").await;
+    let mut owner_stream = server.user.stream().await;
+    let mut other_stream = other.stream().await;
+
+    let (_, started) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/logins", link.id)).json(&json!({"agent": "claude", "method": "token"}))).await;
+    let login_id: Uuid = started["login_id"].as_str().unwrap().parse().unwrap();
+    link.next().await;
+
+    link.send(NodeToControl::LoginOutput { login_id, data: "code ABCD-1234".into() }).await;
+    link.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
+
+    owner_stream.until(|message| matches!(message, StreamMessage::LoginFinished { ok: true, .. }).then_some(())).await;
+    server.user.json(server.user.post(&format!("/api/v1/nodes/{}/drain", link.id)).json(&json!({"draining": true}))).await;
+    other_stream
+        .until(|message| match message {
+            StreamMessage::LoginOutput { .. } | StreamMessage::LoginFinished { .. } => panic!("another person received a sign-in message: {message:?}"),
+            StreamMessage::Node(_) => Some(()),
+            _ => None,
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn another_person_cannot_write_to_or_stop_a_sign_in() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let other = server.second_user("other@example.com").await;
+
+    let (_, started) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/logins", link.id)).json(&json!({"agent": "claude", "method": "token"}))).await;
+    let login_id: Uuid = started["login_id"].as_str().unwrap().parse().unwrap();
+    link.next().await;
+
+    let (status, _) = other.json(other.post(&format!("/api/v1/logins/{login_id}/input")).json(&json!({"text": "secret"}))).await;
+    assert_eq!(status, 404);
+    let (status, _) = other.json(other.delete(&format!("/api/v1/logins/{login_id}"))).await;
+    assert_eq!(status, 404);
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/logins/{login_id}/input")).json(&json!({"text": "mine"}))).await;
+    assert_eq!(status, 204);
+    assert_eq!(link.next().await, ControlToNode::LoginInput { login_id, text: "mine".into() });
+}
+
+#[tokio::test]
+async fn a_node_cannot_publish_output_for_another_nodes_sign_in() {
+    let server = Server::start().await;
+    let first = server.online_node("laptop").await;
+    let mut intruder = server.online_node("desktop").await;
+    let mut stream = server.user.stream().await;
+
+    let (_, started) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/logins", first.id)).json(&json!({"agent": "claude", "method": "token"}))).await;
+    let login_id: Uuid = started["login_id"].as_str().unwrap().parse().unwrap();
+
+    intruder.send(NodeToControl::LoginOutput { login_id, data: "spoofed".into() }).await;
+    intruder.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![] }).await;
+
+    stream
+        .until(|message| match message {
+            StreamMessage::LoginOutput { .. } | StreamMessage::LoginFinished { .. } => panic!("the stream carried a spoofed sign-in message: {message:?}"),
+            StreamMessage::Node(node) if node.id == intruder.id => Some(()),
+            _ => None,
+        })
+        .await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/logins/{login_id}/input")).json(&json!({"text": "still there"}))).await;
+    assert_eq!(status, 204);
+}

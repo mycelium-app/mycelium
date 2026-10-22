@@ -114,13 +114,17 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
         NodeToControl::LoginOutput { login_id, data } => {
-            state.publish(None, StreamMessage::LoginOutput { login_id, data });
+            if let Some(owner) = state.hub.login_owner(login_id).filter(|owner| owner.node_id == node_id) {
+                state.publish(Some(owner.user_id), StreamMessage::LoginOutput { login_id, data });
+            }
 
             Ok(())
         }
         NodeToControl::LoginFinished { login_id, ok } => {
-            state.hub.finish_login(login_id);
-            state.publish(None, StreamMessage::LoginFinished { login_id, ok });
+            if let Some(owner) = state.hub.login_owner(login_id).filter(|owner| owner.node_id == node_id) {
+                state.hub.finish_login(login_id);
+                state.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok });
+            }
 
             Ok(())
         }

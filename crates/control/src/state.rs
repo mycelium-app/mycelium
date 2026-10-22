@@ -27,10 +27,16 @@ struct NodeConnection {
     sessions: HashSet<Uuid>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LoginOwner {
+    pub node_id: Uuid,
+    pub user_id: Uuid,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
-    logins: Mutex<HashMap<Uuid, Uuid>>,
+    logins: Mutex<HashMap<Uuid, LoginOwner>>,
     send_now: Mutex<HashSet<Uuid>>,
 }
 
@@ -104,13 +110,13 @@ impl Hub {
         }
     }
 
-    pub fn track_login(&self, login_id: Uuid, node_id: Uuid) {
+    pub fn track_login(&self, login_id: Uuid, node_id: Uuid, user_id: Uuid) {
         if let Ok(mut logins) = self.logins.lock() {
-            logins.insert(login_id, node_id);
+            logins.insert(login_id, LoginOwner { node_id, user_id });
         }
     }
 
-    pub fn login_node(&self, login_id: Uuid) -> Option<Uuid> {
+    pub fn login_owner(&self, login_id: Uuid) -> Option<LoginOwner> {
         self.logins.lock().ok().and_then(|logins| logins.get(&login_id).copied())
     }
 
