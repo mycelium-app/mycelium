@@ -476,11 +476,25 @@ async fn renaming_and_archiving_move_a_conversation_between_the_lists_and_close_
     assert!(active.as_array().unwrap().is_empty());
     assert_eq!(past[0]["id"], json!(id));
 
-    let (status, body) = server.user.json(server.user.post(&format!("{url}/prompt")).json(&json!({"text": "hello"}))).await;
-    assert_eq!((status, body["error"].as_str()), (409, Some("archived")));
-
     let (_, restored) = server.user.json(server.user.patch(&url).json(&json!({"archived": false}))).await;
     assert_eq!(restored["archived_at"], json!(null));
+}
+
+#[tokio::test]
+async fn sending_a_message_to_an_archived_conversation_unarchives_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let url = format!("/api/v1/conversations/{id}");
+    server.user.json(server.user.patch(&url).json(&json!({"archived": true}))).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("{url}/prompt")).json(&json!({"text": "hello again"}))).await;
+    assert_eq!(status, 204);
+
+    let (_, active) = server.user.json(server.user.get("/api/v1/conversations?archived=false")).await;
+    assert_eq!(active[0]["id"], json!(id));
+    assert_eq!(active[0]["archived_at"], json!(null));
 }
 
 #[tokio::test]

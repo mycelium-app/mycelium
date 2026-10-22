@@ -73,7 +73,11 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     let row = lock_owned(&mut tx, id, user.id).await?;
 
     if row.archived_at.is_some() {
-        return Err(ApiError::conflict("archived", "This conversation is archived. Restore it to send a message."));
+        let restored = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
     }
 
     if row.status == "failed" {
