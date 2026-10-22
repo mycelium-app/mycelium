@@ -35,6 +35,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.ago
 import mycelium.state.agentName
 import mycelium.state.isLaptop
 import mycelium.state.buildThread
@@ -89,6 +90,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 onNode = { nodeSheetOpen = true },
                 onDetails = { panel = SidePanel.Details },
                 onTerminal = { panel = SidePanel.Terminal },
+                onGit = { panel = SidePanel.Git },
                 onRename = { title -> store.rename(conversation, title) },
                 onArchive = {
                     store.act {
@@ -128,6 +130,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             when (panel) {
                 SidePanel.Details -> Inspector(conversation, node)
                 SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
+                SidePanel.Git -> key(conversation.id) { GitSide(store, conversation) }
                 null -> Unit
             }
 
@@ -140,6 +143,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet)) }
+                SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 null -> Unit
             }
         }
@@ -158,6 +162,7 @@ private fun ConversationHeader(
     onNode: () -> Unit,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
+    onGit: () -> Unit,
     onRename: (String) -> Unit,
     onArchive: () -> Unit,
 ) {
@@ -200,6 +205,7 @@ private fun ConversationHeader(
         if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
             MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
+            MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(
@@ -251,7 +257,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
     ConversationStatus.Done -> MyIcon.Check
 }
 
-private enum class SidePanel { Details, Terminal }
+private enum class SidePanel { Details, Terminal, Git }
 
 @Composable
 private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
@@ -266,6 +272,7 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
         ) {
             MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
+            MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
         }
     }
 }
@@ -275,6 +282,14 @@ private fun TerminalSide(store: Store, state: AppState, conversation: Conversati
     Row(Modifier.fillMaxHeight()) {
         VerticalHairline()
         TerminalPanel(store, state, conversation, Modifier.width(Tokens.Size.Terminal).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun GitSide(store: Store, conversation: Conversation) {
+    Row(Modifier.fillMaxHeight()) {
+        VerticalHairline()
+        GitPanel(store, conversation, Modifier.width(Tokens.Size.Git).fillMaxHeight())
     }
 }
 
@@ -318,7 +333,7 @@ private fun InspectorContent(conversation: Conversation, node: NodeSummary?) {
             "Status" to statusSectionName(conversation.status),
             "Mode" to (conversation.mode ?: "Default"),
             "Model" to (conversation.model ?: "Not set"),
-            "Started" to relativeTime(conversation.createdAt).let { if (it == "now") it else "$it ago" },
+            "Started" to ago(conversation.createdAt),
         ),
     )
 }

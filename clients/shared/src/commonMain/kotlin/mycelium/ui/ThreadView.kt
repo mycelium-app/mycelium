@@ -343,7 +343,7 @@ private fun CardHead(content: @Composable RowScope.() -> Unit) {
 }
 
 @Composable
-private fun DiffCard(diff: FileDiff, status: ToolStatus) {
+internal fun DiffCard(diff: FileDiff, status: ToolStatus) {
     val colors = MyTheme.colors
 
     Card(Modifier.semantics { contentDescription = "Edit to ${diff.path}, ${diff.added} added, ${diff.removed} removed" }) {

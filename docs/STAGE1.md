@@ -380,6 +380,20 @@ terminals it was asked to start. The clients carry their own terminal emulator (
 scroll regions, alternate screen) and send keys as bytes. Not done: scrollback in the fallback shell, mouse reporting,
 text selection and answering the terminal's own queries (device attributes, colour requests).
 
+### Git panel
+
+Each conversation has a Git panel on its right-hand rail, beside Details and Terminal (one panel open at a time; a bottom
+sheet on phones). The control plane relays a `git` request to the node over the link, like the file listing, and the node
+runs `git -C <folder>` with arguments, never through a shell: `GET /conversations/{id}/git/status`, `git/log?limit=`,
+`git/diff?path=&staged=` (untracked files diff against `/dev/null`, output cut at 200 KB with a `truncated` flag) and
+`POST git/stage`, `git/unstage`, `git/stage-all`, `git/commit`, `git/fetch` and `git/undo` (`reset --soft HEAD~1`). Calls
+time out after 10 seconds (fetch 60), an offline node is a 409 `node_offline`, an empty commit message is a 400, and git's
+own error text comes back as a 409 `git_failed`. The panel has Changes (files under Tracked and Untracked, by folder, with
+line counts and a checkbox that stages or unstages; selecting a file shows its diff in place of the list) and History tabs,
+with the branch, ahead and behind counts, Fetch, the commit message, Commit and Undo at the bottom. It refreshes when it
+opens, after every action and when the conversation's status changes. Not done: a diff of every file at once (View diff
+opens the first changed file), unstaging in a repository with no commits, discarding changes, and branch switching.
+
 ## Clients
 
 Compose Multiplatform, Kotlin, one `shared` module and two targets: `web` (wasmJs, served by the
@@ -391,7 +405,7 @@ with the design system's tokens and sizes, in dark and light:
 - The shell: sidebar by status with group-free rows (stage 1 has no groups), conversation header
   with rename, thread rendered from events (messages, tool calls, diffs, plans, permission cards,
   workflow card), composer (mode, model, effort where offered, queue, stop, send), the rail with
-  Details and Terminal.
+  Details, Terminal and Git.
 - New conversation: node, agent, folder.
 - Nodes: list, join commands (shell, Nix, NixOS), logins with sign-in output, drain, revoke.
 - Past conversations: archived and done.

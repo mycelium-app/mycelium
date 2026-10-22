@@ -139,6 +139,8 @@ object Tokens {
         val Inspector: Dp = 296.dp
         val Terminal: Dp = 440.dp
         val TerminalSheet: Dp = 360.dp
+        val Git: Dp = 330.dp
+        val GitSheet: Dp = 520.dp
         val Touch: Dp = 44.dp
         val BarTouch: Dp = 52.dp
         val Rail: Dp = 44.dp

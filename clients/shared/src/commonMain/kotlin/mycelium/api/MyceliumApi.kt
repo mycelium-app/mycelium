@@ -198,6 +198,38 @@ class MyceliumApi(
     suspend fun files(id: String, query: String): List<String> =
         call("/conversations/$id/files") { client.get(it) { authorise(); parameter("query", query) } }.body()
 
+    suspend fun gitStatus(id: String): GitStatus = call("/conversations/$id/git/status") { client.get(it) { authorise() } }.body()
+
+    suspend fun gitLog(id: String, limit: Int = 50): List<GitCommit> =
+        call("/conversations/$id/git/log") { client.get(it) { authorise(); parameter("limit", limit) } }.body()
+
+    suspend fun gitDiff(id: String, path: String, staged: Boolean): GitDiff =
+        call("/conversations/$id/git/diff") { client.get(it) { authorise(); parameter("path", path); parameter("staged", staged) } }.body()
+
+    suspend fun gitStage(id: String, paths: List<String>) {
+        call("/conversations/$id/git/stage") { client.post(it) { authorise(); json(GitPathsRequest(paths)) } }
+    }
+
+    suspend fun gitUnstage(id: String, paths: List<String>) {
+        call("/conversations/$id/git/unstage") { client.post(it) { authorise(); json(GitPathsRequest(paths)) } }
+    }
+
+    suspend fun gitStageAll(id: String) {
+        call("/conversations/$id/git/stage-all") { client.post(it) { authorise() } }
+    }
+
+    suspend fun gitCommit(id: String, message: String) {
+        call("/conversations/$id/git/commit") { client.post(it) { authorise(); json(GitCommitRequest(message)) } }
+    }
+
+    suspend fun gitFetch(id: String) {
+        call("/conversations/$id/git/fetch") { client.post(it) { authorise() } }
+    }
+
+    suspend fun gitUndo(id: String) {
+        call("/conversations/$id/git/undo") { client.post(it) { authorise() } }
+    }
+
     suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =
         call("/conversations/$id/events") {
             client.get(it) {

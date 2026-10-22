@@ -62,6 +62,8 @@ enum class MyIcon(vararg val paths: String) {
     Info(circle(12f, 12f, 9f), "M12 11v5M12 8h.01"),
     File("M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6"),
     Branch("M6 3v12", circle(18f, 6f, 3f), circle(6f, 18f, 3f), "M18 9a9 9 0 0 1-9 9"),
+    Diff("M12 3v8M8 7h8M8 17h8"),
+    Person(circle(12f, 8f, 4f), "M4 21a8 8 0 0 1 16 0"),
     Clock(circle(12f, 12f, 9f), "M12 7v5l3 2"),
     Agent(rect(3f, 11f, 18f, 10f, 2f), circle(12f, 5f, 2f), "M12 7v4M8 16h.01M16 16h.01"),
     Folder("M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"),

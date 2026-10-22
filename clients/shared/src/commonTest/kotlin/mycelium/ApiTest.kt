@@ -327,4 +327,56 @@ class ApiTest {
 
         assertEquals("Enter something to search for.", failure.message)
     }
+
+    @Test
+    fun gitStatusLogAndDiffAreReadFromTheGitRoutes() = runTest {
+        val (api, seen) = apiWith { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/conversations/c1/git/status" -> ok("""{"branch":"main","upstream":null,"ahead":1,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":false,"untracked":false,"additions":3,"deletions":1}]}""")
+                "/api/v1/conversations/c1/git/log" -> ok("""[{"hash":"abc1234","author":"Ada","date":"2026-10-22T10:00:00+00:00","subject":"Fix"}]""")
+                else -> ok("""{"diff":"@@","truncated":true}""")
+            }
+        }
+
+        val status = api.gitStatus("c1")
+        val log = api.gitLog("c1", 10)
+        val diff = api.gitDiff("c1", "src/a.kt", staged = true)
+
+        assertEquals(1, status.ahead)
+        assertEquals(null, status.upstream)
+        assertEquals(3, status.files.single().additions)
+        assertEquals("Fix", log.single().subject)
+        assertEquals(true, diff.truncated)
+        assertEquals("limit=10", seen[1].url.encodedQuery)
+        assertEquals("path=src%2Fa.kt&staged=true", seen[2].url.encodedQuery)
+    }
+
+    @Test
+    fun gitActionsPostToTheirOwnRoutesWithTheirBodies() = runTest {
+        val (api, seen) = apiWith { ok("{}") }
+
+        api.gitStage("c1", listOf("a", "b"))
+        api.gitUnstage("c1", listOf("a"))
+        api.gitStageAll("c1")
+        api.gitCommit("c1", "Fix it")
+        api.gitFetch("c1")
+        api.gitUndo("c1")
+
+        assertEquals(
+            listOf("stage", "unstage", "stage-all", "commit", "fetch", "undo").map { HttpMethod.Post to "/api/v1/conversations/c1/git/$it" },
+            seen.map { it.method to it.url.encodedPath },
+        )
+        assertEquals("""{"paths":["a","b"]}""", String(seen[0].body.toByteArray()))
+        assertEquals("""{"message":"Fix it"}""", String(seen[3].body.toByteArray()))
+    }
+
+    @Test
+    fun aFailedGitCommandSurfacesGitsOwnMessage() = runTest {
+        val (api, _) = apiWith { respond("""{"error":"git_failed","message":"fatal: no remote repository specified"}""", HttpStatusCode.Conflict, JsonHeaders) }
+
+        val failure = assertFailsWith<ApiException> { api.gitFetch("c1") }
+
+        assertEquals("git_failed", failure.code)
+        assertEquals("fatal: no remote repository specified", failure.message)
+    }
 }

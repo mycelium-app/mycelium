@@ -31,6 +31,8 @@ fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
     }
 }
 
+fun ago(iso: String, now: Instant = Clock.System.now()): String = relativeTime(iso, now).let { if (it == "now") it else "$it ago" }
+
 fun projectName(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').ifEmpty { cwd }
 
 fun isLaptop(os: String): Boolean = os.lowercase().let { it.contains("mac") || it.contains("darwin") || it.contains("windows") }

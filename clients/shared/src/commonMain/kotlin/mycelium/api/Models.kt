@@ -322,3 +322,28 @@ fun parseStreamMessage(text: String): StreamMessage? {
 
 private fun JsonObject.requireString(key: String): String =
     (this[key] as? JsonPrimitive)?.contentOrNull ?: error("Stream message is missing $key")
+
+@Serializable
+data class GitFile(
+    val path: String,
+    val staged: Boolean,
+    val unstaged: Boolean,
+    val untracked: Boolean,
+    val additions: Int,
+    val deletions: Int,
+)
+
+@Serializable
+data class GitStatus(val branch: String, val upstream: String? = null, val ahead: Int, val behind: Int, val files: List<GitFile>)
+
+@Serializable
+data class GitCommit(val hash: String, val author: String, val date: String, val subject: String)
+
+@Serializable
+data class GitDiff(val diff: String, val truncated: Boolean)
+
+@Serializable
+data class GitPathsRequest(val paths: List<String>)
+
+@Serializable
+data class GitCommitRequest(val message: String)
