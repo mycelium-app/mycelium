@@ -63,6 +63,7 @@ release binaries are static musl.
 | `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must not report the address as unverified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
 | `MYCELIUM_WEB_DIR` | `/usr/share/mycelium/web` | The built web client, served at `/` |
 | `MYCELIUM_SKIP_MIGRATIONS` | `false` | For gated deploys only |
+| `MYCELIUM_TRUSTED_PROXIES` | empty | Comma-separated addresses or CIDR ranges of reverse proxies. `X-Forwarded-For` is read only on connections from these, taking the nearest address that is not itself a proxy. Empty trusts no header |
 
 ### Boot, health and migrations
 
@@ -125,6 +126,7 @@ Device codes (one flow for nodes and for desktop clients):
 - `POST /api/v1/device` `{kind, label, hostname, os, arch}` → `{device_code, user_code, verification_uri,
   verification_uri_complete, interval, expires_in}`. User codes look like `WDJB-MJHT`, expire in
   10 minutes, single use.
+- Both device endpoints are limited per client address (a token bucket in memory: 10 starts a minute, 30 polls a minute, refilling steadily); beyond that they answer 429 `rate_limited` with `Retry-After`.
 - `POST /api/v1/device/token` `{device_code}` → `{"error":"authorization_pending"}` (400) until approved,
   then `{kind, id, token}` once. Expired or denied codes return `expired_token` or `access_denied`.
 - `GET /api/v1/device/{user_code}` (signed in) → the pending request, for the approval page.
@@ -155,7 +157,7 @@ Conversations:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.

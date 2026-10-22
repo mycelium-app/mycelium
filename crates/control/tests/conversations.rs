@@ -534,10 +534,15 @@ async fn a_client_token_can_open_the_stream() {
     server.user.json(server.user.post(&format!("/api/v1/nodes/{}/drain", link.id)).json(&json!({"draining": true}))).await;
 
     use futures_util::StreamExt;
-    let frame = tokio::time::timeout(common::WAIT, socket.next()).await.unwrap().unwrap().unwrap();
-    let message: StreamMessage = serde_json::from_str(frame.to_text().unwrap()).unwrap();
 
-    assert!(matches!(message, StreamMessage::Node(node) if node.draining));
+    loop {
+        let frame = tokio::time::timeout(common::WAIT, socket.next()).await.unwrap().unwrap().unwrap();
+        let message: StreamMessage = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+
+        if matches!(message, StreamMessage::Node(node) if node.draining) {
+            return;
+        }
+    }
 }
 
 #[tokio::test]
@@ -673,4 +678,36 @@ async fn a_prompt_sent_before_the_node_says_hello_waits_for_the_sessions_it_repo
 
     assert_eq!(returned.expect_prompt().await.1, "before hello");
     assert_eq!(status_of(&server, id).await, "working");
+}
+
+async fn stream_request(server: &Server, origin: Option<&str>) -> Result<(), u16> {
+    let url = format!("ws://127.0.0.1:{}/api/v1/stream", server.address.port());
+    let mut request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(url).unwrap();
+    request.headers_mut().insert("cookie", server.user.cookie.parse().unwrap());
+
+    if let Some(origin) = origin {
+        request.headers_mut().insert("origin", origin.parse().unwrap());
+    }
+
+    match tokio_tungstenite::connect_async(request).await {
+        Ok(_) => Ok(()),
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => Err(response.status().as_u16()),
+        Err(other) => panic!("unexpected error {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn the_stream_refuses_a_browser_page_from_another_origin() {
+    let server = Server::start().await;
+
+    assert_eq!(stream_request(&server, Some("https://evil.example")).await, Err(403));
+    assert_eq!(stream_request(&server, Some("http://127.0.0.1:1")).await, Err(403));
+}
+
+#[tokio::test]
+async fn the_stream_accepts_the_control_planes_own_origin_and_clients_that_send_none() {
+    let server = Server::start().await;
+
+    assert_eq!(stream_request(&server, Some(&server.base)).await, Ok(()));
+    assert_eq!(stream_request(&server, None).await, Ok(()));
 }

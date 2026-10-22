@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::rate_limit::RateLimiter;
 use crate::state::{AppState, Hub, Readiness};
 use anyhow::Result;
 use axum::Json;
@@ -25,6 +26,7 @@ pub fn new_state(config: Config) -> Result<AppState> {
         config: Arc::new(config),
         hub: Arc::new(Hub::default()),
         stream,
+        rate_limiter: Arc::new(RateLimiter::default()),
         readiness: Arc::new(Mutex::new(Readiness::Migrating)),
         http: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
     })

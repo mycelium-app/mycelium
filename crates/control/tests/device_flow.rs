@@ -1,6 +1,7 @@
 mod common;
 
 use common::Server;
+use mycelium_control::Cidr;
 use serde_json::{Value, json};
 
 async fn start_device(server: &Server, kind: &str, label: &str) -> Value {
@@ -169,4 +170,88 @@ async fn a_device_request_without_any_name_is_rejected_with_a_fix() {
 
     assert_eq!(status, 400);
     assert_eq!(body["message"], "Enter a name for this device.");
+}
+
+async fn start_device_from(server: &Server, forwarded_for: Option<&str>) -> (u16, Value) {
+    let anonymous = server.anonymous();
+    let mut request = anonymous.post("/api/v1/device").json(&json!({"kind": "node", "label": "box", "hostname": "box", "os": "linux", "arch": "x86_64"}));
+
+    if let Some(forwarded_for) = forwarded_for {
+        request = request.header("x-forwarded-for", forwarded_for);
+    }
+
+    anonymous.json(request).await
+}
+
+async fn address_on_approval_page(server: &Server, started: &Value) -> String {
+    let user_code = started["user_code"].as_str().unwrap();
+    let (_, pending) = server.user.json(server.user.get(&format!("/api/v1/device/{user_code}"))).await;
+
+    pending["ip"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn x_forwarded_for_is_ignored_unless_the_connection_comes_from_a_trusted_proxy() {
+    let server = Server::start().await;
+
+    let (_, started) = start_device_from(&server, Some("203.0.113.9")).await;
+
+    assert_eq!(address_on_approval_page(&server, &started).await, "127.0.0.1");
+}
+
+#[tokio::test]
+async fn a_trusted_proxy_reports_the_nearest_client_address_that_is_not_itself_a_proxy() {
+    let server = Server::start_with(|config| config.trusted_proxies = vec![Cidr::parse("127.0.0.0/8").unwrap(), Cidr::parse("10.0.0.0/8").unwrap()]).await;
+
+    let (_, started) = start_device_from(&server, Some("198.51.100.1, 203.0.113.9, 10.1.2.3")).await;
+
+    assert_eq!(address_on_approval_page(&server, &started).await, "203.0.113.9");
+}
+
+#[tokio::test]
+async fn starting_device_codes_too_fast_from_one_address_is_refused_with_a_wait() {
+    let server = Server::start().await;
+
+    for _ in 0..10 {
+        let (status, _) = start_device_from(&server, None).await;
+        assert_eq!(status, 200);
+    }
+
+    let anonymous = server.anonymous();
+    let response = anonymous.post("/api/v1/device").json(&json!({"kind": "node", "label": "box", "hostname": "box", "os": "linux", "arch": "x86_64"})).send().await.unwrap();
+
+    assert_eq!(response.status(), 429);
+    assert!(response.headers().get("retry-after").is_some());
+
+    let body: Value = response.json().await.unwrap();
+
+    assert_eq!(body["error"], "rate_limited");
+    assert_eq!(body["message"], "You have made too many requests. Wait a minute, then try again.");
+}
+
+#[tokio::test]
+async fn one_addresss_requests_do_not_use_up_another_addresss_allowance() {
+    let server = Server::start_with(|config| config.trusted_proxies = vec![Cidr::parse("127.0.0.1/32").unwrap()]).await;
+
+    for _ in 0..10 {
+        start_device_from(&server, Some("203.0.113.1")).await;
+    }
+
+    assert_eq!(start_device_from(&server, Some("203.0.113.1")).await.0, 429);
+    assert_eq!(start_device_from(&server, Some("203.0.113.2")).await.0, 200);
+}
+
+#[tokio::test]
+async fn polling_for_a_device_token_too_fast_from_one_address_is_refused() {
+    let server = Server::start().await;
+    let started = start_device(&server, "node", "laptop").await;
+
+    for _ in 0..30 {
+        let (status, _) = poll(&server, &started).await;
+        assert_eq!(status, 400);
+    }
+
+    let (status, body) = poll(&server, &started).await;
+
+    assert_eq!((status, body["error"].as_str()), (429, Some("rate_limited")));
 }

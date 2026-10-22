@@ -40,6 +40,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
             allowed_emails: Vec::new(),
             web_dir: directory.path().to_path_buf(),
             skip_migrations: false,
+            trusted_proxies: Vec::new(),
         };
 
         tokio::spawn(mycelium_control::run(config, listener));
@@ -142,6 +143,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
         allowed_emails: Vec::new(),
         web_dir: directory.path().to_path_buf(),
         skip_migrations: false,
+        trusted_proxies: Vec::new(),
     };
 
     tokio::spawn(mycelium_control::run(config, listener));

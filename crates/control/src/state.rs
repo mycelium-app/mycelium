@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::rate_limit::RateLimiter;
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
@@ -194,6 +195,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub hub: Arc<Hub>,
     pub stream: broadcast::Sender<Streamed>,
+    pub rate_limiter: Arc<RateLimiter>,
     pub readiness: Arc<Mutex<Readiness>>,
     pub http: reqwest::Client,
 }
