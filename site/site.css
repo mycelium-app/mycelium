@@ -1,5 +1,5 @@
 html { background: #0d1311; color-scheme: dark; }
-body { margin: 0; color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; background: linear-gradient(rgba(10, 14, 12, 0.84), rgba(10, 14, 12, 0.92)), url("hero.jpg") center / cover fixed, #0d1311; }
+body { margin: 0; color: var(--text); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; background: #0d1311; }
 a { color: var(--accent); }
 .wrap { width: 100%; max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); box-sizing: border-box; }
 
