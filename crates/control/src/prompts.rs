@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::state::AppState;
-use crate::store::{CONVERSATION_COLUMNS, append_event, find_owned, lock_owned, publish_queue, queue_of, set_status};
+use crate::store::{CONVERSATION_COLUMNS, append_event, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -15,15 +15,15 @@ use uuid::Uuid;
 
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool)>(
+    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>)>(
         "select owner, node_id, archived_at is not null,
-                acp_session_id is not null and status in ('review', 'done') from conversations where id = $1 for update",
+                acp_session_id is not null and status in ('review', 'done'), agent, cwd, acp_session_id from conversations where id = $1 for update",
     )
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some((owner, node_id, archived, idle)) = locked else {
+    let Some((owner, node_id, archived, idle, agent, cwd, acp_session_id)) = locked else {
         return Ok(());
     };
 
@@ -43,6 +43,11 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id}), None).await?;
     let row = set_status(&mut tx, conversation_id, ConversationStatus::Working).await?;
     tx.commit().await?;
+
+    if !state.hub.has_session(node_id, conversation_id) {
+        state.hub.add_session(node_id, conversation_id);
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id });
+    }
 
     state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text });
 

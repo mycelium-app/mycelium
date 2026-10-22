@@ -172,7 +172,7 @@ Node to control plane:
 
 | type | fields |
 |---|---|
-| `hello` | `version, hostname, os, arch, agents: [{agent, version, available}], sessions: [{conversation_id, last_seq}]` |
+| `hello` | `version, hostname, os, arch, agents: [{agent, version, available}], sessions: [{conversation_id, last_seq, live}]` (`live` is false for a session whose agent has exited) |
 | `session_started` | `conversation_id, acp_session_id, modes?, models?, config_options?` |
 | `acp_update` | `conversation_id, seq, update` |
 | `permission_request` | `conversation_id, seq, request_id, request` |

@@ -48,7 +48,7 @@ fn node_hello_is_tagged_snake_case_with_exact_fields() {
         os: "linux".into(),
         arch: "x86_64".into(),
         agents: vec![AgentInfo { agent: AgentId::Codex, version: None, available: false }],
-        sessions: vec![SessionPosition { conversation_id: id(), last_seq: 4 }],
+        sessions: vec![SessionPosition { conversation_id: id(), last_seq: 4, live: true }],
     });
 
     assert_eq!(json["type"], "hello");

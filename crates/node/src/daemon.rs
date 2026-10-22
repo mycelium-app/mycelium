@@ -4,7 +4,7 @@ use crate::config::{NodeConfig, agent_command, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, run_link};
 use crate::login::LoginManager;
-use crate::session::{Launch, SessionHandle, SessionSpec, spawn_session};
+use crate::session::{Launch, SessionHandle, SessionSpec, journal_head, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
@@ -130,7 +130,7 @@ impl Daemon {
 
     pub async fn hello(&self) -> NodeToControl {
         let agents = self.agents().await;
-        let sessions = self.session_handles().into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked() }).collect();
+        let sessions = self.session_handles().into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked(), live: !handle.ended() }).collect();
 
         NodeToControl::Hello { version: VERSION.to_string(), hostname: hostname(), os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string(), agents, sessions }
     }
@@ -169,7 +169,7 @@ impl Daemon {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
             ControlToNode::StartSession { conversation_id, agent, cwd, resume } => self.start_session(conversation_id, agent, &cwd, resume),
-            ControlToNode::Prompt { conversation_id, text, .. } => self.with_session(conversation_id, |session| session.command(Command::Prompt { text })),
+            ControlToNode::Prompt { conversation_id, text, .. } => self.prompt(conversation_id, text),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
@@ -211,6 +211,15 @@ impl Daemon {
         match handle {
             Some(handle) => action(&handle),
             None => tracing::warn!(conversation = %conversation_id, "the control plane addressed a conversation this node does not run"),
+        }
+    }
+
+    fn prompt(&self, conversation_id: Uuid, text: String) {
+        let handle = self.sessions.lock().ok().and_then(|sessions| sessions.get(&conversation_id).cloned());
+
+        match handle {
+            Some(handle) if !handle.ended() => handle.command(Command::Prompt { text }),
+            _ => self.refuse(conversation_id, "The agent for this conversation is not running on this node.".to_string()),
         }
     }
 
@@ -281,7 +290,8 @@ impl Daemon {
     }
 
     fn refuse(&self, conversation_id: Uuid, message: String) {
-        let _ = self.out.send(NodeToControl::SessionFailed { conversation_id, seq: 1, message });
+        let seq = journal_head(&self.session_dir(conversation_id)) + 1;
+        let _ = self.out.send(NodeToControl::SessionFailed { conversation_id, seq, message });
     }
 
     fn write_status(&self) {

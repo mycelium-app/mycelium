@@ -92,6 +92,18 @@ impl Hub {
         }
     }
 
+    pub fn has_session(&self, node_id: Uuid, conversation_id: Uuid) -> bool {
+        self.nodes.lock().is_ok_and(|nodes| nodes.get(&node_id).is_some_and(|connection| connection.sessions.contains(&conversation_id)))
+    }
+
+    pub fn remove_session(&self, node_id: Uuid, conversation_id: Uuid) {
+        if let Ok(mut nodes) = self.nodes.lock()
+            && let Some(connection) = nodes.get_mut(&node_id)
+        {
+            connection.sessions.remove(&conversation_id);
+        }
+    }
+
     pub fn track_login(&self, login_id: Uuid, node_id: Uuid) {
         if let Ok(mut logins) = self.logins.lock() {
             logins.insert(login_id, node_id);

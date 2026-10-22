@@ -353,3 +353,31 @@ async fn a_transcript_under_the_node_home_is_copied_to_the_control_plane() {
     std::io::Write::write_all(&mut appended, b"{\"line\":2}\n").unwrap();
     eventually("the appended transcript bytes", || async { (std::fs::read_to_string(&copy).ok()? == "{\"line\":1}\n{\"line\":2}\n").then_some(()) }).await;
 }
+
+#[tokio::test]
+async fn an_archived_conversation_survives_a_daemon_restart_and_resumes_when_restored_and_prompted() {
+    let environment = Environment::start().await;
+    let api = &environment.api;
+    environment.join_node().await;
+    let mut daemon = environment.run_daemon();
+    let node = environment.wait_for_node_with_claude().await;
+    let conversation = environment.start_conversation(node, "hello").await;
+    api.wait_for_status(conversation, "review").await;
+    let url = format!("/api/v1/conversations/{conversation}");
+
+    assert_eq!(api.patch(&url, json!({"archived": true})).await, 200);
+    eventually("the keeper to exit after the session is closed", || async { (!keeper_is_running(&environment.node_home)).then_some(()) }).await;
+    daemon.kill().await.unwrap();
+    api.wait_for_node_offline(node).await;
+    let mut daemon = environment.run_daemon();
+    environment.wait_for_node_with_claude().await;
+
+    assert_eq!(api.patch(&url, json!({"archived": false})).await, 200);
+    assert_eq!(api.post(&format!("{url}/prompt"), json!({"text": "again"})).await, 204);
+    api.wait_for_event_text(conversation, "one", 2).await;
+    api.wait_for_status(conversation, "review").await;
+
+    let events = api.events(conversation).await;
+    assert!(events.iter().all(|event| event["kind"] != "error"), "the archived conversation was reported as failed: {events:?}");
+    daemon.kill().await.unwrap();
+}

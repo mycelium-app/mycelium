@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
-pub const WAIT: Duration = Duration::from_secs(5);
+pub const WAIT: Duration = Duration::from_secs(15);
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -191,7 +191,7 @@ impl NodeLink {
             os: "linux".into(),
             arch: "x86_64".into(),
             agents: vec![AgentInfo { agent: AgentId::Claude, version: Some("2.1.308".into()), available: true }],
-            sessions: sessions.into_iter().map(|(conversation_id, last_seq)| mycelium_proto::conversation::SessionPosition { conversation_id, last_seq }).collect(),
+            sessions: sessions.into_iter().map(|(conversation_id, last_seq)| mycelium_proto::conversation::SessionPosition { conversation_id, last_seq, live: true }).collect(),
         })
         .await;
     }

@@ -106,6 +106,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
+            state.hub.remove_session(node_id, conversation_id);
             record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
@@ -157,7 +158,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
 
     tx.commit().await?;
 
-    let live: HashSet<Uuid> = sessions.iter().map(|session| session.conversation_id).collect();
+    let live: HashSet<Uuid> = sessions.iter().filter(|session| session.live).map(|session| session.conversation_id).collect();
     state.hub.set_sessions(node_id, live.clone());
 
     let conversations = sqlx::query_scalar::<_, Uuid>("select id from conversations where node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
@@ -171,6 +172,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     }
 
     publish_node(state, node_id).await?;
+    fail_conversations_without_a_session(state, node_id, &live).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")
         .bind(node_id)
@@ -179,6 +181,34 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
 
     for conversation_id in waiting {
         pump(state, conversation_id, false).await?;
+    }
+
+    Ok(())
+}
+
+async fn fail_conversations_without_a_session(state: &AppState, node_id: Uuid, live: &HashSet<Uuid>) -> ApiResult<()> {
+    let running = sqlx::query_scalar::<_, Uuid>("select id from conversations where node_id = $1 and status in ('working', 'input')").bind(node_id).fetch_all(&state.pool).await?;
+
+    for conversation_id in running.into_iter().filter(|id| !live.contains(id)) {
+        let mut tx = state.pool.begin().await?;
+        let Some(row) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
+            continue;
+        };
+
+        if !matches!(row.status.as_str(), "working" | "input") {
+            continue;
+        }
+
+        let message = "The agent stopped while this conversation was running, so the last message may not have been handled. Start a new conversation to continue.";
+        let event = append_event(&mut tx, conversation_id, EventKind::Error, &json!({"message": message}), None).await?;
+        let updated = set_status(&mut tx, conversation_id, ConversationStatus::Failed).await?;
+        tx.commit().await?;
+
+        if let Some(event) = event {
+            state.publish(Some(row.owner), StreamMessage::Event(event));
+        }
+
+        state.publish(Some(row.owner), StreamMessage::Conversation(updated.to_proto()?));
     }
 
     Ok(())
@@ -255,6 +285,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if archived {
         state.hub.send(node_id, ControlToNode::CloseSession { conversation_id });
+        state.hub.remove_session(node_id, conversation_id);
 
         return Ok(());
     }

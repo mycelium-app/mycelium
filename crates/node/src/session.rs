@@ -80,17 +80,51 @@ fn read_acked(dir: &Path) -> i64 {
     std::fs::read_to_string(acked_path(dir)).ok().and_then(|text| text.trim().parse().ok()).unwrap_or(0)
 }
 
+fn closed_path(dir: &Path) -> PathBuf {
+    dir.join("closed")
+}
+
+fn base_path(dir: &Path) -> PathBuf {
+    dir.join("seq_base")
+}
+
+fn read_base(dir: &Path) -> i64 {
+    std::fs::read_to_string(base_path(dir)).ok().and_then(|text| text.trim().parse().ok()).unwrap_or(0)
+}
+
+pub fn journal_head(dir: &Path) -> i64 {
+    let entries = std::fs::read_to_string(dir.join("journal.jsonl")).map(|journal| journal.lines().count() as i64).unwrap_or(0);
+
+    read_base(dir) + entries
+}
+
 pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl>) -> SessionHandle {
     let (messages, inbox) = mpsc::unbounded_channel();
     let acked = Arc::new(AtomicI64::new(read_acked(&spec.dir)));
-    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(false)), acp_session_id: Arc::new(Mutex::new(None)) };
+    let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || !socket_path(&spec.dir).exists());
+    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)) };
 
-    let actor = Actor { conversation_id: spec.conversation_id, dir: spec.dir.clone(), out, handle: handle.clone(), outbox: VecDeque::new(), started: None };
+    let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
+    let actor = Actor { conversation_id: spec.conversation_id, dir: spec.dir.clone(), base, out, handle: handle.clone(), outbox: VecDeque::new(), started: None };
     let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone() });
-    let state = SessionState::new(spec.conversation_id, plan, acked.load(Ordering::SeqCst));
+    let mut state = SessionState::new(spec.conversation_id, plan, acked.load(Ordering::SeqCst));
+    if spec.launch.is_none() && closed_path(&spec.dir).exists() {
+        state.mark_closing();
+    }
+
     tokio::spawn(actor.run(spec, state, inbox));
 
     handle
+}
+
+fn start_new_journal_epoch(dir: &Path) -> i64 {
+    let base = journal_head(dir);
+
+    if let Err(error) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(base_path(dir), base.to_string())) {
+        tracing::warn!("could not record the journal base: {error}");
+    }
+
+    base
 }
 
 struct Connection {
@@ -101,6 +135,7 @@ struct Connection {
 struct Actor {
     conversation_id: Uuid,
     dir: PathBuf,
+    base: i64,
     out: mpsc::UnboundedSender<NodeToControl>,
     handle: SessionHandle,
     outbox: VecDeque<(i64, NodeToControl)>,
@@ -115,8 +150,9 @@ impl Actor {
             Err(error) => {
                 tracing::error!(conversation = %self.conversation_id, "keeper unavailable: {error:#}");
                 self.handle.ended.store(true, Ordering::SeqCst);
-                let message = NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq: 1, message: format!("{error:#}") };
-                self.emit(1, message);
+                let seq = self.base + 1;
+                let message = NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq, message: format!("{error:#}") };
+                self.emit(seq, message);
                 self.serve_commands_only(inbox).await;
 
                 return;
@@ -142,6 +178,10 @@ impl Actor {
 
                     match message {
                         Message::Command(command) => {
+                            if matches!(command, Command::Close) {
+                                self.record_close_request();
+                            }
+
                             let actions = state.on_command(command);
                             self.perform(actions, &mut connection).await;
                         }
@@ -181,7 +221,7 @@ impl Actor {
         };
         let direction = if entry.get("dir").and_then(Value::as_str) == Some("out") { Direction::Out } else { Direction::In };
 
-        state.on_entry(seq, direction, entry.get("frame").cloned().unwrap_or(Value::Null))
+        state.on_entry(self.base + seq, direction, entry.get("frame").cloned().unwrap_or(Value::Null))
     }
 
     async fn perform(&mut self, actions: Vec<Action>, connection: &mut Connection) {
@@ -221,6 +261,12 @@ impl Actor {
 
         if let Err(error) = std::fs::write(acked_path(&self.dir), seq.to_string()) {
             tracing::warn!(conversation = %self.conversation_id, "could not record acked seq: {error}");
+        }
+    }
+
+    fn record_close_request(&self) {
+        if let Err(error) = std::fs::write(closed_path(&self.dir), "") {
+            tracing::warn!(conversation = %self.conversation_id, "could not record the close request: {error}");
         }
     }
 
@@ -316,6 +362,7 @@ async fn connect_socket(dir: &Path) -> Result<UnixStream> {
 async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let _ = std::fs::remove_file(acked_path(dir));
+    let _ = std::fs::remove_file(closed_path(dir));
     let _ = std::fs::remove_file(socket_path(dir));
     let _ = std::fs::remove_file(dir.join("exit.json"));
 

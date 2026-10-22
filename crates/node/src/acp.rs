@@ -134,6 +134,10 @@ impl SessionState {
         self.session_id.as_deref()
     }
 
+    pub fn mark_closing(&mut self) {
+        self.closing = true;
+    }
+
     pub fn set_acked(&mut self, acked: i64) {
         self.acked = acked;
     }

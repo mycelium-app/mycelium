@@ -457,3 +457,87 @@ async fn queued_prompts_wait_for_a_node_that_is_offline_and_go_out_when_it_retur
 
     assert_eq!(returned.expect_prompt().await.1, "while you were away");
 }
+
+#[tokio::test]
+async fn a_prompt_after_archiving_and_restoring_resumes_the_session_before_sending() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let url = format!("/api/v1/conversations/{id}");
+
+    server.user.json(server.user.patch(&url).json(&json!({"archived": true}))).await;
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+    server.user.json(server.user.patch(&url).json(&json!({"archived": false}))).await;
+
+    assert_eq!(prompt(&server, id, "back again").await, 204);
+
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, cwd, .. } => {
+            assert_eq!((conversation_id, resume.as_deref(), cwd.as_str()), (id, Some("acp-1"), "/work/app"));
+        }
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    assert_eq!(link.expect_prompt().await.1, "back again");
+}
+
+#[tokio::test]
+async fn a_prompt_to_a_session_the_node_reports_as_ended_resumes_it_first() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned
+        .send(NodeToControl::Hello {
+            version: "0.1.0".into(),
+            hostname: "laptop".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            agents: vec![],
+            sessions: vec![mycelium_proto::conversation::SessionPosition { conversation_id: id, last_seq: 1, live: false }],
+        })
+        .await;
+
+    assert_eq!(prompt(&server, id, "wake up").await, 204);
+
+    assert!(matches!(returned.next().await, ControlToNode::StartSession { resume: Some(_), .. }));
+    assert_eq!(returned.expect_prompt().await.1, "wake up");
+}
+
+#[tokio::test]
+async fn a_running_conversation_the_node_no_longer_holds_is_failed_when_the_node_reconnects() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("go")).await;
+    link.expect_prompt().await;
+    assert_eq!(status_of(&server, id).await, "working");
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![]).await;
+
+    common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+    let events = server.events(id).await;
+    assert_eq!(events.last().unwrap()["kind"], "error");
+}
+
+#[tokio::test]
+async fn a_running_conversation_the_node_still_holds_is_left_running_when_it_reconnects() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("go")).await;
+    link.expect_prompt().await;
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![(id, 0)]).await;
+    returned.barrier(id, 1).await;
+
+    assert_eq!(status_of(&server, id).await, "working");
+}

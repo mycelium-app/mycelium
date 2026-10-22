@@ -121,4 +121,10 @@ pub struct LoginInfo {
 pub struct SessionPosition {
     pub conversation_id: Uuid,
     pub last_seq: i64,
+    #[serde(default = "session_is_live")]
+    pub live: bool,
+}
+
+fn session_is_live() -> bool {
+    true
 }
