@@ -3,6 +3,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::projects;
 use crate::state::AppState;
+use crate::worktrees;
 use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, set_status, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -54,7 +55,11 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
     }
 
-    let cwd = match &project {
+    if project.is_none() && request.branch.is_some() {
+        return Err(ApiError::bad_request("project_required", "Choose a project to start a worktree from."));
+    }
+
+    let mut cwd = match &project {
         Some(project) => project.path.clone(),
         None => request.cwd.trim().to_string(),
     };
@@ -79,6 +84,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     if available == Some(false) {
         return Err(ApiError::conflict("agent_unavailable", format!("{} is not installed on this node. Install it or choose another agent.", enum_text(&request.agent))));
+    }
+
+    if let (Some(project), Some(branch)) = (&project, &request.branch) {
+        cwd = worktrees::create(&state, project, branch, None).await?.path;
     }
 
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());

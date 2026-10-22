@@ -204,3 +204,66 @@ async fn a_conversation_from_a_project_needs_the_node_it_lives_on_and_a_project_
     assert_eq!((wrong_node, error["error"].clone(), not_theirs), (400, json!("project_not_on_node"), 404));
     assert_eq!((no_folder, missing["error"].clone()), (400, json!("cwd_required")));
 }
+
+async fn project_on(server: &Server, link: &mut NodeLink) -> Value {
+    let (_, _) = create_project(server, link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    listed[0].clone()
+}
+
+#[tokio::test]
+async fn a_conversation_can_start_in_a_new_worktree_the_node_creates_on_a_new_branch() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let starting = tokio::spawn(async move { user.json(user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "project_id": project["id"], "branch": " feature/login "}))).await });
+
+    let (cwd, command) = answer_next(&mut link, Ok(json!({"path": "/w/app-worktrees/feature-login", "branch": "feature/login"}))).await;
+    let (status, conversation) = starting.await.unwrap();
+
+    assert_eq!((cwd.as_str(), command), ("/w/app", GitCommand::AddWorktree { branch: "feature/login".into() }));
+    assert_eq!((status, conversation["cwd"].clone()), (201, json!("/w/app-worktrees/feature-login")));
+    match link.next().await {
+        ControlToNode::StartSession { cwd, .. } => assert_eq!(cwd, "/w/app-worktrees/feature-login"),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+
+    let (_, worktrees) = server.user.json(server.user.get("/api/v1/worktrees")).await;
+    assert_eq!((worktrees[0]["branch"].clone(), worktrees[0]["path"].clone(), worktrees[0]["issue_number"].clone()), (json!("feature/login"), json!("/w/app-worktrees/feature-login"), Value::Null));
+    let other = server.second_user("other@example.com").await;
+    let (_, theirs) = other.json(other.get("/api/v1/worktrees")).await;
+    assert_eq!(theirs, json!([]));
+}
+
+#[tokio::test]
+async fn a_worktree_that_git_refuses_starts_no_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let starting = tokio::spawn(async move { user.json(user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "project_id": project["id"], "branch": "main"}))).await });
+
+    answer_next(&mut link, Err("a branch named 'main' already exists")).await;
+    let (status, error) = starting.await.unwrap();
+
+    assert_eq!((status, error["error"].clone(), error["message"].clone()), (409, json!("git_failed"), json!("a branch named 'main' already exists")));
+    let (_, conversations) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    let (_, worktrees) = server.user.json(server.user.get("/api/v1/worktrees")).await;
+    assert_eq!((conversations, worktrees), (json!([]), json!([])));
+}
+
+#[tokio::test]
+async fn a_branch_needs_a_project_and_a_name() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, &mut link).await;
+
+    let (_, without_project) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app", "branch": "x"}))).await;
+    let (_, blank) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "project_id": project["id"], "branch": "  "}))).await;
+
+    assert_eq!((without_project["error"].clone(), blank["error"].clone()), (json!("project_required"), json!("branch_required")));
+}

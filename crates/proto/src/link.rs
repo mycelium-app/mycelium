@@ -124,6 +124,9 @@ pub enum GitCommand {
         credentials: Option<GitCredentials>,
     },
     Register,
+    AddWorktree {
+        branch: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

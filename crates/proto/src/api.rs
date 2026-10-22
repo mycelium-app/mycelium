@@ -139,6 +139,8 @@ pub struct CreateConversationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -348,4 +350,14 @@ pub struct CreateProjectRequest {
     pub repository: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Worktree {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub branch: String,
+    pub path: String,
+    pub issue_number: Option<i64>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }

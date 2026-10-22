@@ -21,6 +21,7 @@ mod stream;
 mod terminals;
 mod transcripts;
 mod web;
+mod worktrees;
 
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig};
 
@@ -108,6 +109,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
+        .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/imports", get(imports::list).post(imports::create))
         .route("/api/v1/indexing", get(search::indexing))
         .route("/api/v1/search", get(search::search))

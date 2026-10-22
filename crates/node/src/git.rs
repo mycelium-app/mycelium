@@ -17,6 +17,7 @@ pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value, Stri
             clone(&within(root, cwd)?, &url, credentials.as_ref())
         }
         GitCommand::Register => register(&within(root, cwd)?),
+        GitCommand::AddWorktree { branch } => add_worktree(&within(root, cwd)?, &branch),
         other => run(Path::new(cwd), other),
     }
 }
@@ -32,7 +33,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Commit { message } => changed(cwd, &["commit", "-m", &message], &[]),
         GitCommand::Fetch => changed(cwd, &["fetch"], &[]),
         GitCommand::UndoLastCommit => changed(cwd, &["reset", "--soft", "HEAD~1"], &[]),
-        GitCommand::Clone { .. } | GitCommand::Register => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
+        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
     }
 }
 
@@ -116,6 +117,24 @@ fn register(folder: &Path) -> Result<Value, String> {
     let repository = git(&canonical, &["rev-parse", "--git-dir"], &[]).is_ok();
 
     Ok(json!({"path": canonical.to_string_lossy(), "repository": repository}))
+}
+
+fn add_worktree(project: &Path, branch: &str) -> Result<Value, String> {
+    if branch.starts_with('-') || git(project, &["check-ref-format", "--branch", branch], &[]).is_err() {
+        return Err(format!("{branch} is not a valid branch name. Use letters, numbers, dashes and slashes."));
+    }
+
+    let name = project.file_name().ok_or_else(|| format!("{} has no folder name.", project.display()))?.to_string_lossy();
+    let folder = project.with_file_name(format!("{name}-worktrees")).join(branch.replace('/', "-"));
+
+    if folder.exists() {
+        return Err(format!("{} already exists. Choose another branch name.", folder.display()));
+    }
+
+    let folder_text = folder.to_string_lossy();
+    git(project, &["worktree", "add", "-b", branch, &folder_text], &[])?;
+
+    Ok(json!({"path": folder_text, "branch": branch}))
 }
 
 fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Value, String> {
@@ -568,5 +587,44 @@ mod tests {
         assert!(repo["path"].as_str().unwrap().ends_with("/repo"));
         assert!(run_in(root.path(), "missing", GitCommand::Register).unwrap_err().contains("does not exist"));
         assert!(run_in(root.path(), "file.txt", GitCommand::Register).unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn a_worktree_gets_a_new_branch_in_a_sibling_folder_inside_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("projects/org/app");
+        std::fs::create_dir_all(&project).unwrap();
+        init(&project);
+        std::fs::write(project.join("a.txt"), "one\n").unwrap();
+        run(&project, GitCommand::StageAll).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into() }).unwrap();
+
+        let added = run_in(root.path(), project.to_str().unwrap(), GitCommand::AddWorktree { branch: "issue/12-fix".into() }).unwrap();
+
+        let folder = root.path().join("projects/org/app-worktrees/issue-12-fix");
+        assert_eq!((added["path"].as_str(), added["branch"].as_str()), (folder.to_str(), Some("issue/12-fix")));
+        assert_eq!(std::fs::read_to_string(folder.join("a.txt")).unwrap(), "one\n");
+        assert_eq!(run(&folder, GitCommand::Status).unwrap()["branch"], "issue/12-fix");
+    }
+
+    #[test]
+    fn a_worktree_branch_that_exists_or_is_not_a_branch_name_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("app");
+        std::fs::create_dir_all(&project).unwrap();
+        init(&project);
+        std::fs::write(project.join("a.txt"), "one\n").unwrap();
+        run(&project, GitCommand::StageAll).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into() }).unwrap();
+        run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap();
+
+        let existing = run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap_err();
+        assert!(existing.contains("already exists"), "{existing}");
+
+        for branch in ["--detach", "a b", "x..y", ""] {
+            let error = run_in(root.path(), "app", GitCommand::AddWorktree { branch: branch.into() }).unwrap_err();
+
+            assert!(error.contains("not a valid branch name"), "{branch}: {error}");
+        }
     }
 }

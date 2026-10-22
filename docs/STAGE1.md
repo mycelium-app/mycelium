@@ -97,6 +97,7 @@ queued_prompts   id uuid pk, conversation_id, position int, text text, created_a
 transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
 projects         id uuid pk, owner uuid, node_id uuid, name text, path text, forge_id uuid null, repository text null,
                  created_at, unique(node_id, path)
+worktrees        id uuid pk, project_id uuid, branch text, path text, issue_number bigint null, created_at, unique(project_id, branch)
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
 ```
@@ -185,6 +186,8 @@ Forges:
 Projects:
 - `GET /api/v1/projects` → `[{id, node_id, name, path, forge_id, repository, created_at}]`, the caller's own. `POST /api/v1/projects` `{node_id, forge_id, repository: "owner/name"}` clones the repository on the node into `<projects_root>/projects/<owner>/<name>` with the forge's token; `{node_id, path}` registers an existing folder inside the node's projects root. 201 with the project; 409 `node_offline`, `git_failed` (git's own message) or `project_exists`; 400 `repository_invalid` or `project_source_required`.
 - `POST /api/v1/conversations` also takes `project_id` (instead of `cwd`): the conversation runs in the project's folder; the node must be the project's (400 `project_not_on_node`).
+- `POST /api/v1/conversations` with `project_id` and `branch` first has the node create a git worktree on that new branch (`git worktree add -b`), in `<project>-worktrees/<branch with / as ->` beside the project, and the conversation runs there (cwd is the worktree). 400 `branch_required` or `project_required`; 409 `git_failed` with git's message (branch exists, not a valid name) and no conversation is created.
+- `GET /api/v1/worktrees` → `[{id, project_id, branch, path, issue_number, created_at}]` for the caller's projects.
 
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
