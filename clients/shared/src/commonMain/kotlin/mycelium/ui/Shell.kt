@@ -1,5 +1,18 @@
 package mycelium.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.backhandler.BackHandler
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +64,12 @@ sealed interface Route {
 
 @Composable
 fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+    if (LocalTouch.current) {
+        PhoneShell(store, platform, me, onSignOut, initialRoute)
+
+        return
+    }
+
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
@@ -72,15 +91,63 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (val current = route) {
-                    Route.Empty -> EmptyMain(state, onNew = { route = Route.New })
-                    is Route.Chat -> ConversationScreen(store, state, current.id, onArchived = { route = Route.Empty })
-                    Route.New -> NewConversationScreen(store, state, onCreated = { route = Route.Chat(it.id) })
-                    Route.Nodes -> NodesScreen(store, state, platform)
-                    Route.Archive -> ArchiveScreen(store, state, onOpen = { route = Route.Chat(it) })
+                RouteContent(store, state, platform, route, onRoute = { route = it })
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+    val state by store.state.collectAsState()
+    val problem by store.problem.collectAsState()
+    var route by remember { mutableStateOf(initialRoute) }
+    var drawerOpen by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = drawerOpen) { drawerOpen = false }
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
+        CompositionLocalProvider(LocalOpenList provides { drawerOpen = true }) {
+            Column(Modifier.fillMaxSize()) {
+                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
+
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    RouteContent(store, state, platform, route, onRoute = { route = it })
                 }
             }
         }
+
+        AnimatedVisibility(drawerOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClickLabel = "Close conversations") { drawerOpen = false },
+            )
+        }
+
+        AnimatedVisibility(drawerOpen, enter = slideInHorizontally { -it }, exit = slideOutHorizontally { -it }) {
+            Sidebar(
+                state = state,
+                route = route,
+                me = me,
+                onRoute = { route = it; drawerOpen = false },
+                onSignOut = onSignOut,
+                modifier = Modifier.width(minOf(Tokens.Size.Sidebar + Tokens.Space.S8 * 2, maxWidth * 0.86f)).fillMaxHeight(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RouteContent(store: Store, state: AppState, platform: Platform, route: Route, onRoute: (Route) -> Unit) {
+    when (route) {
+        Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
+        is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
+        Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+        Route.Nodes -> NodesScreen(store, state, platform)
+        Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
     }
 }
 
@@ -88,14 +155,26 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
 private fun EmptyMain(state: AppState, onNew: () -> Unit) {
     val hasNode = state.nodes.values.any { it.online }
 
-    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Label(
-            if (hasNode) "Choose a conversation or start a new one." else "No node is online. Join a node from Nodes, then start a conversation.",
-            color = MyTheme.colors.textMuted,
-        )
+    Column(Modifier.fillMaxSize()) {
+        if (LocalOpenList.current != null) {
+            Bar {
+                BarTitle("Mycelium")
+            }
+        }
 
-        if (hasNode) {
-            MyButton(onNew, text = "New conversation", icon = MyIcon.Plus, variant = ButtonVariant.Outline, modifier = Modifier.padding(top = Tokens.Space.S3))
+        Column(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.S4),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Label(
+                if (hasNode) "Choose a conversation or start a new one." else "No node is online. Join a node from Nodes, then start a conversation.",
+                color = MyTheme.colors.textMuted,
+            )
+
+            if (hasNode) {
+                MyButton(onNew, text = "New conversation", icon = MyIcon.Plus, variant = ButtonVariant.Outline, modifier = Modifier.padding(top = Tokens.Space.S3))
+            }
         }
     }
 }
@@ -130,7 +209,7 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
         Hairline()
 
         Row(
-            Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Bar).padding(horizontal = Tokens.Space.S1),
+            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -149,7 +228,7 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = Tokens.Size.Row)
+            .heightIn(min = rowHeight())
             .pressable(onClick, role = androidx.compose.ui.semantics.Role.Button, selected = selected)
             .padding(horizontal = Tokens.Space.S3),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -175,7 +254,7 @@ private fun SidebarSectionView(
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = Tokens.Size.Row)
+                .heightIn(min = rowHeight())
                 .pressable(onToggle, stateDescription = if (open) "Expanded" else "Collapsed")
                 .padding(horizontal = Tokens.Space.S3),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
@@ -201,7 +280,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = Tokens.Size.Row)
+            .heightIn(min = rowHeight())
             .pressable(
                 onClick,
                 selected = selected,

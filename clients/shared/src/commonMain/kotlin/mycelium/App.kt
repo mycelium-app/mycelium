@@ -2,6 +2,11 @@ package mycelium
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -20,10 +25,12 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ApproveScreen
 import mycelium.ui.Label
+import mycelium.ui.LocalTouch
 import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Shell
 import mycelium.ui.SignInScreen
+import mycelium.ui.Tokens
 
 private sealed interface Phase {
     data object Restoring : Phase
@@ -73,39 +80,46 @@ private fun AppContent(platform: Platform) {
         }
     }
 
-    Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent), contentAlignment = Alignment.TopStart) {
-        when (val current = phase) {
-            Phase.Restoring -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Label("Loading", color = MyTheme.colors.textMuted)
-            }
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(MyTheme.colors.bgContent).windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.TopStart,
+    ) {
+        val phone = maxWidth < Tokens.Size.Compact
 
-            is Phase.SignedOut -> SignInScreen(platform, saved?.baseUrl, current.notice) { api, me -> phase = Phase.SignedIn(api, me) }
+        CompositionLocalProvider(LocalTouch provides phone) {
+            when (val current = phase) {
+                Phase.Restoring -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Label("Loading", color = MyTheme.colors.textMuted)
+                }
 
-            is Phase.SignedIn -> {
-                val code = approveCode
+                is Phase.SignedOut -> SignInScreen(platform, saved?.baseUrl, current.notice) { api, me -> phase = Phase.SignedIn(api, me) }
 
-                if (code != null) {
-                    ApproveScreen(current.api, code, onDone = { approveCode = null })
-                } else {
-                    val store = remember(current.api) { Store(current.api, scope) }
+                is Phase.SignedIn -> {
+                    val code = approveCode
 
-                    DisposableEffect(store) {
-                        store.start()
-                        onDispose { store.stop() }
+                    if (code != null) {
+                        ApproveScreen(current.api, code, onDone = { approveCode = null })
+                    } else {
+                        val store = remember(current.api) { Store(current.api, scope) }
+
+                        DisposableEffect(store) {
+                            store.start()
+                            onDispose { store.stop() }
+                        }
+
+                        Shell(
+                            store = store,
+                            platform = platform,
+                            me = current.me,
+                            onSignOut = {
+                                scope.launch {
+                                    runCatching { current.api.logout() }
+                                    platform.saveConnection(null)
+                                    phase = Phase.SignedOut(null)
+                                }
+                            },
+                        )
                     }
-
-                    Shell(
-                        store = store,
-                        platform = platform,
-                        me = current.me,
-                        onSignOut = {
-                            scope.launch {
-                                runCatching { current.api.logout() }
-                                platform.saveConnection(null)
-                                phase = Phase.SignedOut(null)
-                            }
-                        },
-                    )
                 }
             }
         }

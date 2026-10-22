@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.unit.Density
 import io.ktor.client.engine.mock.MockEngine
@@ -16,6 +17,7 @@ import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
 import mycelium.ui.Shell
@@ -99,8 +101,10 @@ private fun fakeApi(): MyceliumApi {
     return MyceliumApi("https://mycelium.test", "token", engine)
 }
 
-private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File {
-    val scene = ImageComposeScene(1440, 900, Density(1f)) { MyceliumTheme(dark, content) }
+private fun renderAt(name: String, dark: Boolean, phone: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File {
+    val scene = ImageComposeScene(if (phone) 390 else 1440, if (phone) 844 else 900, Density(1f)) {
+        MyceliumTheme(dark) { CompositionLocalProvider(LocalTouch provides phone, content = content) }
+    }
     var image = scene.render(0)
 
     for (frame in 1..6) {
@@ -108,13 +112,15 @@ private fun render(name: String, dark: Boolean, content: @androidx.compose.runti
     }
 
     val bytes = image.encodeToData(EncodedImageFormat.PNG)!!.bytes
-    val out = File("build/screens/$name-${if (dark) "dark" else "light"}.png")
+    val out = File("build/screens/${if (phone) "phone-" else ""}$name-${if (dark) "dark" else "light"}.png")
     out.parentFile.mkdirs()
     out.writeBytes(bytes)
     scene.close()
 
     return out
 }
+
+private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content)
 
 class ScreensRenderTest {
     private val me = Me("u", "user@example.com", "User")
@@ -143,6 +149,17 @@ class ScreensRenderTest {
             assertTrue(render("nodes", dark, shell(Route.Nodes)).length() > 10_000)
             assertTrue(render("new", dark, shell(Route.New)).length() > 10_000)
             assertTrue(render("archive", dark, shell(Route.Archive)).length() > 10_000)
+        }
+    }
+
+    @Test
+    fun phoneScreensRenderInBothThemes() {
+        for (dark in listOf(true, false)) {
+            assertTrue(renderAt("conversation", dark, true, shell(Route.Chat(ConversationId))).length() > 10_000)
+            assertTrue(renderAt("nodes", dark, true, shell(Route.Nodes)).length() > 10_000)
+            assertTrue(renderAt("archive", dark, true, shell(Route.Archive)).length() > 10_000)
+            assertTrue(renderAt("empty", dark, true, shell(Route.Empty)).length() > 5_000)
+            assertTrue(renderAt("signin", dark, true) { SignInScreen(PlatformStub, "mycelium.example.com", null) { _, _ -> } }.length() > 5_000)
         }
     }
 

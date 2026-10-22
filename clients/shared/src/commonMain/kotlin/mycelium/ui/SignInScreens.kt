@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,7 +93,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
     CenteredPage {
         Label("Mycelium", Modifier.semantics { heading() }, Tokens.Type.Display)
 
-        Column(Modifier.width(Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Column(Modifier.widthIn(max = Tokens.Size.FormColumn).fillMaxWidth().padding(horizontal = Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             val code = device
 
             if (code != null) {
@@ -187,7 +188,7 @@ fun ApproveScreen(api: MyceliumApi, code: String, onDone: () -> Unit) {
         val device = pending
         val colors = MyTheme.colors
 
-        Column(Modifier.width(Tokens.Size.ApproveColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
+        Column(Modifier.widthIn(max = Tokens.Size.ApproveColumn).fillMaxWidth().padding(horizontal = Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
             when {
                 outcome != null -> {
                     Label("Done", Modifier.semantics { heading() }, Tokens.Type.Display)
@@ -217,7 +218,7 @@ fun ApproveScreen(api: MyceliumApi, code: String, onDone: () -> Unit) {
                         Hairline()
 
                         for ((name, value) in listOf("Host" to device.hostname, "System" to "${device.os} ${device.arch}", "Address" to device.ip)) {
-                            Row(Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()), verticalAlignment = Alignment.CenterVertically) {
                                 Label(name, Modifier.width(Tokens.Size.ActionColumn / 2), color = colors.textMuted)
                                 Label(value)
                             }

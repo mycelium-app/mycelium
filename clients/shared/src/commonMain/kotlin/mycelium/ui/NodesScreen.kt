@@ -62,6 +62,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
     var joinOpen by remember { mutableStateOf(false) }
     var revoking by remember { mutableStateOf<String?>(null) }
     val nodes = state.nodes.values.sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
+    val touch = LocalTouch.current
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -69,7 +70,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
             Box(Modifier.weight(1f))
 
             Box {
-                MyButton({ joinOpen = true }, text = "Join a node", icon = MyIcon.Plus, variant = ButtonVariant.Outline, description = "Join a node")
+                MyButton({ joinOpen = true }, text = if (touch) null else "Join a node", icon = MyIcon.Plus, variant = ButtonVariant.Outline, description = "Join a node")
 
                 if (joinOpen) {
                     JoinPopup(api.baseUrl, platform, onDismiss = { joinOpen = false })
@@ -82,7 +83,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
                 Label("No node has joined yet. Select Join a node to connect the first one.", Modifier.padding(Tokens.Space.S4), color = MyTheme.colors.textMuted)
             }
 
-            if (nodes.isNotEmpty()) {
+            if (nodes.isNotEmpty() && !touch) {
                 NodeColumnHeads()
             }
 
@@ -161,10 +162,11 @@ private fun NodeGroup(
     var addOpen by remember { mutableStateOf(false) }
     var moreOpen by remember { mutableStateOf(false) }
     val installed = node.agents.filter { it.available }
+    val touch = LocalTouch.current
 
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().background(colors.bgPanel).heightIn(min = Tokens.Size.Row).padding(start = Tokens.Space.S4, end = Tokens.Space.S2),
+            Modifier.fillMaxWidth().background(colors.bgPanel).heightIn(min = rowHeight()).padding(start = Tokens.Space.S4, end = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -177,10 +179,14 @@ private fun NodeGroup(
                 else -> Label("Online", style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
-            Label("${node.os} ${node.arch}  ·  ${node.version}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            if (touch) {
+                Box(Modifier.weight(1f))
+            } else {
+                Label("${node.os} ${node.arch}  ·  ${node.version}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            }
 
             Box {
-                MyButton({ addOpen = true }, text = "Add login", icon = MyIcon.Plus, size = ButtonSize.Sm, muted = true, description = "Add login on ${node.name}")
+                MyButton({ addOpen = true }, text = if (touch) null else "Add login", icon = MyIcon.Plus, size = ButtonSize.Sm, muted = true, description = "Add login on ${node.name}")
 
                 if (addOpen) {
                     MenuPopup(onDismiss = { addOpen = false }) {
@@ -213,7 +219,7 @@ private fun NodeGroup(
 
         if (confirmingRevoke) {
             Row(
-                Modifier.fillMaxWidth().padding(start = Tokens.Space.S4, end = Tokens.Space.S2).heightIn(min = Tokens.Size.Row),
+                Modifier.fillMaxWidth().padding(start = Tokens.Space.S4, end = Tokens.Space.S2).heightIn(min = rowHeight()),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -246,7 +252,7 @@ private fun NodeColumnHeads() {
     val colors = MyTheme.colors
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row).padding(start = Tokens.Space.S6, end = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S6, end = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -262,21 +268,37 @@ private fun NodeColumnHeads() {
 @Composable
 private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Unit) {
     val colors = MyTheme.colors
+    val touch = LocalTouch.current
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row).padding(start = Tokens.Space.S6, end = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = if (touch) Tokens.Space.S4 else Tokens.Space.S6, end = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-            Label(agentName(agent.agent), maxLines = 1)
-            Label(agent.version.orEmpty(), color = colors.textMuted, maxLines = 1)
+        if (touch) {
+            Column(Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                    Label(agentName(agent.agent), maxLines = 1)
+                    Label(agent.version.orEmpty(), color = colors.textMuted, maxLines = 1)
+                }
+
+                val detail = listOfNotNull(login?.account?.ifEmpty { null }, login?.let { loginMethodName(it.method) }).joinToString("  ·  ")
+
+                if (detail.isNotEmpty()) {
+                    Label(detail, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                }
+            }
+        } else {
+            Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                Label(agentName(agent.agent), maxLines = 1)
+                Label(agent.version.orEmpty(), color = colors.textMuted, maxLines = 1)
+            }
+
+            Label(login?.account.orEmpty(), Modifier.weight(1.2f), color = colors.text, maxLines = 1)
+            Label(login?.let { loginMethodName(it.method) }.orEmpty(), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
         }
 
-        Label(login?.account.orEmpty(), Modifier.weight(1.2f), color = colors.text, maxLines = 1)
-        Label(login?.let { loginMethodName(it.method) }.orEmpty(), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
-
-        Row(Modifier.weight(1.2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Row(if (touch) Modifier else Modifier.weight(1.2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             when (login?.state) {
                 LoginState.SignedIn -> Label("Signed in", color = colors.textMuted)
                 LoginState.Expired -> StatusMark("Expired", Tone.Failed, MyIcon.Failed)
@@ -314,7 +336,7 @@ private fun LoginPanel(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(min = Tokens.Size.Row, max = Tokens.Size.Popover / 2)
+                    .heightIn(min = rowHeight(), max = Tokens.Size.Popover / 2)
                     .background(colors.bgPanel, ControlShape)
                     .verticalScroll(rememberScrollState())
                     .padding(Tokens.Space.S2),
@@ -337,7 +359,7 @@ private fun LoginPanel(
                         { reply = it },
                         label = "Reply to the sign-in",
                         placeholder = "Paste the code, then send",
-                        modifier = Modifier.width(Tokens.Size.FormColumn),
+                        modifier = Modifier.weight(1f),
                         mono = true,
                         onSubmit = { onInput(reply); reply = "" },
                     )

@@ -110,6 +110,8 @@ object Tokens {
         val Dot: Dp = 6.dp
         val Sidebar: Dp = 248.dp
         val Inspector: Dp = 296.dp
+        val Touch: Dp = 44.dp
+        val BarTouch: Dp = 52.dp
         val Rail: Dp = 44.dp
         val Menu: Dp = 280.dp
         val Measure: Dp = 720.dp
@@ -134,6 +136,7 @@ object Tokens {
         val Control: Dp = 4.dp
         val Block: Dp = 6.dp
         val Float: Dp = 8.dp
+        val Card: Dp = 16.dp
         val Full: Dp = 9999.dp
     }
 
@@ -154,6 +157,10 @@ object Tokens {
         val CodeLarge = TextStyle(fontFamily = Mono, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.6.sp)
     }
 }
+
+val LocalOpenList = staticCompositionLocalOf<(() -> Unit)?> { null }
+
+val LocalTouch = staticCompositionLocalOf { false }
 
 val LocalPalette = staticCompositionLocalOf { Tokens.Dark }
 

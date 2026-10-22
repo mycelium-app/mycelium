@@ -59,11 +59,24 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
     val rows = pastConversations(state.conversations.values, archived, filter, query)
 
+    val touch = LocalTouch.current
+
     Column(Modifier.fillMaxSize()) {
         Bar {
             BarTitle("Past conversations")
-            Box(Modifier.weight(1f))
-            TextInput(query, { query = it }, label = "Search past conversations", placeholder = "Search titles", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn))
+
+            if (!touch) {
+                Box(Modifier.weight(1f))
+            }
+
+            TextInput(
+                query,
+                { query = it },
+                label = "Search past conversations",
+                placeholder = "Search titles",
+                showLabel = false,
+                modifier = if (touch) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn),
+            )
         }
 
         Bar {
@@ -71,7 +84,9 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            TableRow(header = true, "Conversation", "Agent", "Node", "Last active", "")
+            if (!touch) {
+                TableRow(header = true, "Conversation", "Agent", "Node", "Last active", "")
+            }
 
             if (rows.isEmpty()) {
                 Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
@@ -83,30 +98,42 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = Tokens.Size.Row)
+                        .heightIn(min = rowHeight())
                         .padding(horizontal = Tokens.Space.S4),
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
+                    Column(
                         Modifier
-                            .weight(3f)
+                            .weight(if (touch) 1f else 3f)
                             .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.Center,
                     ) {
-                        Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                            Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
 
-                        if (isArchived) {
-                            Tag("Archived")
+                            if (isArchived) {
+                                Tag("Archived")
+                            }
+                        }
+
+                        if (touch) {
+                            Label(
+                                listOf(agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                                style = Tokens.Type.Meta,
+                                color = colors.textMuted,
+                                maxLines = 1,
+                            )
                         }
                     }
 
-                    Label(agentName(row.agent), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
-                    Label(state.nodes[row.nodeId]?.name.orEmpty(), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
-                    Label(relativeTime(row.updatedAt), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
+                    if (!touch) {
+                        Label(agentName(row.agent), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
+                        Label(state.nodes[row.nodeId]?.name.orEmpty(), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
+                        Label(relativeTime(row.updatedAt), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
+                    }
 
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Box(if (touch) Modifier else Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                         MyButton(
                             onClick = {
                                 store.act {
@@ -136,7 +163,7 @@ private fun TableRow(header: Boolean, vararg cells: String) {
 
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row).padding(horizontal = Tokens.Space.S4).semantics { contentDescription = "Columns" },
+            Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S4).semantics { contentDescription = "Columns" },
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
             verticalAlignment = Alignment.CenterVertically,
         ) {

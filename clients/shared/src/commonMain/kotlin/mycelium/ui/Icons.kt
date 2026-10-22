@@ -37,6 +37,7 @@ enum class MyIcon(vararg val paths: String) {
     Server(rect(2f, 3f, 20f, 8f, 2f), rect(2f, 13f, 20f, 8f, 2f), "M6 7h.01M6 17h.01"),
     Archive(rect(3f, 4f, 18f, 5f, 1f), "M5 9v10h14V9M10 13h4"),
     More("M5 12h.01M12 12h.01M19 12h.01"),
+    Menu("M4 6h16M4 12h16M4 18h16"),
     Send("M12 19V5M5 12l7-7 7 7"),
     Stop(rect(6f, 6f, 12f, 12f, 2f)),
     Pencil("M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"),

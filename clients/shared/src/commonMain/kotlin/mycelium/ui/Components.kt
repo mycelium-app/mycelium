@@ -7,9 +7,15 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -40,6 +46,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -50,7 +57,12 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.api.ConversationStatus
@@ -58,6 +70,15 @@ import mycelium.api.ConversationStatus
 val ControlShape = RoundedCornerShape(Tokens.Radius.Control)
 val BlockShape = RoundedCornerShape(Tokens.Radius.Block)
 val FloatShape = RoundedCornerShape(Tokens.Radius.Float)
+
+@Composable
+fun touchMin(base: Dp): Dp = if (LocalTouch.current) maxOf(base, Tokens.Size.Touch) else base
+
+@Composable
+fun rowHeight(): Dp = touchMin(Tokens.Size.Row)
+
+@Composable
+fun barHeight(): Dp = if (LocalTouch.current) Tokens.Size.BarTouch else Tokens.Size.Bar
 
 @Composable
 fun Label(
@@ -158,11 +179,13 @@ fun MyButton(
     trailingIcon: MyIcon? = null,
 ) {
     val colors = MyTheme.colors
-    val height = when (size) {
-        ButtonSize.Sm -> Tokens.Size.ControlSm
-        ButtonSize.Md -> Tokens.Size.ControlMd
-        ButtonSize.Lg -> Tokens.Size.ControlLg
-    }
+    val height = touchMin(
+        when (size) {
+            ButtonSize.Sm -> Tokens.Size.ControlSm
+            ButtonSize.Md -> Tokens.Size.ControlMd
+            ButtonSize.Lg -> Tokens.Size.ControlLg
+        },
+    )
     val padding = when (size) {
         ButtonSize.Sm -> Tokens.Space.S1_5
         ButtonSize.Md -> Tokens.Space.S2
@@ -220,7 +243,7 @@ fun Bar(
 
     Column(modifier.background(if (chrome) colors.bgChrome else colors.bgContent)) {
         Row(
-            Modifier.fillMaxWidth().height(Tokens.Size.Bar).padding(start = startPadding, end = Tokens.Space.S2),
+            Modifier.fillMaxWidth().height(barHeight()).padding(start = startPadding, end = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
             content = content,
@@ -231,6 +254,10 @@ fun Bar(
 
 @Composable
 fun BarTitle(text: String, modifier: Modifier = Modifier) {
+    LocalOpenList.current?.let { openList ->
+        MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
+    }
+
     Label(text, modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
 }
 
@@ -304,7 +331,7 @@ fun TextInput(
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    val height = if (large) Tokens.Size.ControlLg else Tokens.Size.ControlMd
+    val height = touchMin(if (large) Tokens.Size.ControlLg else Tokens.Size.ControlMd)
     val borderColor = if (error != null) colors.statusFailed else colors.borderControl
     val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
 
@@ -365,7 +392,7 @@ fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Uni
 
             Box(
                 Modifier
-                    .height(Tokens.Size.ControlSm)
+                    .height(touchMin(Tokens.Size.ControlSm))
                     .pressable(
                         onClick = { onSelect(option) },
                         role = Role.RadioButton,
@@ -386,6 +413,12 @@ fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Uni
 fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = Tokens.Size.Menu, content: @Composable () -> Unit) {
     val colors = MyTheme.colors
 
+    if (LocalTouch.current) {
+        BottomSheet(onDismiss) { content() }
+
+        return
+    }
+
     Popup(onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         Column(
             modifier
@@ -400,6 +433,37 @@ fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = 
     }
 }
 
+private object ScreenPopup : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =
+        IntOffset.Zero
+}
+
+@Composable
+fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val colors = MyTheme.colors
+
+    Popup(popupPositionProvider = ScreenPopup, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.32f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) { detectTapGestures { } }
+                    .background(colors.bgRaised, RoundedCornerShape(topStart = Tokens.Radius.Card, topEnd = Tokens.Radius.Card))
+                    .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = Tokens.Space.S2),
+                content = content,
+            )
+        }
+    }
+}
+
 @Composable
 fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null) {
     val colors = MyTheme.colors
@@ -407,7 +471,7 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = Tokens.Size.Row)
+            .heightIn(min = rowHeight())
             .pressable(onClick, role = Role.RadioButton, shape = ControlShape, stateDescription = if (checked) "Selected" else null)
             .semantics { selected = checked }
             .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
@@ -438,7 +502,7 @@ fun MenuLabel(text: String) {
 @Composable
 fun SectionHead(text: String, modifier: Modifier = Modifier, aside: String? = null) {
     Row(
-        modifier.fillMaxWidth().height(Tokens.Size.Row).padding(horizontal = Tokens.Space.S3),
+        modifier.fillMaxWidth().height(rowHeight()).padding(horizontal = Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Label(text, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)

@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -92,6 +95,40 @@ fun Composer(
         }
     }
 
+    if (LocalTouch.current) {
+        val shape = RoundedCornerShape(Tokens.Radius.Card)
+
+        Column(modifier.fillMaxWidth().padding(start = Tokens.Space.S2, end = Tokens.Space.S2, bottom = Tokens.Space.S2)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .shadow(Tokens.Space.S2, shape, ambientColor = colors.shadowFloat, spotColor = colors.shadowFloat)
+                    .background(colors.bgRaised, shape)
+                    .border(Tokens.Size.Hairline, if (focused) colors.focus else colors.border, shape)
+                    .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
+            ) {
+                if (queue.isNotEmpty()) {
+                    QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    MessageField(text, { text = it }, source, ::submit, Modifier.weight(1f).padding(start = Tokens.Space.S2))
+                    SendButtons(working, onStop, ::submit)
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    ModelMenu(conversation.model, onSetModel)
+
+                    if (modes.isNotEmpty()) {
+                        ModeMenu(modes, currentMode, onSetMode)
+                    }
+                }
+            }
+        }
+
+        return
+    }
+
     Column(
         modifier
             .fillMaxWidth()
@@ -105,36 +142,7 @@ fun Composer(
             QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
         }
 
-        BasicTextField(
-            value = text,
-            onValueChange = { text = it },
-            textStyle = Tokens.Type.Prose.copy(color = colors.text),
-            cursorBrush = SolidColor(colors.text),
-            interactionSource = source,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = Tokens.Size.ComposerInput)
-                .padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3)
-                .semantics { contentDescription = "Message" }
-                .onPreviewKeyEvent { event ->
-                    val enter = event.key == Key.Enter && !event.isShiftPressed
-
-                    if (enter && event.type == KeyEventType.KeyDown) {
-                        submit()
-                    }
-
-                    enter
-                },
-            decorationBox = { inner ->
-                Box {
-                    if (text.isEmpty()) {
-                        Label("Ask, plan or build", style = Tokens.Type.Prose, color = colors.textFaint)
-                    }
-
-                    inner()
-                }
-            },
-        )
+        MessageField(text, { text = it }, source, ::submit, Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
 
         Row(
             Modifier.fillMaxWidth().padding(start = Tokens.Space.S1, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
@@ -152,19 +160,58 @@ fun Composer(
             }
 
             ModelMenu(conversation.model, onSetModel)
-
-            if (working) {
-                MyButton(onStop, icon = MyIcon.Stop, description = "Stop the agent", variant = ButtonVariant.Outline)
-            }
-
-            MyButton(
-                onClick = ::submit,
-                icon = MyIcon.Send,
-                description = if (working) "Queue message" else "Send",
-                variant = ButtonVariant.Primary,
-            )
+            SendButtons(working, onStop, ::submit)
         }
     }
+}
+
+@Composable
+private fun MessageField(text: String, onTextChange: (String) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MyTheme.colors
+
+    BasicTextField(
+        value = text,
+        onValueChange = onTextChange,
+        textStyle = Tokens.Type.Prose.copy(color = colors.text),
+        cursorBrush = SolidColor(colors.text),
+        interactionSource = source,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = Tokens.Size.ComposerInput)
+            .semantics { contentDescription = "Message" }
+            .onPreviewKeyEvent { event ->
+                val enter = event.key == Key.Enter && !event.isShiftPressed
+
+                if (enter && event.type == KeyEventType.KeyDown) {
+                    onSubmit()
+                }
+
+                enter
+            },
+        decorationBox = { inner ->
+            Box(contentAlignment = Alignment.CenterStart) {
+                if (text.isEmpty()) {
+                    Label("Ask, plan or build", style = Tokens.Type.Prose, color = colors.textFaint)
+                }
+
+                inner()
+            }
+        },
+    )
+}
+
+@Composable
+private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit) {
+    if (working) {
+        MyButton(onStop, icon = MyIcon.Stop, description = "Stop the agent", variant = ButtonVariant.Outline)
+    }
+
+    MyButton(
+        onClick = onSend,
+        icon = MyIcon.Send,
+        description = if (working) "Queue message" else "Send",
+        variant = ButtonVariant.Primary,
+    )
 }
 
 @Composable
@@ -176,7 +223,7 @@ private fun ModeMenu(modes: List<AgentMode>, current: AgentMode?, onSelect: (Str
     Box {
         Row(
             Modifier.pressable(onClick = { open = true }, description = "Mode: $label", shape = ControlShape)
-                .heightIn(min = Tokens.Size.ControlMd)
+                .heightIn(min = touchMin(Tokens.Size.ControlMd))
                 .padding(horizontal = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
             verticalAlignment = Alignment.CenterVertically,
@@ -240,7 +287,7 @@ private fun QueuedMessages(
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" }) {
         for (item in queue) {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = Tokens.Size.Row).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
+                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
