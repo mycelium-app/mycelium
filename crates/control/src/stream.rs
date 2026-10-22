@@ -1,4 +1,7 @@
 use crate::auth::AuthUser;
+use crate::error::{ApiError, ApiResult};
+use axum::http::header::ORIGIN;
+use axum::http::{HeaderMap, StatusCode};
 use crate::state::{AppState, Streamed};
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -6,10 +9,22 @@ use axum::response::Response;
 use tokio::sync::broadcast::{self, error::RecvError};
 use uuid::Uuid;
 
-pub async fn connect(State(state): State<AppState>, user: AuthUser, upgrade: WebSocketUpgrade) -> Response {
+fn origin_of(url: &str) -> Option<String> {
+    url::Url::parse(url).ok().map(|url| url.origin().ascii_serialization())
+}
+
+pub async fn connect(State(state): State<AppState>, headers: HeaderMap, user: AuthUser, upgrade: WebSocketUpgrade) -> ApiResult<Response> {
+    if let Some(origin) = headers.get(ORIGIN) {
+        let own = origin_of(&state.config.public_url);
+
+        if origin.to_str().ok().map(str::to_string) != own {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "origin_not_allowed", "This page is not allowed to open the live stream. Use the address of the control plane itself."));
+        }
+    }
+
     let receiver = state.stream.subscribe();
 
-    upgrade.on_upgrade(move |socket| forward(user.id, receiver, socket))
+    Ok(upgrade.on_upgrade(move |socket| forward(user.id, receiver, socket)))
 }
 
 async fn forward(user_id: Uuid, mut receiver: broadcast::Receiver<Streamed>, mut socket: WebSocket) {

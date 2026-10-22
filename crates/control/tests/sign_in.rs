@@ -194,6 +194,37 @@ async fn oidc_callback_rejects_a_state_that_does_not_match_the_browser() {
 }
 
 #[tokio::test]
+async fn an_identity_provider_refusal_is_answered_with_the_json_error_and_a_fix() {
+    let (issuer, _) = start_provider().await;
+    let server = Server::start_with(|config| {
+        config.dev_login = None;
+        config.oidc = Some(OidcConfig { issuer: issuer.clone(), client_id: "mycelium".into(), client_secret: None });
+    })
+    .await;
+    let anonymous = server.anonymous();
+
+    let (status, body) = anonymous.json(anonymous.get("/auth/callback").query(&[("error", "access_denied"), ("state", "x")])).await;
+
+    assert_eq!((status, body["error"].as_str()), (400, Some("sign_in_refused")));
+    assert_eq!(body["message"], "The identity provider did not sign you in. Start the sign-in again, or ask the person who runs this control plane for access.");
+}
+
+#[tokio::test]
+async fn a_callback_without_a_code_asks_to_start_again() {
+    let (issuer, _) = start_provider().await;
+    let server = Server::start_with(|config| {
+        config.dev_login = None;
+        config.oidc = Some(OidcConfig { issuer: issuer.clone(), client_id: "mycelium".into(), client_secret: None });
+    })
+    .await;
+    let anonymous = server.anonymous();
+
+    let (status, body) = anonymous.json(anonymous.get("/auth/callback")).await;
+
+    assert_eq!((status, body["error"].as_str()), (400, Some("sign_in_expired")));
+}
+
+#[tokio::test]
 async fn oidc_callback_rejects_an_id_token_issued_for_another_login() {
     let (issuer, provider) = start_provider().await;
     let server = Server::start_with(|config| {

@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -7,6 +7,41 @@ pub struct OidcConfig {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Cidr {
+    network: IpAddr,
+    prefix: u8,
+}
+
+impl Cidr {
+    pub fn parse(text: &str) -> Result<Cidr> {
+        let (address, prefix) = match text.trim().split_once('/') {
+            Some((address, prefix)) => (address, Some(prefix)),
+            None => (text.trim(), None),
+        };
+        let network: IpAddr = address.parse().map_err(|_| anyhow::anyhow!("{text:?} is not an address or a CIDR range."))?;
+        let longest = if network.is_ipv4() { 32 } else { 128 };
+        let prefix = match prefix {
+            Some(prefix) => prefix.parse::<u8>().ok().filter(|prefix| *prefix <= longest).ok_or_else(|| anyhow::anyhow!("{text:?} has a prefix length outside 0 to {longest}."))?,
+            None => longest,
+        };
+
+        Ok(Cidr { network, prefix })
+    }
+
+    pub fn contains(&self, address: IpAddr) -> bool {
+        match (self.network, address) {
+            (IpAddr::V4(network), IpAddr::V4(address)) => shared_prefix(u128::from(u32::from(network)), u128::from(u32::from(address)), 32, self.prefix),
+            (IpAddr::V6(network), IpAddr::V6(address)) => shared_prefix(u128::from(network), u128::from(address), 128, self.prefix),
+            _ => false,
+        }
+    }
+}
+
+fn shared_prefix(left: u128, right: u128, width: u8, prefix: u8) -> bool {
+    prefix == 0 || (left ^ right) >> (width - prefix) == 0
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +55,7 @@ pub struct Config {
     pub allowed_emails: Vec<String>,
     pub web_dir: PathBuf,
     pub skip_migrations: bool,
+    pub trusted_proxies: Vec<Cidr>,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -73,6 +109,10 @@ impl Config {
             allowed_emails: optional(lookup, "MYCELIUM_ALLOWED_EMAILS").map(|emails| emails.split(',').map(|email| email.trim().to_lowercase()).filter(|email| !email.is_empty()).collect()).unwrap_or_default(),
             web_dir: optional(lookup, "MYCELIUM_WEB_DIR").unwrap_or_else(|| "/usr/share/mycelium/web".into()).into(),
             skip_migrations: optional(lookup, "MYCELIUM_SKIP_MIGRATIONS").is_some_and(|value| value == "true" || value == "1"),
+            trusted_proxies: optional(lookup, "MYCELIUM_TRUSTED_PROXIES")
+                .map(|ranges| ranges.split(',').map(str::trim).filter(|range| !range.is_empty()).map(Cidr::parse).collect::<Result<Vec<_>>>())
+                .transpose()?
+                .unwrap_or_default(),
         })
     }
 }
@@ -123,6 +163,30 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.allowed_emails, ["me@example.com", "you@example.com"]);
+    }
+
+    #[test]
+    fn trusted_proxies_default_to_none_and_parse_ranges_and_single_addresses() {
+        let base = [("MYCELIUM_DATABASE_URL", "postgres://x"), ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"), ("MYCELIUM_DEV_LOGIN", "me@example.com")];
+        assert!(config_from(&base).unwrap().trusted_proxies.is_empty());
+
+        let mut listed = base.to_vec();
+        listed.push(("MYCELIUM_TRUSTED_PROXIES", "10.0.0.0/8, ::1, 192.168.1.7"));
+        let proxies = config_from(&listed).unwrap().trusted_proxies;
+
+        assert!(proxies[0].contains("10.200.0.1".parse().unwrap()));
+        assert!(!proxies[0].contains("11.0.0.1".parse().unwrap()));
+        assert!(proxies[1].contains("::1".parse().unwrap()));
+        assert!(proxies[2].contains("192.168.1.7".parse().unwrap()));
+        assert!(!proxies[2].contains("192.168.1.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_trusted_proxy_range_that_is_not_one_is_refused_with_a_fix() {
+        let mut values = vec![("MYCELIUM_DATABASE_URL", "postgres://x"), ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"), ("MYCELIUM_DEV_LOGIN", "me@example.com")];
+        values.push(("MYCELIUM_TRUSTED_PROXIES", "10.0.0.0/33"));
+
+        assert!(config_from(&values).unwrap_err().to_string().contains("prefix length"));
     }
 
     #[test]

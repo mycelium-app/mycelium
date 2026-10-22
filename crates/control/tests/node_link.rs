@@ -1,6 +1,6 @@
 mod common;
 
-use common::Server;
+use common::{NodeLink, Server};
 use mycelium_proto::conversation::{AgentId, LoginInfo, LoginState};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
@@ -416,4 +416,91 @@ async fn a_node_cannot_publish_output_for_another_nodes_sign_in() {
 
     let (status, _) = server.user.json(server.user.post(&format!("/api/v1/logins/{login_id}/input")).json(&json!({"text": "still there"}))).await;
     assert_eq!(status, 204);
+}
+
+#[tokio::test]
+async fn revoking_a_node_tells_clients_to_drop_it() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/nodes/{}", link.id))).await;
+    assert_eq!(status, 204);
+
+    let removed = stream.until(|message| match message {
+        StreamMessage::NodeRemoved { node_id } => Some(node_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(removed, link.id);
+}
+
+async fn conversation_awaiting_prompt_acknowledgement(server: &Server) -> (NodeLink, Uuid, Uuid) {
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("hello")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    let (prompt_id, _) = link.expect_prompt().await;
+
+    (link, conversation.id, prompt_id)
+}
+
+async fn reconnect_reporting_live(server: &Server, link: NodeLink, conversation_id: Uuid) -> NodeLink {
+    let (id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut returned = server.connect_node(id, &token).await;
+    returned.hello(vec![(conversation_id, 0)]).await;
+
+    returned
+}
+
+#[tokio::test]
+async fn a_prompt_the_node_never_acknowledged_is_sent_again_when_it_reports_the_session_live() {
+    let server = Server::start().await;
+    let (link, conversation_id, prompt_id) = conversation_awaiting_prompt_acknowledgement(&server).await;
+
+    let mut returned = reconnect_reporting_live(&server, link, conversation_id).await;
+
+    match returned.next().await {
+        ControlToNode::Prompt { conversation_id: resent_conversation, prompt_id: resent, text } => {
+            assert_eq!((resent_conversation, resent, text.as_str()), (conversation_id, prompt_id, "hello"));
+        }
+        other => panic!("expected the prompt again, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_acknowledged_prompt_is_not_sent_again() {
+    let server = Server::start().await;
+    let (mut link, conversation_id, prompt_id) = conversation_awaiting_prompt_acknowledgement(&server).await;
+    link.send(NodeToControl::PromptReceived { conversation_id, prompt_id }).await;
+    link.barrier(conversation_id, 1).await;
+
+    let mut returned = reconnect_reporting_live(&server, link, conversation_id).await;
+    returned.send(NodeToControl::AcpUpdate { conversation_id, seq: 2, update: json!({"sessionUpdate": "barrier"}) }).await;
+
+    loop {
+        match returned.raw().await {
+            ControlToNode::Prompt { .. } => panic!("an acknowledged prompt was sent again"),
+            ControlToNode::Ack { seq, .. } if seq >= 2 => break,
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_prompt_acknowledged_by_another_node_does_not_count() {
+    let server = Server::start().await;
+    let (link, conversation_id, prompt_id) = conversation_awaiting_prompt_acknowledgement(&server).await;
+    let mut intruder = server.online_node("server").await;
+    let own = server.create_conversation(intruder.id, None).await;
+    intruder.expect_start_session().await;
+    intruder.start_session(own.id, "acp-2").await;
+    intruder.send(NodeToControl::PromptReceived { conversation_id, prompt_id }).await;
+    intruder.barrier(own.id, 1).await;
+
+    let mut returned = reconnect_reporting_live(&server, link, conversation_id).await;
+
+    assert!(matches!(returned.next().await, ControlToNode::Prompt { .. }));
 }

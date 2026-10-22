@@ -91,6 +91,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
     match message {
         NodeToControl::Hello { version, hostname, os, arch, agents, sessions } => hello(state, node_id, version, hostname, os, arch, agents, sessions).await,
         NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, .. } => session_started(state, node_id, conversation_id, acp_session_id, modes, models).await,
+        NodeToControl::PromptReceived { conversation_id, prompt_id } => {
+            state.hub.acknowledge_prompt(node_id, conversation_id, prompt_id);
+
+            Ok(())
+        }
         NodeToControl::AcpUpdate { conversation_id, seq, update } => record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await.map(|_| ()),
         NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
             let mut payload = request.clone();
@@ -107,6 +112,8 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
             state.hub.remove_session(node_id, conversation_id);
+            state.hub.forget_prompts_of(conversation_id);
+            state.hub.take_send_now(conversation_id);
             record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
@@ -176,6 +183,10 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
         }
     }
 
+    for prompt in state.hub.unacknowledged_prompts_on(node_id, &live) {
+        state.hub.send(node_id, ControlToNode::Prompt { conversation_id: prompt.conversation_id, prompt_id: prompt.prompt_id, text: prompt.text });
+    }
+
     publish_node(state, node_id).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")
@@ -227,7 +238,10 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     let mode = modes.as_ref().and_then(|modes| modes["currentModeId"].as_str()).map(str::to_string);
     let model = models.as_ref().and_then(|models| models["currentModelId"].as_str()).map(str::to_string);
     let updated = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!(
-        "update conversations set acp_session_id = $2, mode = coalesce($3, mode), model = coalesce($4, model), updated_at = now() where id = $1 returning {}",
+        "update conversations set
+            mode = case when acp_session_id = $2 then coalesce(mode, $3) else coalesce($3, mode) end,
+            model = case when acp_session_id = $2 then coalesce(model, $4) else coalesce($4, model) end,
+            acp_session_id = $2, updated_at = now() where id = $1 returning {}",
         crate::store::CONVERSATION_COLUMNS
     )))
     .bind(conversation_id)
@@ -283,6 +297,8 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     if !inserted {
         return Ok(());
     }
+
+    state.hub.forget_prompts_of(conversation_id);
 
     let send_now = state.hub.take_send_now(conversation_id);
     let archived = sqlx::query_scalar::<_, bool>("select archived_at is not null from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;

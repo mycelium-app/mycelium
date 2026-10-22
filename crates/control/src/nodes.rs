@@ -7,6 +7,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, StartLoginRequest, StartLoginResponse};
 use mycelium_proto::link::ControlToNode;
+use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
 pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<NodeSummary>>> {
@@ -34,6 +35,7 @@ pub async fn revoke(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
 
     state.hub.send(id, ControlToNode::Revoked);
     state.hub.disconnect(id);
+    state.publish(None, StreamMessage::NodeRemoved { node_id: id });
 
     Ok(StatusCode::NO_CONTENT)
 }

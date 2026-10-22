@@ -63,6 +63,7 @@ release binaries are static musl.
 | `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must not report the address as unverified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
 | `MYCELIUM_WEB_DIR` | `/usr/share/mycelium/web` | The built web client, served at `/` |
 | `MYCELIUM_SKIP_MIGRATIONS` | `false` | For gated deploys only |
+| `MYCELIUM_TRUSTED_PROXIES` | empty | Comma-separated addresses or CIDR ranges of reverse proxies. `X-Forwarded-For` is read only on connections from these, taking the nearest address that is not itself a proxy. Empty trusts no header |
 
 ### Boot, health and migrations
 
@@ -117,7 +118,7 @@ JSON over `/api/v1`, errors as `{"error": "<code>", "message": "<GOV.UK-style se
 
 People:
 - `GET /auth/login?next=<path>`: OIDC authorisation code with PKCE, or the dev login.
-- `GET /auth/callback`: finishes OIDC, sets the cookie, redirects to `next`.
+- `GET /auth/callback`: finishes OIDC, sets the cookie, redirects to `next`. A provider refusal (`?error=`) or a missing code answers the JSON error (`sign_in_refused`, `sign_in_expired`).
 - `POST /auth/logout`.
 - `GET /api/v1/me` → `{id, email, name}`.
 
@@ -125,6 +126,7 @@ Device codes (one flow for nodes and for desktop clients):
 - `POST /api/v1/device` `{kind, label, hostname, os, arch}` → `{device_code, user_code, verification_uri,
   verification_uri_complete, interval, expires_in}`. User codes look like `WDJB-MJHT`, expire in
   10 minutes, single use.
+- Both device endpoints are limited per client address (a token bucket in memory: 10 starts a minute, 30 polls a minute, refilling steadily); beyond that they answer 429 `rate_limited` with `Retry-After`.
 - `POST /api/v1/device/token` `{device_code}` → `{"error":"authorization_pending"}` (400) until approved,
   then `{kind, id, token}` once. Expired or denied codes return `expired_token` or `access_denied`.
 - `GET /api/v1/device/{user_code}` (signed in) → the pending request, for the approval page.
@@ -155,7 +157,7 @@ Conversations:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
@@ -178,6 +180,7 @@ Node to control plane:
 | type | fields |
 |---|---|
 | `hello` | `version, hostname, os, arch, agents: [{agent, version, available}], sessions: [{conversation_id, last_seq, live}]` (`live` is false for a session whose agent has exited) |
+| `prompt_received` | `conversation_id, prompt_id` (sent once the prompt is written to the keeper) |
 | `session_started` | `conversation_id, acp_session_id, modes?, models?, config_options?` |
 | `acp_update` | `conversation_id, seq, update` |
 | `permission_request` | `conversation_id, seq, request_id, request` |
@@ -207,6 +210,10 @@ Control plane to node:
 | `transcript_ack` | `path, bytes` |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
+
+The control plane keeps every sent `prompt` as unacknowledged until `prompt_received` arrives with its `prompt_id` (or the turn ends or the session fails). After a `hello`, it sends again the unacknowledged prompts of sessions the node reports live, and forgets those of sessions it does not. The node ignores a `prompt_id` it has already received. A `session_started` for the `acp_session_id` the conversation already holds sets mode and model only where they are empty.
+
+An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
 
 On `hello` the control plane marks every `working` or `input` conversation on that node that has no live session as `failed`, with an `error` event. A prompt for a conversation whose session is not live is preceded by `start_session` with `resume` set to its `acp_session_id`. Journal `seq` values keep increasing across a resume: the node continues from the end of the previous journal.
 

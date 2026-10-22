@@ -14,6 +14,9 @@ pub enum StreamMessage {
         queue: Vec<QueuedPrompt>,
     },
     Node(NodeSummary),
+    NodeRemoved {
+        node_id: Uuid,
+    },
     LoginOutput {
         login_id: Uuid,
         data: String,

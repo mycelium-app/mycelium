@@ -1,7 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
-use crate::state::AppState;
+use crate::state::{AppState, UnacknowledgedPrompt};
 use crate::store::{CONVERSATION_COLUMNS, append_event, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -49,6 +49,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id });
     }
 
+    state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone() });
     state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text });
 
     if let Some(event) = event {
@@ -156,7 +157,7 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     }
 
     if matches!(row.status.as_str(), "working" | "input") {
-        state.hub.expect_send_now(id);
+        state.hub.expect_send_now(id, row.node_id);
 
         if !state.hub.send(row.node_id, ControlToNode::Cancel { conversation_id: id }) {
             state.hub.take_send_now(id);
@@ -189,13 +190,17 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
         .await?
         .ok_or_else(|| ApiError::not_found("That permission request"))?;
 
-    let resolved = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'permission_resolved' and payload->>'request_id' = $2)")
+    if row.status == "failed" {
+        return Err(ApiError::conflict("session_failed", "This conversation's session failed. Start a new conversation to continue."));
+    }
+
+    let answered = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'permission_resolved' and payload->>'request_id' = $2)")
         .bind(id)
         .bind(&answer.request_id)
         .fetch_one(&mut *tx)
         .await?;
 
-    if resolved {
+    if answered || row.status != "input" {
         return Err(ApiError::conflict("already_resolved", "This permission request has already been answered."));
     }
 

@@ -7,7 +7,9 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use mycelium_proto::api::{DeviceRequest, DeviceResponse, DeviceTokenRequest, DeviceTokenResponse, PendingDevice};
 use mycelium_proto::conversation::DeviceKind;
-use std::net::SocketAddr;
+use crate::rate_limit::Limited;
+use axum::response::{IntoResponse, Response};
+use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 const LIFETIME_SECONDS: u64 = 600;
@@ -24,17 +26,27 @@ fn normalise(user_code: &str) -> String {
     user_code.trim().to_uppercase()
 }
 
-fn peer_address(headers: &HeaderMap, peer: SocketAddr) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| peer.ip().to_string())
+fn client_address(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+    let trusted = |address: IpAddr| state.config.trusted_proxies.iter().any(|range| range.contains(address));
+
+    if !trusted(peer.ip()) {
+        return peer.ip();
+    }
+
+    let forwarded = headers.get_all("x-forwarded-for").iter().filter_map(|value| value.to_str().ok()).flat_map(|value| value.split(',')).filter_map(|value| value.trim().parse::<IpAddr>().ok());
+    let hops: Vec<IpAddr> = forwarded.collect();
+
+    hops.into_iter().rev().find(|address| !trusted(*address)).unwrap_or(peer.ip())
 }
 
-pub async fn start(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(request): Json<DeviceRequest>) -> ApiResult<Json<DeviceResponse>> {
+pub async fn start(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(request): Json<DeviceRequest>) -> Result<Json<DeviceResponse>, Response> {
+    let address = client_address(&state, &headers, peer);
+    state.rate_limiter.take(Limited::StartDevice, address).map_err(IntoResponse::into_response)?;
+
+    start_allowed(state, address, request).await.map_err(IntoResponse::into_response)
+}
+
+async fn start_allowed(state: AppState, address: IpAddr, request: DeviceRequest) -> ApiResult<Json<DeviceResponse>> {
     let label = if request.label.trim().is_empty() { request.hostname.trim().to_string() } else { request.label.trim().to_string() };
 
     if label.is_empty() {
@@ -42,7 +54,7 @@ pub async fn start(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo
     }
 
     let device_code = new_token();
-    let ip = peer_address(&headers, peer);
+    let ip = address.to_string();
 
     for _ in 0..5 {
         let user_code = new_user_code();
@@ -94,7 +106,14 @@ struct DeviceRow {
     consumed: bool,
 }
 
-pub async fn token(State(state): State<AppState>, Json(request): Json<DeviceTokenRequest>) -> ApiResult<Json<DeviceTokenResponse>> {
+pub async fn token(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(request): Json<DeviceTokenRequest>) -> Result<Json<DeviceTokenResponse>, Response> {
+    let address = client_address(&state, &headers, peer);
+    state.rate_limiter.take(Limited::PollDeviceToken, address).map_err(IntoResponse::into_response)?;
+
+    token_allowed(state, request).await.map_err(IntoResponse::into_response)
+}
+
+async fn token_allowed(state: AppState, request: DeviceTokenRequest) -> ApiResult<Json<DeviceTokenResponse>> {
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, DeviceRow>(
         "select id, kind, label, hostname, os, arch, expires_at < now() as expired, approved_by,

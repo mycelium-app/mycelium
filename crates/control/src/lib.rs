@@ -7,13 +7,14 @@ mod error;
 mod link;
 mod nodes;
 mod prompts;
+mod rate_limit;
 mod state;
 mod store;
 mod stream;
 mod transcripts;
 mod web;
 
-pub use config::{Config, OidcConfig};
+pub use config::{Cidr, Config, OidcConfig};
 
 use anyhow::Result;
 use axum::Router;
