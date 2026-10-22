@@ -172,6 +172,25 @@ data class Forge(
 data class ConnectForgeRequest(val kind: String, @SerialName("base_url") val baseUrl: String? = null, val token: String)
 
 @Serializable
+data class Project(
+    val id: String,
+    @SerialName("node_id") val nodeId: String,
+    val name: String,
+    val path: String,
+    @SerialName("forge_id") val forgeId: String? = null,
+    val repository: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateProjectRequest(
+    @SerialName("node_id") val nodeId: String,
+    @SerialName("forge_id") val forgeId: String? = null,
+    val repository: String? = null,
+    val path: String? = null,
+)
+
+@Serializable
 data class Repository(
     @SerialName("forge_id") val forgeId: String,
     val owner: String,
@@ -249,7 +268,8 @@ data class SearchHit(
 data class CreateConversationRequest(
     @SerialName("node_id") val nodeId: String,
     val agent: String,
-    val cwd: String,
+    val cwd: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
     val title: String? = null,
     val prompt: String? = null,
 )

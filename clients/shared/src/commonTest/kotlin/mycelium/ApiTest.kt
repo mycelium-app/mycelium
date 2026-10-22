@@ -13,6 +13,8 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import mycelium.api.ApiException
 import mycelium.api.ConnectForgeRequest
+import mycelium.api.CreateConversationRequest
+import mycelium.api.CreateProjectRequest
 import mycelium.api.ConversationStatus
 import mycelium.api.DeviceKind
 import mycelium.api.DevicePoll
@@ -46,6 +48,9 @@ private const val MemoryJson = """{"id":"m1","text":"Staging listens on 5433","s
 
 private const val ForgeJson = """{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"wxyz",
 "organisations":["samexample","acme-org"],"created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val ProjectJson = """{"id":"p1","node_id":"n1","name":"acme-backups","path":"/home/sam/projects/acme-org/acme-backups","forge_id":"f1",
+"repository":"acme-org/acme-backups","created_at":"2026-10-22T10:00:00Z"}"""
 
 class ApiTest {
     @Test
@@ -344,6 +349,66 @@ class ApiTest {
         api.repositories()
 
         assertEquals("https://mycelium.test/api/v1/repositories", seen.single().url.toString())
+    }
+
+    @Test
+    fun projectsDecodeWithAndWithoutAForge() = runTest {
+        val folder = """{"id":"p2","node_id":"n1","name":"app","path":"/w/app","forge_id":null,"repository":null,"created_at":"2026-10-22T10:00:00Z"}"""
+        val (api, seen) = apiWith { ok("[$ProjectJson,$folder]") }
+
+        val projects = api.projects()
+
+        assertEquals("acme-org/acme-backups", projects[0].repository)
+        assertEquals("f1", projects[0].forgeId)
+        assertEquals(null, projects[1].forgeId)
+        assertEquals("https://mycelium.test/api/v1/projects", seen.single().url.toString())
+    }
+
+    @Test
+    fun cloningARepositoryPostsTheNodeForgeAndRepository() = runTest {
+        val (api, seen) = apiWith { respond(ProjectJson, HttpStatusCode.Created, JsonHeaders) }
+
+        val project = api.createProject(CreateProjectRequest("n1", "f1", "acme-org/acme-backups"))
+
+        assertEquals("""{"node_id":"n1","forge_id":"f1","repository":"acme-org/acme-backups"}""", String(seen.single().body.toByteArray()))
+        assertEquals("p1", project.id)
+    }
+
+    @Test
+    fun registeringAFolderPostsTheNodeAndPathOnly() = runTest {
+        val (api, seen) = apiWith { respond(ProjectJson, HttpStatusCode.Created, JsonHeaders) }
+
+        api.createProject(CreateProjectRequest("n1", path = "work/app"))
+
+        assertEquals("""{"node_id":"n1","path":"work/app"}""", String(seen.single().body.toByteArray()))
+    }
+
+    @Test
+    fun aRefusedCloneFailsWithGitsMessage() = runTest {
+        val (api, _) = apiWith { respond("""{"error":"git_failed","message":"repository not found"}""", HttpStatusCode.Conflict, JsonHeaders) }
+
+        val failure = assertFailsWith<ApiException> { api.createProject(CreateProjectRequest("n1", "f1", "acme-org/missing")) }
+
+        assertEquals("git_failed", failure.code)
+        assertEquals("repository not found", failure.message)
+    }
+
+    @Test
+    fun aConversationFromAProjectSendsProjectIdAndNoFolder() = runTest {
+        val (api, seen) = apiWith { ok(ConversationJson) }
+
+        api.createConversation(CreateConversationRequest("n1", "claude", projectId = "p1"))
+
+        assertEquals("""{"node_id":"n1","agent":"claude","project_id":"p1"}""", String(seen.single().body.toByteArray()))
+    }
+
+    @Test
+    fun aConversationFromAFolderStillSendsTheFolder() = runTest {
+        val (api, seen) = apiWith { ok(ConversationJson) }
+
+        api.createConversation(CreateConversationRequest("n1", "claude", cwd = "/work/midden"))
+
+        assertEquals("""{"node_id":"n1","agent":"claude","cwd":"/work/midden"}""", String(seen.single().body.toByteArray()))
     }
 
     @Test

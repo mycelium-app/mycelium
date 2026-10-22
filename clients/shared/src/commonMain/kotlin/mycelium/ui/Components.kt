@@ -536,6 +536,40 @@ fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
 }
 
 @Composable
+fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val colors = MyTheme.colors
+
+    if (LocalTouch.current) {
+        BottomSheet(onDismiss) {
+            Column(Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4), content = content)
+        }
+
+        return
+    }
+
+    Popup(popupPositionProvider = ScreenPopup, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .width(Tokens.Size.Dialog)
+                    .pointerInput(Unit) { detectTapGestures { } }
+                    .background(colors.bgRaised, FloatShape)
+                    .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                    .padding(Tokens.Space.S4),
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
 fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null) {
     val colors = MyTheme.colors
 

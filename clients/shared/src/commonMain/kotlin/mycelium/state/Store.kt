@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
+import mycelium.api.CreateProjectRequest
+import mycelium.api.Project
 import mycelium.api.MyceliumApi
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
@@ -94,6 +96,20 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         val nodes = api.nodes()
 
         mutableState.update { it.copy(conversations = conversations.associateBy { c -> c.id }, nodes = nodes.associateBy { n -> n.id }) }
+    }
+
+    suspend fun refreshProjects() {
+        val projects = api.projects()
+
+        mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }) }
+    }
+
+    suspend fun createProject(request: CreateProjectRequest): Project {
+        val project = api.createProject(request)
+
+        mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
+
+        return project
     }
 
     suspend fun open(conversationId: String) {

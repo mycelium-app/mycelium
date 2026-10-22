@@ -78,7 +78,11 @@ sealed interface Route {
 
     data object New : Route
 
+    data class NewIn(val projectId: String) : Route
+
     data object Nodes : Route
+
+    data object Projects : Route
 
     data object Archive : Route
 
@@ -203,7 +207,9 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
         is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
         Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+        is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
         Route.Nodes -> NodesScreen(store, state, platform)
+        Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
         Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
         Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
     }
@@ -276,6 +282,7 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
         ) {
             val appearance = LocalAppearance.current
 
+            MyButton({ onRoute(Route.Projects) }, text = "Projects", icon = MyIcon.Folder, muted = true, selected = route == Route.Projects)
             Box(Modifier.weight(1f))
             MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
             MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
@@ -347,7 +354,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
 }
 
 @Composable
-private fun nodeColour(name: String): Color {
+fun nodeColour(name: String): Color {
     val choices = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
     val accent = choices[name.hashCode().mod(choices.size)]
 

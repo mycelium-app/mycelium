@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,7 +26,7 @@ import mycelium.state.isLaptop
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
 @Composable
-fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit) {
+fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit, projectId: String? = null) {
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
@@ -34,8 +35,16 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var prompt by remember { mutableStateOf("") }
     var cwdError by remember { mutableStateOf<String?>(null) }
     var nodeMenu by remember { mutableStateOf(false) }
+    var chosenProject by remember { mutableStateOf(projectId) }
+    var projectMenu by remember { mutableStateOf(false) }
 
-    val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
+    LaunchedEffect(Unit) {
+        store.act { store.refreshProjects() }
+    }
+
+    val projects = state.projects.values.sortedBy { it.name }
+    val project = state.projects[chosenProject]
+    val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
@@ -44,7 +53,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return
         }
 
-        if (cwd.isBlank()) {
+        if (project == null && cwd.isBlank()) {
             cwdError = "Enter the folder the agent should work in, for example /home/you/project."
             return
         }
@@ -52,7 +61,13 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         cwdError = null
         store.act {
             val created = store.api.createConversation(
-                CreateConversationRequest(node.id, chosenAgent, cwd.trim(), prompt = prompt.trim().ifEmpty { null }),
+                CreateConversationRequest(
+                    node.id,
+                    chosenAgent,
+                    cwd = if (project == null) cwd.trim() else null,
+                    projectId = project?.id,
+                    prompt = prompt.trim().ifEmpty { null },
+                ),
             )
             onCreated(created)
         }
@@ -74,30 +89,67 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                 Modifier.widthIn(max = Tokens.Size.Page).fillMaxWidth().padding(Tokens.Space.S4),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                if (projects.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Project", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-                    Box {
-                        MyButton(
-                            { nodeMenu = true },
-                            text = node.name,
-                            icon = nodeIcon(node),
-                            description = "Node: ${node.name}",
-                            variant = ButtonVariant.Outline,
-                            trailingIcon = MyIcon.ChevronDown,
-                        )
+                        Box {
+                            MyButton(
+                                { projectMenu = true },
+                                text = project?.name ?: "A folder",
+                                icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
+                                description = "Project: ${project?.name ?: "A folder"}",
+                                variant = ButtonVariant.Outline,
+                                trailingIcon = MyIcon.ChevronDown,
+                            )
 
-                        if (nodeMenu) {
-                            MenuPopup(onDismiss = { nodeMenu = false }) {
-                                MenuLabel("Run on")
+                            if (projectMenu) {
+                                MenuPopup(onDismiss = { projectMenu = false }) {
+                                    MenuLabel("Start in")
 
-                                for (option in nodes) {
-                                    MenuItem(
-                                        option.name,
-                                        onClick = { nodeId = option.id; nodeMenu = false },
-                                        checked = option.id == node.id,
-                                        leading = nodeIcon(option),
-                                    )
+                                    for (option in projects) {
+                                        MenuItem(
+                                            option.name,
+                                            onClick = { chosenProject = option.id; projectMenu = false },
+                                            checked = option.id == project?.id,
+                                            leading = state.nodes[option.nodeId]?.let(::nodeIcon),
+                                            hint = state.nodes[option.nodeId]?.name,
+                                        )
+                                    }
+
+                                    MenuItem("A folder", onClick = { chosenProject = null; projectMenu = false }, checked = project == null, leading = MyIcon.Folder)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (project == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+
+                        Box {
+                            MyButton(
+                                { nodeMenu = true },
+                                text = node.name,
+                                icon = nodeIcon(node),
+                                description = "Node: ${node.name}",
+                                variant = ButtonVariant.Outline,
+                                trailingIcon = MyIcon.ChevronDown,
+                            )
+
+                            if (nodeMenu) {
+                                MenuPopup(onDismiss = { nodeMenu = false }) {
+                                    MenuLabel("Run on")
+
+                                    for (option in nodes) {
+                                        MenuItem(
+                                            option.name,
+                                            onClick = { nodeId = option.id; nodeMenu = false },
+                                            checked = option.id == node.id,
+                                            leading = nodeIcon(option),
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -119,7 +171,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     }
                 }
 
-                TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
+                if (project == null) {
+                    TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
+                }
 
                 TextInput(prompt, { prompt = it }, label = "First message (optional)", placeholder = "Ask, plan or build", onSubmit = ::create)
 

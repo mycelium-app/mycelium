@@ -109,4 +109,17 @@ class StoreTest {
         assertTrue(requested.value.any { it.contains("/conversations/c1/events?after=2&limit=500") })
         assertEquals(listOf(1L, 2L, 3L), store.state.value.events.getValue("c1").map { it.seq })
     }
+
+    @Test
+    fun aCreatedProjectIsHeldInTheStoreByItsId() = runTest {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val engine = MockEngine {
+            respond("""{"id":"p1","node_id":"n1","name":"app","path":"/w/app","created_at":"2026-10-22T10:00:00Z"}""", HttpStatusCode.Created, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.createProject(mycelium.api.CreateProjectRequest("n1", path = "work/app"))
+
+        assertEquals("app", store.state.value.projects["p1"]?.name)
+    }
 }

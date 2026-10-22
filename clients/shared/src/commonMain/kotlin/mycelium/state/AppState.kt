@@ -6,6 +6,8 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.NodeSummary
+import mycelium.api.Project
+import mycelium.api.Repository
 import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 
@@ -20,6 +22,7 @@ data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyL
 data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
+    val projects: Map<String, Project> = emptyMap(),
     val events: Map<String, List<Event>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
@@ -76,6 +79,11 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.TerminalExited ->
         state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
 }
+
+fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
+    projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }
+
+fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
 
 fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> =
     (existing + incoming).associateBy { it.seq }.values.sortedBy { it.seq }

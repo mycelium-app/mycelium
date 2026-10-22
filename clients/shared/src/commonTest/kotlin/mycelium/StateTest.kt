@@ -4,6 +4,8 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Event
+import mycelium.api.Project
+import mycelium.api.Repository
 import mycelium.api.StreamMessage
 import mycelium.api.MyceliumJson
 import mycelium.api.parseStreamMessage
@@ -11,7 +13,9 @@ import mycelium.state.AppState
 import mycelium.state.TerminalChunkLimit
 import mycelium.state.agentVersion
 import mycelium.state.loginMethodName
+import mycelium.state.projectsOfRepository
 import mycelium.state.reduce
+import mycelium.state.registeredFolders
 import mycelium.state.relativeTime
 import mycelium.state.sidebarSections
 import kotlin.test.Test
@@ -252,5 +256,31 @@ class HistoryTest {
 
         assertEquals(setOf("review", "done", "working", "old"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.All, "").map { it.id }.toSet())
         assertEquals(listOf("done"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.Done, "").map { it.id })
+    }
+}
+
+private fun project(id: String, node: String, forge: String?, repository: String?, name: String = id) =
+    Project(id, node, name, "/p/$name", forge, repository, "2026-10-22T10:00:00Z")
+
+class ProjectJoinTest {
+    private val backups = Repository("f1", "acme-org", "acme-backups", "acme-org/acme-backups")
+
+    @Test
+    fun aRepositoryIsSetUpOnEveryNodeWhereAProjectMatchesItsForgeAndName() {
+        val projects = listOf(
+            project("a", "n1", "f1", "acme-org/acme-backups"),
+            project("b", "n2", "f1", "acme-org/acme-backups"),
+            project("c", "n1", "f2", "acme-org/acme-backups"),
+            project("d", "n1", "f1", "acme-org/other"),
+        )
+
+        assertEquals(listOf("a", "b"), projectsOfRepository(projects, backups).map { it.id })
+    }
+
+    @Test
+    fun registeredFoldersAreTheProjectsWithoutAForgeSortedByName() {
+        val projects = listOf(project("a", "n1", "f1", "acme-org/acme-backups"), project("b", "n1", null, null, "zed"), project("c", "n2", null, null, "app"))
+
+        assertEquals(listOf("app", "zed"), registeredFolders(projects).map { it.name })
     }
 }
