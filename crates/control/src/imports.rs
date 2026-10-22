@@ -18,7 +18,8 @@ const AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 enum Item {
     User(String),
     Agent(String),
-    Tool { id: String, name: String },
+    Tool { id: String, title: String, kind: &'static str, input: Value },
+    ToolResult { id: String, output: String, failed: bool },
 }
 
 struct Parsed {
@@ -43,6 +44,52 @@ fn session_id_of_path(agent: AgentId, path: &str) -> String {
         AgentId::Claude => stem.to_string(),
         AgentId::Codex => stem.chars().rev().take(36).collect::<Vec<_>>().into_iter().rev().collect(),
     }
+}
+
+fn claude_tool(id: &str, name: &str, input: &Value) -> Item {
+    let kind = match name {
+        "Bash" => "execute",
+        "Read" => "read",
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "edit",
+        "Grep" | "Glob" => "search",
+        "WebFetch" | "WebSearch" => "fetch",
+        _ => "other",
+    };
+    let title = input["description"].as_str().unwrap_or(name).to_string();
+
+    Item::Tool { id: id.to_string(), title, kind, input: input.clone() }
+}
+
+fn claude_result(block: &Value) -> Item {
+    let content = &block["content"];
+    let output = match content.as_array() {
+        Some(parts) => parts.iter().filter_map(|part| part["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        None => content.as_str().unwrap_or_default().to_string(),
+    };
+
+    Item::ToolResult { id: block["tool_use_id"].as_str().unwrap_or_default().to_string(), output, failed: block["is_error"].as_bool() == Some(true) }
+}
+
+fn codex_tool(id: &str, name: &str, arguments: &str) -> Item {
+    let parsed: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+    let command = match &parsed["command"] {
+        Value::Array(parts) => parts.iter().filter_map(Value::as_str).last().map(str::to_string),
+        Value::String(command) => Some(command.clone()),
+        _ => parsed["cmd"].as_str().map(str::to_string),
+    };
+
+    match command {
+        Some(command) => Item::Tool { id: id.to_string(), title: command.clone(), kind: "execute", input: json!({"command": command}) },
+        None if name == "apply_patch" => Item::Tool { id: id.to_string(), title: name.to_string(), kind: "edit", input: json!({"patch": arguments}) },
+        None => Item::Tool { id: id.to_string(), title: name.to_string(), kind: "other", input: parsed },
+    }
+}
+
+fn codex_output(payload: &Value) -> Item {
+    let raw = payload["output"].as_str().unwrap_or_default();
+    let output = serde_json::from_str::<Value>(raw).ok().and_then(|value| value["output"].as_str().map(str::to_string)).unwrap_or_else(|| raw.to_string());
+
+    Item::ToolResult { id: payload["call_id"].as_str().unwrap_or_default().to_string(), output, failed: false }
 }
 
 fn parse_claude(text: &str) -> Option<Parsed> {
@@ -97,6 +144,10 @@ fn parse_claude(text: &str) -> Option<Parsed> {
         let texts: Vec<&str> = blocks.iter().filter(|block| block["type"] == "text").filter_map(|block| block["text"].as_str()).collect();
 
         if kind == "user" {
+            for block in blocks.iter().filter(|block| block["type"] == "tool_result") {
+                parsed.items.push(claude_result(block));
+            }
+
             if !texts.is_empty() {
                 parsed.items.push(Item::User(texts.join("\n")));
             }
@@ -107,7 +158,7 @@ fn parse_claude(text: &str) -> Option<Parsed> {
         for block in &blocks {
             match block["type"].as_str() {
                 Some("text") => parsed.items.push(Item::Agent(block["text"].as_str().unwrap_or_default().to_string())),
-                Some("tool_use") => parsed.items.push(Item::Tool { id: block["id"].as_str().unwrap_or_default().to_string(), name: block["name"].as_str().unwrap_or("Tool").to_string() }),
+                Some("tool_use") => parsed.items.push(claude_tool(block["id"].as_str().unwrap_or_default(), block["name"].as_str().unwrap_or("Tool"), &block["input"])),
                 _ => {}
             }
         }
@@ -149,9 +200,13 @@ fn parse_codex(text: &str) -> Option<Parsed> {
                             _ => {}
                         }
                     }
-                    Some("function_call") | Some("custom_tool_call") => {
-                        parsed.items.push(Item::Tool { id: payload["call_id"].as_str().unwrap_or_default().to_string(), name: payload["name"].as_str().unwrap_or("Tool").to_string() });
+                    Some("function_call") => {
+                        parsed.items.push(codex_tool(payload["call_id"].as_str().unwrap_or_default(), payload["name"].as_str().unwrap_or("Tool"), payload["arguments"].as_str().unwrap_or_default()));
                     }
+                    Some("custom_tool_call") => {
+                        parsed.items.push(codex_tool(payload["call_id"].as_str().unwrap_or_default(), payload["name"].as_str().unwrap_or("Tool"), payload["input"].as_str().unwrap_or_default()));
+                    }
+                    Some("function_call_output") | Some("custom_tool_call_output") => parsed.items.push(codex_output(payload)),
                     _ => {}
                 }
             }
@@ -182,9 +237,13 @@ fn events_of(items: &[Item]) -> Vec<(EventKind, Value)> {
                 turn_open = true;
                 events.push((EventKind::AcpUpdate, json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}})));
             }
-            Item::Tool { id, name } => {
+            Item::Tool { id, title, kind, input } => {
                 turn_open = true;
-                events.push((EventKind::AcpUpdate, json!({"update": {"sessionUpdate": "tool_call", "toolCallId": id, "title": name, "kind": "other", "status": "completed"}})));
+                events.push((EventKind::AcpUpdate, json!({"update": {"sessionUpdate": "tool_call", "toolCallId": id, "title": title, "kind": kind, "status": "completed", "rawInput": input}})));
+            }
+            Item::ToolResult { id, output, failed } => {
+                let status = if *failed { "failed" } else { "completed" };
+                events.push((EventKind::AcpUpdate, json!({"update": {"sessionUpdate": "tool_call_update", "toolCallId": id, "status": status, "content": [{"type": "content", "content": {"type": "text", "text": output}}]}})));
             }
         }
     }
@@ -318,7 +377,7 @@ mod tests {
         let text = [
             r#"{"type":"user","sessionId":"s1","cwd":"/work/app","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"Fix the build\nplease"}}"#,
             r#"{"type":"assistant","sessionId":"s1","timestamp":"2026-10-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm"}]}}"#,
-            r#"{"type":"assistant","sessionId":"s1","timestamp":"2026-10-01T10:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Looking."},{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}"#,
+            r#"{"type":"assistant","sessionId":"s1","timestamp":"2026-10-01T10:00:06Z","message":{"role":"assistant","content":[{"type":"text","text":"Looking."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo build","description":"Build the crate"}}]}}"#,
             r#"{"type":"user","sessionId":"s1","timestamp":"2026-10-01T10:00:07Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
             r#"{"type":"assistant","sessionId":"s1","timestamp":"2026-10-01T10:00:08Z","message":{"role":"assistant","content":[{"type":"text","text":"Fixed."}]}}"#,
             r#"{"type":"user","sessionId":"s1","isMeta":true,"timestamp":"2026-10-01T10:00:09Z","message":{"role":"user","content":"meta"}}"#,
@@ -332,8 +391,12 @@ mod tests {
         let kinds: Vec<EventKind> = events.iter().map(|(kind, _)| *kind).collect();
 
         assert_eq!((parsed.session_id.as_str(), parsed.cwd.as_str()), ("s1", "/work/app"));
-        assert_eq!(kinds, [EventKind::UserMessage, EventKind::AcpUpdate, EventKind::AcpUpdate, EventKind::AcpUpdate, EventKind::TurnEnd, EventKind::UserMessage]);
+        assert_eq!(kinds, [EventKind::UserMessage, EventKind::AcpUpdate, EventKind::AcpUpdate, EventKind::AcpUpdate, EventKind::AcpUpdate, EventKind::TurnEnd, EventKind::UserMessage]);
         assert_eq!(events[2].1["update"]["toolCallId"], "t1");
+        assert_eq!(events[2].1["update"]["kind"], "execute");
+        assert_eq!(events[2].1["update"]["rawInput"]["command"], "cargo build");
+        assert_eq!(events[3].1["update"]["sessionUpdate"], "tool_call_update");
+        assert_eq!(events[3].1["update"]["content"][0]["content"]["text"], "ok");
         assert_eq!(parsed.last_at.unwrap().to_rfc3339(), "2026-10-01T10:01:00+00:00");
     }
 
@@ -343,7 +406,8 @@ mod tests {
             r#"{"timestamp":"2026-10-01T10:00:00Z","type":"session_meta","payload":{"id":"abc","cwd":"/work/app"}}"#,
             r#"{"timestamp":"2026-10-01T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>x</environment_context>"}]}}"#,
             r#"{"timestamp":"2026-10-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Add a test"}]}}"#,
-            r#"{"timestamp":"2026-10-01T10:00:03Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"c1","arguments":"{}"}}"#,
+            r#"{"timestamp":"2026-10-01T10:00:03Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"c1","arguments":"{\"command\":[\"bash\",\"-lc\",\"cargo test\"]}"}}"#,
+            r#"{"timestamp":"2026-10-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"{\"output\":\"1 passed\",\"metadata\":{}}"}}"#,
             r#"{"timestamp":"2026-10-01T10:00:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Added."}]}}"#,
         ]
         .join("\n");
@@ -352,10 +416,12 @@ mod tests {
         let events = events_of(&parsed.items);
 
         assert_eq!((parsed.session_id.as_str(), parsed.cwd.as_str()), ("abc", "/work/app"));
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         assert_eq!(events[0].1["text"], "Add a test");
-        assert_eq!(events[1].1["update"]["title"], "shell");
-        assert_eq!(events[3].0, EventKind::TurnEnd);
+        assert_eq!(events[1].1["update"]["kind"], "execute");
+        assert_eq!(events[1].1["update"]["rawInput"]["command"], "cargo test");
+        assert_eq!(events[2].1["update"]["content"][0]["content"]["text"], "1 passed");
+        assert_eq!(events[4].0, EventKind::TurnEnd);
     }
 
     #[test]

@@ -74,11 +74,12 @@ async fn importing_a_claude_transcript_creates_a_done_conversation_with_events_a
 
     let events = server.events(streamed.id).await;
     let kinds: Vec<&str> = events.iter().map(|event| event["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["user_message", "acp_update", "acp_update", "turn_end"]);
+    assert_eq!(kinds, ["user_message", "acp_update", "acp_update", "acp_update", "turn_end"]);
     assert_eq!(events[0]["payload"]["text"], "Fix the build\nplease");
     assert_eq!(events[1]["payload"]["update"]["content"]["text"], "Looking at it.");
     assert_eq!(events[2]["payload"]["update"]["toolCallId"], "t1");
-    assert_eq!(events[3]["payload"]["stop_reason"], "end_turn");
+    assert_eq!(events[3]["payload"]["update"]["sessionUpdate"], "tool_call_update");
+    assert_eq!(events[4]["payload"]["stop_reason"], "end_turn");
 }
 
 #[tokio::test]
