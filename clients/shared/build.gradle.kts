@@ -8,6 +8,21 @@ plugins {
     alias(libs.plugins.androidKmpLibrary)
 }
 
+val clientVersion = (providers.gradleProperty("appVersion").orNull ?: System.getenv("MYCELIUM_VERSION") ?: System.getenv("CI_COMMIT_TAG") ?: "dev").removePrefix("v")
+val buildInfoDir = layout.buildDirectory.dir("generated/buildInfo")
+val writeBuildInfo by tasks.registering {
+    val version = clientVersion
+    val output = buildInfoDir
+
+    inputs.property("version", version)
+    outputs.dir(output)
+    doLast {
+        val file = output.get().file("mycelium/BuildInfo.kt").asFile
+        file.parentFile.mkdirs()
+        file.writeText("package mycelium\n\nconst val ClientVersion = \"$version\"\n")
+    }
+}
+
 kotlin {
     jvm()
 
@@ -16,6 +31,7 @@ kotlin {
         compileSdk = 37
         minSdk = 26
         buildToolsVersion = "37.0.0"
+        androidResources.enable = true
     }
 
     @OptIn(ExperimentalWasmDsl::class)
@@ -24,6 +40,9 @@ kotlin {
     }
 
     sourceSets {
+        commonMain {
+            kotlin.srcDir(writeBuildInfo)
+        }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

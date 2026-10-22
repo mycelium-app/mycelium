@@ -126,6 +126,10 @@ class MyceliumApi(
         call("/nodes/$id/drain") { client.post(it) { authorise(); json(DrainRequest(draining)) } }
     }
 
+    suspend fun updateNode(id: String, request: UpdateNodeRequest) {
+        call("/nodes/$id") { client.patch(it) { authorise(); json(request) } }
+    }
+
     suspend fun revokeNode(id: String) {
         call("/nodes/$id") { client.delete(it) { authorise() } }
     }
@@ -155,6 +159,9 @@ class MyceliumApi(
     suspend fun markOpened(id: String) {
         call("/conversations/$id/opened") { client.post(it) { authorise() } }
     }
+
+    suspend fun files(id: String, query: String): List<String> =
+        call("/conversations/$id/files") { client.get(it) { authorise(); parameter("query", query) } }.body()
 
     suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =
         call("/conversations/$id/events") {

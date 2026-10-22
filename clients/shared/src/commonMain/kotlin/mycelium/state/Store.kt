@@ -10,7 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
+import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
+import mycelium.api.PatchConversationRequest
 
 private const val EventPageSize = 500
 private const val FirstRetryMillis = 1_000L
@@ -86,6 +88,33 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
         if (conversation != null && conversation.status == mycelium.api.ConversationStatus.Review) {
             api.markOpened(conversationId)
+        }
+    }
+
+    fun send(conversationId: String, text: String) {
+        mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + text)) }
+
+        act {
+            try {
+                api.sendPrompt(conversationId, text)
+            } catch (failure: Exception) {
+                mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, text)) }
+                throw failure
+            }
+        }
+    }
+
+    fun rename(conversation: Conversation, title: String) {
+        mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(title = title))) }
+
+        act {
+            try {
+                val renamed = api.patchConversation(conversation.id, PatchConversationRequest(title = title))
+                mutableState.update { it.copy(conversations = it.conversations + (renamed.id to renamed)) }
+            } catch (failure: Exception) {
+                mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation)) }
+                throw failure
+            }
         }
     }
 

@@ -125,6 +125,7 @@ data class LoginInfo(
 data class NodeSummary(
     val id: String,
     val name: String,
+    val icon: String? = null,
     val hostname: String,
     val os: String,
     val arch: String,
@@ -138,6 +139,9 @@ data class NodeSummary(
 
 @Serializable
 data class DrainRequest(val draining: Boolean)
+
+@Serializable
+data class UpdateNodeRequest(val name: String? = null, val icon: String? = null)
 
 @Serializable
 data class StartLoginRequest(val agent: String, val method: String)
@@ -191,6 +195,7 @@ data class Conversation(
     @SerialName("acp_session_id") val acpSessionId: String? = null,
     val mode: String? = null,
     val model: String? = null,
+    val options: JsonObject? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("archived_at") val archivedAt: String? = null,

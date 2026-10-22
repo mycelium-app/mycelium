@@ -64,6 +64,8 @@ pub struct PendingDevice {
 pub struct NodeSummary {
     pub id: Uuid,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub hostname: String,
     pub os: String,
     pub arch: String,
@@ -81,9 +83,14 @@ pub struct DrainRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RenameNodeRequest {
-    pub name: String,
+pub struct UpdateNodeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
+
+pub const NODE_ICONS: &[&str] = &["server", "laptop", "desktop", "cloud", "terminal", "chip"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartLoginRequest {

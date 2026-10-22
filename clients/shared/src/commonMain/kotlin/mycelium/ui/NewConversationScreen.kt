@@ -81,7 +81,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         MyButton(
                             { nodeMenu = true },
                             text = node.name,
-                            icon = if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server,
+                            icon = nodeIcon(node),
                             description = "Node: ${node.name}",
                             variant = ButtonVariant.Outline,
                             trailingIcon = MyIcon.ChevronDown,
@@ -96,7 +96,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                         option.name,
                                         onClick = { nodeId = option.id; nodeMenu = false },
                                         checked = option.id == node.id,
-                                        leading = if (isLaptop(option.os)) MyIcon.Laptop else MyIcon.Server,
+                                        leading = nodeIcon(option),
                                     )
                                 }
                             }

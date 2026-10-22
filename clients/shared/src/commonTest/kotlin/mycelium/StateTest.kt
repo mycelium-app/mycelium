@@ -7,6 +7,8 @@ import mycelium.api.Event
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
+import mycelium.state.agentVersion
+import mycelium.state.loginMethodName
 import mycelium.state.reduce
 import mycelium.state.relativeTime
 import mycelium.state.sidebarSections
@@ -158,5 +160,21 @@ class StateTest {
         assertEquals("4m", relativeTime("2026-10-22T11:56:00Z", now))
         assertEquals("3h", relativeTime("2026-10-22T09:00:00Z", now))
         assertEquals("2d", relativeTime("2026-10-20T12:00:00Z", now))
+    }
+}
+
+class FormatTest {
+    @Test
+    fun loginMethodsReadTheSameWhicheverSeparatorTheNodeUses() {
+        assertEquals("Subscription token", loginMethodName("oauth_token"))
+        assertEquals("Subscription sign-in", loginMethodName("device_auth"))
+        assertEquals("Subscription sign-in", loginMethodName("device-auth"))
+        assertEquals("API key", loginMethodName("api_key"))
+    }
+
+    @Test
+    fun anAgentVersionDropsThePackageName() {
+        assertEquals("2.2.2", agentVersion("@agentclientprotocol/codex-acp 2.2.2"))
+        assertEquals("0.94.0", agentVersion("0.94.0"))
     }
 }

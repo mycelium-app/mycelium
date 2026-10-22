@@ -36,6 +36,9 @@ import mycelium.state.Store
 import mycelium.state.agentName
 import mycelium.state.isLaptop
 import mycelium.state.buildThread
+import mycelium.state.sessionOptions
+import mycelium.state.slashCommands
+import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
 import mycelium.state.projectName
 import mycelium.state.relativeTime
@@ -66,9 +69,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         return
     }
 
+    LaunchedEffect(id, conversation.status) {
+        if (conversation.status == ConversationStatus.Review) {
+            store.act { api.markOpened(id) }
+        }
+    }
+
     val node = state.nodes[conversation.nodeId]
     val thread = remember(state.events[id]) { buildThread(state.events[id].orEmpty()) }
-    val agentLine = listOfNotNull(agentName(conversation.agent), conversation.model).joinToString(" · ")
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -78,7 +86,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 compact = compact,
                 onNode = { nodeSheetOpen = true },
                 onDetails = { inspectorOpen = true },
-                onRename = { title -> store.act { fetched = api.patchConversation(id, PatchConversationRequest(title = title)) } },
+                onRename = { title -> store.rename(conversation, title) },
                 onArchive = {
                     store.act {
                         api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
@@ -89,7 +97,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
             ThreadView(
                 items = thread,
-                agentLine = agentLine,
+                pending = state.sending[id].orEmpty(),
                 onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
                 onStopWorkflow = { store.act { api.cancel(id) } },
                 modifier = Modifier.weight(1f),
@@ -99,22 +107,26 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 conversation = conversation,
                 working = conversation.status == ConversationStatus.Working,
                 queue = state.queues[id].orEmpty(),
-                onSend = { text -> store.act { api.sendPrompt(id, text) } },
+                onSend = { text -> store.send(id, text) },
                 onStop = { store.act { api.cancel(id) } },
                 onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
                 onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
                 onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
+                options = remember(conversation, state.events[id]) { sessionOptions(conversation, state.events[id].orEmpty()) },
+                commands = remember(state.events[id]) { slashCommands(state.events[id].orEmpty()) },
                 onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
                 onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
+                onSearchFiles = { query -> api.files(id, query) },
+                onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
             )
         }
 
         if (!compact) {
-            Rail(inspectorOpen) { inspectorOpen = !inspectorOpen }
-
             if (inspectorOpen) {
                 Inspector(conversation, node)
             }
+
+            Rail(inspectorOpen) { inspectorOpen = !inspectorOpen }
         }
     }
 
@@ -176,7 +188,7 @@ private fun ConversationHeader(
         }
 
         if (compact) {
-            MyButton(onNode, icon = if (node != null && isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
+            MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(

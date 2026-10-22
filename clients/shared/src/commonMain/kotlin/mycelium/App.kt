@@ -1,7 +1,6 @@
 package mycelium
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -22,13 +21,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.launch
@@ -38,11 +32,15 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ApproveScreen
 import mycelium.ui.Label
-import mycelium.ui.LocalKeyboardNavigation
 import mycelium.ui.LocalReducedMotion
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
+import mycelium.ui.Accent
+import mycelium.ui.Appearance
+import mycelium.ui.LocalAppearance
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.ui.graphics.Color
 import mycelium.ui.Shell
 import mycelium.ui.SignInScreen
 import mycelium.ui.Tokens
@@ -57,12 +55,21 @@ private sealed interface Phase {
 
 @Composable
 fun App(platform: Platform, dark: Boolean? = null) {
-    if (dark == null) {
-        MyceliumTheme { AppContent(platform) }
-    } else {
-        MyceliumTheme(dark) { AppContent(platform) }
+    val night = dark ?: isSystemInDarkTheme()
+    val systemAccent = platform.systemAccent(night)?.let { Color(it.toInt()) }
+    val accents = Accent.entries.filter { it != Accent.System || systemAccent != null }
+    var accent by remember { mutableStateOf(accents.firstOrNull { it.name == platform.loadPreference(AccentPreference) } ?: accents.first()) }
+    val appearance = Appearance(night, accent, accents) { chosen ->
+        accent = chosen
+        platform.savePreference(AccentPreference, chosen.name)
+    }
+
+    CompositionLocalProvider(LocalAppearance provides appearance) {
+        MyceliumTheme(night, accent, systemAccent) { AppContent(platform) }
     }
 }
+
+private const val AccentPreference = "accent"
 
 @Composable
 private fun AppContent(platform: Platform) {
@@ -70,8 +77,7 @@ private fun AppContent(platform: Platform) {
     val saved = remember { platform.loadConnection() }
     var phase by remember { mutableStateOf<Phase>(Phase.Restoring) }
     var approveCode by remember { mutableStateOf(platform.approveCode()) }
-    val keyboardNavigation = remember { mutableStateOf(false) }
-    val root = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) {
         val baseUrl = saved?.baseUrl ?: platform.originUrl
@@ -102,41 +108,21 @@ private fun AppContent(platform: Platform) {
             .fillMaxSize()
             .background(MyTheme.colors.bgContent)
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown) {
-                    keyboardNavigation.value = true
-                }
-
-                false
-            }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-
-                        if (event.type == PointerEventType.Press) {
-                            keyboardNavigation.value = false
-                        }
-                    }
-                }
-            }
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(pass = PointerEventPass.Final)
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
                     val up = waitForUpOrCancellation(PointerEventPass.Final)
 
-                    if (down.type == PointerType.Mouse && up != null && !up.isConsumed) {
-                        root.requestFocus()
+                    if (down.type == PointerType.Mouse && !down.isConsumed && up != null && !up.isConsumed) {
+                        focusManager.clearFocus()
                     }
                 }
-            }
-            .focusRequester(root)
-            .focusable(),
+            },
         contentAlignment = Alignment.TopStart,
     ) {
         val phone = maxWidth < Tokens.Size.Compact
 
-        CompositionLocalProvider(LocalTouch provides phone, LocalKeyboardNavigation provides keyboardNavigation, LocalReducedMotion provides platform.reducedMotion) {
+        CompositionLocalProvider(LocalTouch provides phone, LocalReducedMotion provides platform.reducedMotion) {
             when (val current = phase) {
                 Phase.Restoring -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Label("Loading", color = MyTheme.colors.textMuted)

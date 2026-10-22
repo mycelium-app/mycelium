@@ -46,6 +46,29 @@ import mycelium.api.NodeSummary
 import mycelium.state.AppState
 import mycelium.state.SidebarSection
 import mycelium.state.Store
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.heading
+import mycelium.api.ConversationStatus
+import mycelium.state.projectName
+import mycelium.state.relativeTime
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
 import mycelium.state.isLaptop
 import mycelium.state.sidebarSections
@@ -61,6 +84,8 @@ sealed interface Route {
     data object Nodes : Route
 
     data object Archive : Route
+
+    data object Settings : Route
 }
 
 @Composable
@@ -75,6 +100,13 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
     val colors = MyTheme.colors
+    var sidebarWidth by remember { mutableStateOf(platform.loadPreference(SidebarWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.Sidebar) }
+    val density = LocalDensity.current
+
+    fun resize(width: Dp) {
+        sidebarWidth = width.coerceIn(Tokens.Size.SidebarMin, Tokens.Size.SidebarMax)
+        platform.savePreference(SidebarWidthPreference, sidebarWidth.value.toString())
+    }
 
     Row(Modifier.fillMaxSize().background(colors.bgContent)) {
         Sidebar(
@@ -83,16 +115,47 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
             me = me,
             onRoute = { route = it },
             onSignOut = onSignOut,
-            modifier = Modifier.width(Tokens.Size.Sidebar).fillMaxHeight(),
+            modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
         )
 
-        VerticalHairline()
+        val handle = remember { MutableInteractionSource() }
+        val handleFocused by handle.collectIsFocusedAsState()
+
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .width(Tokens.Size.Hairline)
+                .background(if (handleFocused) colors.focus else colors.border)
+                .semantics { contentDescription = "Resize the sidebar" },
+        ) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .requiredWidth(Tokens.Space.S2)
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .draggable(rememberDraggableState { delta -> resize(sidebarWidth + with(density) { delta.toDp() }) }, Orientation.Horizontal)
+                    .onKeyEvent { event ->
+                        val step = when (event.key) {
+                            Key.DirectionLeft -> -Tokens.Space.S4
+                            Key.DirectionRight -> Tokens.Space.S4
+                            else -> null
+                        }
+
+                        if (event.type == KeyEventType.KeyDown && step != null) {
+                            resize(sidebarWidth + step)
+                        }
+
+                        step != null
+                    }
+                    .focusable(interactionSource = handle),
+            )
+        }
 
         Column(Modifier.weight(1f).fillMaxHeight()) {
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                RouteContent(store, state, platform, route, onRoute = { route = it })
+                RouteContent(store, state, platform, me, route, onRoute = { route = it })
             }
         }
     }
@@ -114,7 +177,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    RouteContent(store, state, platform, route, onRoute = { route = it })
+                    RouteContent(store, state, platform, me, route, onRoute = { route = it })
                 }
             }
         }
@@ -142,13 +205,14 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, route: Route, onRoute: (Route) -> Unit) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit) {
     when (route) {
         Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
         is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
         Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
         Route.Nodes -> NodesScreen(store, state, platform)
         Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+        Route.Settings -> SettingsScreen(me, store.api.baseUrl)
     }
 }
 
@@ -187,12 +251,17 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
     val sections = sidebarSections(state.conversations.values)
 
     Column(modifier.background(colors.bgPanel)) {
-        Bar(chrome = true) {
-            Label("Conversations", Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
-            MyButton({ onRoute(Route.New) }, icon = MyIcon.Plus, description = "New conversation", muted = true)
+        Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
+            SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
+            SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+            SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes) { onRoute(Route.Nodes) }
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = Tokens.Space.S1, bottom = Tokens.Space.S2)) {
+        Hairline()
+
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
+            Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+
             for (section in sections) {
                 SidebarSectionView(
                     section = section,
@@ -203,19 +272,17 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
                     onOpen = { onRoute(Route.Chat(it)) },
                 )
             }
-
-            SidebarLink("All past conversations", MyIcon.Archive, selected = route == Route.Archive) { onRoute(Route.Archive) }
         }
 
         Hairline()
 
         Row(
-            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
+            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S1),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MyButton({ onRoute(Route.Nodes) }, icon = MyIcon.Server, description = "Nodes", muted = true, selected = route == Route.Nodes)
-            Label(me.name.ifBlank { me.email }, style = Tokens.Type.Meta.copy(textAlign = TextAlign.End), color = colors.textMuted, maxLines = 1, modifier = Modifier.weight(1f))
+            Label(me.name.ifBlank { me.email }, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
             MyButton(onSignOut, icon = MyIcon.Logout, description = "Sign out ${me.email}", muted = true)
         }
     }
@@ -229,13 +296,13 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
         Modifier
             .fillMaxWidth()
             .heightIn(min = rowHeight())
-            .pressable(onClick, role = androidx.compose.ui.semantics.Role.Button, selected = selected)
-            .padding(horizontal = Tokens.Space.S3),
+            .pressable(onClick, role = androidx.compose.ui.semantics.Role.Button, selected = selected, shape = BlockShape)
+            .padding(horizontal = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, colors.textMuted, Tokens.Size.IconSm)
-        Label(text, color = colors.textMuted, maxLines = 1)
+        Icon(icon, colors.textMuted, Tokens.Size.IconMd)
+        Label(text, maxLines = 1)
     }
 }
 
@@ -248,20 +315,22 @@ private fun SidebarSectionView(
     nodes: Map<String, NodeSummary>,
     onOpen: (String) -> Unit,
 ) {
-    val colors = MyTheme.colors
-
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.S2)) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = rowHeight())
-                .pressable(onToggle, stateDescription = if (open) "Expanded" else "Collapsed")
-                .padding(horizontal = Tokens.Space.S3),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                .pressable(onToggle, stateDescription = if (open) "Expanded" else "Collapsed", shape = BlockShape)
+                .padding(horizontal = Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(if (open) MyIcon.ChevronDown else MyIcon.ChevronRight, colors.textMuted, Tokens.Size.IconSm)
-            Label(section.name, style = Tokens.Type.MetaStrong, color = colors.textMuted)
+            StatusGlyph(section.status, Tokens.Size.IconMd)
+            Label(section.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
+
+            if (!open) {
+                Label("${section.rows.size}", style = Tokens.Type.Meta, color = MyTheme.colors.textFaint)
+            }
         }
 
         if (open) {
@@ -279,23 +348,73 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
 
     Row(
         Modifier
+            .padding(start = Tokens.Space.S3)
             .fillMaxWidth()
-            .heightIn(min = rowHeight())
             .pressable(
                 onClick,
                 selected = selected,
+                shape = BlockShape,
                 description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}",
             )
-            .padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
+            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        StatusGlyph(row.status)
-        Label(row.title, Modifier.weight(1f), maxLines = 1)
-        Label(agentName(row.agent).substringBefore(' '), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+        Box(Modifier.padding(top = Tokens.Space.S0_5)) {
+            Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
 
-        if (node != null) {
-            Icon(if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server, colors.textMuted, Tokens.Size.IconSm)
+            statusDotColour(row.status)?.let { dot ->
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5)
+                        .size(Tokens.Size.Dot + Tokens.Space.S0_5)
+                        .background(colors.bgPanel, RoundedCornerShape(Tokens.Radius.Full))
+                        .padding(Tokens.Space.S0_5 / 2)
+                        .background(dot, RoundedCornerShape(Tokens.Radius.Full)),
+                )
+            }
+        }
+
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Label(row.title, Modifier.weight(1f), maxLines = 1)
+                Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                Label(projectName(row.cwd), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+
+                if (node != null) {
+                    val tint = nodeColour(node.name)
+
+                    Label("·", style = Tokens.Type.Meta, color = colors.textFaint)
+                    Icon(nodeIcon(node), tint, Tokens.Size.IconSm)
+                    Label(node.name, style = Tokens.Type.Meta, color = tint, maxLines = 1)
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun statusDotColour(status: ConversationStatus): Color? {
+    val colors = MyTheme.colors
+
+    return when (status) {
+        ConversationStatus.Working -> colors.statusWorking
+        ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
+        ConversationStatus.Failed -> colors.statusFailed
+        ConversationStatus.Done -> null
+    }
+}
+
+@Composable
+private fun nodeColour(name: String): Color {
+    val choices = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
+    val accent = choices[name.hashCode().mod(choices.size)]
+
+    return if (LocalAppearance.current.dark) accent.dark else accent.light
+}
+
+private const val SidebarWidthPreference = "sidebar-width"

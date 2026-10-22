@@ -63,7 +63,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/device/{user_code}/approve", post(device::approve))
         .route("/api/v1/device/{user_code}/deny", post(device::deny))
         .route("/api/v1/nodes", get(nodes::list))
-        .route("/api/v1/nodes/{id}", patch(nodes::rename).delete(nodes::revoke))
+        .route("/api/v1/nodes/{id}", patch(nodes::update).delete(nodes::revoke))
         .route("/api/v1/nodes/{id}/drain", post(nodes::drain))
         .route("/api/v1/nodes/{id}/logins", post(nodes::start_login))
         .route("/api/v1/logins/{login_id}/input", post(nodes::login_input))

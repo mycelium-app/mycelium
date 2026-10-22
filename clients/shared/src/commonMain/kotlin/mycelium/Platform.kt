@@ -26,4 +26,10 @@ interface Platform {
     fun openUrl(url: String)
 
     fun copyToClipboard(text: String)
+
+    fun loadPreference(key: String): String? = null
+
+    fun savePreference(key: String, value: String) = Unit
+
+    fun systemAccent(dark: Boolean): Long? = null
 }

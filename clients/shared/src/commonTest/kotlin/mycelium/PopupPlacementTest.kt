@@ -28,4 +28,16 @@ class PopupPlacementTest {
     fun opensAboveWhenThereIsNoRoomBelow() {
         assertEquals(IntOffset(100, 396), place(IntRect(100, 700, 200, 740)))
     }
+
+    @Test
+    fun keepsAGapFromTheWindowEdge() {
+        assertEquals(IntOffset(4, 44), place(IntRect(0, 0, 50, 40)))
+    }
+
+    @Test
+    fun aTooltipIsCentredUnderItsAnchor() {
+        val placed = BelowAnchor(4, centred = true).calculatePosition(IntRect(300, 100, 340, 140), window, LayoutDirection.Ltr, IntSize(120, 30))
+
+        assertEquals(IntOffset(260, 144), placed)
+    }
 }

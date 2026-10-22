@@ -29,9 +29,11 @@ import mycelium.api.AgentInfo
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.UpdateNodeRequest
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.agentName
+import mycelium.state.agentVersion
 import mycelium.state.isLaptop
 import mycelium.state.loginMethodName
 
@@ -109,6 +111,8 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
                         }
                     },
                     onDrain = { store.act { api.drainNode(node.id, !node.draining) } },
+                    onRename = { name -> store.act { api.updateNode(node.id, UpdateNodeRequest(name = name)) } },
+                    onIcon = { icon -> store.act { api.updateNode(node.id, UpdateNodeRequest(icon = icon)) } },
                     onAskRevoke = { revoking = node.id },
                     onCancelRevoke = { revoking = null },
                     onRevoke = {
@@ -154,6 +158,8 @@ private fun NodeGroup(
     onLoginInput: (String) -> Unit,
     onLoginClose: () -> Unit,
     onDrain: () -> Unit,
+    onRename: (String) -> Unit,
+    onIcon: (String) -> Unit,
     onAskRevoke: () -> Unit,
     onCancelRevoke: () -> Unit,
     onRevoke: () -> Unit,
@@ -161,7 +167,9 @@ private fun NodeGroup(
     val colors = MyTheme.colors
     var addOpen by remember { mutableStateOf(false) }
     var moreOpen by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf<String?>(null) }
     val installed = node.agents.filter { it.available }
+    val signedOut = installed.filter { agent -> node.logins.none { it.agent == agent.agent && it.state == LoginState.SignedIn } }
     val touch = LocalTouch.current
 
     Column(Modifier.fillMaxWidth()) {
@@ -170,8 +178,21 @@ private fun NodeGroup(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server, colors.textMuted, Tokens.Size.IconSm)
-            Label(node.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
+            Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
+            val draft = renaming
+
+            if (draft != null) {
+                fun save() {
+                    onRename(draft.trim())
+                    renaming = null
+                }
+
+                TextInput(draft, { renaming = it }, label = "Name for ${node.name}", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn), onSubmit = ::save)
+                MyButton(::save, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                MyButton({ renaming = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
+            } else {
+                Label(node.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
+            }
 
             when {
                 node.draining -> StatusMark("Draining", Tone.Attention, MyIcon.Clock)
@@ -185,19 +206,17 @@ private fun NodeGroup(
                 Label("${node.os} ${node.arch}  ·  ${node.version}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
             }
 
-            Box {
-                MyButton({ addOpen = true }, text = if (touch) null else "Add login", icon = MyIcon.Plus, size = ButtonSize.Sm, muted = true, description = "Add login on ${node.name}")
+            if (signedOut.isNotEmpty()) {
+                Box {
+                    MyButton({ addOpen = true }, text = if (touch) null else "Add login", icon = MyIcon.Plus, size = ButtonSize.Sm, muted = true, description = "Add login on ${node.name}")
 
-                if (addOpen) {
-                    MenuPopup(onDismiss = { addOpen = false }) {
-                        MenuLabel("Sign in an agent on ${node.name}")
+                    if (addOpen) {
+                        MenuPopup(onDismiss = { addOpen = false }) {
+                            MenuLabel("Sign in an agent on ${node.name}")
 
-                        for (agent in installed) {
-                            MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent) })
-                        }
-
-                        if (installed.isEmpty()) {
-                            MenuLabel("No agent is installed on this node.")
+                            for (agent in signedOut) {
+                                MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent) })
+                            }
                         }
                     }
                 }
@@ -208,6 +227,13 @@ private fun NodeGroup(
 
                 if (moreOpen) {
                     MenuPopup(onDismiss = { moreOpen = false }) {
+                        MenuItem("Rename", onClick = { moreOpen = false; renaming = node.name }, leading = MyIcon.Pencil)
+                        MenuLabel("Icon")
+                        Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                            for ((key, icon) in NodeIcons) {
+                                MyButton({ moreOpen = false; onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
+                            }
+                        }
                         MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { moreOpen = false; onDrain() })
                         MenuItem("Revoke", onClick = { moreOpen = false; onAskRevoke() })
                     }
@@ -232,7 +258,7 @@ private fun NodeGroup(
         }
 
         if (installed.isEmpty()) {
-            Label("No agents installed", Modifier.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, bottom = Tokens.Space.S2), color = colors.textMuted)
+            Label("No agents installed", Modifier.padding(start = NameIndent, top = Tokens.Space.S2, bottom = Tokens.Space.S2), color = colors.textMuted)
         }
 
         for (agent in installed) {
@@ -247,12 +273,14 @@ private fun NodeGroup(
     }
 }
 
+private val NameIndent = Tokens.Space.S4 + Tokens.Size.IconSm + Tokens.Space.S2
+
 @Composable
 private fun NodeColumnHeads() {
     val colors = MyTheme.colors
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S6, end = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = NameIndent, end = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -271,7 +299,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
     val touch = LocalTouch.current
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = if (touch) Tokens.Space.S4 else Tokens.Space.S6, end = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = NameIndent, end = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -279,7 +307,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
             Column(Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                     Label(agentName(agent.agent), maxLines = 1)
-                    Label(agent.version.orEmpty(), color = colors.textMuted, maxLines = 1)
+                    Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
                 }
 
                 val detail = listOfNotNull(login?.account?.ifEmpty { null }, login?.let { loginMethodName(it.method) }).joinToString("  ·  ")
@@ -291,7 +319,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
         } else {
             Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                 Label(agentName(agent.agent), maxLines = 1)
-                Label(agent.version.orEmpty(), color = colors.textMuted, maxLines = 1)
+                Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
             }
 
             Label(login?.account.orEmpty(), Modifier.weight(1.2f), color = colors.text, maxLines = 1)

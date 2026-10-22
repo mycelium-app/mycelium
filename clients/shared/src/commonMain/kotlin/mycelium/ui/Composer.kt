@@ -33,22 +33,35 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import mycelium.state.Choice
+import mycelium.state.SessionOptions
+import mycelium.state.SlashCommand
+import mycelium.state.mentionAt
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
 import mycelium.api.Conversation
 import mycelium.api.QueuedPrompt
 
-data class AgentMode(val id: String, val label: String)
-
-fun modesFor(agent: String): List<AgentMode> = when (agent) {
+fun fallbackModes(agent: String): List<Choice> = when (agent) {
     "claude" -> listOf(
-        AgentMode("default", "Default"),
-        AgentMode("plan", "Plan"),
-        AgentMode("acceptEdits", "Auto"),
-        AgentMode("bypassPermissions", "Bypass"),
+        Choice("default", "Default"),
+        Choice("plan", "Plan"),
+        Choice("acceptEdits", "Auto"),
+        Choice("bypassPermissions", "Bypass"),
     )
     "codex" -> listOf(
-        AgentMode("read-only", "Default"),
-        AgentMode("auto", "Auto"),
-        AgentMode("full-access", "Bypass"),
+        Choice("read-only", "Default"),
+        Choice("auto", "Auto"),
+        Choice("full-access", "Bypass"),
     )
     else -> emptyList()
 }
@@ -75,23 +88,94 @@ fun Composer(
     onSendQueuedNow: (String) -> Unit,
     onEditQueued: (String, String) -> Unit,
     onRemoveQueued: (String) -> Unit,
+    options: SessionOptions,
+    commands: List<SlashCommand>,
     onSetMode: (String) -> Unit,
     onSetModel: (String) -> Unit,
+    onSetSetting: (String, String) -> Unit,
+    onSearchFiles: suspend (String) -> List<String>,
     modifier: Modifier = Modifier,
 ) {
     val colors = MyTheme.colors
-    var text by remember(conversation.id) { mutableStateOf("") }
+    var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    val modes = modesFor(conversation.agent)
-    val currentMode = modes.firstOrNull { it.id == conversation.mode }
+    val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }
+    val settings = options.settings.filterNot { (it.category == "mode" && options.modes.isNotEmpty()) || (it.category == "model" && options.models.isNotEmpty()) }
+    val query = text.text.takeIf { it.startsWith("/") && it.none(Char::isWhitespace) }?.drop(1)
+    val mention = if (query == null) mentionAt(text.text, text.selection.end) else null
+    var files by remember { mutableStateOf(emptyList<String>()) }
+
+    LaunchedEffect(mention?.query) {
+        files = emptyList()
+        val wanted = mention?.query ?: return@LaunchedEffect
+        delay(FileSearchDelayMillis)
+        files = runCatching { onSearchFiles(wanted) }.getOrDefault(emptyList())
+    }
+
+    fun insert(start: Int, completed: String) {
+        val updated = text.text.substring(0, start) + completed + text.text.substring(text.selection.end)
+        text = TextFieldValue(updated, TextRange(start + completed.length))
+    }
+
+    val matches = when {
+        query != null -> commands.filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
+            .map { command -> Completion(command.name, command.description) { insert(0, "/${command.name} ") } }
+        mention != null -> files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
+        else -> emptyList()
+    }
+    var highlighted by remember(query, mention?.query) { mutableStateOf(0) }
 
     fun submit() {
-        val trimmed = text.trim()
+        val trimmed = text.text.trim()
 
         if (trimmed.isNotEmpty()) {
             onSend(trimmed)
-            text = ""
+            text = TextFieldValue("")
+        }
+    }
+
+    val field: @Composable (Modifier) -> Unit = { fieldModifier ->
+        Box(fieldModifier) {
+            MessageField(
+                text = text,
+                onTextChange = { text = it },
+                source = source,
+                onSubmit = ::submit,
+                onKey = { key ->
+                    when {
+                        matches.isEmpty() -> false
+                        key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
+                        key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
+                        key == Key.Tab || key == Key.Enter -> { matches[highlighted.coerceIn(matches.indices)].apply(); true }
+                        key == Key.Escape -> { text = TextFieldValue(""); true }
+                        else -> false
+                    }
+                },
+            )
+
+            if (matches.isNotEmpty()) {
+                CompletionPopup(if (query != null) "Commands" else "Files", matches, highlighted.coerceIn(matches.indices))
+            }
+        }
+    }
+
+    val pickers: @Composable () -> Unit = {
+        if (modes.isNotEmpty()) {
+            val current = modes.firstOrNull { it.id == options.currentMode }
+            val label = current?.name ?: "Mode"
+
+            OptionMenu("Mode", modes, options.currentMode, onSetMode, buttonLabel = label, icon = MyIcon.Mode, tint = modeColor(label))
+        }
+
+        if (options.models.isNotEmpty()) {
+            OptionMenu("Model", options.models, options.currentModel, onSetModel)
+        } else if (options.currentModel != null) {
+            Label(options.currentModel, Modifier.padding(horizontal = Tokens.Space.S2), Tokens.Type.Ui, colors.textMuted, maxLines = 1)
+        }
+
+        for (setting in settings) {
+            OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
         }
     }
 
@@ -112,16 +196,12 @@ fun Composer(
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                    MessageField(text, { text = it }, source, ::submit, Modifier.weight(1f).padding(start = Tokens.Space.S2))
+                    field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
                     SendButtons(working, onStop, ::submit)
                 }
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    ModelMenu(conversation.model, onSetModel)
-
-                    if (modes.isNotEmpty()) {
-                        ModeMenu(modes, currentMode, onSetMode)
-                    }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    pickers()
                 }
             }
         }
@@ -142,7 +222,7 @@ fun Composer(
             QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
         }
 
-        MessageField(text, { text = it }, source, ::submit, Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
+        field(Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
 
         Row(
             Modifier.fillMaxWidth().padding(start = Tokens.Space.S1, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
@@ -155,24 +235,20 @@ fun Composer(
                 Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
             }
 
-            if (modes.isNotEmpty()) {
-                ModeMenu(modes, currentMode, onSetMode)
-            }
-
-            ModelMenu(conversation.model, onSetModel)
+            pickers()
             SendButtons(working, onStop, ::submit)
         }
     }
 }
 
 @Composable
-private fun MessageField(text: String, onTextChange: (String) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, modifier: Modifier = Modifier) {
+private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onKey: (Key) -> Boolean, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
 
     BasicTextField(
         value = text,
         onValueChange = onTextChange,
-        textStyle = Tokens.Type.Prose.themed().copy(color = colors.text),
+        textStyle = Tokens.Type.Input.themed().copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
         interactionSource = source,
         modifier = modifier
@@ -180,6 +256,10 @@ private fun MessageField(text: String, onTextChange: (String) -> Unit, source: M
             .heightIn(min = Tokens.Size.ComposerInput)
             .semantics { contentDescription = "Message" }
             .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && onKey(event.key)) {
+                    return@onPreviewKeyEvent true
+                }
+
                 val enter = event.key == Key.Enter && !event.isShiftPressed
 
                 if (enter && event.type == KeyEventType.KeyDown) {
@@ -190,8 +270,8 @@ private fun MessageField(text: String, onTextChange: (String) -> Unit, source: M
             },
         decorationBox = { inner ->
             Box(contentAlignment = Alignment.CenterStart) {
-                if (text.isEmpty()) {
-                    Label("Ask, plan or build", style = Tokens.Type.Prose, color = colors.textFaint)
+                if (text.text.isEmpty()) {
+                    Label("Ask, plan or build", style = Tokens.Type.Input, color = colors.textFaint)
                 }
 
                 inner()
@@ -215,58 +295,103 @@ private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit
 }
 
 @Composable
-private fun ModeMenu(modes: List<AgentMode>, current: AgentMode?, onSelect: (String) -> Unit) {
+private fun OptionMenu(
+    name: String,
+    choices: List<Choice>,
+    current: String?,
+    onSelect: (String) -> Unit,
+    buttonLabel: String = choices.firstOrNull { it.id == current }?.name ?: current ?: name,
+    icon: MyIcon? = null,
+    tint: Color? = null,
+) {
     var open by remember { mutableStateOf(false) }
-    val label = current?.label ?: "Mode"
-    val tint = modeColor(label)
+    var search by remember(open) { mutableStateOf("") }
+    val searchable = choices.size > SearchableChoices
+    val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box {
-        Row(
-            Modifier.pressable(onClick = { open = true }, description = "Mode: $label", shape = ControlShape)
-                .heightIn(min = touchMin(Tokens.Size.ControlMd))
-                .padding(horizontal = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(MyIcon.Mode, tint)
-            Label(label, style = Tokens.Type.UiStrong, color = tint, maxLines = 1)
+        if (tint != null && icon != null) {
+            Row(
+                Modifier.pressable(onClick = { open = true }, description = "$name: $buttonLabel", shape = ControlShape)
+                    .heightIn(min = touchMin(Tokens.Size.ControlMd))
+                    .padding(horizontal = Tokens.Space.S2),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, tint)
+                Label(buttonLabel, style = Tokens.Type.UiStrong, color = tint, maxLines = 1)
+            }
+        } else {
+            MyButton({ open = true }, text = buttonLabel, description = "$name: $buttonLabel", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
         }
 
         if (open) {
             MenuPopup(onDismiss = { open = false }) {
-                MenuLabel("Mode")
+                MenuLabel(name)
 
-                for (mode in modes) {
-                    MenuItem(mode.label, onClick = { onSelect(mode.id); open = false }, checked = mode.id == current?.id)
+                if (searchable) {
+                    TextInput(search, { search = it }, label = "Search ${name.lowercase()}", placeholder = "Select an option", showLabel = false, modifier = Modifier.padding(Tokens.Space.S1))
+                }
+
+                Column(Modifier.heightIn(max = Tokens.Size.MenuList).verticalScroll(rememberScrollState())) {
+                    for (choice in shown) {
+                        MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description)
+                    }
                 }
             }
         }
     }
 }
 
+private const val SearchableChoices = 7
+
+private const val FileSearchDelayMillis = 120L
+
+private class Completion(val label: String, val description: String, val apply: () -> Unit)
+
 @Composable
-private fun ModelMenu(current: String?, onSelect: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    var draft by remember(current) { mutableStateOf(current.orEmpty()) }
+private fun CompletionPopup(title: String, completions: List<Completion>, highlighted: Int) {
+    val colors = MyTheme.colors
+    val gap = with(LocalDensity.current) { Tokens.Space.S1.roundToPx() }
+    val selected = completions[highlighted]
 
-    Box {
-        MyButton({ open = true }, text = current ?: "Model", description = "Model: ${current ?: "not set"}", muted = true, trailingIcon = MyIcon.ChevronDown)
+    Popup(popupPositionProvider = remember(gap) { BelowAnchor(gap) }, properties = PopupProperties(focusable = false)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Column(
+                Modifier
+                    .width(Tokens.Size.Menu)
+                    .heightIn(max = Tokens.Size.MenuList)
+                    .background(colors.bgRaised, FloatShape)
+                    .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                    .verticalScroll(rememberScrollState())
+                    .padding(Tokens.Space.S1)
+                    .semantics { contentDescription = title },
+            ) {
+                MenuLabel(title)
 
-        if (open) {
-            MenuPopup(onDismiss = { open = false }) {
-                Column(Modifier.padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                    TextInput(draft, { draft = it }, label = "Model", placeholder = "Model name", mono = true)
+                completions.forEachIndexed { index, completion ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = rowHeight())
+                            .pressable(completion.apply, shape = ControlShape, selected = index == highlighted, description = completion.label)
+                            .padding(horizontal = Tokens.Space.S2),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Label(completion.label, style = Tokens.Type.Code, maxLines = 1)
+                    }
+                }
+            }
 
-                    MyButton(
-                        onClick = {
-                            if (draft.isNotBlank()) {
-                                onSelect(draft.trim())
-                                open = false
-                            }
-                        },
-                        text = "Use this model",
-                        variant = ButtonVariant.Primary,
-                    )
+            if (selected.description.isNotEmpty() && !LocalTouch.current) {
+                Box(
+                    Modifier
+                        .width(Tokens.Size.Popover)
+                        .background(colors.bgRaised, FloatShape)
+                        .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                        .padding(Tokens.Space.S3),
+                ) {
+                    Label(selected.description, style = Tokens.Type.Ui)
                 }
             }
         }

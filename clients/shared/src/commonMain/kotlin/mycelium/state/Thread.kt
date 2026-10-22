@@ -307,6 +307,6 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
     return result
 }
 
-private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
 private fun JsonObject.contentText(): String = (this["content"] as? JsonObject)?.string("text") ?: ""

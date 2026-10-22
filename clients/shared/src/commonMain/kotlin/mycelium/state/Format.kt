@@ -10,11 +10,14 @@ fun agentName(agent: String): String = when (agent) {
     else -> agent
 }
 
-fun loginMethodName(method: String): String = when (method) {
+fun loginMethodName(method: String): String = when (method.replace('_', '-')) {
     "subscription", "device-auth" -> "Subscription sign-in"
-    "token", "setup-token" -> "Token"
-    else -> method.replaceFirstChar { it.uppercase() }
+    "token", "setup-token", "oauth-token" -> "Subscription token"
+    "api-key" -> "API key"
+    else -> method.replace('_', ' ').replace('-', ' ').replaceFirstChar { it.uppercase() }
 }
+
+fun agentVersion(version: String?): String = version.orEmpty().trim().substringAfterLast(' ')
 
 fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
     val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""

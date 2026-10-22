@@ -92,6 +92,15 @@ private object DesktopPlatform : Platform {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
 
+    override fun loadPreference(key: String): String? = runCatching { Files.readString(configDir.resolve("$key.pref")).trim() }.getOrNull()
+
+    override fun savePreference(key: String, value: String) {
+        runCatching {
+            Files.createDirectories(configDir)
+            Files.writeString(configDir.resolve("$key.pref"), value)
+        }
+    }
+
     fun stepScale(keyCode: Int): Boolean {
         val current = scale.value
         val next = when (keyCode) {

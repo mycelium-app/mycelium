@@ -5,7 +5,7 @@ use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, RenameNodeRequest, StartLoginRequest, StartLoginResponse};
+use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
@@ -26,20 +26,29 @@ pub async fn drain(State(state): State<AppState>, _user: AuthUser, Path(id): Pat
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn rename(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<RenameNodeRequest>) -> ApiResult<StatusCode> {
-    let name = request.name.trim();
+pub async fn update(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateNodeRequest>) -> ApiResult<StatusCode> {
+    let name = request.name.as_deref().map(str::trim);
 
-    if name.is_empty() {
+    if name == Some("") {
         return Err(ApiError::bad_request("name_required", "Enter a name for this node."));
     }
 
-    let updated = sqlx::query("update nodes set name = $2 where id = $1 and revoked_at is null").bind(id).bind(name).execute(&state.pool).await;
+    if let Some(icon) = request.icon.as_deref().filter(|icon| !NODE_ICONS.contains(icon)) {
+        return Err(ApiError::bad_request("unknown_icon", format!("{icon} is not a node icon. Choose one of {}.", NODE_ICONS.join(", "))));
+    }
+
+    let updated = sqlx::query("update nodes set name = coalesce($2, name), icon = coalesce($3, icon) where id = $1 and revoked_at is null")
+        .bind(id)
+        .bind(name)
+        .bind(&request.icon)
+        .execute(&state.pool)
+        .await;
 
     match updated {
         Ok(done) if done.rows_affected() == 0 => return Err(ApiError::not_found("That node")),
         Ok(_) => {}
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => {
-            return Err(ApiError::conflict("name_taken", format!("Another node is already called {name}. Choose a different name.")));
+            return Err(ApiError::conflict("name_taken", format!("Another node is already called {}. Choose a different name.", name.unwrap_or_default())));
         }
         Err(cause) => return Err(cause.into()),
     }

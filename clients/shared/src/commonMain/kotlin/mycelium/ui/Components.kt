@@ -34,6 +34,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +55,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -111,12 +117,12 @@ fun VerticalHairline(modifier: Modifier = Modifier) {
 @Composable
 fun Modifier.focusRing(focused: State<Boolean>, shape: Shape = RectangleShape, inside: Boolean = false, always: Boolean = false): Modifier {
     val ring = MyTheme.colors.focus
-    val keyboardNavigation = LocalKeyboardNavigation.current
+    val inputMode = LocalInputModeManager.current
 
     return drawWithContent {
         drawContent()
 
-        if (focused.value && (always || keyboardNavigation.value)) {
+        if (focused.value && (always || inputMode.inputMode == InputMode.Keyboard)) {
             val stroke = Tokens.Size.FocusRing.toPx()
             val grow = if (inside) -stroke / 2 else Tokens.Size.FocusOffset.toPx() + stroke / 2
             val corner = if (shape is RoundedCornerShape) shape.topStart.toPx(size, this) else 0f
@@ -143,8 +149,8 @@ fun Modifier.pressable(
     selected: Boolean = false,
     stateDescription: String? = null,
     ringInside: Boolean = false,
+    source: MutableInteractionSource = remember { MutableInteractionSource() },
 ): Modifier {
-    val source = remember { MutableInteractionSource() }
     val hovered = source.collectIsHoveredAsState()
     val focused = source.collectIsFocusedAsState()
     val colors = MyTheme.colors
@@ -191,8 +197,10 @@ fun MyButton(
     muted: Boolean = false,
     selected: Boolean = false,
     trailingIcon: MyIcon? = null,
+    tooltip: String? = if (text == null) description else null,
 ) {
     val colors = MyTheme.colors
+    val source = remember { MutableInteractionSource() }
     val height = touchMin(
         when (size) {
             ButtonSize.Sm -> Tokens.Size.ControlSm
@@ -227,6 +235,7 @@ fun MyButton(
                 shape = ControlShape,
                 base = if (variant == ButtonVariant.Primary) colors.accent else Color.Transparent,
                 selected = selected,
+                source = source,
             )
             .padding(horizontal = if (text == null) 0.dp else padding),
         horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
@@ -243,6 +252,10 @@ fun MyButton(
         if (trailingIcon != null) {
             Icon(trailingIcon, contentColor, iconSize)
         }
+    }
+
+    if (tooltip != null) {
+        Tooltip(tooltip, source)
     }
 }
 
@@ -450,16 +463,52 @@ fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = 
     }
 }
 
-internal class BelowAnchor(private val gap: Int) : PopupPositionProvider {
+internal class BelowAnchor(private val gap: Int, private val centred: Boolean = false) : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
-        val fitsRight = anchorBounds.left + popupContentSize.width <= windowSize.width
-        val x = if (fitsRight) anchorBounds.left else anchorBounds.right - popupContentSize.width
-        val fitsBelow = anchorBounds.bottom + gap + popupContentSize.height <= windowSize.height
+        val fitsRight = anchorBounds.left + popupContentSize.width <= windowSize.width - gap
+        val x = when {
+            centred -> anchorBounds.center.x - popupContentSize.width / 2
+            fitsRight -> anchorBounds.left
+            else -> anchorBounds.right - popupContentSize.width
+        }
+        val fitsBelow = anchorBounds.bottom + gap + popupContentSize.height <= windowSize.height - gap
         val y = if (fitsBelow) anchorBounds.bottom + gap else anchorBounds.top - gap - popupContentSize.height
 
-        return IntOffset(x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)), y.coerceAtLeast(0))
+        return IntOffset(x.coerceIn(gap, maxOf(gap, windowSize.width - popupContentSize.width - gap)), y.coerceAtLeast(gap))
     }
 }
+
+@Composable
+fun Tooltip(text: String, source: MutableInteractionSource) {
+    val colors = MyTheme.colors
+    val hovered by source.collectIsHoveredAsState()
+    var shown by remember { mutableStateOf(false) }
+    val gap = with(LocalDensity.current) { Tokens.Space.S1.roundToPx() }
+
+    LaunchedEffect(hovered) {
+        shown = false
+
+        if (hovered) {
+            delay(TooltipDelayMillis)
+            shown = true
+        }
+    }
+
+    if (shown) {
+        Popup(popupPositionProvider = remember(gap) { BelowAnchor(gap, centred = true) }) {
+            Box(
+                Modifier
+                    .background(colors.bgRaised, FloatShape)
+                    .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                    .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+            ) {
+                Label(text, style = Tokens.Type.Meta, maxLines = 1)
+            }
+        }
+    }
+}
+
+private const val TooltipDelayMillis = 600L
 
 private object ScreenPopup : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =

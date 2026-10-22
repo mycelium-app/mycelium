@@ -254,6 +254,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
     let json = round_trip(&NodeSummary {
         id: id(),
         name: "n".into(),
+        icon: None,
         hostname: "h".into(),
         os: "linux".into(),
         arch: "x86_64".into(),

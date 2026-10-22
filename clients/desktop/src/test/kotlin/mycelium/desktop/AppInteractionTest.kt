@@ -1,6 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -51,6 +58,28 @@ class AppInteractionTest {
         rule.onNodeWithText("Enter the address of your control plane", substring = true).assertExists()
     }
 
+
+    @Test
+    fun aTappedAddressFieldStaysFocusedAndTakesText() {
+        rule.setContent { App(StubPlatform(signsInThroughTheBrowser = false), dark = true) }
+
+        rule.onNode(hasSetTextAction()).performClick()
+        rule.onNode(hasSetTextAction()).assertIsFocused()
+        rule.onNode(hasSetTextAction()).performTextInput("mycelium.example.com")
+
+        rule.onNode(hasSetTextAction()).assertIsFocused().assertTextContains("mycelium.example.com")
+    }
+
+    @Test
+    fun aMouseClickOnEmptySpaceClearsFocus() {
+        rule.setContent { App(StubPlatform(signsInThroughTheBrowser = false), dark = true) }
+
+        rule.onNode(hasSetTextAction()).performMouseInput { click() }
+        rule.onNode(hasSetTextAction()).assertIsFocused()
+        rule.onRoot().performMouseInput { click(Offset(5f, 5f)) }
+
+        rule.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
 
     @Test
     fun theBrowserSignInButtonIsCentredUnderTheTitle() {

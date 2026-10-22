@@ -12,6 +12,7 @@ import mycelium.Platform
 
 class AndroidPlatform(private val context: Context) : Platform {
     private val preferences = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
+    private val settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     override val signsInThroughTheBrowser = false
 
@@ -52,6 +53,22 @@ class AndroidPlatform(private val context: Context) : Platform {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         context.startActivity(intent)
+    }
+
+    override fun loadPreference(key: String): String? = settings.getString(key, null)
+
+    override fun savePreference(key: String, value: String) {
+        settings.edit().putString(key, value).apply()
+    }
+
+    override fun systemAccent(dark: Boolean): Long? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return null
+        }
+
+        val colour = if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600
+
+        return context.getColor(colour).toLong()
     }
 
     override fun copyToClipboard(text: String) {

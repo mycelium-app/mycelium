@@ -2,7 +2,9 @@ package mycelium.state
 
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
+import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
+import mycelium.api.EventKinds
 import mycelium.api.NodeSummary
 import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
@@ -15,6 +17,7 @@ data class AppState(
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
+    val sending: Map<String, List<String>> = emptyMap(),
     val connected: Boolean = false,
 )
 
@@ -27,15 +30,25 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.EventAppended -> {
         val id = message.event.conversationId
 
+        val sent = (message.event.payload as? JsonObject)?.string("text").takeIf { message.event.kind == EventKinds.UserMessage }
+        val delivered = state.copy(sending = state.sending.withoutFirst(id, sent))
+
         if (id in state.openedConversations) {
-            state.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
+            delivered.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
         } else {
-            state
+            delivered
         }
     }
 
-    is StreamMessage.QueueChanged ->
-        state.copy(queues = state.queues + (message.conversationId to message.queue.sortedBy { it.position }))
+    is StreamMessage.QueueChanged -> {
+        val queued = message.queue.map { it.text }
+        val waiting = state.sending[message.conversationId].orEmpty().filterNot { it in queued }
+
+        state.copy(
+            queues = state.queues + (message.conversationId to message.queue.sortedBy { it.position }),
+            sending = state.sending + (message.conversationId to waiting),
+        )
+    }
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 
@@ -73,3 +86,14 @@ fun sidebarSections(conversations: Collection<Conversation>): List<SidebarSectio
         .groupBy { it.status }
         .map { (status, rows) -> SidebarSection(status, statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }
+
+internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
+    val current = this[conversationId] ?: return this
+    val index = current.indexOf(text)
+
+    if (index < 0) {
+        return this
+    }
+
+    return this + (conversationId to current.filterIndexed { position, _ -> position != index })
+}

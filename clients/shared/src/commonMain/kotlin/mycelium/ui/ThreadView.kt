@@ -37,6 +37,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import mycelium.state.MarkdownBlock
+import mycelium.state.markdownBlocks
 import mycelium.state.DiffLine
 import mycelium.state.FileDiff
 import mycelium.state.PlanStatus
@@ -49,16 +68,20 @@ private const val ShortOutputLimit = 40
 @Composable
 fun ThreadView(
     items: List<ThreadItem>,
-    agentLine: String,
+    pending: List<String>,
     onAnswer: (requestId: String, optionId: String) -> Unit,
     onStopWorkflow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val oldest = pending.size + items.lastIndex
+    val atTop by remember(oldest) {
+        derivedStateOf {
+            val last = state.layoutInfo.visibleItemsInfo.lastOrNull()
 
-    LaunchedEffect(items.size) {
-        if (items.isNotEmpty()) {
-            state.scrollToItem(items.lastIndex)
+            last == null || (last.index == oldest && last.offset + last.size <= state.layoutInfo.viewportEndOffset)
         }
     }
 
@@ -66,6 +89,7 @@ fun ThreadView(
         LazyColumn(
             Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().semantics { contentDescription = "Conversation" },
             state = state,
+            reverseLayout = true,
             contentPadding = PaddingValues(
                 start = Tokens.Space.S4,
                 top = Tokens.Space.S8,
@@ -74,35 +98,62 @@ fun ThreadView(
             ),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
         ) {
-            items(items, key = { it.key }) { item ->
-                ThreadRow(item, agentLine, onAnswer, onStopWorkflow)
+            items(pending.asReversed()) { text ->
+                UserMessage(text, sending = true)
+            }
+
+            itemsIndexed(items.asReversed(), key = { _, item -> item.key }) { reversedIndex, item ->
+                val index = items.lastIndex - reversedIndex
+
+                if (item is ThreadItem.TurnEnd) {
+                    val asked = items.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
+                    val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
+
+                    TurnEnd(
+                        item = item,
+                        onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
+                        onScrollToMessage = if (asked < 0) null else ({
+                            scope.launch {
+                                val target = pending.size + items.lastIndex - asked
+                                state.animateScrollToItem(target)
+                                val placed = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target } ?: return@launch
+                                state.animateScrollBy(-(state.layoutInfo.viewportEndOffset - placed.offset - placed.size).toFloat())
+                            }
+                        }),
+                        onScrollToTop = if (atTop) null else ({ scope.launch { state.animateScrollToItem(oldest) } }),
+                    )
+                } else {
+                    ThreadRow(item, onAnswer, onStopWorkflow)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, agentLine: String, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text)
+        is ThreadItem.UserMessage -> UserMessage(item.text, sending = false)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.ToolCall -> ToolCall(item)
         is ThreadItem.Plan -> PlanCard(item)
         is ThreadItem.Permission -> PermissionCard(item, onAnswer)
-        is ThreadItem.TurnEnd -> TurnEnd(item, agentLine)
+        is ThreadItem.TurnEnd -> Unit
         is ThreadItem.Failure -> StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.semantics { contentDescription = "Error: ${item.message}" })
         is ThreadItem.Workflow -> WorkflowCard(item.progress, onStopWorkflow)
     }
 }
 
 @Composable
-private fun UserMessage(text: String) {
+private fun UserMessage(text: String, sending: Boolean) {
     val colors = MyTheme.colors
 
     SelectionContainer {
         Box(
             Modifier
                 .fillMaxWidth()
+                .alpha(if (sending) SendingAlpha else 1f)
+                .semantics { if (sending) stateDescription = "Sending" }
                 .background(colors.bgPanel, BlockShape)
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
@@ -115,12 +166,19 @@ private fun UserMessage(text: String) {
 @Composable
 private fun AgentMessage(text: String) {
     val colors = MyTheme.colors
+    val codeFont = LocalFonts.current.mono
 
     SelectionContainer {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            for (block in splitBlocks(text)) {
-                if (block.code) {
-                    Box(
+            for (block in markdownBlocks(text)) {
+                when (block) {
+                    is MarkdownBlock.Paragraph -> Prose(block.text)
+                    is MarkdownBlock.Heading -> BasicText(
+                        inlineMarkup(block.text, colors.text, colors.accent, codeFont),
+                        Modifier.semantics { heading() },
+                        style = (if (block.level <= 2) Tokens.Type.Display else Tokens.Type.Title).themed(),
+                    )
+                    is MarkdownBlock.Code -> Box(
                         Modifier
                             .fillMaxWidth()
                             .background(colors.bgPanel, BlockShape)
@@ -130,31 +188,50 @@ private fun AgentMessage(text: String) {
                     ) {
                         Label(block.text, style = Tokens.Type.Code)
                     }
-                } else {
-                    BasicText(inlineMarkup(block.text, colors.text, colors.accent, LocalFonts.current.mono), style = Tokens.Type.Prose.themed())
+                    is MarkdownBlock.Bullets -> ListBlock(block.items) {
+                        Box(Modifier.height(Tokens.Type.Prose.lineHeight.value.dp), contentAlignment = Alignment.Center) {
+                            Dot(colors.textMuted)
+                        }
+                    }
+                    is MarkdownBlock.Numbered -> ListBlock(block.items) { index ->
+                        Label("${block.start + index}.", style = Tokens.Type.Prose, color = colors.textMuted)
+                    }
+                    is MarkdownBlock.Quote -> Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                        Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
+                        Box(Modifier.padding(start = Tokens.Space.S3)) {
+                            BasicText(inlineMarkup(block.text, colors.textMuted, colors.accent, codeFont), style = Tokens.Type.Prose.themed())
+                        }
+                    }
+                    MarkdownBlock.Rule -> Hairline()
                 }
             }
         }
     }
 }
 
-data class TextBlock(val text: String, val code: Boolean)
+@Composable
+private fun Prose(text: String) {
+    val colors = MyTheme.colors
 
-fun splitBlocks(text: String): List<TextBlock> {
-    val blocks = mutableListOf<TextBlock>()
-    val parts = text.split("```")
+    BasicText(inlineMarkup(text, colors.text, colors.accent, LocalFonts.current.mono), style = Tokens.Type.Prose.themed())
+}
 
-    parts.forEachIndexed { index, part ->
-        if (index % 2 == 1) {
-            val body = part.substringAfter('\n', part).trimEnd('\n')
-            blocks += TextBlock(body, code = true)
-        } else {
-            part.split("\n\n").map { it.trim('\n') }.filter { it.isNotBlank() }.forEach { blocks += TextBlock(it, code = false) }
+@Composable
+private fun ListBlock(items: List<String>, marker: @Composable (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        items.forEachIndexed { index, item ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Box(Modifier.widthIn(min = Tokens.Space.S4)) {
+                    marker(index)
+                }
+
+                Prose(item)
+            }
         }
     }
-
-    return blocks
 }
+
+private val InlineLink = Regex("\\[([^\\]]+)]\\((https?://[^)\\s]+)\\)")
 
 fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily): AnnotatedString =
     buildAnnotatedString {
@@ -162,6 +239,16 @@ fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFam
             var index = 0
 
             while (index < text.length) {
+                val link = InlineLink.matchAt(text, index)
+
+                if (link != null) {
+                    withLink(LinkAnnotation.Url(link.groupValues[2], TextLinkStyles(SpanStyle(color = codeColor, textDecoration = TextDecoration.Underline)))) {
+                        append(link.groupValues[1])
+                    }
+                    index += link.value.length
+                    continue
+                }
+
                 val code = text.startsWith("`", index)
                 val bold = text.startsWith("**", index)
                 val marker = if (code) "`" else if (bold) "**" else null
@@ -371,15 +458,35 @@ private fun PermissionCard(permission: ThreadItem.Permission, onAnswer: (String,
 }
 
 @Composable
-private fun TurnEnd(item: ThreadItem.TurnEnd, agentLine: String) {
-    val text = when (item.stopReason) {
-        "end_turn" -> agentLine
+private fun TurnEnd(item: ThreadItem.TurnEnd, onCopy: (() -> Unit)?, onScrollToMessage: (() -> Unit)?, onScrollToTop: (() -> Unit)?) {
+    val stopped = when (item.stopReason) {
+        "end_turn" -> null
         "cancelled" -> "Stopped"
         else -> "Stopped: ${item.stopReason.replace('_', ' ')}"
     }
 
-    Label(text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5), verticalAlignment = Alignment.CenterVertically) {
+        if (stopped != null) {
+            Label(stopped, Modifier.padding(end = Tokens.Space.S1), Tokens.Type.Meta, MyTheme.colors.textMuted)
+        }
+
+        Box(Modifier.weight(1f))
+
+        if (onCopy != null) {
+            MyButton(onCopy, icon = MyIcon.Copy, description = "Copy this agent response", size = ButtonSize.Sm, muted = true)
+        }
+
+        if (onScrollToMessage != null) {
+            MyButton(onScrollToMessage, icon = MyIcon.ScrollToMessage, description = "Scroll to your message", size = ButtonSize.Sm, muted = true)
+        }
+
+        if (onScrollToTop != null) {
+            MyButton(onScrollToTop, icon = MyIcon.ScrollToTop, description = "Scroll to top", size = ButtonSize.Sm, muted = true)
+        }
+    }
 }
+
+private const val SendingAlpha = 0.6f
 
 @Composable
 private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {

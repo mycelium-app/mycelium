@@ -155,11 +155,12 @@ struct NodeRow {
     version: String,
     draining: bool,
     last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
+    icon: Option<String>,
 }
 
 pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<Vec<NodeSummary>> {
     let nodes = sqlx::query_as::<_, NodeRow>(
-        "select id, name, hostname, os, arch, version, draining, last_seen_at from nodes
+        "select id, name, hostname, os, arch, version, draining, last_seen_at, icon from nodes
          where revoked_at is null and ($1::uuid is null or id = $1) order by name",
     )
     .bind(only)
@@ -196,6 +197,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         summaries.push(NodeSummary {
             id: node.id,
             name: node.name,
+            icon: node.icon,
             hostname: node.hostname,
             os: node.os,
             arch: node.arch,

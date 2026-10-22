@@ -21,7 +21,10 @@ import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.ui.Accent
+import mycelium.ui.Appearance
 import mycelium.ui.Bar
+import mycelium.ui.LocalAppearance
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
@@ -38,7 +41,7 @@ private const val LaptopId = "aaaaaaaa-0000-0000-0000-000000000001"
 private const val AtlasId = "aaaaaaaa-0000-0000-0000-000000000002"
 
 private fun conversation(id: String, title: String, status: String, agent: String = "claude", node: String = LaptopId, archived: Boolean = false) =
-    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"/home/user/projects/midden","title":"$title","status":"$status",
+    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"/home/sam/projects/midden","title":"$title","status":"$status",
     "acp_session_id":null,"mode":"acceptEdits","model":"Opus 5.5","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T11:${if (id == ConversationId) "59" else "10"}:00Z",
     "archived_at":${if (archived) "\"2026-10-22T11:00:00Z\"" else "null"}}"""
 
@@ -61,10 +64,10 @@ private val Events = listOf(
 private val Nodes = """[
 {"id":"$LaptopId","name":"laptop","hostname":"laptop","os":"macos","arch":"aarch64","version":"0.1.0","online":true,"draining":false,
  "agents":[{"agent":"claude","version":"2.1.308","available":true},{"agent":"codex","version":"0.163.0","available":true}],
- "logins":[{"agent":"claude","account":"user@example.com","method":"token","state":"signed_in"}]},
+ "logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in"}]},
 {"id":"$AtlasId","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
  "agents":[{"agent":"codex","version":"0.163.0","available":true}],
- "logins":[{"agent":"codex","account":"user@example.com","method":"device-auth","state":"expired"}]}]"""
+ "logins":[{"agent":"codex","account":"sam@example.com","method":"device-auth","state":"expired"}]}]"""
 
 private val Conversations = listOf(
     conversation("22222222-2222-2222-2222-222222222222", "Release v0.3.7 for outline", "input", node = AtlasId),
@@ -74,6 +77,11 @@ private val Conversations = listOf(
     conversation("55555555-5555-5555-5555-555555555555", "Uploads survive a 503 and a timeout", "working", agent = "codex", node = AtlasId),
     conversation("66666666-6666-6666-6666-666666666666", "Flux image automation for vm", "done", node = AtlasId),
 ).joinToString(",", "[", "]")
+
+@androidx.compose.runtime.Composable
+private fun withAccents(dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit) {
+    CompositionLocalProvider(LocalAppearance provides Appearance(dark, Accent.Neutral, Accent.entries.filter { it != Accent.System }) {}, content = content)
+}
 
 private val PlatformStub = object : Platform {
     override val signsInThroughTheBrowser = false
@@ -135,7 +143,7 @@ private fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0,
 private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content = content)
 
 class ScreensRenderTest {
-    private val me = Me("u", "user@example.com", "User")
+    private val me = Me("u", "sam@example.com", "Sam")
 
     private fun shell(route: Route, nodes: String = Nodes): @androidx.compose.runtime.Composable () -> Unit {
         val store = Store(fakeApi(nodes), CoroutineScope(Dispatchers.Unconfined))
@@ -161,6 +169,7 @@ class ScreensRenderTest {
             assertTrue(render("nodes", dark, shell(Route.Nodes)).length() > 10_000)
             assertTrue(render("new", dark, shell(Route.New)).length() > 10_000)
             assertTrue(render("archive", dark, shell(Route.Archive)).length() > 10_000)
+            assertTrue(render("settings", dark) { withAccents(dark) { shell(Route.Settings)() } }.length() > 10_000)
         }
     }
 
@@ -171,6 +180,7 @@ class ScreensRenderTest {
             assertTrue(renderAt("nodes", dark, true, content = shell(Route.Nodes)).length() > 10_000)
             assertTrue(renderAt("archive", dark, true, content = shell(Route.Archive)).length() > 10_000)
             assertTrue(renderAt("empty", dark, true, content = shell(Route.Empty)).length() > 5_000)
+            assertTrue(renderAt("settings", dark, true) { withAccents(dark) { shell(Route.Settings)() } }.length() > 5_000)
             assertTrue(renderAt("signin", dark, true) { SignInScreen(PlatformStub, "mycelium.example.com", null) { _, _ -> } }.length() > 5_000)
         }
     }

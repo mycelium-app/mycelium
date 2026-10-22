@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.Dp
+import mycelium.api.NodeSummary
+import mycelium.state.isLaptop
 
 private const val ViewBox = 24f
 private const val StrokeWidth = 1.5f
@@ -44,6 +46,10 @@ enum class MyIcon(vararg val paths: String) {
     Check("M20 6 9 17l-5-5"),
     Laptop(rect(3f, 4f, 18f, 12f, 2f), "M2 20h20"),
     Server(rect(2f, 3f, 20f, 8f, 2f), rect(2f, 13f, 20f, 8f, 2f), "M6 7h.01M6 17h.01"),
+    Desktop(rect(2f, 3f, 20f, 13f, 2f), "M8 21h8M12 16v5"),
+    Cloud("M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9Z"),
+    Terminal(rect(2f, 4f, 20f, 16f, 2f), "m7 10 3 2-3 2M13 15h4"),
+    Chip(rect(5f, 5f, 14f, 14f, 2f), rect(9f, 9f, 6f, 6f, 1f), "M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"),
     Archive(rect(3f, 4f, 18f, 5f, 1f), "M5 9v10h14V9M10 13h4"),
     More("M5 12h.01M12 12h.01M19 12h.01"),
     Menu("M4 6h16M4 12h16M4 18h16"),
@@ -62,7 +68,25 @@ enum class MyIcon(vararg val paths: String) {
     Mode("M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"),
     Sliders("M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0", circle(16f, 6f, 2f), circle(8f, 12f, 2f), circle(18f, 18f, 2f)),
     Logout("M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"),
+    ScrollToTop("M5 4h14M12 20V9M7 13l5-5 5 5"),
+    ScrollToMessage(circle(9f, 7f, 4f), "M3 21v-1a5 5 0 0 1 5-5h2", "M18 21v-8M15 16l3-3 3 3"),
+    ClaudeMark("M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"),
+    CodexMark("M12 2.5 20.5 7.25v9.5L12 21.5l-8.5-4.75v-9.5Z", circle(12f, 12f, 3.5f)),
+    Settings(circle(12f, 12f, 3f), "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"),
 }
+
+val NodeIcons = mapOf(
+    "server" to MyIcon.Server,
+    "laptop" to MyIcon.Laptop,
+    "desktop" to MyIcon.Desktop,
+    "cloud" to MyIcon.Cloud,
+    "terminal" to MyIcon.Terminal,
+    "chip" to MyIcon.Chip,
+)
+
+fun nodeIcon(node: NodeSummary): MyIcon = NodeIcons[node.icon] ?: if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server
+
+fun agentIcon(agent: String): MyIcon = if (agent == "codex") MyIcon.CodexMark else MyIcon.ClaudeMark
 
 @Composable
 fun Icon(icon: MyIcon, tint: Color, size: Dp = Tokens.Size.IconMd, modifier: Modifier = Modifier) {
