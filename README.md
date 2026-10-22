@@ -31,8 +31,15 @@ each machine runs the agents and dials in. You steer all of it from web, iOS or 
 
 ## Status
 
-Design done, stage 1 in progress. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and the
-stages, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) for the short version.
+[v0.1.0](https://github.com/mycelium-app/mycelium/releases) is stage 1: the control plane, the node daemon, Claude Code
+and Codex over ACP, and the web client. Install a node with:
+
+```sh
+curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://<your control plane>
+```
+
+[`docs/DESIGN.md`](docs/DESIGN.md) has the architecture and the stages, [`docs/STAGE1.md`](docs/STAGE1.md) the
+contract stage 1 was built to, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) the short version.
 
 ## Install a node
 
