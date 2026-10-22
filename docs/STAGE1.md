@@ -154,6 +154,11 @@ Conversations:
 - `POST /{id}/config` `{mode?, model?, config?: {id: value}}` → ACP `session/set_mode`, `session/set_model`
   or `session/set_config_option`, whichever the agent advertises.
 
+History:
+- `GET /api/v1/imports` → `[{node_id, agent, found, imported}]` per node and agent; `POST /api/v1/imports`
+  `{node_id, agent}` → `{imported}`. `GET /api/v1/indexing` → `{conversations, entries, nodes: [{node_id, transcripts, imported, conversations}]}`.
+- `GET /api/v1/search?q=&limit=20` → `[{conversation_id, title, node_id, updated_at, snippet}]`; an empty `q` is 400.
+
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
@@ -180,6 +185,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Sign-in output | `login_output` | starter |
 | Sign-in ends: node reports it, `DELETE /logins/{id}`, node disconnects or is revoked | `login_finished` | starter |
 | Conversation created, renamed, archived or restored | `conversation` (and `queue` on create) | owner |
+| History imported (`POST /imports`) | `conversation` per new conversation | owner |
 | `session_started` (session id, mode, model) | `conversation` | owner |
 | Mode or model changed | `conversation` | owner |
 | Prompt sent from the queue | `event` user_message, `conversation` working, `queue` | owner |
@@ -320,6 +326,16 @@ new bytes from the last `transcript_ack` (inotify or a 2-second poll). Workflow 
 (`~/.claude/projects/*/*/subagents/workflows/*/journal.jsonl`) are followed the same way and also
 sent as `workflow` messages for the conversation whose `acp_session_id` matches the session
 directory, so clients can draw the workflow card live.
+
+### History import and search
+
+Mirrored transcripts (`.claude/projects/**` and `.codex/sessions/**`, subagent journals excluded) are imported
+on request from Settings, Agents: each becomes a `done` conversation owned by the requester, with the transcript's
+session id as `acp_session_id` so the node can resume it, and events in the shape live conversations use. A
+transcript whose session id already belongs to a conversation on that node is counted as imported and skipped.
+Every user message and every assistant turn, live or imported, is stored in `search_entries` and searched with
+Postgres full-text search (`websearch_to_tsquery`, English) for now, not ctx. Search is scoped to the caller's own
+conversations and returns the best matching message per conversation with `**` around the matched words.
 
 ## Clients
 

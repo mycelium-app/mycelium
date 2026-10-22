@@ -189,4 +189,57 @@ class ApiTest {
         assertEquals("codex", node.agents.single().agent)
         assertEquals(mycelium.api.LoginState.Expired, node.logins.single().state)
     }
+
+    @Test
+    fun importStatusesDecodeAndTheImportPostsTheNodeAndAgent() = runTest {
+        val (api, seen) = apiWith { request ->
+            if (request.method == HttpMethod.Post) ok("""{"imported":3}""") else ok("""[{"node_id":"n1","agent":"claude","found":5,"imported":2}]""")
+        }
+
+        val status = api.imports().single()
+        val result = api.startImport(mycelium.api.ImportRequest("n1", "claude"))
+
+        assertEquals(3, mycelium.ui.pendingImports(status))
+        assertEquals(3, result.imported)
+        assertEquals("""{"node_id":"n1","agent":"claude"}""", String(seen.last().body.toByteArray()))
+    }
+
+    @Test
+    fun anAgentWithNothingLeftToImportHasNoPendingImports() {
+        assertEquals(0, mycelium.ui.pendingImports(mycelium.api.ImportStatus("n1", "codex", found = 4, imported = 4)))
+        assertEquals(0, mycelium.ui.pendingImports(null))
+    }
+
+    @Test
+    fun indexingDecodesTheCountsPerNode() = runTest {
+        val (api, seen) = apiWith { ok("""{"conversations":7,"entries":40,"nodes":[{"node_id":"n1","transcripts":9,"imported":6,"conversations":7}]}""") }
+
+        val indexing = api.indexing()
+
+        assertEquals(40, indexing.entries)
+        assertEquals(6, indexing.nodes.single().imported)
+        assertEquals("https://mycelium.test/api/v1/indexing", seen.single().url.toString())
+    }
+
+    @Test
+    fun searchSendsTheQueryAndDecodesTheSnippet() = runTest {
+        val (api, seen) = apiWith {
+            ok("""[{"conversation_id":"c1","title":"Rotate keys","node_id":"n1","updated_at":"2026-10-01T10:00:00Z","snippet":"the **keystore** is rotated"}]""")
+        }
+
+        val hit = api.search("key store").single()
+
+        assertEquals("the **keystore** is rotated", hit.snippet)
+        assertEquals("c1", hit.conversationId)
+        assertEquals("https://mycelium.test/api/v1/search?q=key+store&limit=20", seen.single().url.toString())
+    }
+
+    @Test
+    fun anEmptySearchSurfacesTheServersMessage() = runTest {
+        val (api, _) = apiWith { respond("""{"error":"query_required","message":"Enter something to search for."}""", HttpStatusCode.BadRequest, JsonHeaders) }
+
+        val failure = assertFailsWith<ApiException> { api.search("") }
+
+        assertEquals("Enter something to search for.", failure.message)
+    }
 }

@@ -4,10 +4,12 @@ mod config;
 mod conversations;
 mod device;
 mod error;
+mod imports;
 mod link;
 mod nodes;
 mod prompts;
 mod rate_limit;
+mod search;
 mod state;
 mod store;
 mod stream;
@@ -80,6 +82,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))
         .route("/api/v1/conversations/{id}/config", post(prompts::config))
+        .route("/api/v1/imports", get(imports::list).post(imports::create))
+        .route("/api/v1/indexing", get(search::indexing))
+        .route("/api/v1/search", get(search::search))
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))

@@ -22,13 +22,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.text.BasicText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.PatchConversationRequest
+import mycelium.api.SearchHit
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.agentName
 import mycelium.state.relativeTime
+
+private const val SearchDebounceMillis = 250L
 
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
@@ -57,6 +64,31 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         store.act { archived = store.api.conversations(archived = true) }
     }
 
+    var hits by remember { mutableStateOf<List<SearchHit>?>(null) }
+    var searchProblem by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(query) {
+        if (query.isBlank()) {
+            hits = null
+            searchProblem = null
+
+            return@LaunchedEffect
+        }
+
+        delay(SearchDebounceMillis)
+
+        try {
+            hits = store.api.search(query.trim())
+            searchProblem = null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: ApiException) {
+            searchProblem = failure.message
+        } catch (_: Exception) {
+            searchProblem = "Could not reach the control plane. Check your connection and try again."
+        }
+    }
+
     val rows = pastConversations(state.conversations.values, archived, filter, query)
 
     val touch = LocalTouch.current
@@ -73,14 +105,53 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                 query,
                 { query = it },
                 label = "Search past conversations",
-                placeholder = "Search titles",
+                placeholder = "Search conversations",
                 showLabel = false,
                 modifier = if (touch) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn),
             )
         }
 
-        Bar {
-            Segmented(PastFilter.entries.map { it.label }, filter.label, { picked -> filter = PastFilter.entries.first { it.label == picked } }, groupLabel = "State")
+        if (query.isBlank()) {
+            Bar {
+                Segmented(PastFilter.entries.map { it.label }, filter.label, { picked -> filter = PastFilter.entries.first { it.label == picked } }, groupLabel = "State")
+            }
+        }
+
+        val found = hits
+
+        if (query.isNotBlank() && found != null) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                if (found.isEmpty()) {
+                    Label("No conversations match that search.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                }
+
+                for (hit in found) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .pressable({ onOpen(hit.conversationId) }, role = Role.Button, description = "Open ${hit.title}", shape = ControlShape)
+                            .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2),
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
+                    ) {
+                        Label(hit.title, maxLines = 1)
+                        Label(
+                            listOf(state.nodes[hit.nodeId]?.name.orEmpty(), relativeTime(hit.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                            style = Tokens.Type.Meta,
+                            color = colors.textMuted,
+                            maxLines = 1,
+                        )
+                        BasicText(inlineMarkup(hit.snippet, colors.textMuted, colors.accent), style = Tokens.Type.Meta.themed(), maxLines = 3)
+                    }
+
+                    Hairline()
+                }
+            }
+
+            return@Column
+        }
+
+        if (query.isNotBlank() && searchProblem != null) {
+            Label(searchProblem.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), color = colors.textMuted)
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {

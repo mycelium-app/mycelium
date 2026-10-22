@@ -166,3 +166,60 @@ impl EventsQuery {
         500
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportStatus {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    pub found: i64,
+    pub imported: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportRequest {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub imported: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeIndexing {
+    pub node_id: Uuid,
+    pub transcripts: i64,
+    pub imported: i64,
+    pub conversations: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Indexing {
+    pub conversations: i64,
+    pub entries: i64,
+    pub nodes: Vec<NodeIndexing>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchQuery {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default = "SearchQuery::default_limit")]
+    pub limit: i64,
+}
+
+impl SearchQuery {
+    pub fn default_limit() -> i64 {
+        20
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchHit {
+    pub conversation_id: Uuid,
+    pub title: String,
+    pub node_id: Uuid,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub snippet: String,
+}
