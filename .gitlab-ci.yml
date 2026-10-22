@@ -96,6 +96,28 @@ binary:aarch64:
     RUST_TARGET: aarch64-unknown-linux-musl
     ASSET: mycelium-linux-aarch64
 
+desktop:linux:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  needs: []
+  <<: *release_rule
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils
+  script:
+    - cd clients
+    - MYCELIUM_VERSION="$CI_COMMIT_TAG" ./gradlew --no-daemon :desktop:packageDeb :desktop:createDistributable
+    - cp desktop/build/compose/binaries/main/deb/*.deb ../mycelium-desktop-linux-x86_64.deb
+    - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
+    - cd ..
+    - for file in mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do sha256sum "$file" | cut -d' ' -f1 > "$file.sha256"; done
+  artifacts:
+    paths:
+      - mycelium-desktop-linux-x86_64.deb
+      - mycelium-desktop-linux-x86_64.deb.sha256
+      - mycelium-desktop-linux-x86_64.tar.gz
+      - mycelium-desktop-linux-x86_64.tar.gz.sha256
+    expire_in: 1 week
+
 publish:s3:
   stage: release
   image: nixos/nix:latest
@@ -103,6 +125,8 @@ publish:s3:
     - job: binary:x86_64
       artifacts: true
     - job: binary:aarch64
+      artifacts: true
+    - job: desktop:linux
       artifacts: true
   <<: *release_rule
   before_script:
@@ -116,7 +140,7 @@ publish:s3:
     - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
     - export AWS_DEFAULT_REGION=us-east-1 AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=adaptive
     - DEST="s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}"
-    - for file in mycelium-linux-x86_64 mycelium-linux-aarch64; do
+    - for file in mycelium-linux-x86_64 mycelium-linux-aarch64 mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do
         aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file" "$DEST/$file";
         aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file.sha256" "$DEST/$file.sha256";
       done
@@ -142,6 +166,12 @@ publish:release:
           link_type: package
         - name: "mycelium-linux-aarch64"
           url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-linux-aarch64"
+          link_type: package
+        - name: "mycelium-desktop-linux-x86_64.deb"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-desktop-linux-x86_64.deb"
+          link_type: package
+        - name: "mycelium-desktop-linux-x86_64.tar.gz"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-desktop-linux-x86_64.tar.gz"
           link_type: package
         - name: "install.sh"
           url: "${S3_PUBLIC}/install.sh"

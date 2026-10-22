@@ -30,7 +30,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Msi)
             packageName = "mycelium"
-            packageVersion = "1.0.0"
+            packageVersion = System.getenv("MYCELIUM_VERSION")?.removePrefix("v") ?: "1.0.0"
         }
     }
 }
