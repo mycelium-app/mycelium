@@ -1,9 +1,9 @@
-use crate::config::OidcConfig;
+use crate::config::{OidcConfig, is_localhost};
 use crate::error::{ApiError, ApiResult};
 use crate::state::{AppState, hash_token, new_token};
 use axum::Json;
 use axum::extract::{FromRequestParts, Query, State};
-use axum::http::header::{AUTHORIZATION, COOKIE, LOCATION, SET_COOKIE};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -84,10 +84,10 @@ impl FromRequestParts<AppState> for AuthNode {
 }
 
 fn session_cookie_attributes(state: &AppState) -> &'static str {
-    if state.config.public_url.starts_with("https://") {
-        "; Secure"
-    } else {
+    if is_localhost(&state.config.public_url) {
         ""
+    } else {
+        "; Secure"
     }
 }
 
@@ -213,7 +213,8 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
         form.push(("client_secret", secret.as_str()));
     }
 
-    let tokens: Value = state.http.post(token_endpoint).form(&form).send().await.map_err(ApiError::internal)?.json().await.map_err(ApiError::internal)?;
+    let body = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(&form).finish();
+    let tokens: Value = state.http.post(token_endpoint).header(CONTENT_TYPE, "application/x-www-form-urlencoded").body(body).send().await.map_err(ApiError::internal)?.json().await.map_err(ApiError::internal)?;
     let id_token = tokens["id_token"].as_str().ok_or_else(|| ApiError::internal("token response has no id_token"))?;
     let payload = id_token.split('.').nth(1).ok_or_else(|| ApiError::internal("malformed id_token"))?;
     let claims: Value = URL_SAFE_NO_PAD.decode(payload).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(|| ApiError::internal("malformed id_token"))?;
@@ -252,8 +253,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
     }
 
     let mut response = StatusCode::NO_CONTENT.into_response();
-    response.headers_mut().append(SET_COOKIE, header_value(&format!("{SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0"))?);
-    response.headers_mut().remove(LOCATION);
+    response.headers_mut().append(SET_COOKIE, header_value(&format!("{SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0{}", session_cookie_attributes(&state)))?);
 
     Ok(response)
 }

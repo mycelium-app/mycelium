@@ -92,10 +92,6 @@ impl Hub {
         }
     }
 
-    pub fn has_session(&self, node_id: Uuid, conversation_id: Uuid) -> bool {
-        self.nodes.lock().is_ok_and(|nodes| nodes.get(&node_id).is_some_and(|connection| connection.sessions.contains(&conversation_id)))
-    }
-
     pub fn track_login(&self, login_id: Uuid, node_id: Uuid) {
         if let Ok(mut logins) = self.logins.lock() {
             logins.insert(login_id, node_id);
@@ -131,6 +127,12 @@ pub struct AppState {
     pub stream: broadcast::Sender<Streamed>,
     pub readiness: Arc<Mutex<Readiness>>,
     pub http: reqwest::Client,
+}
+
+impl AppState {
+    pub fn publish(&self, owner: Option<Uuid>, message: StreamMessage) {
+        let _ = self.stream.send(Streamed { owner, message });
+    }
 }
 
 pub fn new_token() -> String {
