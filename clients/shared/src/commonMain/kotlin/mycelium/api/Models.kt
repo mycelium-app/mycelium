@@ -191,6 +191,15 @@ data class CreateProjectRequest(
 )
 
 @Serializable
+data class Worktree(
+    val id: String,
+    @SerialName("project_id") val projectId: String,
+    val branch: String,
+    val path: String,
+    @SerialName("issue_number") val issueNumber: Long? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+@Serializable
 data class Repository(
     @SerialName("forge_id") val forgeId: String,
     val owner: String,
@@ -287,6 +296,7 @@ data class PatchQueueRequest(val text: String)
 data class PermissionAnswer(
     @SerialName("request_id") val requestId: String,
     @SerialName("option_id") val optionId: String,
+    val branch: String? = null,
 )
 
 @Serializable

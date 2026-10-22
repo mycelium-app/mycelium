@@ -253,14 +253,14 @@ private fun ChangeItem(row: ChangeRow.Change, onOpen: () -> Unit, onToggle: () -
 }
 
 @Composable
-private fun Checkbox(checked: Boolean, description: String, onToggle: () -> Unit) {
+fun Checkbox(checked: Boolean, description: String, onToggle: () -> Unit, checkedState: String = "Staged", uncheckedState: String = "Not staged") {
     val colors = MyTheme.colors
     val target = touchMin(Tokens.Size.ControlMd)
 
     Box(
         Modifier
             .size(target)
-            .pressable(onClick = onToggle, role = Role.Checkbox, description = description, stateDescription = if (checked) "Staged" else "Not staged", shape = ControlShape),
+            .pressable(onClick = onToggle, role = Role.Checkbox, description = description, stateDescription = if (checked) checkedState else uncheckedState, shape = ControlShape),
         contentAlignment = Alignment.Center,
     ) {
         Box(

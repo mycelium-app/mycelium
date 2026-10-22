@@ -37,6 +37,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var nodeMenu by remember { mutableStateOf(false) }
     var chosenProject by remember { mutableStateOf(projectId) }
     var projectMenu by remember { mutableStateOf(false) }
+    var worktree by remember { mutableStateOf(false) }
+    var branch by remember { mutableStateOf("") }
+    var branchError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshProjects() }
@@ -58,7 +61,13 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return
         }
 
+        if (project != null && worktree && branch.isBlank()) {
+            branchError = "Enter a name for the new branch."
+            return
+        }
+
         cwdError = null
+        branchError = null
         store.act {
             val created = store.api.createConversation(
                 CreateConversationRequest(
@@ -66,6 +75,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     chosenAgent,
                     cwd = if (project == null) cwd.trim() else null,
                     projectId = project?.id,
+                    branch = if (project != null && worktree) branch.trim() else null,
                     prompt = prompt.trim().ifEmpty { null },
                 ),
             )
@@ -173,6 +183,17 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
                 if (project == null) {
                     TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
+                }
+
+                if (project != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(worktree, "New worktree", { worktree = !worktree }, checkedState = "On", uncheckedState = "Off")
+                        Label("New worktree")
+                    }
+
+                    if (worktree) {
+                        TextInput(branch, { branch = it }, label = "Branch name", placeholder = "feature/restore-copy", mono = true, error = branchError, onSubmit = ::create)
+                    }
                 }
 
                 TextInput(prompt, { prompt = it }, label = "First message (optional)", placeholder = "Ask, plan or build", onSubmit = ::create)

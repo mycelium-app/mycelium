@@ -194,6 +194,8 @@ class MyceliumApi(
     suspend fun createProject(request: CreateProjectRequest): Project =
         call("/projects") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
+
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 
     suspend fun startImport(request: ImportRequest): ImportResult =
