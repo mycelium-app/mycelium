@@ -1,0 +1,10 @@
+target
+.git
+.claude
+site
+design
+docs
+**/build
+**/.gradle
+**/.kotlin
+**/node_modules

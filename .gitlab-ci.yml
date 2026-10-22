@@ -1,5 +1,7 @@
 stages:
   - pages
+  - build
+  - release
 
 pages:
   stage: pages
@@ -34,3 +36,112 @@ pages:
   artifacts:
     paths:
       - public
+
+variables:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/mycelium-app/mycelium
+  DOCKER_HOST: unix:///var/run/docker.sock
+  DOCKER_BUILDKIT: "1"
+  S3_ENDPOINT: "https://s3.example.com"
+  S3_BUCKET: "artefacts"
+  S3_PREFIX: "mycelium"
+  S3_PUBLIC: "https://github.com/mycelium-app/mycelium/releases/download"
+
+.release_rule: &release_rule
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/
+
+build:image:
+  stage: build
+  image: docker:27
+  needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
+  script:
+    - docker build
+        -f Dockerfile
+        --build-arg "MYCELIUM_VERSION=${CI_COMMIT_SHORT_SHA}"
+        -t "$IMAGE:${CI_COMMIT_SHORT_SHA}"
+        -t "$IMAGE:latest"
+        .
+    - docker push "$IMAGE:${CI_COMMIT_SHORT_SHA}"
+    - docker push "$IMAGE:latest"
+
+.binary:
+  stage: build
+  needs: []
+  <<: *release_rule
+  script:
+    - MYCELIUM_VERSION="$CI_COMMIT_TAG" cargo build --release --locked --package mycelium-cli --target "$RUST_TARGET"
+    - cp "target/$RUST_TARGET/release/mycelium" "$ASSET"
+    - sha256sum "$ASSET" | cut -d' ' -f1 > "$ASSET.sha256"
+  artifacts:
+    paths: ["$ASSET", "$ASSET.sha256"]
+    expire_in: 1 week
+
+binary:x86_64:
+  extends: .binary
+  image: messense/rust-musl-cross:x86_64-musl
+  variables:
+    RUST_TARGET: x86_64-unknown-linux-musl
+    ASSET: mycelium-linux-x86_64
+
+binary:aarch64:
+  extends: .binary
+  image: messense/rust-musl-cross:aarch64-musl
+  variables:
+    RUST_TARGET: aarch64-unknown-linux-musl
+    ASSET: mycelium-linux-aarch64
+
+publish:s3:
+  stage: release
+  image: nixos/nix:latest
+  needs:
+    - job: binary:x86_64
+      artifacts: true
+    - job: binary:aarch64
+      artifacts: true
+  <<: *release_rule
+  before_script:
+    - mkdir -p /etc/nix && echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+    - nix-env -iA nixpkgs.awscli2
+    - aws configure set default.s3.addressing_style virtual
+    - aws configure set default.s3.multipart_threshold 1MB
+    - aws configure set default.s3.multipart_chunksize 1MB
+    - aws configure set default.s3.max_concurrent_requests 4
+  script:
+    - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+    - export AWS_DEFAULT_REGION=us-east-1 AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=adaptive
+    - DEST="s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}"
+    - for file in mycelium-linux-x86_64 mycelium-linux-aarch64; do
+        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file" "$DEST/$file";
+        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file.sha256" "$DEST/$file.sha256";
+      done
+    - printf '%s' "$CI_COMMIT_TAG" > latest
+    - aws --endpoint-url "$S3_ENDPOINT" s3 cp latest "s3://${S3_BUCKET}/${S3_PREFIX}/latest"
+    - aws --endpoint-url "$S3_ENDPOINT" s3 cp install.sh "s3://${S3_BUCKET}/${S3_PREFIX}/install.sh"
+
+publish:release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs: [publish:s3]
+  <<: *release_rule
+  script:
+    - echo "release ${CI_COMMIT_TAG}"
+  release:
+    name: "mycelium ${CI_COMMIT_TAG}"
+    tag_name: "$CI_COMMIT_TAG"
+    description: "mycelium ${CI_COMMIT_TAG}."
+    assets:
+      links:
+        - name: "mycelium-linux-x86_64"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-linux-x86_64"
+          link_type: package
+        - name: "mycelium-linux-aarch64"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-linux-aarch64"
+          link_type: package
+        - name: "install.sh"
+          url: "${S3_PUBLIC}/install.sh"
+          link_type: other
