@@ -64,9 +64,8 @@ pub enum NodeToControl {
     },
     Workflow {
         conversation_id: Uuid,
-        seq: i64,
         run_id: String,
-        line: String,
+        line: Value,
     },
     Pong,
 }

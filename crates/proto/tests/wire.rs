@@ -68,7 +68,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),
         (NodeToControl::LoginFinished { login_id: id(), ok: true }, "login_finished"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
-        (NodeToControl::Workflow { conversation_id: id(), seq: 5, run_id: "run".into(), line: "{}".into() }, "workflow"),
+        (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::Pong, "pong"),
     ];
 

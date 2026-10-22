@@ -1,6 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::link::NodeToControl;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -164,7 +165,7 @@ impl TranscriptFollower {
         };
 
         for line in String::from_utf8_lossy(&bytes[..complete]).lines().filter(|line| !line.trim().is_empty()) {
-            let _ = self.out.send(NodeToControl::Workflow { conversation_id, seq: 0, run_id: journal.run_id.clone(), line: line.to_string() });
+            let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line: serde_json::from_str(line).unwrap_or_else(|_| Value::String(line.to_string())) });
         }
     }
 
@@ -341,8 +342,8 @@ mod tests {
         follower.poll(true, |session| (session == "session-9").then_some(conversation));
 
         let workflow: Vec<NodeToControl> = drain(&mut messages).into_iter().filter(|message| matches!(message, NodeToControl::Workflow { .. })).collect();
-        let lines: Vec<&str> = workflow.iter().map(|message| if let NodeToControl::Workflow { line, .. } = message { line.as_str() } else { "" }).collect();
-        assert_eq!(lines, ["{\"step\":1}", "{\"step\":2}"]);
+        let lines: Vec<Value> = workflow.iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line.clone()) } else { None }).collect();
+        assert_eq!(lines, [serde_json::json!({"step": 1}), serde_json::json!({"step": 2})]);
         assert!(workflow.iter().all(|message| matches!(message, NodeToControl::Workflow { conversation_id, run_id, .. } if *conversation_id == conversation && run_id == "run-1")));
     }
 

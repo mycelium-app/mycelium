@@ -159,7 +159,7 @@ Node link:
 
 `events.kind` is one of: `user_message`, `acp_update` (payload: the ACP `session/update` params as
 sent), `permission_request` (payload: the ACP request params plus `request_id`), `permission_resolved`,
-`turn_end` (`{stop_reason}`), `error` (`{message}`), `workflow` (`{run_id, line}`: one journal line).
+`turn_end` (`{stop_reason}`), `error` (`{message}`), `workflow` (`{run_id, line}`: `line` is one journal line as a JSON object, or a string when the line is not JSON; workflow events carry no node `seq` and are never deduplicated).
 Clients render the thread from events alone.
 
 ## Node link protocol
@@ -182,7 +182,7 @@ Node to control plane:
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
 | `transcript` | `path, offset, data` (base64; the bytes at `offset`) |
-| `workflow` | `conversation_id, seq, run_id, line` |
+| `workflow` | `conversation_id, run_id, line` (the journal line as JSON; no `seq`) |
 | `pong` | |
 
 Control plane to node:

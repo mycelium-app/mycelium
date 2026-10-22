@@ -257,6 +257,25 @@ async fn stopping_a_sign_in_tells_the_node() {
 }
 
 #[tokio::test]
+async fn every_workflow_line_becomes_an_event_with_the_line_as_a_json_object() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    for step in 1..=3 {
+        link.send(NodeToControl::Workflow { conversation_id: conversation.id, run_id: "run-1".into(), line: json!({"type": "started", "key": format!("agent-{step}")}) }).await;
+    }
+    link.barrier(conversation.id, 1).await;
+
+    let events = server.events(conversation.id).await;
+    let workflow: Vec<_> = events.iter().filter(|event| event["kind"] == "workflow").collect();
+    assert_eq!(workflow.len(), 3);
+    assert_eq!(workflow[2]["payload"], json!({"run_id": "run-1", "line": {"type": "started", "key": "agent-3"}}));
+}
+
+#[tokio::test]
 async fn transcript_chunks_are_copied_under_the_node_and_acknowledged() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

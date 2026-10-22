@@ -91,7 +91,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
     match message {
         NodeToControl::Hello { version, hostname, os, arch, agents, sessions } => hello(state, node_id, version, hostname, os, arch, agents, sessions).await,
         NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, .. } => session_started(state, node_id, conversation_id, acp_session_id, modes, models).await,
-        NodeToControl::AcpUpdate { conversation_id, seq, update } => record(state, node_id, conversation_id, seq, EventKind::AcpUpdate, update, None).await.map(|_| ()),
+        NodeToControl::AcpUpdate { conversation_id, seq, update } => record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await.map(|_| ()),
         NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
             let mut payload = request.clone();
 
@@ -102,14 +102,14 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 None => payload = json!({"request_id": request_id, "request": request}),
             }
 
-            record(state, node_id, conversation_id, seq, EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
+            record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
-            record(state, node_id, conversation_id, seq, EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
+            record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
         }
-        NodeToControl::Workflow { conversation_id, seq, run_id, line } => {
-            record(state, node_id, conversation_id, seq, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await.map(|_| ())
+        NodeToControl::Workflow { conversation_id, run_id, line } => {
+            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await.map(|_| ())
         }
         NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
         NodeToControl::LoginOutput { login_id, data } => {
@@ -209,13 +209,13 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     pump(state, conversation_id, before.acp_session_id.is_none()).await
 }
 
-async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, kind: EventKind, payload: Value, transition: Option<ConversationStatus>) -> ApiResult<bool> {
+async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Option<i64>, kind: EventKind, payload: Value, transition: Option<ConversationStatus>) -> ApiResult<bool> {
     let mut tx = state.pool.begin().await?;
     let Some(row) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
         return Ok(false);
     };
 
-    let event = append_event(&mut tx, conversation_id, kind, &payload, Some(seq)).await?;
+    let event = append_event(&mut tx, conversation_id, kind, &payload, seq).await?;
     let mut updated = None;
 
     if event.is_some()
@@ -244,7 +244,7 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64
 }
 
 async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String) -> ApiResult<()> {
-    let inserted = record(state, node_id, conversation_id, seq, EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
+    let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
 
     if !inserted {
         return Ok(());

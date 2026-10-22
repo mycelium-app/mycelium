@@ -222,7 +222,7 @@ impl NodeLink {
     }
 
     pub async fn barrier(&mut self, conversation_id: Uuid, seq: i64) {
-        self.send(NodeToControl::Workflow { conversation_id, seq, run_id: "barrier".into(), line: "{}".into() }).await;
+        self.send(NodeToControl::AcpUpdate { conversation_id, seq, update: json!({"sessionUpdate": "barrier"}) }).await;
 
         loop {
             if let ControlToNode::Ack { seq: acknowledged, .. } = self.raw().await
