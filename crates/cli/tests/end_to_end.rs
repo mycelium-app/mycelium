@@ -126,6 +126,7 @@ struct Environment {
     node_config: PathBuf,
     node_home: PathBuf,
     projects: PathBuf,
+    data_dir: PathBuf,
     streamed: Arc<Mutex<Vec<Value>>>,
     _control: Child,
     _directory: TempDir,
@@ -188,7 +189,7 @@ impl Environment {
         let api = Api { base, cookie, http };
         let streamed = Arc::new(Mutex::new(Vec::new()));
 
-        Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, streamed, _control: control, _directory: directory }
+        Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, data_dir: directory.path().join("data"), streamed, _control: control, _directory: directory }
     }
 
     async fn join_node(&self) {
@@ -333,4 +334,22 @@ async fn a_conversation_runs_through_control_node_and_agent_and_survives_a_daemo
     assert_eq!(api.patch(&format!("/api/v1/conversations/{conversation}"), json!({"archived": true})).await, 200);
     eventually("the keeper to exit after the session is closed", || async { (!keeper_is_running(&environment.node_home)).then_some(()) }).await;
     daemon.kill().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_transcript_under_the_node_home_is_copied_to_the_control_plane() {
+    let environment = Environment::start().await;
+    environment.join_node().await;
+    let transcript = environment.node_home.join(".claude").join("projects").join("-work-app").join("session-1.jsonl");
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    std::fs::write(&transcript, "{\"line\":1}\n").unwrap();
+    let _daemon = environment.run_daemon();
+    let node = environment.wait_for_node_with_claude().await;
+
+    let copy = environment.data_dir.join("transcripts").join(node.to_string()).join(".claude/projects/-work-app/session-1.jsonl");
+    eventually("the transcript copy", || async { (std::fs::read_to_string(&copy).ok()? == "{\"line\":1}\n").then_some(()) }).await;
+
+    let mut appended = std::fs::OpenOptions::new().append(true).open(&transcript).unwrap();
+    std::io::Write::write_all(&mut appended, b"{\"line\":2}\n").unwrap();
+    eventually("the appended transcript bytes", || async { (std::fs::read_to_string(&copy).ok()? == "{\"line\":1}\n{\"line\":2}\n").then_some(()) }).await;
 }

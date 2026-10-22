@@ -80,7 +80,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
     let logins_home = options.home.clone();
     let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &agents) });
-    let transcripts = TranscriptFollower::new(options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
+    let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),

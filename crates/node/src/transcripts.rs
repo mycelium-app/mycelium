@@ -11,6 +11,7 @@ const CHUNK_BYTES: u64 = 256 * 1024;
 const CHUNKS_PER_FILE_PER_POLL: usize = 4;
 
 pub struct TranscriptFollower {
+    home: PathBuf,
     roots: Vec<PathBuf>,
     state_file: PathBuf,
     out: mpsc::UnboundedSender<NodeToControl>,
@@ -56,10 +57,10 @@ fn workflow_journal(root: &Path, path: &Path) -> Option<WorkflowJournal> {
 }
 
 impl TranscriptFollower {
-    pub fn new(roots: Vec<PathBuf>, state_file: PathBuf, out: mpsc::UnboundedSender<NodeToControl>) -> TranscriptFollower {
+    pub fn new(home: PathBuf, roots: Vec<PathBuf>, state_file: PathBuf, out: mpsc::UnboundedSender<NodeToControl>) -> TranscriptFollower {
         let acked = std::fs::read_to_string(&state_file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
 
-        TranscriptFollower { roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, dirty: false }
+        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, dirty: false }
     }
 
     pub fn on_connect(&mut self) {
@@ -99,7 +100,10 @@ impl TranscriptFollower {
     }
 
     fn send_new_bytes(&mut self, path: &Path) {
-        let key = path.display().to_string();
+        let Ok(relative) = path.strip_prefix(&self.home) else {
+            return;
+        };
+        let key = relative.display().to_string();
         let Ok(length) = std::fs::metadata(path).map(|metadata| metadata.len() as i64) else {
             return;
         };
@@ -203,10 +207,10 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn follower(root: &Path, state: &Path) -> (TranscriptFollower, mpsc::UnboundedReceiver<NodeToControl>) {
+    fn follower(home: &Path, root: &Path, state: &Path) -> (TranscriptFollower, mpsc::UnboundedReceiver<NodeToControl>) {
         let (out, messages) = mpsc::unbounded_channel();
 
-        (TranscriptFollower::new(vec![root.to_path_buf()], state.to_path_buf(), out), messages)
+        (TranscriptFollower::new(home.to_path_buf(), vec![root.to_path_buf()], state.to_path_buf(), out), messages)
     }
 
     fn drain(messages: &mut mpsc::UnboundedReceiver<NodeToControl>) -> Vec<NodeToControl> {
@@ -236,7 +240,7 @@ mod tests {
     fn new_bytes_are_sent_from_the_last_sent_offset() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("projects").join("p").join("s.jsonl");
-        let (mut follower, mut messages) = follower(&dir.path().join("projects"), &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
 
         append(&file, "one\n");
         follower.poll(true, |_| None);
@@ -254,10 +258,10 @@ mod tests {
     fn after_a_reconnect_sending_resumes_from_the_acked_offset() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("projects").join("p").join("s.jsonl");
-        let (mut follower, mut messages) = follower(&dir.path().join("projects"), &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
         append(&file, "one\ntwo\n");
         follower.poll(true, |_| None);
-        follower.ack(&file.display().to_string(), 4);
+        follower.ack("projects/p/s.jsonl", 4);
         drain(&mut messages);
 
         follower.on_connect();
@@ -272,21 +276,34 @@ mod tests {
         let file = dir.path().join("projects").join("p").join("s.jsonl");
         let state = dir.path().join("state.json");
         append(&file, "one\ntwo\n");
-        let (mut first, _messages) = follower(&dir.path().join("projects"), &state);
-        first.ack(&file.display().to_string(), 4);
+        let (mut first, _messages) = follower(dir.path(), &dir.path().join("projects"), &state);
+        first.ack("projects/p/s.jsonl", 4);
         first.poll(false, |_| None);
 
-        let (mut second, mut messages) = follower(&dir.path().join("projects"), &state);
+        let (mut second, mut messages) = follower(dir.path(), &dir.path().join("projects"), &state);
         second.poll(true, |_| None);
 
         assert_eq!(transcript_data(&drain(&mut messages)[0]), (4, "two\n".to_string()));
     }
 
     #[test]
+    fn transcript_paths_are_sent_relative_to_the_home_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("projects").join("p").join("s.jsonl");
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
+        append(&file, "one\n");
+
+        follower.poll(true, |_| None);
+
+        let sent = drain(&mut messages);
+        assert!(matches!(&sent[0], NodeToControl::Transcript { path, .. } if path == "projects/p/s.jsonl"));
+    }
+
+    #[test]
     fn nothing_is_sent_while_disconnected() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("projects").join("p").join("s.jsonl");
-        let (mut follower, mut messages) = follower(&dir.path().join("projects"), &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
         append(&file, "one\n");
 
         follower.poll(false, |_| None);
@@ -298,7 +315,7 @@ mod tests {
     fn a_truncated_file_is_sent_again_from_the_start() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("projects").join("p").join("s.jsonl");
-        let (mut follower, mut messages) = follower(&dir.path().join("projects"), &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
         append(&file, "a long first line\n");
         follower.poll(true, |_| None);
         drain(&mut messages);
@@ -315,7 +332,7 @@ mod tests {
         let root = dir.path().join("projects");
         let journal = root.join("proj").join("session-9").join("subagents").join("workflows").join("run-1").join("journal.jsonl");
         let conversation = Uuid::from_u128(5);
-        let (mut follower, mut messages) = follower(&root, &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &root, &dir.path().join("state.json"));
         append(&journal, "{\"old\":true}\n");
         follower.poll(true, |_| Some(conversation));
         drain(&mut messages);
@@ -335,7 +352,7 @@ mod tests {
         let root = dir.path().join("projects");
         let journal = root.join("proj").join("session-9").join("subagents").join("workflows").join("run-1").join("journal.jsonl");
         append(&journal, "{\"old\":true}\n");
-        let (mut follower, mut messages) = follower(&root, &dir.path().join("state.json"));
+        let (mut follower, mut messages) = follower(dir.path(), &root, &dir.path().join("state.json"));
 
         follower.poll(true, |_| Some(Uuid::from_u128(5)));
 
