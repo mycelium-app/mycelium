@@ -14,10 +14,16 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import mycelium.App
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.performSemanticsAction
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
+import mycelium.ui.MyButton
 import mycelium.ui.MyceliumTheme
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
 import mycelium.ui.SignInScreen
 import org.junit.Rule
 import kotlin.math.abs
@@ -79,6 +85,37 @@ class AppInteractionTest {
         rule.onRoot().performMouseInput { click(Offset(5f, 5f)) }
 
         rule.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
+
+    @Test
+    fun hoveringAButtonChangesItsBackground() {
+        rule.setContent { MyceliumTheme(true) { MyButton({}, text = "Hover me") } }
+        val button = rule.onNodeWithText("Hover me")
+        val before = button.captureToImage().toPixelMap().let { it[2, it.height / 2] }
+
+        button.performMouseInput { moveTo(center) }
+        rule.mainClock.advanceTimeBy(100)
+        rule.waitForIdle()
+
+        val after = button.captureToImage().toPixelMap().let { it[2, it.height / 2] }
+        assertTrue(before != after, "background stayed $before")
+    }
+
+    @Test
+    fun aMenuItemNameIsNeverCutOffByItsDescription() {
+        rule.setContent {
+            MyceliumTheme(true) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(280.dp)) {
+                    mycelium.ui.MenuItem("Accept edits", onClick = {}, hint = "Automatically accept all file edits and keep going")
+                }
+            }
+        }
+
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        rule.onNodeWithText("Accept edits").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+
+        val layout = layouts.single()
+        assertTrue(layout.multiParagraph.maxIntrinsicWidth <= layout.size.width + 0.5f && !layout.isLineEllipsized(0), "the name was cut off: width ${layout.size.width}, needs ${layout.multiParagraph.maxIntrinsicWidth}")
     }
 
     @Test

@@ -70,18 +70,6 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
 }
 
 @Composable
-private fun modeColor(label: String): Color {
-    val colors = MyTheme.colors
-
-    return when (label) {
-        "Plan" -> colors.statusWorking
-        "Auto" -> colors.statusAttention
-        "Bypass" -> colors.statusFailed
-        else -> colors.textMuted
-    }
-}
-
-@Composable
 fun Composer(
     conversation: Conversation,
     working: Boolean,
@@ -164,10 +152,7 @@ fun Composer(
 
     val pickers: @Composable () -> Unit = {
         if (modes.isNotEmpty()) {
-            val current = modes.firstOrNull { it.id == options.currentMode }
-            val label = current?.name ?: "Mode"
-
-            OptionMenu("Mode", modes, options.currentMode, onSetMode, buttonLabel = label, icon = MyIcon.Mode, tint = modeColor(label))
+            OptionMenu("Mode", modes, options.currentMode, onSetMode)
         }
 
         if (options.models.isNotEmpty()) {
@@ -307,33 +292,18 @@ private fun OptionMenu(
     choices: List<Choice>,
     current: String?,
     onSelect: (String) -> Unit,
-    buttonLabel: String = choices.firstOrNull { it.id == current }?.name ?: current ?: name,
-    icon: MyIcon? = null,
-    tint: Color? = null,
 ) {
+    val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: current ?: name
     var open by remember { mutableStateOf(false) }
     var search by remember(open) { mutableStateOf("") }
     val searchable = choices.size > SearchableChoices
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box {
-        if (tint != null && icon != null) {
-            Row(
-                Modifier.pressable(onClick = { open = true }, description = "$name: $buttonLabel", shape = ControlShape)
-                    .heightIn(min = touchMin(Tokens.Size.ControlMd))
-                    .padding(horizontal = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(icon, tint)
-                Label(buttonLabel, style = Tokens.Type.UiStrong, color = tint, maxLines = 1)
-            }
-        } else {
-            MyButton({ open = true }, text = buttonLabel, description = "$name: $buttonLabel", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
-        }
+        MyButton({ open = true }, text = buttonLabel, description = "$name: $buttonLabel", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
 
         if (open) {
-            MenuPopup(onDismiss = { open = false }) {
+            MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {
                 MenuLabel(name)
 
                 if (searchable) {

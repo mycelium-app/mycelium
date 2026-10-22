@@ -66,6 +66,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -559,10 +560,12 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
             Icon(leading, colors.textMuted)
         }
 
-        Label(label, Modifier.weight(1f), maxLines = 1)
+        Label(label, maxLines = 1, overflow = TextOverflow.Visible)
 
         if (hint != null) {
-            Label(hint, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            Label(hint, Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textMuted, maxLines = 1)
+        } else {
+            Box(Modifier.weight(1f))
         }
 
         if (checked) {

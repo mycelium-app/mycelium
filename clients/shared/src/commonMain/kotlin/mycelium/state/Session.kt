@@ -84,7 +84,7 @@ private fun choicesFrom(element: JsonElement?, idKey: String): List<Choice> {
         val choice = item as? JsonObject ?: return@mapNotNull null
         val id = choice.string(idKey) ?: return@mapNotNull null
 
-        Choice(id, choice.string("name") ?: id, choice.string("description"))
+        Choice(id, choice.string("name")?.ifBlank { null } ?: id, choice.string("description"))
     }
 }
 
