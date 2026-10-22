@@ -4,7 +4,7 @@ use crate::config::{NodeConfig, agent_command, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
-use crate::session::{Launch, SessionHandle, SessionSpec, journal_head, spawn_session};
+use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
@@ -24,12 +24,13 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
 };
 
 type CommandSource = Arc<dyn Fn(AgentId) -> Vec<String> + Send + Sync>;
+type LoginCommandSource = Arc<dyn Fn(AgentId, &str) -> Option<Vec<String>> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct DaemonOptions {
     pub keeper_binary: PathBuf,
     pub agent_commands: CommandSource,
-    pub login_commands: CommandSource,
+    pub login_commands: LoginCommandSource,
     pub backoff: Backoff,
     pub liveness: Liveness,
     pub home: PathBuf,
@@ -175,12 +176,15 @@ impl Daemon {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
             ControlToNode::StartSession { conversation_id, agent, cwd, resume } => self.start_session(conversation_id, agent, &cwd, resume),
-            ControlToNode::Prompt { conversation_id, text, .. } => self.prompt(conversation_id, text),
+            ControlToNode::Prompt { conversation_id, prompt_id, text } => self.prompt(conversation_id, prompt_id, text),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
             ControlToNode::CloseSession { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Close)),
-            ControlToNode::StartLogin { login_id, agent, .. } => self.logins.start(login_id, (self.options.login_commands)(agent)),
+            ControlToNode::StartLogin { login_id, agent, method } => match (self.options.login_commands)(agent, &method) {
+                Some(command) => self.logins.start(login_id, command),
+                None => self.logins.refuse(login_id, format!("{} cannot sign in with {method} from here. Use the method this node lists for it, or sign in on the node itself.", agent.as_str())),
+            },
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
             ControlToNode::TranscriptAck { path, bytes } => {
@@ -220,11 +224,11 @@ impl Daemon {
         }
     }
 
-    fn prompt(&self, conversation_id: Uuid, text: String) {
+    fn prompt(&self, conversation_id: Uuid, prompt_id: Uuid, text: String) {
         let handle = self.sessions.lock().ok().and_then(|sessions| sessions.get(&conversation_id).cloned());
 
         match handle {
-            Some(handle) if !handle.ended() => handle.command(Command::Prompt { text }),
+            Some(handle) if !handle.ended() => handle.command(Command::Prompt { prompt_id, text }),
             _ => self.refuse(conversation_id, "The agent for this conversation is not running on this node.".to_string()),
         }
     }
@@ -308,7 +312,7 @@ impl Daemon {
     }
 
     fn refuse(&self, conversation_id: Uuid, message: String) {
-        let seq = journal_head(&self.session_dir(conversation_id)) + 1;
+        let seq = next_failure_seq(&self.session_dir(conversation_id));
         let _ = self.out.send(NodeToControl::SessionFailed { conversation_id, seq, message });
     }
 

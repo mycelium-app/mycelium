@@ -64,6 +64,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::PermissionRequest { conversation_id: id(), seq: 2, request_id: "r".into(), request: json!({}) }, "permission_request"),
         (NodeToControl::TurnEnd { conversation_id: id(), seq: 3, stop_reason: "end_turn".into() }, "turn_end"),
         (NodeToControl::SessionFailed { conversation_id: id(), seq: 4, message: "x".into() }, "session_failed"),
+        (NodeToControl::PromptReceived { conversation_id: id(), prompt_id: id() }, "prompt_received"),
         (NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut }] }, "logins"),
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),
         (NodeToControl::LoginFinished { login_id: id(), ok: true }, "login_finished"),

@@ -46,6 +46,10 @@ pub enum NodeToControl {
         seq: i64,
         message: String,
     },
+    PromptReceived {
+        conversation_id: Uuid,
+        prompt_id: Uuid,
+    },
     Logins {
         logins: Vec<LoginInfo>,
     },

@@ -128,6 +128,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::PromptReceived { .. } => Ok(()),
         NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
         NodeToControl::Pong => {
             sqlx::query("update nodes set last_seen_at = now() where id = $1").bind(node_id).execute(&state.pool).await?;

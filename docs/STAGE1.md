@@ -183,6 +183,7 @@ Node to control plane:
 | `permission_request` | `conversation_id, seq, request_id, request` |
 | `turn_end` | `conversation_id, seq, stop_reason` |
 | `session_failed` | `conversation_id, seq, message` |
+| `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
 | `logins` | `logins: [{agent, account?, method, state}]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
@@ -208,6 +209,10 @@ Control plane to node:
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
 
+The control plane keeps each sent prompt as unacknowledged until `prompt_received` arrives, and after a `hello` re-sends unacknowledged prompts for sessions the node reports live. The node ignores a `prompt_id` it has already received (the ids it has written are persisted in the session directory) and answers a repeat with `prompt_received` again. Failures the node emits itself (a refused start, an unreachable keeper) take the next free `seq` for the conversation, tracked in the session directory, never a fixed value.
+
+`start_login` carries the method the node reported in `logins`: `claude` supports `oauth_token`, `codex` supports `device_auth`. Any other method is answered with `login_output` explaining it and `login_finished` with `ok` false.
+
 On `hello` the control plane marks every `working` or `input` conversation on that node that has no live session as `failed`, with an `error` event. A prompt for a conversation whose session is not live is preceded by `start_session` with `resume` set to its `acp_session_id`. Journal `seq` values keep increasing across a resume: the node continues from the end of the previous journal.
 
 The node reconnects with exponential backoff (1s to 60s, jitter) and sends `hello` with the last
@@ -229,8 +234,8 @@ reports "Join tokens arrive in a later release" until then.
 
 | agent | ACP command (default, overridable) | Login command |
 |---|---|---|
-| `claude` | `claude-agent-acp` (`MYCELIUM_CLAUDE_ACP`) | `claude setup-token`, verify against `claude --help` |
-| `codex` | `codex-acp` (`MYCELIUM_CODEX_ACP`) | `codex login --device-auth` |
+| `claude` | `claude-agent-acp` (`MYCELIUM_CLAUDE_ACP`) | method `oauth_token`: `claude setup-token`, verify against `claude --help` |
+| `codex` | `codex-acp` (`MYCELIUM_CODEX_ACP`) | method `device_auth`: `codex login --device-auth` |
 
 An agent is available when its ACP command resolves on `PATH`. The daemon reports versions from
 `<cmd> --version` where it answers.
@@ -258,11 +263,14 @@ starts itself. `cancel` is the ACP `session/cancel` notification.
    One client at a time; a new attach replaces the old. After the replay of existing entries
    the keeper sends one `{"live": true}` line, then live entries. The node waits for this marker
    to know the replay is complete and that everything after it is new. `{"close": true}` kills
-   the agent, after which step 4 applies.
+   the agent, after which step 4 applies. The keeper streams the replay from the journal file and
+   holds none of it in memory.
 4. When the agent exits it writes `{"exit": code}` to `<dir>/exit.json` and quits.
 
 The daemon restarts without touching keepers: it reattaches to every `<dir>/keeper.sock` that
-answers and treats the rest as ended.
+answers and treats the rest as ended. It saves the session's state to `<dir>/state.json` whenever
+an acknowledgement catches up with the end of the journal, and reattaches after that position
+instead of 0; without a saved state it replays from 0.
 
 ### Transcripts and workflows
 
@@ -308,6 +316,7 @@ with the design system's tokens and sizes, in dark and light:
 - Unit tests next to the code for parsing, ordering and state transitions.
 - Control plane integration tests against a real Postgres (`docker run postgres:17-alpine`), driven
   through HTTP.
+- Tests that need Postgres skip with a printed `SKIPPED` line when `MYCELIUM_TEST_DATABASE_URL` is unset.
 - An end-to-end test: control plane, a node, and a fake ACP agent (`crates/node/tests/fake-acp`, a
   small script speaking `initialize`, `session/new`, `session/prompt`, `session/update`,
   `session/request_permission` and `session/cancel`), driven through the HTTP API: join, start a
