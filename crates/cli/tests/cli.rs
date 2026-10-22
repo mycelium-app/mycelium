@@ -40,7 +40,7 @@ fn keeper_requires_a_command_after_the_separator() {
         .args(["keeper", "--dir", "/nonexistent/keeper", "--", "agent", "--flag"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("start agent"));
+        .stderr(predicate::str::contains("create /nonexistent/keeper"));
 }
 
 #[test]
