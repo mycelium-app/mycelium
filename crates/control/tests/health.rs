@@ -63,7 +63,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
     .await;
 
     assert_eq!(unready.0, 503);
-    assert!(!unready.1["message"].as_str().unwrap().is_empty());
+    assert_eq!(unready.1["message"], "Migrations have not been applied.");
     assert_eq!(http.get(format!("{base}/healthz")).send().await.unwrap().status(), 200);
 }
 
@@ -119,6 +119,7 @@ async fn readyz_turns_503_when_the_database_connection_is_cut() {
 
     assert_eq!(status, 503);
     assert_eq!(body["error"], "database_unreachable");
+    assert_eq!(body["message"], "The database is not reachable.");
     assert_eq!(anonymous.json(anonymous.get("/healthz")).await.0, 200);
 }
 
@@ -154,7 +155,8 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
     })
     .await;
 
-    assert!(body["message"].as_str().unwrap().contains("users"), "{body}");
+    assert_eq!(body["message"], "Migrations have not been applied.");
+    assert!(!body.to_string().contains("users"), "{body}");
     assert_eq!(http.get(format!("http://{address}/healthz")).send().await.unwrap().status(), 200);
 }
 

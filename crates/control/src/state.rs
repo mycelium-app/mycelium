@@ -18,7 +18,7 @@ pub struct Streamed {
 pub enum Readiness {
     Migrating,
     Ready,
-    Failed(String),
+    Failed,
 }
 
 struct NodeConnection {

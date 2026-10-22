@@ -60,7 +60,7 @@ pub async fn migrate_until_ready(state: AppState) {
                     reported = true;
                 }
 
-                set_readiness(&state, Readiness::Failed(message));
+                set_readiness(&state, Readiness::Failed);
                 tokio::time::sleep(RETRY_INTERVAL).await;
             }
         }
@@ -92,10 +92,14 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
 
     match readiness {
         Readiness::Migrating => not_ready("migrating", "The database is still being prepared.".into()),
-        Readiness::Failed(message) => not_ready("migrations_failed", message),
+        Readiness::Failed => not_ready("migrations_failed", "Migrations have not been applied.".into()),
         Readiness::Ready => match sqlx::query("select 1").execute(&state.pool).await {
             Ok(_) => Json(serde_json::json!({"status": "ready"})).into_response(),
-            Err(cause) => not_ready("database_unreachable", cause.to_string()),
+            Err(cause) => {
+                tracing::warn!("the readiness probe could not reach the database: {cause}");
+
+                not_ready("database_unreachable", "The database is not reachable.".into())
+            }
         },
     }
 }
