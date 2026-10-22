@@ -108,3 +108,20 @@ a { color: var(--accent); }
 .install-steps h3::before { content: counter(step) ". "; color: var(--accent); }
 .install-steps p, .install-more { margin: 0; font-size: 17px; line-height: 26px; color: var(--text-muted); }
 .install-steps pre { margin: 0; padding: 12px; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-block); background: var(--bg-panel); color: var(--text); font-size: 13px; line-height: 20px; }
+.compare { padding-block: 24px 120px; display: flex; flex-direction: column; gap: 16px; }
+.compare h2 { margin: 0; font-size: clamp(28px, 4vw, 36px); line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+.compare h3 { margin: 24px 0 0; font-size: 22px; line-height: 28px; font-weight: 600; }
+.compare-lead, .footnote { margin: 0; color: var(--text-muted); font-size: 15px; line-height: 24px; max-width: 70ch; }
+.footnote { font-size: 13px; line-height: 20px; }
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-float); }
+.table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.matrix { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 14px; line-height: 20px; }
+.matrix-two { min-width: 0; }
+.matrix-two tbody th { width: 50%; }
+.matrix th, .matrix td { padding: 10px 14px; text-align: left; vertical-align: top; border-top: 1px solid var(--border); }
+.matrix thead th { border-top: 0; font-size: 13px; font-weight: 600; color: var(--text); background: var(--bg-panel); }
+.matrix thead th a { color: var(--text); }
+.matrix tbody th { font-weight: 500; color: var(--text); width: 22%; }
+.matrix td { color: var(--text-muted); }
+.matrix td:nth-child(2) { color: var(--text); }
+.matrix sup a { color: var(--accent); text-decoration: none; }

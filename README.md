@@ -18,21 +18,21 @@
 
 Mycelium is the successor to an earlier single-machine orchestrator. A control plane on your
 homelab keeps track of every conversation, project and worktree across your machines; a daemon on
-each machine runs the agents and dials in. You steer all of it from web, iOS or Android.
+each machine runs the agents and dials in. You steer all of it from the web, the Linux desktop app or Android.
 
 | | |
 |---|---|
 | **Nodes** | Laptop, server, VM: each runs a daemon that connects out to the control plane |
-| **Agents** | Claude Code and Codex, over the Agent Client Protocol or in tmux |
-| **Moves** | A conversation and its worktree move between machines while idle |
-| **History** | Every transcript copied centrally and searchable with ctx, even when its machine is off |
-| **Memory** | Shared findings every session can recall, on every machine |
-| **Config** | One AGENTS.md, skills and MCP config, pushed to every node, with a layer per group |
+| **Agents** | Claude Code and Codex, over the Agent Client Protocol (tmux is planned) |
+| **Moves** | Planned: a conversation and its worktree move between machines while idle |
+| **History** | Every transcript copied centrally, even when its machine is off; search with ctx is planned |
+| **Memory** | Planned: shared findings every session can recall, on every machine |
+| **Config** | Planned: one AGENTS.md, skills and MCP config, pushed to every node, with a layer per group |
 | **Logins** | Claude and Codex logins per node, managed from any client |
 
 ## Status
 
-[v0.1.0](https://github.com/mycelium-app/mycelium/releases) is stage 1: the control plane, the node daemon, Claude Code
+[v0.1.10](https://github.com/mycelium-app/mycelium/releases) is stage 1: the control plane, the node daemon, Claude Code
 and Codex over ACP, and clients for web, desktop and Android. Install a node with:
 
 ```sh

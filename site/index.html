@@ -188,6 +188,54 @@
 </div>
 </div>
 </section>
+
+<section id="compare" class="wrap compare">
+<h2>How it compares</h2>
+<p class="compare-lead">Checked against each project's own documentation on 22 October 2026. "Not documented" means we found nothing either way.</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Comparison with similar tools">
+<table class="matrix">
+<thead><tr><th scope="col"></th><th scope="col">Mycelium</th><th scope="col"><a href="https://paseo.sh">Paseo</a></th><th scope="col"><a href="https://github.com/openchamber/openchamber">OpenChamber</a></th><th scope="col"><a href="https://github.com/slopus/happy">Happy</a></th><th scope="col"><a href="https://code.claude.com/docs/en/remote-control">Claude Code Remote Control</a></th></tr></thead>
+<tbody>
+<tr><th scope="row">Self-hosted</th><td>Yes, one container and Postgres</td><td>Yes</td><td>Yes</td><td>Partly, hosted relay by default</td><td>No</td></tr>
+<tr><th scope="row">Licence</th><td>WTFPL</td><td>Apache-2.0</td><td>MIT</td><td>MIT</td><td>Closed</td></tr>
+<tr><th scope="row">Agents</th><td>Claude Code, Codex</td><td>Claude Code, Codex, Copilot, OpenCode and more</td><td>OpenCode</td><td>Claude Code, Codex</td><td>Claude Code</td></tr>
+<tr><th scope="row">Protocol</th><td>ACP</td><td>Own adapters and ACP</td><td>OpenCode server</td><td>Own CLI wrapper</td><td>Anthropic relay</td></tr>
+<tr><th scope="row">Many machines</th><td>Yes, a node on each</td><td>Yes</td><td>Partly, over SSH</td><td>Not documented</td><td>Yes</td></tr>
+<tr><th scope="row">Survives the client closing</th><td>Yes, and a node restart</td><td>Yes</td><td>Yes</td><td>Yes</td><td>While claude runs</td></tr>
+<tr><th scope="row">Android</th><td>Yes, sideloaded</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes, Claude app</td></tr>
+<tr><th scope="row">iOS</th><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes, Claude app</td></tr>
+<tr><th scope="row">Desktop</th><td>Linux</td><td>Yes</td><td>macOS, Windows, Linux</td><td>macOS, Windows, Linux</td><td>Claude Desktop</td></tr>
+<tr><th scope="row">Web</th><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>claude.ai/code</td></tr>
+<tr><th scope="row">Sign-in</th><td>Your OIDC provider</td><td>Pairing or password</td><td>Password or QR pairing</td><td>Account with end-to-end encryption</td><td>claude.ai account</td></tr>
+<tr><th scope="row">Permission prompts from anywhere</th><td>Yes</td><td>Not documented</td><td>Partly</td><td>Yes, with push</td><td>Yes, with push</td></tr>
+<tr><th scope="row">Queued messages</th><td>Yes, edit and send now</td><td>Not documented</td><td>Not documented</td><td>Not documented</td><td>Not documented</td></tr>
+<tr><th scope="row">Worktrees</th><td>Planned</td><td>Yes</td><td>Yes</td><td>Not documented</td><td>Yes</td></tr>
+<tr><th scope="row">Price</th><td>Free</td><td>Free</td><td>Free</td><td>Free</td><td>Needs a paid Claude plan</td></tr>
+</tbody>
+</table>
+</div>
+<h3>Planned, already in Paseo through plugins</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Planned features that Paseo has through plugins">
+<table class="matrix matrix-two">
+<thead><tr><th scope="col"></th><th scope="col">Mycelium</th><th scope="col">Paseo</th></tr></thead>
+<tbody>
+<tr><th scope="row">Activity: usage heatmap, tools and models over time</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Several accounts per agent, switched per conversation</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Suggested replies under a finished turn</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Predicted chat titles</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Node resources: CPU, memory, disk, Docker</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Ports opened by a conversation, with sharing</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Annotations attached to the next message</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Side chat that stays out of the conversation</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Git history graph</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Generated UI in answers</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Workspaces from forge issues</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+<tr><th scope="row">Tasks board</th><td>Planned</td><td>Plugin<sup><a href="#fn-plugin">1</a></sup></td></tr>
+</tbody>
+</table>
+</div>
+<p id="fn-plugin" class="footnote"><sup>1</sup> A third-party plugin listed on <a href="https://paseo.sh">paseo.sh</a> or <a href="https://paseo.cafe">paseo.cafe</a>, not part of Paseo itself. Paseo plugins run on the daemon host without a sandbox.</p>
+</section>
 </main>
 </div>
 
