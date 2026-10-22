@@ -84,7 +84,28 @@ pub enum NodeToControl {
         request_id: Uuid,
         paths: Vec<String>,
     },
+    GitResult {
+        request_id: Uuid,
+        ok: bool,
+        output: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     Pong,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GitCommand {
+    Status,
+    Log { limit: u32 },
+    Diff { path: String, staged: bool },
+    Stage { paths: Vec<String> },
+    Unstage { paths: Vec<String> },
+    StageAll,
+    Commit { message: String },
+    Fetch,
+    UndoLastCommit,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -165,6 +186,11 @@ pub enum ControlToNode {
         request_id: Uuid,
         cwd: String,
         query: String,
+    },
+    Git {
+        request_id: Uuid,
+        cwd: String,
+        command: GitCommand,
     },
     Ping,
     Revoked,

@@ -2,6 +2,7 @@ mod auth;
 mod boot;
 mod config;
 mod conversations;
+mod git;
 mod device;
 mod error;
 mod imports;
@@ -78,6 +79,15 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))
         .route("/api/v1/conversations/{id}/files", get(conversations::files))
+        .route("/api/v1/conversations/{id}/git/status", get(git::status))
+        .route("/api/v1/conversations/{id}/git/log", get(git::log))
+        .route("/api/v1/conversations/{id}/git/diff", get(git::diff))
+        .route("/api/v1/conversations/{id}/git/stage", post(git::stage))
+        .route("/api/v1/conversations/{id}/git/unstage", post(git::unstage))
+        .route("/api/v1/conversations/{id}/git/stage-all", post(git::stage_all))
+        .route("/api/v1/conversations/{id}/git/commit", post(git::commit))
+        .route("/api/v1/conversations/{id}/git/fetch", post(git::fetch))
+        .route("/api/v1/conversations/{id}/git/undo", post(git::undo))
         .route("/api/v1/conversations/{id}/terminal", post(terminals::start))
         .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))
         .route("/api/v1/terminals/{terminal_id}/resize", post(terminals::resize))

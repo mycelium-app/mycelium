@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::rate_limit::RateLimiter;
-use mycelium_proto::link::ControlToNode;
+use mycelium_proto::link::{ControlToNode, GitCommand};
+use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -43,6 +44,12 @@ pub struct UnacknowledgedPrompt {
     pub text: String,
 }
 
+pub struct GitAnswer {
+    pub ok: bool,
+    pub output: Value,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -51,6 +58,7 @@ pub struct Hub {
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
+    git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
 }
 
 impl Hub {
@@ -120,6 +128,39 @@ impl Hub {
 
     pub fn forget_file_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.file_requests.lock() {
+            requests.remove(&request_id);
+        }
+    }
+
+    pub fn request_git(&self, node_id: Uuid, cwd: String, command: GitCommand) -> Option<(Uuid, oneshot::Receiver<GitAnswer>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.git_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::Git { request_id, cwd, command }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_git_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_git(&self, node_id: Uuid, request_id: Uuid, answer: GitAnswer) {
+        let waiting = self.git_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    pub fn forget_git_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.git_requests.lock() {
             requests.remove(&request_id);
         }
     }

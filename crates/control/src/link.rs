@@ -1,7 +1,7 @@
 use crate::auth::AuthNode;
 use crate::error::ApiResult;
 use crate::prompts::pump;
-use crate::state::AppState;
+use crate::state::{AppState, GitAnswer};
 use crate::store::{append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::State;
@@ -160,6 +160,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
         NodeToControl::Files { request_id, paths } => {
             state.hub.answer_files(node_id, request_id, paths);
+
+            Ok(())
+        }
+        NodeToControl::GitResult { request_id, ok, output, error } => {
+            state.hub.answer_git(node_id, request_id, GitAnswer { ok, output, error });
 
             Ok(())
         }

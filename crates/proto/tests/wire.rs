@@ -71,6 +71,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::LoginFinished { login_id: id(), ok: true }, "login_finished"),
         (NodeToControl::TerminalOutput { terminal_id: id(), data: "aGk=".into() }, "terminal_output"),
         (NodeToControl::TerminalExited { terminal_id: id() }, "terminal_exited"),
+        (NodeToControl::GitResult { request_id: id(), ok: false, output: Value::Null, error: Some("fatal".into()) }, "git_result"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::Pong, "pong"),
@@ -101,6 +102,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::TerminalInput { terminal_id: id(), data: "bHM=".into() }, "terminal_input"),
         (ControlToNode::ResizeTerminal { terminal_id: id(), cols: 100, rows: 30 }, "resize_terminal"),
         (ControlToNode::StopTerminal { terminal_id: id() }, "stop_terminal"),
+        (ControlToNode::Git { request_id: id(), cwd: "/work".into(), command: GitCommand::Diff { path: "a".into(), staged: true } }, "git"),
         (ControlToNode::TranscriptAck { path: "p".into(), bytes: 10 }, "transcript_ack"),
         (ControlToNode::Ping, "ping"),
         (ControlToNode::Revoked, "revoked"),
@@ -110,6 +112,13 @@ fn every_control_message_round_trips_under_its_tag() {
         let json = round_trip(&message);
         assert_eq!(json["type"], tag);
     }
+}
+
+#[test]
+fn git_commands_are_tagged_snake_case() {
+    assert_eq!(round_trip(&GitCommand::StageAll), json!({"type": "stage_all"}));
+    assert_eq!(round_trip(&GitCommand::Log { limit: 5 }), json!({"type": "log", "limit": 5}));
+    assert_eq!(round_trip(&GitCommand::UndoLastCommit), json!({"type": "undo_last_commit"}));
 }
 
 #[test]

@@ -225,7 +225,7 @@ Silent on purpose, because no client shows them: user, web session and client to
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
 `POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
-`POST /conversations/{id}/terminal` (the output follows as `terminal_output`), `POST /terminals/{id}/input` and
+`POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened).
 

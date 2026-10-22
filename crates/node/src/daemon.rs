@@ -207,6 +207,17 @@ impl Daemon {
                     let _ = out.send(NodeToControl::Files { request_id, paths });
                 });
             }
+            ControlToNode::Git { request_id, cwd, command } => {
+                let out = self.out.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    let message = match crate::git::run(std::path::Path::new(&cwd), command) {
+                        Ok(output) => NodeToControl::GitResult { request_id, ok: true, output, error: None },
+                        Err(error) => NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some(error) },
+                    };
+                    let _ = out.send(message);
+                });
+            }
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }
