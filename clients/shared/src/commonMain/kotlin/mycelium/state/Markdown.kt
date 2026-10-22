@@ -13,6 +13,8 @@ sealed interface MarkdownBlock {
 
     data class Quote(val text: String) : MarkdownBlock
 
+    data class Table(val header: List<String>, val rows: List<List<String>>) : MarkdownBlock
+
     data object Rule : MarkdownBlock
 }
 
@@ -20,6 +22,12 @@ private val HeadingLine = Regex("^(#{1,6})\\s+(.*)$")
 private val BulletLine = Regex("^\\s*[-*+]\\s+(.*)$")
 private val NumberedLine = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
 private val RuleLine = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
+private val TableDivider = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
+private fun cells(line: String): List<String> = line.trim().removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
+
+private fun startsTable(lines: List<String>, index: Int): Boolean =
+    lines[index].contains('|') && index + 1 < lines.size && lines[index + 1].contains('-') && TableDivider.matches(lines[index + 1])
 
 fun markdownBlocks(text: String): List<MarkdownBlock> {
     val blocks = mutableListOf<MarkdownBlock>()
@@ -50,6 +58,19 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
             RuleLine.matches(line) -> {
                 blocks += MarkdownBlock.Rule
                 index++
+            }
+
+            startsTable(lines, index) -> {
+                val header = cells(line)
+                val rows = mutableListOf<List<String>>()
+                index += 2
+
+                while (index < lines.size && lines[index].contains('|') && lines[index].isNotBlank()) {
+                    rows += cells(lines[index]).let { row -> List(header.size) { column -> row.getOrElse(column) { "" } } }
+                    index++
+                }
+
+                blocks += MarkdownBlock.Table(header, rows)
             }
 
             HeadingLine.matches(trimmed) -> {
@@ -95,7 +116,7 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
             else -> {
                 val paragraph = mutableListOf<String>()
 
-                while (index < lines.size && lines[index].isNotBlank() && !startsBlock(lines[index])) {
+                while (index < lines.size && lines[index].isNotBlank() && !startsBlock(lines[index]) && !startsTable(lines, index)) {
                     paragraph += lines[index].trim()
                     index++
                 }

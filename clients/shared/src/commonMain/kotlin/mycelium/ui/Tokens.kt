@@ -131,6 +131,7 @@ object Tokens {
         val Bar: Dp = 40.dp
         val DiffFile: Dp = 30.dp
         val CommandOutput: Dp = 240.dp
+        val TableCell: Dp = 320.dp
         val IconSm: Dp = 14.dp
         val IconMd: Dp = 16.dp
         val Dot: Dp = 6.dp

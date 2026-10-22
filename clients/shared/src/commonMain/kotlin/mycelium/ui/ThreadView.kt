@@ -1,6 +1,8 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -206,6 +208,7 @@ private fun AgentMessage(text: String) {
                         }
                     }
                     MarkdownBlock.Rule -> Hairline()
+                    is MarkdownBlock.Table -> TableBlock(block)
                 }
             }
         }
@@ -217,6 +220,40 @@ private fun Prose(text: String) {
     val colors = MyTheme.colors
 
     BasicText(inlineMarkup(text, colors.text, colors.accent, LocalFonts.current.mono), style = Tokens.Type.Prose.themed())
+}
+
+@Composable
+private fun TableBlock(table: MarkdownBlock.Table) {
+    val colors = MyTheme.colors
+    val codeFont = LocalFonts.current.mono
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val rows = listOf(table.header) + table.rows
+    val styles = listOf(Tokens.Type.UiStrong.themed()) + List(table.rows.size) { Tokens.Type.Prose.themed() }
+    val marked = rows.mapIndexed { index, row -> row.map { inlineMarkup(it, colors.text, colors.accent, codeFont) to styles[index] } }
+    val widths = table.header.indices.map { column ->
+        val widest = marked.maxOf { row -> measurer.measure(row[column].first, row[column].second).size.width }
+
+        with(density) { minOf(widest.toDp() + Tokens.Space.S3 * 2, Tokens.Size.TableCell) }
+    }
+
+    Box(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, BlockShape).horizontalScroll(rememberScrollState())) {
+        Column {
+            marked.forEachIndexed { index, row ->
+                if (index > 0) {
+                    Hairline(Modifier.width(widths.fold(0.dp) { total, width -> total + width }))
+                }
+
+                Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
+                    row.forEachIndexed { column, (text, style) ->
+                        Box(Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)) {
+                            BasicText(text, style = style)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -7,6 +7,20 @@ import kotlin.test.assertEquals
 
 class MarkdownTest {
     @Test
+    fun aPipeTableBecomesATableWithShortRowsPaddedAndProseAroundItKept() {
+        val text = "Results:\n| Check | Result |\n|---|:---:|\n| sha256 | ok |\n| `latest` |\n\nDone, a | b is prose."
+
+        assertEquals(
+            listOf(
+                MarkdownBlock.Paragraph("Results:"),
+                MarkdownBlock.Table(listOf("Check", "Result"), listOf(listOf("sha256", "ok"), listOf("`latest`", ""))),
+                MarkdownBlock.Paragraph("Done, a | b is prose."),
+            ),
+            markdownBlocks(text),
+        )
+    }
+
+    @Test
     fun headingsListsQuotesRulesAndCodeBecomeTheirOwnBlocks() {
         val text = """
             # Slices
