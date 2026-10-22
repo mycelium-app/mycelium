@@ -11,6 +11,9 @@ RUN cargo build --release --package mycelium-cli \
  && cp target/release/mycelium /mycelium
 
 FROM gradle:9.8.2-jdk21 AS web
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libatomic1 \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src/clients
 COPY clients ./
 RUN gradle --no-daemon :web:wasmJsBrowserDistribution \
