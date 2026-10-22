@@ -414,3 +414,62 @@ pub struct CreateTaskRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EachRun {
+    New,
+    Same,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunOutcome {
+    Started,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Schedule {
+    pub id: Uuid,
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    pub cwd: String,
+    pub project_id: Option<Uuid>,
+    pub prompt: String,
+    pub cron: String,
+    pub each_run: EachRun,
+    pub paused: bool,
+    pub next_run_at: chrono::DateTime<chrono::Utc>,
+    pub last_run_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_conversation_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateScheduleRequest {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
+    pub prompt: String,
+    pub cron: String,
+    pub each_run: EachRun,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchScheduleRequest {
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduleRun {
+    pub id: Uuid,
+    pub schedule_id: Uuid,
+    pub ran_at: chrono::DateTime<chrono::Utc>,
+    pub outcome: RunOutcome,
+    pub reason: Option<String>,
+    pub conversation_id: Option<Uuid>,
+}

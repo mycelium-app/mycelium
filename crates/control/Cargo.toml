@@ -25,6 +25,7 @@ futures-util.workspace = true
 reqwest.workspace = true
 url.workspace = true
 semver.workspace = true
+croner.workspace = true
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["query"] }

@@ -89,6 +89,10 @@ async fn apply_migrations(state: &AppState) -> Result<()> {
     Ok(())
 }
 
+pub fn is_ready(state: &AppState) -> bool {
+    state.readiness.lock().is_ok_and(|current| *current == Readiness::Ready)
+}
+
 pub async fn healthz() -> &'static str {
     "ok"
 }

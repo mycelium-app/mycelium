@@ -100,6 +100,11 @@ transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
 projects         id uuid pk, owner uuid, node_id uuid, name text, path text, forge_id uuid null, repository text null,
                  created_at, unique(node_id, path)
 worktrees        id uuid pk, project_id uuid, branch text, path text, issue_number bigint null, created_at, unique(project_id, branch)
+tasks            id uuid pk, owner uuid, node_id uuid, agent text, cwd text, project_id uuid null, branch text null, title text, prompt text null,
+                 started_at null, conversation_id uuid null, created_at
+schedules        id uuid pk, owner uuid, node_id uuid, agent text, cwd text, project_id uuid null, prompt text, cron text,
+                 each_run text ('new'|'same'), paused bool, next_run_at, last_run_at null, last_conversation_id null, created_at
+schedule_runs    id uuid pk, schedule_id uuid, ran_at, outcome text ('started'|'skipped'), reason text null, conversation_id uuid null
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
 ```
@@ -189,6 +194,8 @@ Projects:
 - `GET /api/v1/projects` → `[{id, node_id, name, path, forge_id, repository, created_at}]`, the caller's own. `POST /api/v1/projects` `{node_id, forge_id, repository: "owner/name"}` clones the repository on the node into `<projects_root>/projects/<owner>/<name>` with the forge's token; `{node_id, path}` registers an existing folder inside the node's projects root. 201 with the project; 409 `node_offline`, `git_failed` (git's own message) or `project_exists`; 400 `repository_invalid` or `project_source_required`.
 - `POST /api/v1/conversations` also takes `project_id` (instead of `cwd`): the conversation runs in the project's folder; the node must be the project's (400 `project_not_on_node`).
 - `POST /api/v1/conversations` with `project_id` and `branch` first has the node create a git worktree on that new branch (`git worktree add -b`), in `<project>-worktrees/<branch with / as ->` beside the project, and the conversation runs there (cwd is the worktree). 400 `branch_required` or `project_required`; 409 `git_failed` with git's message (branch exists, not a valid name) and no conversation is created.
+- `GET /api/v1/tasks` → the caller's backlog tasks that are not started yet, `[{id, node_id, agent, cwd, project_id, branch, title, prompt, created_at}]`. `POST /api/v1/tasks` `{node_id, agent, title, prompt?, project_id?, branch?, cwd?}` adds one (201; 400 `title_required`, `cwd_required`, `project_required` or `project_not_on_node`). `POST /api/v1/tasks/{id}/start` starts a conversation the way `POST /conversations` does, titled with the task, whose prompt is the task's prompt or else its title (201 with the conversation; the task leaves the backlog, and stays there when the start is refused, for example `node_offline`). `DELETE /api/v1/tasks/{id}` removes an unstarted task.
+- `GET /api/v1/schedules` → `[{id, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, next_run_at, last_run_at, last_conversation_id, created_at}]`. `POST /api/v1/schedules` `{node_id, agent, prompt, cron, each_run: "new"|"same", project_id?, cwd?}` (201; 400 `prompt_required`, `cron_invalid`, `cron_never_runs`, `cwd_required`, `project_not_on_node`). `cron` is five fields, evaluated in UTC. `PATCH /api/v1/schedules/{id}` `{paused}` pauses it, or resumes it with the next run counted from now. `POST /api/v1/schedules/{id}/run` runs it now without moving `next_run_at` (201 with the run). `DELETE /api/v1/schedules/{id}`. `GET /api/v1/schedule-runs` → the caller's 50 latest runs, `[{id, schedule_id, ran_at, outcome, reason, conversation_id}]`.
 - `GET /api/v1/worktrees` → `[{id, project_id, branch, path, issue_number, created_at}]` for the caller's projects.
 
 Issues:
@@ -225,6 +232,15 @@ folder outside its `projects_root` (or containing `..`) and any clone address th
 plane sends the forge's token in the request; the node passes it to git as an `http.<origin>/.extraheader` setting through the
 environment, so it appears neither in arguments nor in `.git/config`, and it is not kept. Not done: later `git fetch` in a
 project's folder uses whatever git credentials the node itself has, not the forge's token.
+
+### Schedules
+
+A loop on every control plane wakes each `scheduler_tick` (15 seconds), once migrations are done, and selects the due, unpaused schedules
+with `for update skip locked`, so replicas never run the same schedule twice. For each it moves `next_run_at` to the next cron time after now (a
+run missed while the control plane was down happens once), then starts the run: with `each_run` `new` a new conversation in the project or
+folder on the node, with `same` the prompt is queued on the previous run's conversation, or a new conversation when there is none or
+that one failed or is gone. A run that cannot start (node offline or draining, agent not installed) is recorded with `outcome` `skipped` and the
+reason, and the schedule moves on. Not done: time zones other than UTC.
 
 ### Live updates
 
@@ -266,7 +282,7 @@ send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logou
 `POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
-`POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer), and `POST /projects` (the Projects page adds the answer).
+`POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer), and `POST /projects` (the Projects page adds the answer), and the task and schedule routes that only change those lists (`POST` and `DELETE /tasks`, `POST`, `PATCH` and `DELETE /schedules`: the Tasks and Schedules pages replace their lists from the answer). `POST /tasks/{id}/start` and `POST /schedules/{id}/run` publish the new conversation as any start does, and a scheduled run does too.
 
 ### Events
 

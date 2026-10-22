@@ -15,6 +15,7 @@ mod nodes;
 mod projects;
 mod prompts;
 mod rate_limit;
+mod schedules;
 mod search;
 mod state;
 mod store;
@@ -26,7 +27,7 @@ mod versions;
 mod web;
 mod worktrees;
 
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, VERSION_CHECK_INTERVAL};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
@@ -55,6 +56,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
 
     tokio::spawn(boot::migrate_until_ready(state.clone()));
     tokio::spawn(versions::refresh_regularly(state.clone()));
+    tokio::spawn(schedules::run_regularly(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
@@ -117,6 +119,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/{id}", delete(tasks::delete))
         .route("/api/v1/tasks/{id}/start", post(tasks::start))
+        .route("/api/v1/schedules", get(schedules::list).post(schedules::create))
+        .route("/api/v1/schedules/{id}", patch(schedules::patch).delete(schedules::delete))
+        .route("/api/v1/schedules/{id}/run", post(schedules::run_now))
+        .route("/api/v1/schedule-runs", get(schedules::runs))
         .route("/api/v1/issues", get(issues::list))
         .route("/api/v1/projects/{id}/issues/{number}/workspace", post(issues::start_workspace))
         .route("/api/v1/imports", get(imports::list).post(imports::create))

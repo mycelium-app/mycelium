@@ -37,6 +37,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls", 
 openidconnect = { version = "4.0.1", features = ["reqwest"] }
 url = "2.5.8"
 semver = "1.0.28"
+croner = "4.0.2"
 toml = "1.1.8"
 dirs = "7.0.0"
 portable-pty = "0.9.0"

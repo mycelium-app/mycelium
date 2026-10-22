@@ -20,6 +20,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/logins/{login_id}",
     "POST /api/v1/conversations",
     "POST /api/v1/tasks/{id}/start",
+    "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
     "PATCH /api/v1/conversations/{id}",
     "POST /api/v1/conversations/{id}/opened",
@@ -52,6 +53,9 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/projects",
     "POST /api/v1/tasks",
     "DELETE /api/v1/tasks/{id}",
+    "POST /api/v1/schedules",
+    "PATCH /api/v1/schedules/{id}",
+    "DELETE /api/v1/schedules/{id}",
     "POST /api/v1/mcp",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
@@ -527,6 +531,21 @@ async fn starting_a_task_streams_its_conversation() {
 
     let streamed = conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
     assert_eq!(streamed.title, "Tidy");
+
+    link.expect_start_session().await;
+}
+
+#[tokio::test]
+async fn running_a_schedule_streams_its_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let (_, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "prompt": "Tidy", "cron": "0 6 * * 1", "each_run": "new"}))).await;
+
+    let (_, run) = server.user.json(server.user.post(&format!("/api/v1/schedules/{}/run", schedule["id"].as_str().unwrap()))).await;
+    let id: Uuid = run["conversation_id"].as_str().unwrap().parse().unwrap();
+
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
 
     link.expect_start_session().await;
 }

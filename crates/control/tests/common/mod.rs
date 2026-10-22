@@ -293,6 +293,7 @@ impl Server {
             release_url: "http://127.0.0.1:1/latest".into(),
             npm_registry_url: "http://127.0.0.1:1".into(),
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
+            scheduler_tick: mycelium_control::SCHEDULER_TICK,
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

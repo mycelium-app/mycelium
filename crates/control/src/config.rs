@@ -5,6 +5,7 @@ use std::time::Duration;
 
 pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
 pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
+pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -64,6 +65,7 @@ pub struct Config {
     pub release_url: String,
     pub npm_registry_url: String,
     pub version_check_interval: Duration,
+    pub scheduler_tick: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -125,6 +127,7 @@ impl Config {
             release_url: optional(lookup, "MYCELIUM_RELEASE_URL").unwrap_or_else(|| "https://github.com/mycelium-app/mycelium/releases/latest/download/latest".into()),
             npm_registry_url: optional(lookup, "MYCELIUM_NPM_REGISTRY_URL").unwrap_or_else(|| "https://registry.npmjs.org".into()),
             version_check_interval: VERSION_CHECK_INTERVAL,
+            scheduler_tick: SCHEDULER_TICK,
         })
     }
 }
