@@ -176,6 +176,114 @@ async fn a_permission_request_asks_for_input_and_the_answer_goes_back_to_the_age
     assert_eq!((status, body["error"].as_str()), (409, Some("already_resolved")));
 }
 
+async fn waiting_for_permission(server: &Server, link: &mut NodeLink) -> Uuid {
+    let id = started_conversation(server, link, Some("Delete the build folder")).await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::PermissionRequest {
+        conversation_id: id,
+        seq: 5,
+        request_id: "req-1".into(),
+        request: json!({"options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]}),
+    })
+    .await;
+
+    common::eventually("the conversation to wait for input", || async { (status_of(server, id).await == "input").then_some(()) }).await;
+
+    id
+}
+
+async fn answer_permission(server: &Server, id: Uuid) -> (u16, serde_json::Value) {
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": "req-1", "option_id": "allow"}))).await
+}
+
+#[tokio::test]
+async fn answering_a_permission_the_turn_already_ended_without_does_not_resume_the_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = waiting_for_permission(&server, &mut link).await;
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "cancelled".into() }).await;
+    link.barrier(id, 7).await;
+    assert_eq!(status_of(&server, id).await, "review");
+
+    let (status, body) = answer_permission(&server, id).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("already_resolved")));
+    assert_eq!(status_of(&server, id).await, "review");
+}
+
+#[tokio::test]
+async fn answering_a_permission_on_a_failed_conversation_leaves_it_failed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = waiting_for_permission(&server, &mut link).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 6, message: "agent exited with code 1".into() }).await;
+    common::eventually("the conversation to fail", || async { (status_of(&server, id).await == "failed").then_some(()) }).await;
+
+    let (status, body) = answer_permission(&server, id).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("session_failed")));
+    assert_eq!(status_of(&server, id).await, "failed");
+}
+
+#[tokio::test]
+async fn a_session_started_replayed_on_reconnect_keeps_the_mode_and_model_the_person_chose() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let started = |link_id: Uuid| NodeToControl::SessionStarted {
+        conversation_id: link_id,
+        acp_session_id: "acp-1".into(),
+        modes: Some(json!({"currentModeId": "default"})),
+        models: Some(json!({"currentModelId": "sonnet"})),
+        config_options: None,
+    };
+
+    link.send(started(id)).await;
+    common::eventually("the initial mode", || async { (server.conversation(id).await["mode"] == "default").then_some(()) }).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/config")).json(&json!({"mode": "plan", "model": "opus"}))).await;
+    assert_eq!(status, 204);
+
+    link.send(started(id)).await;
+    link.barrier(id, 1).await;
+
+    let conversation = server.conversation(id).await;
+    assert_eq!((conversation["mode"].as_str(), conversation["model"].as_str()), (Some("plan"), Some("opus")));
+}
+
+#[tokio::test]
+async fn a_send_now_whose_cancel_never_landed_does_not_release_the_queue_after_a_later_stop() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    let (prompt_id, _) = link.expect_prompt().await;
+    link.send(NodeToControl::PromptReceived { conversation_id: id, prompt_id }).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/{urgent}/send-now"))).await;
+    assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
+
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![(id, 2)]).await;
+    returned.expect_ack().await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+    assert_eq!(status, 204);
+    assert_eq!(returned.next().await, ControlToNode::Cancel { conversation_id: id });
+
+    returned.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into() }).await;
+    returned.barrier(id, 4).await;
+
+    assert_eq!(status_of(&server, id).await, "review");
+    assert_eq!(queue(&server, id).await.len(), 1);
+}
+
 #[tokio::test]
 async fn a_prompt_sent_while_a_turn_runs_is_queued_and_sent_when_the_turn_ends() {
     let server = Server::start().await;

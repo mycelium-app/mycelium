@@ -25,6 +25,10 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         config_options: Option<Value>,
     },
+    PromptReceived {
+        conversation_id: Uuid,
+        prompt_id: Uuid,
+    },
     AcpUpdate {
         conversation_id: Uuid,
         seq: i64,

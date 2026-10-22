@@ -155,7 +155,7 @@ Conversations:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished`. Clients reconnect and refetch.
 
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
@@ -178,6 +178,7 @@ Node to control plane:
 | type | fields |
 |---|---|
 | `hello` | `version, hostname, os, arch, agents: [{agent, version, available}], sessions: [{conversation_id, last_seq, live}]` (`live` is false for a session whose agent has exited) |
+| `prompt_received` | `conversation_id, prompt_id` (sent once the prompt is written to the keeper) |
 | `session_started` | `conversation_id, acp_session_id, modes?, models?, config_options?` |
 | `acp_update` | `conversation_id, seq, update` |
 | `permission_request` | `conversation_id, seq, request_id, request` |
@@ -207,6 +208,10 @@ Control plane to node:
 | `transcript_ack` | `path, bytes` |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
+
+The control plane keeps every sent `prompt` as unacknowledged until `prompt_received` arrives with its `prompt_id` (or the turn ends or the session fails). After a `hello`, it sends again the unacknowledged prompts of sessions the node reports live, and forgets those of sessions it does not. The node ignores a `prompt_id` it has already received. A `session_started` for the `acp_session_id` the conversation already holds sets mode and model only where they are empty.
+
+An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
 
 On `hello` the control plane marks every `working` or `input` conversation on that node that has no live session as `failed`, with an `error` event. A prompt for a conversation whose session is not live is preceded by `start_session` with `resume` set to its `acp_session_id`. Journal `seq` values keep increasing across a resume: the node continues from the end of the previous journal.
 

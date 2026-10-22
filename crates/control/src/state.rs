@@ -34,16 +34,27 @@ pub struct LoginOwner {
     pub user_id: Uuid,
 }
 
+#[derive(Debug, Clone)]
+pub struct UnacknowledgedPrompt {
+    pub node_id: Uuid,
+    pub conversation_id: Uuid,
+    pub prompt_id: Uuid,
+    pub text: String,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
-    send_now: Mutex<HashSet<Uuid>>,
+    send_now: Mutex<HashMap<Uuid, Uuid>>,
+    unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
 }
 
 impl Hub {
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {
         let connection_id = Uuid::new_v4();
+        self.forget_send_now_on(node_id);
+
         if let Ok(mut nodes) = self.nodes.lock() {
             nodes.insert(node_id, NodeConnection { connection_id, sender, sessions: HashSet::new(), greeted: false });
         }
@@ -58,6 +69,8 @@ impl Hub {
 
         if nodes.get(&node_id).is_some_and(|connection| connection.connection_id == connection_id) {
             nodes.remove(&node_id);
+            drop(nodes);
+            self.forget_send_now_on(node_id);
 
             return true;
         }
@@ -69,6 +82,8 @@ impl Hub {
         if let Ok(mut nodes) = self.nodes.lock() {
             nodes.remove(&node_id);
         }
+
+        self.forget_send_now_on(node_id);
     }
 
     pub fn is_online(&self, node_id: Uuid) -> bool {
@@ -128,14 +143,48 @@ impl Hub {
         }
     }
 
-    pub fn expect_send_now(&self, conversation_id: Uuid) {
+    pub fn expect_send_now(&self, conversation_id: Uuid, node_id: Uuid) {
         if let Ok(mut send_now) = self.send_now.lock() {
-            send_now.insert(conversation_id);
+            send_now.insert(conversation_id, node_id);
         }
     }
 
     pub fn take_send_now(&self, conversation_id: Uuid) -> bool {
-        self.send_now.lock().is_ok_and(|mut send_now| send_now.remove(&conversation_id))
+        self.send_now.lock().is_ok_and(|mut send_now| send_now.remove(&conversation_id).is_some())
+    }
+
+    fn forget_send_now_on(&self, node_id: Uuid) {
+        if let Ok(mut send_now) = self.send_now.lock() {
+            send_now.retain(|_, node| *node != node_id);
+        }
+    }
+
+    pub fn await_prompt_acknowledgement(&self, prompt: UnacknowledgedPrompt) {
+        if let Ok(mut unacknowledged) = self.unacknowledged.lock() {
+            unacknowledged.push(prompt);
+        }
+    }
+
+    pub fn acknowledge_prompt(&self, node_id: Uuid, conversation_id: Uuid, prompt_id: Uuid) {
+        if let Ok(mut unacknowledged) = self.unacknowledged.lock() {
+            unacknowledged.retain(|prompt| !(prompt.node_id == node_id && prompt.conversation_id == conversation_id && prompt.prompt_id == prompt_id));
+        }
+    }
+
+    pub fn forget_prompts_of(&self, conversation_id: Uuid) {
+        if let Ok(mut unacknowledged) = self.unacknowledged.lock() {
+            unacknowledged.retain(|prompt| prompt.conversation_id != conversation_id);
+        }
+    }
+
+    pub fn unacknowledged_prompts_on(&self, node_id: Uuid, live: &HashSet<Uuid>) -> Vec<UnacknowledgedPrompt> {
+        let Ok(mut unacknowledged) = self.unacknowledged.lock() else {
+            return Vec::new();
+        };
+
+        unacknowledged.retain(|prompt| prompt.node_id != node_id || live.contains(&prompt.conversation_id));
+
+        unacknowledged.iter().filter(|prompt| prompt.node_id == node_id).cloned().collect()
     }
 }
 
