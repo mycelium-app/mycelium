@@ -59,8 +59,10 @@ result arrives as a turn the agent starts with no prompt in flight, and `session
 every running workflow. Background tasks behave the same way. `/clear`, `/cost`, `/login` and the
 terminal-only commands are removed, and the automatic "while you were away" recap is never sent.
 So the client reads `session/update` and `session/request_permission` at any time, not only during
-a prompt; ACP is the default; and a conversation that leans on workflows or long background work
-runs in tmux. ACP v2, still a draft, adds agent-started turns and background state.
+a prompt. Workflow progress does not depend on ACP: Claude Code journals each workflow run to
+`subagents/workflows/<run>/journal.jsonl` beside the transcript, and the node daemon follows that
+file the way it follows transcripts, so the client draws every phase and agent live. Stopping one
+workflow still means cancelling the turn until ACP grows a per-task stop. ACP v2, still a draft, adds agent-started turns and background state.
 
 **Keeper.** An ACP agent is a child of whoever spawned it over stdio, so a daemon restart would kill
 every running turn. Each ACP session therefore runs under a small keeper process that:
@@ -356,12 +358,12 @@ Nix builds of Rust are cheap.
 Each stage ships alone and is useful without the next.
 
 1. **Run and steer** (the MVP): control plane with OIDC sign-in; node daemon joined by script,
-   Nix or NixOS; ACP sessions under a keeper and tmux sessions beside them; the conversation list by
+   Nix or NixOS; ACP sessions under a keeper, ACP only; live workflow progress; the conversation list by
    status, thread and composer (mode, model, effort, queue, stop); per-node agent logins; the
    transcript copy; rename, archive and past conversations; web and desktop clients.
 2. **Many machines**: moving idle conversations and worktrees, the git hub and per-node branch
    views, node settings, drain and revoke, managed AGENTS.md with group layers, history search
-   with ctx.
+   with ctx, and tmux sessions for the full terminal app.
 3. **Everywhere**: phone and iPad clients, pairing by QR code, shared memory with group scopes,
    the details panel, Zed over ACP.
 4. **Hands off**: goals, schedules, ticket integrations, diff walkthroughs, recaps for every agent.
