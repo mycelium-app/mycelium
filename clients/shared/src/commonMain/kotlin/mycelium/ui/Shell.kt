@@ -24,8 +24,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -61,7 +62,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -127,7 +127,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
                 Modifier
                     .fillMaxHeight()
                     .requiredWidth(Tokens.Space.S2)
-                    .pointerHoverIcon(PointerIcon.Hand)
+                    .pointerHoverIcon(HorizontalResizeIcon)
                     .draggable(rememberDraggableState { delta -> resize(sidebarWidth + with(density) { delta.toDp() }) }, Orientation.Horizontal)
                     .onKeyEvent { event ->
                         val step = when (event.key) {
@@ -251,19 +251,21 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
 
         Hairline()
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
-            Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
+            item(key = "label") {
+                Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+            }
 
             for (section in sections) {
-                SidebarSectionView(
-                    section = section,
-                    selectedId = (route as? Route.Chat)?.id,
-                    nodes = state.nodes,
-                    onOpen = { onRoute(Route.Chat(it)) },
-                )
+                item(key = "section-${section.status}") {
+                    SectionHeading(section)
+                }
+
+                items(section.rows, key = { it.id }) { row ->
+                    ConversationRow(row, state.nodes[row.nodeId], selected = row.id == (route as? Route.Chat)?.id, onClick = { onRoute(Route.Chat(row.id)) })
+                }
             }
         }
-
 
         Hairline()
 
@@ -300,28 +302,18 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
 }
 
 @Composable
-private fun SidebarSectionView(
-    section: SidebarSection,
-    selectedId: String?,
-    nodes: Map<String, NodeSummary>,
-    onOpen: (String) -> Unit,
-) {
-    Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.S2)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = rowHeight())
-                .padding(horizontal = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatusGlyph(section.status, Tokens.Size.IconMd)
-            Label(section.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
-        }
-
-        for (row in section.rows) {
-            ConversationRow(row, nodes[row.nodeId], selected = row.id == selectedId, onClick = { onOpen(row.id) })
-        }
+private fun SectionHeading(section: SidebarSection) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Tokens.Space.S2)
+            .heightIn(min = rowHeight())
+            .padding(horizontal = Tokens.Space.S2),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusGlyph(section.status, Tokens.Size.IconMd)
+        Label(section.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
     }
 }
 

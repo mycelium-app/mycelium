@@ -9,8 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import mycelium.state.projectName
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -120,12 +121,14 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         val found = hits
 
         if (query.isNotBlank() && found != null) {
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 if (found.isEmpty()) {
-                    Label("No conversations match that search.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                    item(key = "empty") {
+                        Label("No conversations match that search.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                    }
                 }
 
-                for (hit in found) {
+                items(found, key = { it.conversationId }) { hit ->
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -154,16 +157,20 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
             Label(searchProblem.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), color = colors.textMuted)
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             if (!touch) {
-                TableRow(header = true, "Conversation", "Agent", "Node", "Last active", "")
+                item(key = "columns") {
+                    TableRow(header = true, "Conversation", "Project", "Agent", "Node", "Last active", "")
+                }
             }
 
             if (rows.isEmpty()) {
-                Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                item(key = "empty") {
+                    Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                }
             }
 
-            for (row in rows) {
+            items(rows, key = { it.id }) { row ->
                 val isArchived = row.archivedAt != null
 
                 Row(
@@ -191,7 +198,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
                         if (touch) {
                             Label(
-                                listOf(agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                                listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
                                 style = Tokens.Type.Meta,
                                 color = colors.textMuted,
                                 maxLines = 1,
@@ -200,6 +207,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                     }
 
                     if (!touch) {
+                        Label(projectName(row.cwd), Modifier.weight(1.4f), color = colors.textMuted, maxLines = 1)
                         Label(agentName(row.agent), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
                         Label(state.nodes[row.nodeId]?.name.orEmpty(), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
                         Label(relativeTime(row.updatedAt), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
@@ -231,7 +239,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 @Composable
 private fun TableRow(header: Boolean, vararg cells: String) {
     val colors = MyTheme.colors
-    val weights = listOf(3f, 1.2f, 1.2f, 1f, 1f)
+    val weights = listOf(3f, 1.4f, 1.2f, 1.2f, 1f, 1f)
 
     Column(Modifier.fillMaxWidth()) {
         Row(
