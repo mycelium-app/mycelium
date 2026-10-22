@@ -46,9 +46,7 @@ import mycelium.api.NodeSummary
 import mycelium.state.AppState
 import mycelium.state.SidebarSection
 import mycelium.state.Store
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.heading
 import mycelium.api.ConversationStatus
 import mycelium.state.projectName
@@ -360,21 +358,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.Top,
     ) {
-        Box(Modifier.padding(top = Tokens.Space.S0_5)) {
-            Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
-
-            statusDotColour(row.status)?.let { dot ->
-                Box(
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5)
-                        .size(Tokens.Size.Dot + Tokens.Space.S0_5)
-                        .background(colors.bgPanel, RoundedCornerShape(Tokens.Radius.Full))
-                        .padding(Tokens.Space.S0_5 / 2)
-                        .background(dot, RoundedCornerShape(Tokens.Radius.Full)),
-                )
-            }
-        }
+        Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd, Modifier.padding(top = Tokens.Space.S0_5))
 
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -394,18 +378,6 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun statusDotColour(status: ConversationStatus): Color? {
-    val colors = MyTheme.colors
-
-    return when (status) {
-        ConversationStatus.Working -> colors.statusWorking
-        ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
-        ConversationStatus.Failed -> colors.statusFailed
-        ConversationStatus.Done -> null
     }
 }
 
