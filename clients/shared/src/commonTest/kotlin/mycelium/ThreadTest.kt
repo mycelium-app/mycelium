@@ -25,6 +25,21 @@ private fun chunk(seq: Long, text: String) =
 
 class ThreadTest {
     @Test
+    fun aCommandNamedOnlyByALaterUpdateShowsTheCommandAndItsUnfencedOutput() {
+        val thread = buildThread(
+            listOf(
+                update(1, """{"sessionUpdate":"tool_call","toolCallId":"t1","title":"Terminal","kind":"execute","status":"pending","rawInput":{}}"""),
+                update(2, """{"sessionUpdate":"tool_call_update","toolCallId":"t1","title":"op whoami","rawInput":{"command":"op whoami"}}"""),
+                update(3, """{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"```console\nconnection reset\n```"}}]}"""),
+            ),
+        )
+        val call = assertIs<ThreadItem.ToolCall>(thread.single())
+
+        assertEquals("op whoami", call.argument)
+        assertEquals("connection reset", call.output)
+    }
+
+    @Test
     fun consecutiveAgentChunksBecomeOneMessage() {
         val thread = buildThread(listOf(chunk(1, "Pinned "), chunk(2, "the version.")))
 

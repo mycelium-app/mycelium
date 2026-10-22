@@ -138,9 +138,13 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
     }
 
     val current = items[index] as ThreadItem.ToolCall
+    val title = update.string("title") ?: current.title
+    val argument = toolArgument(update, title)
+    val namesInput = argument != title || current.argument == current.title
 
     items[index] = current.copy(
-        title = update.string("title") ?: current.title,
+        title = title,
+        argument = if (namesInput) argument else current.argument,
         status = update.string("status")?.let(::toolStatus) ?: current.status,
         diff = diffFrom(update) ?: current.diff,
         output = outputFrom(update) ?: current.output,
@@ -183,7 +187,13 @@ private fun outputFrom(update: JsonObject): String? {
         .filter { it.string("type") == "content" }
         .mapNotNull { (it["content"] as? JsonObject)?.string("text") }
 
-    return texts.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    return texts.takeIf { it.isNotEmpty() }?.joinToString("\n") { unfenced(it) }
+}
+
+private fun unfenced(text: String): String {
+    val fence = Regex("^```[\\w-]*\n([\\s\\S]*?)\n?```\\s*$").find(text.trim()) ?: return text
+
+    return fence.groupValues[1]
 }
 
 private fun planEntries(update: JsonObject): List<PlanEntry> =
