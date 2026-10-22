@@ -5,10 +5,18 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.composeMultiplatform)
+    alias(libs.plugins.androidKmpLibrary)
 }
 
 kotlin {
     jvm()
+
+    android {
+        namespace = "mycelium.shared"
+        compileSdk = 37
+        minSdk = 26
+        buildToolsVersion = "37.0.0"
+    }
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
@@ -20,6 +28,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
+            implementation(libs.compose.ui.backhandler)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
             implementation(libs.ktor.client.content.negotiation)
@@ -33,6 +42,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         jvmMain.dependencies {
+            implementation(libs.ktor.client.cio)
+        }
+        androidMain.dependencies {
             implementation(libs.ktor.client.cio)
         }
         wasmJsMain.dependencies {

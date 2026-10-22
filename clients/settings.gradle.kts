@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "mycelium-clients"
 
-include(":shared", ":web", ":desktop")
+include(":shared", ":web", ":desktop", ":androidApp")
