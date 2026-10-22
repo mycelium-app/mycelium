@@ -1,7 +1,8 @@
-> **Claude wrote this project end to end**, starting with the design in
-> [`docs/DESIGN.md`](docs/DESIGN.md). Nothing is built yet. When it is, be most sceptical of moving
-> a conversation between machines: it snapshots uncommitted work, rewrites paths inside agent
-> transcripts and hands ownership from one node to another, and a mistake there loses work.
+> **Claude wrote this project end to end**, from the design in [`docs/DESIGN.md`](docs/DESIGN.md) to the
+> release. Be most sceptical of what happens when a connection drops: the node replays each agent's
+> journal to the control plane after a reconnect or a daemon restart, and a mistake in that replay
+> loses or duplicates part of a conversation. The end-to-end tests cover it against a fake agent, and
+> a real Claude Code session was checked once by hand.
 
 <div align="center">
 
