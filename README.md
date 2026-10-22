@@ -24,7 +24,7 @@ each machine runs the agents and dials in. You steer all of it from web, iOS or 
 | **Moves** | A conversation and its worktree move between machines while idle |
 | **History** | Every transcript copied centrally and searchable with ctx, even when its machine is off |
 | **Memory** | Shared findings every session can recall, on every machine |
-| **Config** | One AGENTS.md, skills and MCP config, pushed to every node |
+| **Config** | One AGENTS.md, skills and MCP config, pushed to every node, with a layer per group |
 | **Logins** | Claude and Codex logins per node, managed from any client |
 
 ## Status

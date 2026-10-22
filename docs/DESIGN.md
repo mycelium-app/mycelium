@@ -221,6 +221,36 @@ Today each machine needs `install.sh` and a `git pull` of agents-md. Instead:
 5. A running Claude session read CLAUDE.md when it started, so a change reaches new sessions only.
    The UI shows which sessions are on an older version.
 
+## Groups
+
+A group (`slop`, `work`, `stoat`, `homelab`) is a namespace. Each project belongs to exactly one,
+and the group carries its own agent instructions and its own memories, layered between the global
+ones and the project's:
+
+| Layer | Instructions | Memory |
+|---|---|---|
+| Global | agents-md's AGENTS.md | Findings true everywhere |
+| Group | The group's AGENTS.md | Findings true for that group's projects |
+| Project | The repo's own AGENTS.md or CLAUDE.md | |
+
+For example, `work` carries "when working with immich dependencies, keep the `@immich/ui` version in
+step with the one the `@acme-org/backups-*` packages use". A session in a `work` project sees it;
+a session in a `slop` project never does. The org guidelines (`slop/guidelines`) become the `slop`
+group's instructions rather than a per-project import.
+
+**Instructions** are delivered through the directory layout, so no repo is touched: projects live
+at `<projects root>/<group>/<project>` on each node, and the node writes the group's file beside
+them. Claude Code reads `CLAUDE.md` from every parent of its working directory, so
+`<projects root>/<group>/CLAUDE.md` is enough. Codex stops at the project root, marked by `.git`
+unless `project_root_markers` says otherwise (codex 0.163.0), so it never sees a file above the
+repo; for Codex the daemon has to add the group layer when it starts the session. Which Codex
+option does that without replacing the base instructions (`model_instructions_file` does) is
+unchecked.
+
+**Memory.** Every memory has a scope: global or one group. `recall` from a session returns global
+memories and its own group's. `remember` defaults to the session's group, so a finding about a work
+dependency stays in `work`; making it global is a deliberate step, the operator's from the UI.
+
 ## Cross-project tools
 
 orchestrator's MCP surface, made aware of nodes:
@@ -234,7 +264,7 @@ orchestrator's MCP surface, made aware of nodes:
 | `send_to_conversation` | Queued until idle, delivered over ACP or tmux; held while the node is offline |
 | `move_conversation`, `move_worktree` | The idle-only move above |
 | `ask_question`, `check_answer` | Answerable from any client |
-| `recall`, `remember` | Curated memory |
+| `recall`, `remember` | Curated memory, global or scoped to the session's group |
 | `search_history`, `show_history` | ctx over every node's transcripts |
 
 A skill file says when to use which, shipped to every node through the managed config.
@@ -282,9 +312,7 @@ Nix builds of Rust are cheap.
 1. **Fork Paseo or start fresh?** A fork brings the daemon, clients and status board on day one, in
    TypeScript; the control plane and keeper go on top.
 2. **Expo or Compose** for the clients.
-3. **What a group scopes.** A boundary for shared memory, tasks and permissions makes it a
-   namespace; a sidebar arrangement makes it a group.
+3. **What else a group scopes.** It scopes instructions and memory (see Groups). Whether tasks and
+   permissions stop at the group boundary too is open.
 4. **Which identity provider** runs in the homelab, and whether its groups drive permissions or the
    control plane keeps its own users.
-5. **The org guidelines** (`slop/guidelines`): managed like AGENTS.md, or still a per-project
-   import.
