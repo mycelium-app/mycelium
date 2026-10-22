@@ -23,10 +23,15 @@ private external fun openTab(url: String)
 @JsFun("(text) => { navigator.clipboard.writeText(text); }")
 private external fun writeClipboard(text: String)
 
+@JsFun("() => window.matchMedia('(prefers-reduced-motion: reduce)').matches")
+private external fun prefersReducedMotion(): Boolean
+
 private object WebPlatform : Platform {
     override val signsInThroughTheBrowser = true
 
     override val originUrl: String = pageOrigin()
+
+    override val reducedMotion: Boolean = prefersReducedMotion()
 
     override fun loadConnection(): Connection? = null
 

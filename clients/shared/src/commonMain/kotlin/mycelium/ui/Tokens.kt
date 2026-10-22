@@ -11,6 +11,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import mycelium.resources.Res
+import mycelium.resources.ibmplexmono_medium
+import mycelium.resources.ibmplexmono_regular
+import mycelium.resources.ibmplexsans_medium
+import mycelium.resources.ibmplexsans_regular
+import mycelium.resources.ibmplexsans_semibold
+import org.jetbrains.compose.resources.Font
 
 data class Palette(
     val bgContent: Color,
@@ -158,6 +165,25 @@ object Tokens {
     }
 }
 
+data class Fonts(val sans: FontFamily, val mono: FontFamily)
+
+val LocalFonts = staticCompositionLocalOf { Fonts(FontFamily.SansSerif, FontFamily.Monospace) }
+
+val LocalKeyboardNavigation = staticCompositionLocalOf { true }
+
+val LocalReducedMotion = staticCompositionLocalOf { false }
+
+@Composable
+fun TextStyle.themed(): TextStyle {
+    val fonts = LocalFonts.current
+
+    return when (fontFamily) {
+        FontFamily.SansSerif -> copy(fontFamily = fonts.sans)
+        FontFamily.Monospace -> copy(fontFamily = fonts.mono)
+        else -> this
+    }
+}
+
 val LocalOpenList = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 val LocalTouch = staticCompositionLocalOf { false }
@@ -171,5 +197,17 @@ object MyTheme {
 
 @Composable
 fun MyceliumTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalPalette provides if (dark) Tokens.Dark else Tokens.Light, content = content)
+    val fonts = Fonts(
+        sans = FontFamily(
+            Font(Res.font.ibmplexsans_regular, FontWeight.Normal),
+            Font(Res.font.ibmplexsans_medium, FontWeight.Medium),
+            Font(Res.font.ibmplexsans_semibold, FontWeight.SemiBold),
+        ),
+        mono = FontFamily(
+            Font(Res.font.ibmplexmono_regular, FontWeight.Normal),
+            Font(Res.font.ibmplexmono_medium, FontWeight.Medium),
+        ),
+    )
+
+    CompositionLocalProvider(LocalPalette provides if (dark) Tokens.Dark else Tokens.Light, LocalFonts provides fonts, content = content)
 }

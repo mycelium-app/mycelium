@@ -47,11 +47,11 @@ fun firstUrl(text: String): String? = Regex("https?://[^\\s\"'<>]+").find(text)?
 private val JoinMethods = listOf("Shell", "Nix", "NixOS or nix-darwin")
 
 fun joinCommands(method: String, controlPlane: String): List<Pair<String, String>> = when (method) {
-    "Shell" -> listOf("install" to "curl -fsSL $controlPlane/install.sh | sh", "join" to "mycelium node join $controlPlane")
-    "Nix" -> listOf("join" to "nix run github:mycelium-app/mycelium -- node join $controlPlane")
+    "Shell" -> listOf("Install" to "curl -fsSL $controlPlane/install.sh | sh", "Join" to "mycelium node join $controlPlane")
+    "Nix" -> listOf("Join" to "nix run github:mycelium-app/mycelium -- node join $controlPlane")
     else -> listOf(
-        "configuration" to "services.mycelium-node = {\n  enable = true;\n  controlPlane = \"$controlPlane\";\n};",
-        "join" to "sudo mycelium node join",
+        "Configuration" to "services.mycelium-node = {\n  enable = true;\n  controlPlane = \"$controlPlane\";\n};",
+        "Join" to "sudo mycelium node join",
     )
 }
 

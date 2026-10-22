@@ -29,6 +29,7 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
             implementation(libs.compose.ui.backhandler)
+            implementation(libs.compose.components.resources)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
             implementation(libs.ktor.client.content.negotiation)
@@ -51,4 +52,8 @@ kotlin {
             implementation(libs.ktor.client.js)
         }
     }
+}
+
+compose.resources {
+    packageOfResClass = "mycelium.resources"
 }

@@ -9,6 +9,8 @@ interface Platform {
 
     val originUrl: String?
 
+    val reducedMotion: Boolean get() = false
+
     fun loadConnection(): Connection?
 
     fun saveConnection(connection: Connection?)

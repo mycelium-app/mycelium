@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
@@ -45,8 +46,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -90,7 +93,7 @@ fun Label(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = if (maxLines == 1) TextOverflow.Ellipsis else TextOverflow.Clip,
 ) {
-    BasicText(text, modifier, style.copy(color = color), maxLines = maxLines, overflow = overflow)
+    BasicText(text, modifier, style.themed().copy(color = color), maxLines = maxLines, overflow = overflow)
 }
 
 @Composable
@@ -104,13 +107,14 @@ fun VerticalHairline(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun Modifier.focusRing(focused: Boolean, shape: Shape = RectangleShape, inside: Boolean = false): Modifier {
+fun Modifier.focusRing(focused: Boolean, shape: Shape = RectangleShape, inside: Boolean = false, always: Boolean = false): Modifier {
     val ring = MyTheme.colors.focus
+    val shown = focused && (always || LocalKeyboardNavigation.current)
 
     return drawWithContent {
         drawContent()
 
-        if (focused) {
+        if (shown) {
             val stroke = Tokens.Size.FocusRing.toPx()
             val grow = if (inside) -stroke / 2 else Tokens.Size.FocusOffset.toPx() + stroke / 2
             val corner = if (shape is RoundedCornerShape) shape.topStart.toPx(size, this) else 0f
@@ -144,7 +148,8 @@ fun Modifier.pressable(
     val colors = MyTheme.colors
     val background = when {
         selected -> colors.bgSelected
-        hovered -> colors.bgHover
+        hovered && base == Color.Transparent -> colors.bgHover
+        hovered -> lerp(base, colors.text, 0.12f)
         else -> base
     }
 
@@ -348,7 +353,7 @@ fun TextInput(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = base.copy(color = colors.text),
+            textStyle = base.themed().copy(color = colors.text),
             cursorBrush = SolidColor(colors.text),
             interactionSource = source,
             keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
@@ -356,7 +361,7 @@ fun TextInput(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
-                .focusRing(focused, ControlShape)
+                .focusRing(focused, ControlShape, always = true)
                 .background(colors.bgContent, ControlShape)
                 .border(Tokens.Size.Hairline, borderColor, ControlShape)
                 .semantics {
@@ -424,7 +429,9 @@ fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = 
         return
     }
 
-    Popup(onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+    val gap = with(LocalDensity.current) { Tokens.Space.S1.roundToPx() }
+
+    Popup(popupPositionProvider = remember(gap) { BelowAnchor(gap) }, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         Column(
             modifier
                 .width(width)
@@ -435,6 +442,17 @@ fun MenuPopup(onDismiss: () -> Unit, modifier: Modifier = Modifier, width: Dp = 
         ) {
             content()
         }
+    }
+}
+
+internal class BelowAnchor(private val gap: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val fitsRight = anchorBounds.left + popupContentSize.width <= windowSize.width
+        val x = if (fitsRight) anchorBounds.left else anchorBounds.right - popupContentSize.width
+        val fitsBelow = anchorBounds.bottom + gap + popupContentSize.height <= windowSize.height
+        val y = if (fitsBelow) anchorBounds.bottom + gap else anchorBounds.top - gap - popupContentSize.height
+
+        return IntOffset(x.coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width)), y.coerceAtLeast(0))
     }
 }
 
@@ -548,9 +566,9 @@ fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier
             .border(Tokens.Size.Hairline, colors.border, ControlShape)
             .padding(start = Tokens.Space.S3, top = Tokens.Space.S1_5, end = Tokens.Space.S1, bottom = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Label(text, Modifier.weight(1f), Tokens.Type.Code)
-        MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy the $label command", size = ButtonSize.Sm, muted = true)
+        Label(text, Modifier.weight(1f).horizontalScroll(rememberScrollState()), Tokens.Type.Code)
+        MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy the ${label.lowercase()} command", size = ButtonSize.Sm, muted = true)
     }
 }

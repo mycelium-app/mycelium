@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
@@ -130,7 +131,7 @@ private fun AgentMessage(text: String) {
                         Label(block.text, style = Tokens.Type.Code)
                     }
                 } else {
-                    BasicText(inlineMarkup(block.text, colors.text, colors.accent), style = Tokens.Type.Prose)
+                    BasicText(inlineMarkup(block.text, colors.text, colors.accent, LocalFonts.current.mono), style = Tokens.Type.Prose.themed())
                 }
             }
         }
@@ -155,7 +156,7 @@ fun splitBlocks(text: String): List<TextBlock> {
     return blocks
 }
 
-fun inlineMarkup(text: String, color: Color, codeColor: Color): AnnotatedString =
+fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily): AnnotatedString =
     buildAnnotatedString {
         withStyle(SpanStyle(color = color)) {
             var index = 0
@@ -175,7 +176,7 @@ fun inlineMarkup(text: String, color: Color, codeColor: Color): AnnotatedString 
                 val inner = text.substring(index + marker.length, close)
 
                 if (code) {
-                    withStyle(SpanStyle(color = codeColor, fontFamily = Tokens.Type.Code.fontFamily, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
+                    withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
                 } else {
                     withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(inner) }
                 }

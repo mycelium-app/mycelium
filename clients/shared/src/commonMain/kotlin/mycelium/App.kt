@@ -1,6 +1,8 @@
 package mycelium
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
@@ -18,6 +20,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Me
@@ -25,6 +35,8 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ApproveScreen
 import mycelium.ui.Label
+import mycelium.ui.LocalKeyboardNavigation
+import mycelium.ui.LocalReducedMotion
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
@@ -55,6 +67,8 @@ private fun AppContent(platform: Platform) {
     val saved = remember { platform.loadConnection() }
     var phase by remember { mutableStateOf<Phase>(Phase.Restoring) }
     var approveCode by remember { mutableStateOf(platform.approveCode()) }
+    var keyboardNavigation by remember { mutableStateOf(false) }
+    val root = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         val baseUrl = saved?.baseUrl ?: platform.originUrl
@@ -81,12 +95,36 @@ private fun AppContent(platform: Platform) {
     }
 
     BoxWithConstraints(
-        Modifier.fillMaxSize().background(MyTheme.colors.bgContent).windowInsetsPadding(WindowInsets.safeDrawing),
+        Modifier
+            .fillMaxSize()
+            .background(MyTheme.colors.bgContent)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    keyboardNavigation = true
+                }
+
+                false
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+
+                        if (event.type == PointerEventType.Press) {
+                            keyboardNavigation = false
+                        }
+                    }
+                }
+            }
+            .pointerInput(Unit) { detectTapGestures { root.requestFocus() } }
+            .focusRequester(root)
+            .focusable(),
         contentAlignment = Alignment.TopStart,
     ) {
         val phone = maxWidth < Tokens.Size.Compact
 
-        CompositionLocalProvider(LocalTouch provides phone) {
+        CompositionLocalProvider(LocalTouch provides phone, LocalKeyboardNavigation provides keyboardNavigation, LocalReducedMotion provides platform.reducedMotion) {
             when (val current = phase) {
                 Phase.Restoring -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Label("Loading", color = MyTheme.colors.textMuted)

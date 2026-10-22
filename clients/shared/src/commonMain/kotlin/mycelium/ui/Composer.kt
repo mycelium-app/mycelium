@@ -172,7 +172,7 @@ private fun MessageField(text: String, onTextChange: (String) -> Unit, source: M
     BasicTextField(
         value = text,
         onValueChange = onTextChange,
-        textStyle = Tokens.Type.Prose.copy(color = colors.text),
+        textStyle = Tokens.Type.Prose.themed().copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
         interactionSource = source,
         modifier = modifier

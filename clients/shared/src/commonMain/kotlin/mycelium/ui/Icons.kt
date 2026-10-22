@@ -1,10 +1,18 @@
 package mycelium.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -16,6 +24,7 @@ import androidx.compose.ui.unit.Dp
 
 private const val ViewBox = 24f
 private const val StrokeWidth = 1.5f
+private const val SpinMillis = 900
 
 private fun circle(cx: Float, cy: Float, r: Float) =
     "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 ${-2 * r} 0"
@@ -58,8 +67,16 @@ enum class MyIcon(vararg val paths: String) {
 @Composable
 fun Icon(icon: MyIcon, tint: Color, size: Dp = Tokens.Size.IconMd, modifier: Modifier = Modifier) {
     val parsed = remember(icon) { icon.paths.map { PathParser().parsePathString(it).toPath() } }
+    val spins = icon == MyIcon.Working && !LocalReducedMotion.current
+    val turned = if (spins) {
+        val angle by rememberInfiniteTransition().animateFloat(0f, 360f, infiniteRepeatable(tween(SpinMillis, easing = LinearEasing), RepeatMode.Restart))
 
-    Canvas(modifier.size(size)) {
+        modifier.rotate(angle)
+    } else {
+        modifier
+    }
+
+    Canvas(turned.size(size)) {
         val scale = this.size.width / ViewBox
 
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
