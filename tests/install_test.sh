@@ -151,6 +151,20 @@ unit_omits_agent_overrides_when_unset() {
   ! grep -q 'MYCELIUM_CLAUDE_ACP\|MYCELIUM_CODEX_ACP' "$work/home/.config/systemd/user/mycelium-node.service"
 }
 
+only_x86_64_linux_builds_are_downloaded() {
+  mkdir -p "$work/arm/bin"
+  cat >"$work/arm/bin/uname" <<'EOF2'
+#!/bin/sh
+case "$1" in
+  -m) echo aarch64 ;;
+  *) echo Linux ;;
+esac
+EOF2
+  chmod +x "$work/arm/bin/uname"
+  output="$(HOME="$work/home" PATH="$work/arm/bin:$work/bin:$PATH" MYCELIUM_S3="http://127.0.0.1:9/none" sh "$root/install.sh" 2>&1)" && return 1
+  echo "$output" | grep -q "Published builds are for Linux x86_64 only"
+}
+
 check "a local binary is installed, joined and started as a user service" local_binary_joins_and_starts_service
 check "without a control plane it installs and says how to join" without_control_plane_installs_but_does_not_start
 check "an existing credential is kept and no join runs" existing_credential_skips_join
@@ -160,5 +174,6 @@ check "a checksum mismatch installs nothing" checksum_mismatch_installs_nothing
 check "the unit PATH finds agents in the usual install locations" unit_path_finds_agents_where_people_install_them
 check "agent command overrides given at install time reach the unit" unit_passes_agent_overrides_through
 check "no agent override lines are written when none were given" unit_omits_agent_overrides_when_unset
+check "an aarch64 machine is told to build from source instead of downloading" only_x86_64_linux_builds_are_downloaded
 
 exit "$failures"

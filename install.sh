@@ -49,6 +49,7 @@ install_binary() {
     [ -f "$MYCELIUM_BINARY" ] || fail "MYCELIUM_BINARY points at $MYCELIUM_BINARY, which is not a file."
     source_binary="$MYCELIUM_BINARY"
   else
+    [ "$os-$arch" = "linux-x86_64" ] || fail "Published builds are for Linux x86_64 only. On $os $arch, build Mycelium from source or use the Nix package, then run this again with MYCELIUM_BINARY set to the binary."
     command -v curl >/dev/null 2>&1 || fail "curl is required. Install curl and run this again."
     command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required."
     tag="$(curl -fsSL "$S3/latest")" || fail "could not read $S3/latest. Check your network connection."

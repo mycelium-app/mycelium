@@ -313,7 +313,7 @@ with the design system's tokens and sizes, in dark and light:
 - `Dockerfile`: control plane image with the web client at `/usr/share/mycelium/web`, non-root uid
   1000, `dumb-init`, `ghcr.io/mycelium-app/mycelium`.
 - CI builds and publishes, never tests: on `main`, the image (`:sha` and `:latest`) and Pages; on a
-  `vX.Y.Z` tag, static binaries for linux x86_64 and aarch64, `.sha256` files, the `latest` marker
+  `vX.Y.Z` tag, a static binary for linux x86_64 and the Linux desktop packages, `.sha256` files, the `latest` marker
   and `install.sh` to `s3://artefacts/mycelium/`, and a GitLab release linking them.
 
 ## Tests (local only)
