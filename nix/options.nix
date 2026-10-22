@@ -19,4 +19,11 @@
     default = null;
     description = "File holding a single-use join token. When null the node joins with a device code.";
   };
+
+  path = lib.mkOption {
+    type = lib.types.listOf lib.types.package;
+    default = [ ];
+    example = lib.literalExpression "[ pkgs.claude-code pkgs.codex ]";
+    description = "Packages whose bin directories are added to the node's PATH, so it finds the agent commands (claude-agent-acp, codex-acp).";
+  };
 }

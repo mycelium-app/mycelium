@@ -69,7 +69,48 @@ install_binary() {
   fi
 }
 
+service_home() {
+  if [ "$scope" = system ] && [ "$service_user" != root ]; then
+    getent passwd "$service_user" 2>/dev/null | cut -d: -f6 || true
+  fi
+}
+
+npm_global_bin() {
+  if command -v npm >/dev/null 2>&1; then
+    npm_prefix="$(npm prefix -g 2>/dev/null || true)"
+    if [ -n "$npm_prefix" ]; then
+      printf '%s' "$npm_prefix/bin:"
+    fi
+  fi
+}
+
+service_path() {
+  home="$(service_home)"
+  home="${home:-$HOME}"
+  printf '%s' "/usr/local/bin:/usr/bin:/bin:$home/.local/bin:$(npm_global_bin)$home/.nix-profile/bin:/etc/profiles/per-user/$service_user/bin:/run/current-system/sw/bin"
+}
+
+service_agent_plist_environment() {
+  if [ -n "${MYCELIUM_CLAUDE_ACP:-}" ]; then
+    echo "<key>MYCELIUM_CLAUDE_ACP</key><string>$MYCELIUM_CLAUDE_ACP</string>"
+  fi
+  if [ -n "${MYCELIUM_CODEX_ACP:-}" ]; then
+    echo "<key>MYCELIUM_CODEX_ACP</key><string>$MYCELIUM_CODEX_ACP</string>"
+  fi
+}
+
+service_agent_environment() {
+  if [ -n "${MYCELIUM_CLAUDE_ACP:-}" ]; then
+    echo "Environment=\"MYCELIUM_CLAUDE_ACP=$MYCELIUM_CLAUDE_ACP\""
+  fi
+  if [ -n "${MYCELIUM_CODEX_ACP:-}" ]; then
+    echo "Environment=\"MYCELIUM_CODEX_ACP=$MYCELIUM_CODEX_ACP\""
+  fi
+}
+
 write_service() {
+  unit_path="$(service_path)"
+  agent_environment="$(service_agent_environment)"
   if [ "$os" = darwin ]; then
     [ "$scope" = user ] || fail "on macOS run this without sudo."
     mkdir -p "$(dirname "$plist")"
@@ -80,7 +121,7 @@ write_service() {
 <dict>
   <key>Label</key><string>app.mycelium.node</string>
   <key>ProgramArguments</key><array><string>$binary</string><string>node</string><string>run</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>EnvironmentVariables</key><dict>$(service_agent_plist_environment)<key>PATH</key><string>$HOME/.local/bin:$(npm_global_bin)/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
 </dict>
@@ -98,6 +139,8 @@ Wants=network-online.target
 [Service]
 User=$service_user
 Environment=MYCELIUM_NODE_CONFIG=$node_config
+Environment="PATH=$unit_path"
+$agent_environment
 ExecStart=$binary node run
 Restart=always
 RestartSec=3
@@ -115,6 +158,8 @@ After=network-online.target
 
 [Service]
 Environment=MYCELIUM_NODE_CONFIG=$node_config
+Environment="PATH=$unit_path"
+$agent_environment
 ExecStart=$binary node run
 Restart=always
 RestartSec=3

@@ -123,11 +123,42 @@ checksum_mismatch_installs_nothing() {
   grep -q 'checksum mismatch' "$work/err" && ! test -e "$work/home/.local/bin/mycelium"
 }
 
+unit_path_finds_agents_where_people_install_them() {
+  reset_home
+  mkdir -p "$work/npmbin"
+  printf '#!/bin/sh\necho /opt/npm-global\n' >"$work/npmbin/npm"
+  chmod +x "$work/npmbin/npm"
+  PATH="$work/npmbin:$PATH" MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
+  unit="$work/home/.config/systemd/user/mycelium-node.service"
+  grep -q '^Environment="PATH=/usr/local/bin:' "$unit" &&
+    grep -q ":$work/home/.local/bin:" "$unit" &&
+    grep -q ":/opt/npm-global/bin:" "$unit" &&
+    grep -q ":$work/home/.nix-profile/bin:" "$unit" &&
+    grep -q ":/run/current-system/sw/bin\"" "$unit"
+}
+
+unit_passes_agent_overrides_through() {
+  reset_home
+  MYCELIUM_CLAUDE_ACP=/opt/claude-acp MYCELIUM_CODEX_ACP=/opt/codex-acp MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
+  unit="$work/home/.config/systemd/user/mycelium-node.service"
+  grep -q '^Environment="MYCELIUM_CLAUDE_ACP=/opt/claude-acp"' "$unit" &&
+    grep -q '^Environment="MYCELIUM_CODEX_ACP=/opt/codex-acp"' "$unit"
+}
+
+unit_omits_agent_overrides_when_unset() {
+  reset_home
+  MYCELIUM_BINARY="$work/fake-mycelium" run_install https://control.example >/dev/null
+  ! grep -q 'MYCELIUM_CLAUDE_ACP\|MYCELIUM_CODEX_ACP' "$work/home/.config/systemd/user/mycelium-node.service"
+}
+
 check "a local binary is installed, joined and started as a user service" local_binary_joins_and_starts_service
 check "without a control plane it installs and says how to join" without_control_plane_installs_but_does_not_start
 check "an existing credential is kept and no join runs" existing_credential_skips_join
 check "a missing local binary is reported" missing_local_binary_is_reported
 check "the latest release is downloaded, verified and installed" download_verifies_and_installs_latest_release
 check "a checksum mismatch installs nothing" checksum_mismatch_installs_nothing
+check "the unit PATH finds agents in the usual install locations" unit_path_finds_agents_where_people_install_them
+check "agent command overrides given at install time reach the unit" unit_passes_agent_overrides_through
+check "no agent override lines are written when none were given" unit_omits_agent_overrides_when_unset
 
 exit "$failures"
