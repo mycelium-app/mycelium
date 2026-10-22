@@ -331,7 +331,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
                 shape = BlockShape,
                 description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}",
             )
-            .padding(start = Tokens.Space.S3, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
+            .padding(start = Tokens.Space.S2 + Tokens.Space.S3, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
