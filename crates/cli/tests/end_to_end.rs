@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -68,6 +69,89 @@ async fn create_database() -> Option<String> {
     let (base, _) = admin.rsplit_once('/').unwrap();
 
     Some(format!("{base}/{name}"))
+}
+
+struct LinkProxy {
+    address: std::net::SocketAddr,
+    swallow_downstream: Arc<AtomicBool>,
+    connections: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    accepting: tokio::task::JoinHandle<()>,
+}
+
+impl LinkProxy {
+    async fn start(upstream: std::net::SocketAddr) -> LinkProxy {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let swallow_downstream = Arc::new(AtomicBool::new(false));
+        let connections: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let accepting = {
+            let swallow = swallow_downstream.clone();
+            let connections = connections.clone();
+
+            tokio::spawn(async move {
+                while let Ok((mut client, _)) = listener.accept().await {
+                    let swallow = swallow.clone();
+                    let handle = tokio::spawn(async move {
+                        let Ok(mut server) = tokio::net::TcpStream::connect(upstream).await else {
+                            return;
+                        };
+                        let (mut client_read, mut client_write) = client.split();
+                        let (mut server_read, mut server_write) = server.split();
+                        let upstream_copy = tokio::io::copy(&mut client_read, &mut server_write);
+                        let downstream_copy = async {
+                            let mut buffer = [0u8; 8192];
+
+                            loop {
+                                let Ok(read) = tokio::io::AsyncReadExt::read(&mut server_read, &mut buffer).await else {
+                                    return;
+                                };
+
+                                if read == 0 {
+                                    return;
+                                }
+
+                                if swallow.load(Ordering::SeqCst) {
+                                    continue;
+                                }
+
+                                if tokio::io::AsyncWriteExt::write_all(&mut client_write, &buffer[..read]).await.is_err() {
+                                    return;
+                                }
+                            }
+                        };
+
+                        tokio::select! {
+                            _ = upstream_copy => {},
+                            _ = downstream_copy => {},
+                        }
+                    });
+
+                    connections.lock().unwrap().push(handle);
+                }
+            })
+        };
+
+        LinkProxy { address, swallow_downstream, connections, accepting }
+    }
+
+    fn swallow_what_the_control_plane_sends(&self) {
+        self.swallow_downstream.store(true, Ordering::SeqCst);
+    }
+
+    fn drop_every_connection(&self) {
+        self.swallow_downstream.store(false, Ordering::SeqCst);
+
+        for handle in self.connections.lock().unwrap().drain(..) {
+            handle.abort();
+        }
+    }
+}
+
+impl Drop for LinkProxy {
+    fn drop(&mut self) {
+        self.accepting.abort();
+        self.drop_every_connection();
+    }
 }
 
 struct Api {
@@ -399,5 +483,43 @@ async fn an_archived_conversation_survives_a_daemon_restart_and_resumes_when_res
 
     let events = api.events(conversation).await;
     assert!(events.iter().all(|event| event["kind"] != "error"), "the archived conversation was reported as failed: {events:?}");
+    daemon.kill().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_prompt_lost_with_the_link_arrives_exactly_once_after_reconnect() {
+    let Some(environment) = Environment::start().await else {
+        return;
+    };
+    let api = &environment.api;
+
+    environment.join_node().await;
+    let control_address: std::net::SocketAddr = api.base.trim_start_matches("http://").parse().unwrap();
+    let proxy = LinkProxy::start(control_address).await;
+    let config = std::fs::read_to_string(&environment.node_config).unwrap();
+    std::fs::write(&environment.node_config, config.replace(&api.base, &format!("http://{}", proxy.address))).unwrap();
+
+    let mut daemon = environment.run_daemon();
+    let node = environment.wait_for_node_with_claude().await;
+    let conversation = environment.start_conversation(node, "hello").await;
+    api.wait_for_status(conversation, "review").await;
+    api.wait_for_event_text(conversation, "three", 1).await;
+
+    proxy.swallow_what_the_control_plane_sends();
+    api.post(&format!("/api/v1/conversations/{conversation}/prompt"), json!({"text": "second"})).await;
+    api.wait_for_status(conversation, "working").await;
+    proxy.drop_every_connection();
+
+    api.wait_for_event_text(conversation, "three", 2).await;
+    api.wait_for_status(conversation, "review").await;
+
+    api.post(&format!("/api/v1/conversations/{conversation}/prompt"), json!({"text": "third"})).await;
+    api.wait_for_event_text(conversation, "three", 3).await;
+    api.wait_for_status(conversation, "review").await;
+
+    let events = api.events(conversation).await;
+    let turns = events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"].to_string().contains("\"one\"")).count();
+    assert_eq!(turns, 3, "the lost prompt ran more or less than once");
+
     daemon.kill().await.unwrap();
 }
