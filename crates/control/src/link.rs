@@ -5,12 +5,12 @@ use crate::state::AppState;
 use crate::store::{append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
-use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -41,6 +41,11 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
         tokio::select! {
             message = outgoing.recv() => {
                 let Some(message) = message else {
+                    if state.hub.is_replaced(node_id, connection_id) {
+                        let close = CloseFrame { code: REPLACED_CLOSE_CODE, reason: "replaced by a newer connection for this node".into() };
+                        let _ = sink.send(Message::Close(Some(close))).await;
+                    }
+
                     break;
                 };
                 let Ok(text) = serde_json::to_string(&message) else {
@@ -92,7 +97,7 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
 async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiResult<()> {
     match message {
         NodeToControl::Hello { version, hostname, os, arch, agents, sessions } => hello(state, node_id, version, hostname, os, arch, agents, sessions).await,
-        NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, .. } => session_started(state, node_id, conversation_id, acp_session_id, modes, models).await,
+        NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, config_options } => session_started(state, node_id, conversation_id, acp_session_id, modes, models, config_options).await,
         NodeToControl::PromptReceived { conversation_id, prompt_id } => {
             state.hub.acknowledge_prompt(node_id, conversation_id, prompt_id);
 
@@ -231,7 +236,7 @@ async fn fail_conversations_without_a_session(state: &AppState, node_id: Uuid, l
     Ok(())
 }
 
-async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>) -> ApiResult<()> {
+async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>, config_options: Option<Value>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let Some(before) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
         return Ok(());
@@ -239,17 +244,19 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
     let mode = modes.as_ref().and_then(|modes| modes["currentModeId"].as_str()).map(str::to_string);
     let model = models.as_ref().and_then(|models| models["currentModelId"].as_str()).map(str::to_string);
+    let options = json!({"modes": modes, "models": models, "config_options": config_options});
     let updated = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set
             mode = case when acp_session_id = $2 then coalesce(mode, $3) else coalesce($3, mode) end,
             model = case when acp_session_id = $2 then coalesce(model, $4) else coalesce($4, model) end,
-            acp_session_id = $2, updated_at = now() where id = $1 returning {}",
+            acp_session_id = $2, options = $5, updated_at = now() where id = $1 returning {}",
         crate::store::CONVERSATION_COLUMNS
     )))
     .bind(conversation_id)
     .bind(acp_session_id)
     .bind(mode)
     .bind(model)
+    .bind(options)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;

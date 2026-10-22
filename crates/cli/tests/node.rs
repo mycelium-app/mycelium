@@ -765,6 +765,15 @@ async fn a_prompt_is_acknowledged_once_it_is_written_to_the_agent() {
 
     let received = connection.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
     assert_eq!(received, NodeToControl::PromptReceived { conversation_id: conversation, prompt_id });
+
+    for _ in 0..500 {
+        if journalled_prompts(&fixture, conversation) > 0 {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
     assert_eq!(journalled_prompts(&fixture, conversation), 1);
 }
 

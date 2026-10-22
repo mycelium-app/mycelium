@@ -187,6 +187,16 @@ impl NodeLink {
         }
     }
 
+    pub async fn close_code(&mut self) -> Option<u16> {
+        loop {
+            match tokio::time::timeout(WAIT, self.socket.next()).await {
+                Ok(Some(Ok(Message::Close(frame)))) => return frame.map(|frame| u16::from(frame.code)),
+                Ok(Some(Ok(_))) => {}
+                _ => return None,
+            }
+        }
+    }
+
     pub async fn hello(&mut self, sessions: Vec<(Uuid, i64)>) {
         self.send(NodeToControl::Hello {
             version: "0.1.0".into(),

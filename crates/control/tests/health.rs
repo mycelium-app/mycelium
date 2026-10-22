@@ -172,7 +172,8 @@ async fn two_control_planes_booting_on_one_database_both_become_ready() {
     assert_eq!(second.anonymous().json(second.anonymous().get("/readyz")).await.0, 200);
 
     let applied = sqlx::query_scalar::<_, i64>("select count(*) from _sqlx_migrations").fetch_one(&first.pool).await.unwrap();
-    assert_eq!(applied, 2);
+    let shipped = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations")).unwrap().count();
+    assert_eq!(applied, shipped as i64);
 }
 
 #[tokio::test]

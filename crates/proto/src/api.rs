@@ -81,6 +81,11 @@ pub struct DrainRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RenameNodeRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartLoginRequest {
     pub agent: AgentId,
     pub method: String,

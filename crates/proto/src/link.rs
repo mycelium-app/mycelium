@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 
+pub const REPLACED_CLOSE_CODE: u16 = 4000;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeToControl {

@@ -179,7 +179,7 @@ async fn token_allowed(state: AppState, request: DeviceTokenRequest) -> ApiResul
                 let name = if suffix == 1 { base_name.clone() } else { format!("{base_name}-{suffix}") };
                 let inserted = sqlx::query(
                     "insert into nodes (id, name, hostname, os, arch, token_hash, created_by) values ($1, $2, $3, $4, $5, $6, $7)
-                     on conflict (name) do nothing",
+                     on conflict (name) where revoked_at is null do nothing",
                 )
                 .bind(id)
                 .bind(&name)

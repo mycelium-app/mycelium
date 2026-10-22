@@ -504,3 +504,13 @@ async fn a_prompt_acknowledged_by_another_node_does_not_count() {
 
     assert!(matches!(returned.next().await, ControlToNode::Prompt { .. }));
 }
+
+#[tokio::test]
+async fn a_second_connection_with_the_same_credential_closes_the_first_and_says_why() {
+    let server = Server::start().await;
+    let mut first = server.online_node("laptop").await;
+    let mut second = server.connect_node(first.id, &first.token.clone()).await;
+    second.hello(vec![]).await;
+
+    assert_eq!(first.close_code().await, Some(mycelium_proto::link::REPLACED_CLOSE_CODE));
+}

@@ -1,7 +1,7 @@
 use crate::daemon::Daemon;
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -53,6 +53,7 @@ impl Backoff {
 
 enum Ended {
     Revoked,
+    Replaced,
     Dropped,
 }
 
@@ -69,6 +70,10 @@ pub async fn run_link(daemon: Arc<Daemon>, mut outgoing: mpsc::UnboundedReceiver
                 daemon.forget_credential();
 
                 return Ok(());
+            }
+            Ok(Ended::Replaced) => {
+                tracing::error!("Another process connected as this node, so the control plane closed this connection. Stop the other `mycelium node run`, or revoke this node and join it again.");
+                established = false;
             }
             Ok(Ended::Dropped) => tracing::warn!("the control plane closed the connection"),
             Err(error) => tracing::warn!("cannot reach the control plane: {error:#}"),
@@ -135,6 +140,7 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
 
                         daemon.handle(message);
                     }
+                    Message::Close(Some(frame)) if u16::from(frame.code) == REPLACED_CLOSE_CODE => return Ok(Ended::Replaced),
                     Message::Close(_) => return Ok(Ended::Dropped),
                     _ => {}
                 }

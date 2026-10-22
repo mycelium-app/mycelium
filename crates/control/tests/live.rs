@@ -16,6 +16,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/device/{user_code}/deny",
     "DELETE /api/v1/nodes/{id}",
     "POST /api/v1/nodes/{id}/drain",
+    "PATCH /api/v1/nodes/{id}",
     "DELETE /api/v1/logins/{login_id}",
     "POST /api/v1/conversations",
     "PATCH /api/v1/conversations/{id}",
@@ -213,6 +214,18 @@ async fn a_node_connecting_greeting_reporting_logins_and_leaving_is_streamed() {
 
     drop(link);
     node_message(&mut stream, id, |node| !node.online).await;
+}
+
+#[tokio::test]
+async fn renaming_a_node_is_streamed() {
+    let server = Server::start().await;
+    let link = server.online_node("willow-3").await;
+    let mut stream = server.user.stream().await;
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/nodes/{}", link.id)).json(&json!({"name": "willow"}))).await;
+    assert_eq!(status, 204);
+
+    node_message(&mut stream, link.id, |node| node.name == "willow").await;
 }
 
 #[tokio::test]

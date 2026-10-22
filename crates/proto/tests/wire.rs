@@ -34,6 +34,7 @@ fn conversation() -> Conversation {
         acp_session_id: Some("s".into()),
         mode: None,
         model: Some("m".into()),
+        options: None,
         created_at: now(),
         updated_at: now(),
         archived_at: None,

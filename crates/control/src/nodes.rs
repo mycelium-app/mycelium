@@ -5,7 +5,7 @@ use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, StartLoginRequest, StartLoginResponse};
+use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, RenameNodeRequest, StartLoginRequest, StartLoginResponse};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
@@ -19,6 +19,29 @@ pub async fn drain(State(state): State<AppState>, _user: AuthUser, Path(id): Pat
 
     if updated.rows_affected() == 0 {
         return Err(ApiError::not_found("That node"));
+    }
+
+    publish_node(&state, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn rename(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<RenameNodeRequest>) -> ApiResult<StatusCode> {
+    let name = request.name.trim();
+
+    if name.is_empty() {
+        return Err(ApiError::bad_request("name_required", "Enter a name for this node."));
+    }
+
+    let updated = sqlx::query("update nodes set name = $2 where id = $1 and revoked_at is null").bind(id).bind(name).execute(&state.pool).await;
+
+    match updated {
+        Ok(done) if done.rows_affected() == 0 => return Err(ApiError::not_found("That node")),
+        Ok(_) => {}
+        Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => {
+            return Err(ApiError::conflict("name_taken", format!("Another node is already called {name}. Choose a different name.")));
+        }
+        Err(cause) => return Err(cause.into()),
     }
 
     publish_node(&state, id).await?;

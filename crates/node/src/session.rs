@@ -20,6 +20,8 @@ use uuid::Uuid;
 const KEEPER_SOCKET_ATTEMPTS: usize = 250;
 const KEEPER_SOCKET_RETRY: Duration = Duration::from_millis(20);
 
+const LONGEST_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 103 };
+
 #[derive(Debug, Clone)]
 pub struct Launch {
     pub keeper_binary: PathBuf,
@@ -484,6 +486,16 @@ async fn connect_socket(dir: &Path) -> Result<UnixStream> {
 }
 
 async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
+    let socket = socket_path(dir);
+
+    if socket.as_os_str().len() > LONGEST_SOCKET_PATH {
+        bail!(
+            "The keeper's socket path {} is {} bytes, and Unix sockets allow {LONGEST_SOCKET_PATH}. Set state_dir in node.toml to a shorter directory, such as ~/.local/state/mycelium.",
+            socket.display(),
+            socket.as_os_str().len()
+        );
+    }
+
     std::fs::create_dir_all(dir)?;
     let _ = std::fs::remove_file(acked_path(dir));
     let _ = std::fs::remove_file(snapshot_path(dir));
@@ -512,4 +524,20 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_state_directory_too_deep_for_a_unix_socket_is_refused_with_the_fix() {
+        let dir = PathBuf::from("/tmp").join("d".repeat(120));
+        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], cwd: PathBuf::from("/"), resume: None };
+
+        let error = launch_keeper(&dir, &launch).await.unwrap_err().to_string();
+
+        assert!(error.contains("Set state_dir in node.toml to a shorter directory"), "{error}");
+        assert!(!dir.exists());
+    }
 }

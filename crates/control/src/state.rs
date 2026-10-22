@@ -56,8 +56,10 @@ impl Hub {
         let connection_id = Uuid::new_v4();
         self.forget_send_now_on(node_id);
 
-        if let Ok(mut nodes) = self.nodes.lock() {
-            nodes.insert(node_id, NodeConnection { connection_id, sender, sessions: HashSet::new(), greeted: false });
+        let replaced = self.nodes.lock().ok().and_then(|mut nodes| nodes.insert(node_id, NodeConnection { connection_id, sender, sessions: HashSet::new(), greeted: false }));
+
+        if replaced.is_some() {
+            tracing::warn!("node {node_id} connected again, so its earlier connection is closed. If this repeats, two processes are running with the same node credential.");
         }
 
         connection_id
@@ -85,6 +87,10 @@ impl Hub {
         }
 
         self.forget_send_now_on(node_id);
+    }
+
+    pub fn is_replaced(&self, node_id: Uuid, connection_id: Uuid) -> bool {
+        self.nodes.lock().ok().and_then(|nodes| nodes.get(&node_id).map(|connection| connection.connection_id != connection_id)).unwrap_or(false)
     }
 
     pub fn is_online(&self, node_id: Uuid) -> bool {
