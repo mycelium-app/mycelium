@@ -35,6 +35,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
             while (true) {
                 try {
                     refresh()
+                    state.value.openedConversations.forEach { open(it) }
                     mutableState.update { it.copy(connected = true) }
                     retry = FirstRetryMillis
                     api.stream().collect { message -> mutableState.update { reduce(it, message) } }
