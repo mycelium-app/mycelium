@@ -39,6 +39,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 
+    is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId)
+
     is StreamMessage.LoginOutput ->
         state.copy(loginOutput = state.loginOutput + (message.loginId to state.loginOutput[message.loginId].orEmpty() + message.data))
 

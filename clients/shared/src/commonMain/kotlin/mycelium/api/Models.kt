@@ -222,6 +222,8 @@ sealed interface StreamMessage {
 
     data class NodeChanged(val node: NodeSummary) : StreamMessage
 
+    data class NodeRemoved(val nodeId: String) : StreamMessage
+
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
 
     data class LoginFinished(val loginId: String, val ok: Boolean) : StreamMessage
@@ -242,6 +244,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
             ),
         )
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
+        "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "login_output" -> StreamMessage.LoginOutput(element.requireString("login_id"), element.requireString("data"))
         "login_finished" -> StreamMessage.LoginFinished(
             loginId = element.requireString("login_id"),

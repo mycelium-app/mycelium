@@ -138,6 +138,19 @@ class StateTest {
     }
 
     @Test
+    fun aRevokedNodeFrameRemovesTheNodeFromState() {
+        val node = mycelium.api.NodeSummary(
+            id = "n1", name = "box", hostname = "box", os = "linux", arch = "x86_64", version = "0.1.0", online = true, draining = false,
+        )
+        val state = reduce(AppState(), StreamMessage.NodeChanged(node))
+
+        val message = parseStreamMessage("""{"type":"node_removed","node_id":"n1"}""")
+        val after = reduce(state, assertIs<StreamMessage.NodeRemoved>(message))
+
+        assertEquals(emptyMap(), after.nodes)
+    }
+
+    @Test
     fun relativeTimeShortensToTheLargestUnit() {
         val now = Instant.parse("2026-10-22T12:00:00Z")
 
