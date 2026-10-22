@@ -325,7 +325,8 @@ Nix builds of Rust are cheap.
   ordered walkthrough with the key change marked; a conversation started from a GitHub issue, pull
   request or Linear ticket with the whole thread attached; a goal the agent works towards turn
   after turn until a separate check says it is done or stuck, with a token budget and Pause; and
-  scheduled tasks that start a conversation on their own.
+  scheduled tasks that start a conversation on their own. A schedule either starts a new conversation
+  each run or reuses one, so a recurring job can see what its earlier runs did.
 - **Zed Delta and DeltaDB**: operation-level history between commits, each edit anchored to the
   conversation that made it; terminal Claude Code sessions shown as threads over ACP; work handed
   to a cloud runner. Private beta with no licence or self-hosting found, so ideas only. `ctx blame`
