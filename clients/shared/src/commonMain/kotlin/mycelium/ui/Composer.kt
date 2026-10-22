@@ -2,7 +2,6 @@ package mycelium.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +47,10 @@ import mycelium.state.SlashCommand
 import mycelium.state.mentionAt
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import mycelium.api.Conversation
 import mycelium.api.QueuedPrompt
 
@@ -99,7 +102,6 @@ fun Composer(
     val colors = MyTheme.colors
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
     val source = remember { MutableInteractionSource() }
-    val focused by source.collectIsFocusedAsState()
     val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }
     val settings = options.settings.filterNot { (it.category == "mode" && options.modes.isNotEmpty()) || (it.category == "model" && options.models.isNotEmpty()) }
     val query = text.text.takeIf { it.startsWith("/") && it.none(Char::isWhitespace) }?.drop(1)
@@ -188,7 +190,7 @@ fun Composer(
                     .fillMaxWidth()
                     .shadow(Tokens.Space.S2, shape, ambientColor = colors.shadowFloat, spotColor = colors.shadowFloat)
                     .background(colors.bgRaised, shape)
-                    .border(Tokens.Size.Hairline, if (focused) colors.focus else colors.border, shape)
+                    .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
                 if (queue.isNotEmpty()) {
@@ -215,17 +217,22 @@ fun Composer(
             .background(colors.bgContent)
             .drawBehind {
                 val line = Tokens.Size.Hairline.toPx()
-                drawRect(if (focused) colors.focus else colors.border, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, line))
+                drawRect(colors.border, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, line))
             },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val measured = Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth()
+
         if (queue.isNotEmpty()) {
-            QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
+            Box(measured) {
+                QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
+            }
         }
 
-        field(Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
+        field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
 
         Row(
-            Modifier.fillMaxWidth().padding(start = Tokens.Space.S1, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
+            measured.padding(start = Tokens.Space.S2, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -290,7 +297,7 @@ private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit
         onClick = onSend,
         icon = MyIcon.Send,
         description = if (working) "Queue message" else "Send",
-        variant = ButtonVariant.Primary,
+        muted = true,
     )
 }
 
@@ -357,19 +364,33 @@ private fun CompletionPopup(title: String, completions: List<Completion>, highli
 
     Popup(popupPositionProvider = remember(gap) { BelowAnchor(gap) }, properties = PopupProperties(focusable = false)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Column(
+            val list = rememberLazyListState()
+
+            LaunchedEffect(highlighted) {
+                val target = highlighted + 1
+                val layout = list.layoutInfo
+                val first = layout.visibleItemsInfo.firstOrNull()?.index ?: return@LaunchedEffect
+                val lastWhole = layout.visibleItemsInfo.lastOrNull { it.offset + it.size <= layout.viewportEndOffset }?.index ?: first
+
+                when {
+                    target <= first -> list.scrollToItem(if (highlighted == 0) 0 else target)
+                    target > lastWhole -> list.scrollToItem(first + target - lastWhole)
+                }
+            }
+
+            LazyColumn(
                 Modifier
                     .width(Tokens.Size.Menu)
                     .heightIn(max = Tokens.Size.MenuList)
                     .background(colors.bgRaised, FloatShape)
                     .border(Tokens.Size.Hairline, colors.border, FloatShape)
-                    .verticalScroll(rememberScrollState())
                     .padding(Tokens.Space.S1)
                     .semantics { contentDescription = title },
+                state = list,
             ) {
-                MenuLabel(title)
+                item { MenuLabel(title) }
 
-                completions.forEachIndexed { index, completion ->
+                itemsIndexed(completions) { index, completion ->
                     Box(
                         Modifier
                             .fillMaxWidth()

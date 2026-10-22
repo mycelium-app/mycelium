@@ -53,7 +53,7 @@ enum class MyIcon(vararg val paths: String) {
     Archive(rect(3f, 4f, 18f, 5f, 1f), "M5 9v10h14V9M10 13h4"),
     More("M5 12h.01M12 12h.01M19 12h.01"),
     Menu("M4 6h16M4 12h16M4 18h16"),
-    Send("M12 19V5M5 12l7-7 7 7"),
+    Send("M22 2 11 13", "M22 2 15 22l-4-9-9-4Z"),
     Stop(rect(6f, 6f, 12f, 12f, 2f)),
     Pencil("M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"),
     Close("M18 6 6 18M6 6l12 12"),
@@ -75,14 +75,16 @@ enum class MyIcon(vararg val paths: String) {
     Settings(circle(12f, 12f, 3f), "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"),
 }
 
-val NodeIcons = mapOf(
-    "server" to MyIcon.Server,
-    "laptop" to MyIcon.Laptop,
-    "desktop" to MyIcon.Desktop,
-    "cloud" to MyIcon.Cloud,
-    "terminal" to MyIcon.Terminal,
-    "chip" to MyIcon.Chip,
-)
+val NodeIcons: Map<String, MyIcon> by lazy {
+    mapOf(
+        "server" to MyIcon.Server,
+        "laptop" to MyIcon.Laptop,
+        "desktop" to MyIcon.Desktop,
+        "cloud" to MyIcon.Cloud,
+        "terminal" to MyIcon.Terminal,
+        "chip" to MyIcon.Chip,
+    )
+}
 
 fun nodeIcon(node: NodeSummary): MyIcon = NodeIcons[node.icon] ?: if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server
 
