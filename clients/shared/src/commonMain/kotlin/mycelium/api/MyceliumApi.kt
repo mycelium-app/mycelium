@@ -196,6 +196,12 @@ class MyceliumApi(
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 
+    suspend fun issues(query: String = ""): Issues =
+        call("/issues") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
+
+    suspend fun startWorkspace(projectId: String, number: Long, agent: String): Conversation =
+        call("/projects/$projectId/issues/$number/workspace") { client.post(it) { authorise(); json(StartWorkspaceRequest(agent)) } }.body()
+
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 
     suspend fun startImport(request: ImportRequest): ImportResult =

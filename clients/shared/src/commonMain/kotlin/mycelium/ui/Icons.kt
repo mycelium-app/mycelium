@@ -68,6 +68,7 @@ enum class MyIcon(vararg val paths: String) {
     Agent(rect(3f, 11f, 18f, 10f, 2f), circle(12f, 5f, 2f), "M12 7v4M8 16h.01M16 16h.01"),
     Folder("M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"),
     Forge("M3 7h18l-2 10H5Z", "M9 7V4h6v3"),
+    Issue(circle(12f, 12f, 9f), circle(12f, 12f, 1.5f)),
     Mode("M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"),
     Sliders("M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0", circle(16f, 6f, 2f), circle(8f, 12f, 2f), circle(18f, 18f, 2f)),
     Logout("M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"),

@@ -199,6 +199,23 @@ data class Worktree(
     @SerialName("issue_number") val issueNumber: Long? = null,
     @SerialName("created_at") val createdAt: String,
 )
+
+@Serializable
+data class Issue(
+    @SerialName("forge_id") val forgeId: String,
+    val repository: String,
+    val number: Long,
+    val title: String,
+    val url: String,
+    val body: String? = null,
+)
+
+@Serializable
+data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
+
+@Serializable
+data class StartWorkspaceRequest(val agent: String)
+
 @Serializable
 data class Repository(
     @SerialName("forge_id") val forgeId: String,
@@ -279,6 +296,7 @@ data class CreateConversationRequest(
     val agent: String,
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
+    val branch: String? = null,
     val title: String? = null,
     val prompt: String? = null,
 )
@@ -296,7 +314,6 @@ data class PatchQueueRequest(val text: String)
 data class PermissionAnswer(
     @SerialName("request_id") val requestId: String,
     @SerialName("option_id") val optionId: String,
-    val branch: String? = null,
 )
 
 @Serializable
