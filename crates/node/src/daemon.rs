@@ -1,6 +1,6 @@
 use crate::acp::Command;
 use crate::agents::{detect_agents, login_command, login_state};
-use crate::config::{NodeConfig, agent_command, config_path};
+use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
@@ -311,7 +311,14 @@ impl Daemon {
             return;
         }
 
-        let launch = Launch { keeper_binary: self.options.keeper_binary.clone(), agent_command, cwd: folder, resume };
+        let launch = Launch {
+            keeper_binary: self.options.keeper_binary.clone(),
+            agent_command,
+            agent_env: agent_env(agent),
+            mcp_server: self.config.mcp_server(conversation_id),
+            cwd: folder,
+            resume,
+        };
         let spec = SessionSpec { conversation_id, dir: self.session_dir(conversation_id), launch: Some(launch) };
         let handle = spawn_session(spec, self.out.clone());
         if let Ok(mut sessions) = self.sessions.lock() {

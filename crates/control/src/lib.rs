@@ -5,6 +5,8 @@ mod conversations;
 mod device;
 mod error;
 mod link;
+mod mcp;
+mod memories;
 mod nodes;
 mod prompts;
 mod rate_limit;
@@ -80,6 +82,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))
         .route("/api/v1/conversations/{id}/config", post(prompts::config))
+        .route("/api/v1/memories", get(memories::list))
+        .route("/api/v1/memories/{id}", patch(memories::update).delete(memories::delete))
+        .route("/api/v1/mcp", post(mcp::handle))
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))

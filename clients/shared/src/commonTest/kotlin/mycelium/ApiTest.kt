@@ -39,6 +39,9 @@ private fun apiWith(token: String? = null, handler: suspend MockRequestHandleSco
 private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n","agent":"claude","cwd":"/work/midden","title":"Bump","status":"working",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
+private const val MemoryJson = """{"id":"m1","text":"Staging listens on 5433","scopes":["global"],"created_by":"laptop/Fix login","conversation_id":null,
+"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+
 class ApiTest {
     @Test
     fun listsConversationsAndSendsTheArchivedFlag() = runTest {
@@ -172,6 +175,60 @@ class ApiTest {
             """{"kind":"client","label":"Desktop","hostname":"host","os":"linux","arch":"x86_64"}""",
             String(seen.single().body.toByteArray()),
         )
+    }
+
+    @Test
+    fun memoriesDecodeAndASearchSendsTheTrimmedQuery() = runTest {
+        val (api, seen) = apiWith { ok("[$MemoryJson]") }
+
+        val memory = api.memories(" staging ").single()
+
+        assertEquals("Staging listens on 5433", memory.text)
+        assertEquals(listOf("global"), memory.scopes)
+        assertEquals("laptop/Fix login", memory.createdBy)
+        assertEquals("https://mycelium.test/api/v1/memories?query=staging", seen.single().url.toString())
+    }
+
+    @Test
+    fun listingMemoriesWithoutAQuerySendsNone() = runTest {
+        val (api, seen) = apiWith { ok("[]") }
+
+        api.memories("  ")
+
+        assertEquals("https://mycelium.test/api/v1/memories", seen.single().url.toString())
+    }
+
+    @Test
+    fun editingAMemoryPatchesItsTextAndReturnsTheSavedMemory() = runTest {
+        val (api, seen) = apiWith { ok(MemoryJson) }
+
+        val saved = api.updateMemory("m1", "Staging listens on 5433")
+
+        assertEquals(HttpMethod.Patch, seen.single().method)
+        assertEquals("https://mycelium.test/api/v1/memories/m1", seen.single().url.toString())
+        assertEquals("""{"text":"Staging listens on 5433"}""", String(seen.single().body.toByteArray()))
+        assertEquals("m1", saved.id)
+    }
+
+    @Test
+    fun editingAMemoryToBlankTextFailsWithTheServersSentence() = runTest {
+        val (api, _) = apiWith {
+            respond("""{"error":"text_required","message":"Enter what to remember."}""", HttpStatusCode.BadRequest, JsonHeaders)
+        }
+
+        val failure = assertFailsWith<ApiException> { api.updateMemory("m1", "") }
+
+        assertEquals("Enter what to remember.", failure.message)
+    }
+
+    @Test
+    fun deletingAMemoryUsesTheDeleteVerb() = runTest {
+        val (api, seen) = apiWith { respond("", HttpStatusCode.NoContent) }
+
+        api.deleteMemory("m1")
+
+        assertEquals(HttpMethod.Delete, seen.single().method)
+        assertEquals("https://mycelium.test/api/v1/memories/m1", seen.single().url.toString())
     }
 
     @Test

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use mycelium_proto::conversation::AgentId;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -55,6 +56,20 @@ impl NodeConfig {
         self.state_dir.join("sessions")
     }
 
+    pub fn mcp_server(&self, conversation_id: Uuid) -> Value {
+        let base = self.control_plane.trim_end_matches('/');
+
+        json!({
+            "type": "http",
+            "name": "mycelium",
+            "url": format!("{base}/api/v1/mcp"),
+            "headers": [
+                {"name": "Authorization", "value": format!("Bearer {}", self.bearer_token())},
+                {"name": "X-Mycelium-Conversation", "value": conversation_id.to_string()},
+            ],
+        })
+    }
+
     pub fn connect_url(&self) -> Result<String> {
         let base = self.control_plane.trim_end_matches('/');
         let socket_base = if let Some(rest) = base.strip_prefix("https://") {
@@ -93,6 +108,13 @@ pub fn agent_command(agent: AgentId) -> Vec<String> {
     let value = std::env::var(variable).unwrap_or_else(|_| default.to_string());
 
     value.split_whitespace().map(str::to_string).collect()
+}
+
+pub fn agent_env(agent: AgentId) -> Vec<(String, String)> {
+    match agent {
+        AgentId::Claude => vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(), "1".to_string())],
+        AgentId::Codex => Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +172,30 @@ mod tests {
 
         config.token = "myc_node_abc".into();
         assert_eq!(config.bearer_token(), "myc_node_abc");
+    }
+
+    #[test]
+    fn the_mcp_server_points_at_the_control_plane_with_the_node_token_and_conversation() {
+        let server = sample().mcp_server(Uuid::from_u128(9));
+
+        assert_eq!(
+            server,
+            json!({
+                "type": "http",
+                "name": "mycelium",
+                "url": "https://mycelium.example/api/v1/mcp",
+                "headers": [
+                    {"name": "Authorization", "value": "Bearer myc_node_abc"},
+                    {"name": "X-Mycelium-Conversation", "value": "00000000-0000-0000-0000-000000000009"},
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn claude_runs_with_its_own_memory_off_and_codex_is_untouched() {
+        assert_eq!(agent_env(AgentId::Claude), vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(), "1".to_string())]);
+        assert!(agent_env(AgentId::Codex).is_empty());
     }
 
     #[test]

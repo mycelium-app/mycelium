@@ -145,6 +145,16 @@ class MyceliumApi(
         call("/logins/$loginId") { client.delete(it) { authorise() } }
     }
 
+    suspend fun memories(query: String = ""): List<Memory> =
+        call("/memories") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("query", query.trim()) } }.body()
+
+    suspend fun updateMemory(id: String, text: String): Memory =
+        call("/memories/$id") { client.patch(it) { authorise(); json(UpdateMemoryRequest(text)) } }.body()
+
+    suspend fun deleteMemory(id: String) {
+        call("/memories/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun conversations(archived: Boolean = false): List<Conversation> =
         call("/conversations") { client.get(it) { authorise(); parameter("archived", archived) } }.body()
 
