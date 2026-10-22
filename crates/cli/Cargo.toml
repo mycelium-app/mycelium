@@ -28,3 +28,5 @@ uuid.workspace = true
 tempfile.workspace = true
 assert_cmd.workspace = true
 predicates.workspace = true
+sqlx.workspace = true
+reqwest.workspace = true
