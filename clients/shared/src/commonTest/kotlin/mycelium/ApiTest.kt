@@ -211,6 +211,17 @@ class ApiTest {
     }
 
     @Test
+    fun editingAMemoryToBlankTextFailsWithTheServersSentence() = runTest {
+        val (api, _) = apiWith {
+            respond("""{"error":"text_required","message":"Enter what to remember."}""", HttpStatusCode.BadRequest, JsonHeaders)
+        }
+
+        val failure = assertFailsWith<ApiException> { api.updateMemory("m1", "") }
+
+        assertEquals("Enter what to remember.", failure.message)
+    }
+
+    @Test
     fun deletingAMemoryUsesTheDeleteVerb() = runTest {
         val (api, seen) = apiWith { respond("", HttpStatusCode.NoContent) }
 

@@ -79,11 +79,11 @@ fun MemoriesSettings(store: Store) {
                     if (editing == memory.id) {
                         fun save() {
                             val text = draft.trim()
-                            editing = null
 
                             store.act {
                                 val saved = store.api.updateMemory(memory.id, text)
                                 memories = memories.map { if (it.id == saved.id) saved else it }
+                                editing = null
                             }
                         }
 
