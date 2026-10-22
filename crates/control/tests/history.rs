@@ -276,6 +276,24 @@ async fn conversations_imported_before_archiving_are_archived_by_the_migration_a
 }
 
 #[tokio::test]
+async fn imports_continued_in_mycelium_are_restored_unless_archived_after_the_upgrade() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    for (session, title) in [("aaaa", "Continued"), ("bbbb", "Untouched"), ("cccc", "Archived later")] {
+        mirror(&server, link.id, &format!(".claude/projects/-work-app/{session}.jsonl"), &claude_transcript(session, title, "Reply.")).await;
+    }
+    import(&server, link.id, "claude").await;
+    sqlx::query("insert into events (conversation_id, seq, kind, payload, node_seq) select id, 100, 'turn_end', '{}', 1 from conversations where title in ('Continued', 'Archived later')").execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set archived_at = (select installed_on from _sqlx_migrations where version = 7) - interval '1 hour'").execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set archived_at = now() + interval '1 hour' where title = 'Archived later'").execute(&server.pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../migrations/0011_restore_continued_imports.sql")).execute(&server.pool).await.unwrap();
+
+    let archived: Vec<(String, bool)> = sqlx::query_as("select title, archived_at is not null from conversations order by title").fetch_all(&server.pool).await.unwrap();
+    assert_eq!(archived, vec![("Archived later".to_string(), true), ("Continued".to_string(), false), ("Untouched".to_string(), true)]);
+}
+
+#[tokio::test]
 async fn unreadable_transcripts_are_counted_as_skipped() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
