@@ -119,7 +119,7 @@ web:wasm:
   needs: []
   <<: *release_rule
   before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip libatomic1
     - *awscli
   script:
     - cd clients

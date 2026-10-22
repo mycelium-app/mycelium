@@ -116,5 +116,7 @@ Then run `mycelium node join https://mycelium.example.com` once on that machine 
 |---|---|
 | Web | Served by the control plane at its public URL |
 | Desktop (Linux) | `mycelium-desktop-linux-x86_64.deb` or `.tar.gz` under `https://github.com/mycelium-app/mycelium/releases/download/<release>/`, each with a `.sha256` |
+| Android | `mycelium-android.apk` under the same release folder, with a `.sha256`. Application id `slop.mycelium` |
+| Web, self-hosted | `mycelium-web.tar.gz` under the same release folder: the same client the control plane serves, as static files |
 
-The desktop client signs in with a device code, like a node.
+The desktop and Android clients sign in with a device code, like a node.
