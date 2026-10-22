@@ -155,6 +155,16 @@ class MyceliumApi(
         call("/memories/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
+
+    suspend fun startImport(request: ImportRequest): ImportResult =
+        call("/imports") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun indexing(): Indexing = call("/indexing") { client.get(it) { authorise() } }.body()
+
+    suspend fun search(query: String, limit: Int = 20): List<SearchHit> =
+        call("/search") { client.get(it) { authorise(); parameter("q", query); parameter("limit", limit) } }.body()
+
     suspend fun conversations(archived: Boolean = false): List<Conversation> =
         call("/conversations") { client.get(it) { authorise(); parameter("archived", archived) } }.body()
 

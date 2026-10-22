@@ -27,6 +27,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/queue/{queue_id}/send-now",
     "POST /api/v1/conversations/{id}/permission",
     "POST /api/v1/conversations/{id}/config",
+    "POST /api/v1/imports",
 ];
 
 const SILENT_ROUTES: &[&str] = &[

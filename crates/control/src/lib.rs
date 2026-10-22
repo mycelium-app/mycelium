@@ -4,12 +4,14 @@ mod config;
 mod conversations;
 mod device;
 mod error;
+mod imports;
 mod link;
 mod mcp;
 mod memories;
 mod nodes;
 mod prompts;
 mod rate_limit;
+mod search;
 mod state;
 mod store;
 mod stream;
@@ -85,6 +87,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/memories", get(memories::list))
         .route("/api/v1/memories/{id}", patch(memories::update).delete(memories::delete))
         .route("/api/v1/mcp", post(mcp::handle))
+        .route("/api/v1/imports", get(imports::list).post(imports::create))
+        .route("/api/v1/indexing", get(search::indexing))
+        .route("/api/v1/search", get(search::search))
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))

@@ -120,7 +120,36 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
     .fetch_optional(&mut **tx)
     .await?;
 
-    Ok(seq.map(|seq| Event { conversation_id, seq, kind, payload: payload.clone() }))
+    let Some(seq) = seq else {
+        return Ok(None);
+    };
+
+    match kind {
+        EventKind::UserMessage => {
+            let text = payload["text"].as_str().map(str::trim).filter(|text| !text.is_empty());
+
+            if let Some(text) = text {
+                sqlx::query("insert into search_entries (conversation_id, seq, text) values ($1, $2, $3) on conflict do nothing").bind(conversation_id).bind(seq).bind(text).execute(&mut **tx).await?;
+            }
+        }
+        EventKind::TurnEnd => {
+            sqlx::query(
+                "insert into search_entries (conversation_id, seq, text)
+                 select $1, $2, string_agg(payload->'update'->'content'->>'text', '' order by seq) from events
+                 where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+                   and seq < $2 and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message' and seq < $2), 0)
+                 having string_agg(payload->'update'->'content'->>'text', '') <> ''
+                 on conflict do nothing",
+            )
+            .bind(conversation_id)
+            .bind(seq)
+            .execute(&mut **tx)
+            .await?;
+        }
+        _ => {}
+    }
+
+    Ok(Some(Event { conversation_id, seq, kind, payload: payload.clone() }))
 }
 
 pub async fn highest_node_seq(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<i64> {

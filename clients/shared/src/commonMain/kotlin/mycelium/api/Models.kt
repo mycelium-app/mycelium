@@ -167,6 +167,35 @@ data class StartLoginResponse(@SerialName("login_id") val loginId: String)
 data class LoginInputRequest(val text: String)
 
 @Serializable
+data class ImportStatus(@SerialName("node_id") val nodeId: String, val agent: String, val found: Int, val imported: Int)
+
+@Serializable
+data class ImportRequest(@SerialName("node_id") val nodeId: String, val agent: String)
+
+@Serializable
+data class ImportResult(val imported: Int, val skipped: Int = 0)
+
+@Serializable
+data class NodeIndexing(
+    @SerialName("node_id") val nodeId: String,
+    val transcripts: Int,
+    val imported: Int,
+    val conversations: Int,
+)
+
+@Serializable
+data class Indexing(val conversations: Int, val entries: Int, val nodes: List<NodeIndexing> = emptyList())
+
+@Serializable
+data class SearchHit(
+    @SerialName("conversation_id") val conversationId: String,
+    val title: String,
+    @SerialName("node_id") val nodeId: String,
+    @SerialName("updated_at") val updatedAt: String,
+    val snippet: String,
+)
+
+@Serializable
 data class CreateConversationRequest(
     @SerialName("node_id") val nodeId: String,
     val agent: String,
