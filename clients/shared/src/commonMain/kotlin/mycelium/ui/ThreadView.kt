@@ -83,6 +83,17 @@ fun ThreadView(
         }
     }
 
+    val shown = remember { intArrayOf(items.size) }
+
+    LaunchedEffect(items.size) {
+        val added = items.size - shown[0]
+        shown[0] = items.size
+
+        if (added > 0 && state.firstVisibleItemIndex <= added && state.firstVisibleItemScrollOffset == 0) {
+            state.scrollToItem(0)
+        }
+    }
+
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().semantics { contentDescription = "Conversation" },
