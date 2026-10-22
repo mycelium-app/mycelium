@@ -1,3 +1,5 @@
+mod common;
+
 use futures_util::{SinkExt, StreamExt};
 use mycelium_node::config::NodeConfig;
 use mycelium_node::daemon::{DaemonOptions, run_daemon};
@@ -183,17 +185,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let Ok(sessions) = std::fs::read_dir(self.config.sessions_dir()) else {
-            return;
-        };
-
-        for session in sessions.flatten() {
-            if let Ok(mut socket) = std::os::unix::net::UnixStream::connect(session.path().join("keeper.sock")) {
-                let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
-                let _ = std::io::Write::write_all(&mut socket, b"{\"attach\":{\"after\":0}}\n{\"close\":true}\n");
-                let _ = std::io::Read::read_to_end(&mut socket, &mut Vec::new());
-            }
-        }
+        common::kill_keepers(&self.config.sessions_dir());
     }
 }
 
@@ -639,6 +631,25 @@ async fn a_node_the_control_plane_rejects_with_401_deletes_its_credential_and_ex
 
     assert_eq!(result, Ok(()));
     assert!(!fixture.config_file().exists());
+}
+
+#[test]
+fn killing_keepers_ends_their_whole_process_group() {
+    use std::os::unix::process::CommandExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let mut keeper = std::process::Command::new("sh").args(["-c", "sleep 300 & wait", "keeper", "--dir"]).arg(sessions.join("a")).process_group(0).spawn().unwrap();
+    let started = std::time::Instant::now();
+    while common::keeper_pids(&sessions).is_empty() {
+        assert!(started.elapsed() < WAIT, "the stand-in keeper never appeared");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    common::kill_keepers(&sessions);
+
+    assert!(!keeper.wait().unwrap().success());
+    assert!(common::keeper_pids(&sessions).is_empty());
 }
 
 #[tokio::test]

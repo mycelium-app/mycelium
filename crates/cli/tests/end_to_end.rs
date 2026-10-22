@@ -1,3 +1,5 @@
+mod common;
+
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use sqlx::{Connection, PgConnection};
@@ -40,11 +42,12 @@ fn mycelium() -> Command {
     command
 }
 
-fn keeper_is_running(node_home: &Path) -> bool {
-    let sessions = node_home.join("state").join("mycelium").join("sessions");
-    let output = std::process::Command::new("pgrep").args(["-f", &format!("keeper --dir {}", sessions.display())]).output().unwrap();
+fn sessions_dir(node_home: &Path) -> PathBuf {
+    node_home.join("state").join("mycelium").join("sessions")
+}
 
-    output.status.success()
+fn keeper_is_running(node_home: &Path) -> bool {
+    !common::keeper_pids(&sessions_dir(node_home)).is_empty()
 }
 
 fn fake_agent() -> PathBuf {
@@ -130,6 +133,12 @@ struct Environment {
     streamed: Arc<Mutex<Vec<Value>>>,
     _control: Child,
     _directory: TempDir,
+}
+
+impl Drop for Environment {
+    fn drop(&mut self) {
+        common::kill_keepers(&sessions_dir(&self.node_home));
+    }
 }
 
 impl Environment {
