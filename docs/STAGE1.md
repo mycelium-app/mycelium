@@ -118,7 +118,7 @@ JSON over `/api/v1`, errors as `{"error": "<code>", "message": "<GOV.UK-style se
 
 People:
 - `GET /auth/login?next=<path>`: OIDC authorisation code with PKCE, or the dev login.
-- `GET /auth/callback`: finishes OIDC, sets the cookie, redirects to `next`.
+- `GET /auth/callback`: finishes OIDC, sets the cookie, redirects to `next`. A provider refusal (`?error=`) or a missing code answers the JSON error (`sign_in_refused`, `sign_in_expired`).
 - `POST /auth/logout`.
 - `GET /api/v1/me` → `{id, email, name}`.
 

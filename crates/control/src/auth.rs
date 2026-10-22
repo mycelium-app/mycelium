@@ -183,18 +183,25 @@ async fn discover(state: &AppState, oidc: &OidcConfig) -> ApiResult<Value> {
 
 #[derive(Deserialize)]
 pub struct CallbackQuery {
-    code: String,
-    state: String,
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
 }
 
 pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(query): Query<CallbackQuery>) -> ApiResult<Response> {
     let oidc = state.config.oidc.as_ref().ok_or_else(|| ApiError::bad_request("oidc_disabled", "This server signs people in without an identity provider."))?;
     let expired = || ApiError::bad_request("sign_in_expired", "The sign-in took too long or was opened in another browser. Start again.");
 
+    if query.error.is_some() {
+        return Err(ApiError::bad_request("sign_in_refused", "The identity provider did not sign you in. Start the sign-in again, or ask the person who runs this control plane for access."));
+    }
+
+    let (code, query_state) = query.code.zip(query.state).ok_or_else(expired)?;
+
     let pending = cookie(&headers, OIDC_COOKIE).ok_or_else(expired)?;
     let pending: Value = URL_SAFE_NO_PAD.decode(pending).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(expired)?;
 
-    if pending["state"].as_str() != Some(query.state.as_str()) {
+    if pending["state"].as_str() != Some(query_state.as_str()) {
         return Err(expired());
     }
 
@@ -204,7 +211,7 @@ pub async fn callback(State(state): State<AppState>, headers: HeaderMap, Query(q
     let redirect_uri = format!("{}/auth/callback", state.config.public_url);
     let mut form = vec![
         ("grant_type", "authorization_code"),
-        ("code", query.code.as_str()),
+        ("code", code.as_str()),
         ("redirect_uri", redirect_uri.as_str()),
         ("client_id", oidc.client_id.as_str()),
         ("code_verifier", pending["verifier"].as_str().unwrap_or_default()),
