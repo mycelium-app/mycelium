@@ -274,9 +274,21 @@ impl Daemon {
             return;
         }
 
-        let folder = self.config.projects_root.join(cwd);
+        let requested = self.config.projects_root.join(cwd);
+        let (Ok(folder), Ok(root)) = (requested.canonicalize(), self.config.projects_root.canonicalize()) else {
+            self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
+
+            return;
+        };
+
         if !folder.is_dir() {
-            self.refuse(conversation_id, format!("The folder {} does not exist on this node.", folder.display()));
+            self.refuse(conversation_id, format!("The folder {} does not exist on this node.", requested.display()));
+
+            return;
+        }
+
+        if !folder.starts_with(&root) {
+            self.refuse(conversation_id, format!("The folder {} is outside {}. Choose a folder inside it.", requested.display(), self.config.projects_root.display()));
 
             return;
         }

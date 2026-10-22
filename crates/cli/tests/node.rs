@@ -424,6 +424,29 @@ async fn a_missing_folder_fails_the_session_with_a_reason() {
 }
 
 #[tokio::test]
+async fn a_folder_outside_the_projects_root_is_refused() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    std::fs::create_dir_all(fixture.root.path().join("secrets")).unwrap();
+    let outside_by_symlink = fixture.root.path().join("projects").join("link");
+    std::os::unix::fs::symlink(fixture.root.path().join("secrets"), &outside_by_symlink).unwrap();
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let escapes = [fixture.root.path().join("secrets").display().to_string(), "../secrets".to_string(), "link".to_string()];
+
+    for (index, cwd) in escapes.into_iter().enumerate() {
+        let conversation = Uuid::from_u128(100 + index as u128);
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: cwd.clone(), resume: None });
+
+        let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { conversation_id, .. } if *conversation_id == conversation)).await;
+        let NodeToControl::SessionFailed { message, .. } = failed else {
+            unreachable!();
+        };
+        assert!(message.contains("is outside"), "{cwd} was not refused: {message}");
+    }
+}
+
+#[tokio::test]
 async fn an_agent_that_is_not_installed_fails_the_session() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

@@ -156,7 +156,7 @@ impl Environment {
         let web_dir = directory.path().join("web");
         std::fs::create_dir_all(&web_dir).unwrap();
         let node_home = directory.path().join("node");
-        let projects = directory.path().join("project");
+        let projects = node_home.join("project");
         std::fs::create_dir_all(&node_home).unwrap();
         std::fs::create_dir_all(&projects).unwrap();
 
