@@ -167,6 +167,18 @@ data class StartLoginResponse(@SerialName("login_id") val loginId: String)
 data class LoginInputRequest(val text: String)
 
 @Serializable
+data class StartTerminalRequest(val cols: Int, val rows: Int)
+
+@Serializable
+data class StartTerminalResponse(@SerialName("terminal_id") val terminalId: String)
+
+@Serializable
+data class TerminalInputRequest(val data: String)
+
+@Serializable
+data class ResizeTerminalRequest(val cols: Int, val rows: Int)
+
+@Serializable
 data class ImportStatus(@SerialName("node_id") val nodeId: String, val agent: String, val found: Int, val imported: Int)
 
 @Serializable
@@ -275,6 +287,10 @@ sealed interface StreamMessage {
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
 
     data class LoginFinished(val loginId: String, val ok: Boolean) : StreamMessage
+
+    data class TerminalOutput(val terminalId: String, val data: String) : StreamMessage
+
+    data class TerminalExited(val terminalId: String) : StreamMessage
 }
 
 fun parseStreamMessage(text: String): StreamMessage? {
@@ -298,6 +314,8 @@ fun parseStreamMessage(text: String): StreamMessage? {
             loginId = element.requireString("login_id"),
             ok = (element["ok"] as? JsonPrimitive)?.contentOrNull == "true",
         )
+        "terminal_output" -> StreamMessage.TerminalOutput(element.requireString("terminal_id"), element.requireString("data"))
+        "terminal_exited" -> StreamMessage.TerminalExited(element.requireString("terminal_id"))
         else -> null
     }
 }

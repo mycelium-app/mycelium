@@ -8,6 +8,7 @@ import mycelium.api.StreamMessage
 import mycelium.api.MyceliumJson
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
+import mycelium.state.TerminalChunkLimit
 import mycelium.state.agentVersion
 import mycelium.state.loginMethodName
 import mycelium.state.reduce
@@ -113,6 +114,45 @@ class StateTest {
         }
 
         assertEquals("Open the link", state.loginOutput.getValue("l1"))
+    }
+
+    @Test
+    fun terminalOutputIsKeptPerTerminalAndOnlyUnseenChunksAreReturned() {
+        val state = listOf("a" to "t1", "b" to "t2", "c" to "t1").fold(AppState()) { acc, (data, id) ->
+            reduce(acc, StreamMessage.TerminalOutput(id, data))
+        }
+
+        assertEquals(listOf("a", "c"), state.terminalOutput.getValue("t1").chunks)
+        assertEquals(listOf("b"), state.terminalOutput.getValue("t2").chunks)
+        assertEquals(listOf("c"), state.terminalOutput.getValue("t1").unseen(1))
+        assertEquals(emptyList(), state.terminalOutput.getValue("t1").unseen(2))
+    }
+
+    @Test
+    fun terminalOutputIsBoundedAndKeepsTheNewestChunks() {
+        val state = (1..TerminalChunkLimit + 10).fold(AppState()) { acc, number ->
+            reduce(acc, StreamMessage.TerminalOutput("t1", "chunk$number"))
+        }
+        val feed = state.terminalOutput.getValue("t1")
+
+        assertEquals(TerminalChunkLimit, feed.chunks.size)
+        assertEquals(TerminalChunkLimit + 10, feed.received)
+        assertEquals("chunk${TerminalChunkLimit + 10}", feed.chunks.last())
+        assertEquals("chunk11", feed.chunks.first())
+        assertEquals(TerminalChunkLimit, feed.unseen(0).size)
+    }
+
+    @Test
+    fun anExitedTerminalIsRecorded() {
+        val state = reduce(AppState(), StreamMessage.TerminalExited("t1"))
+
+        assertEquals(setOf("t1"), state.exitedTerminals)
+    }
+
+    @Test
+    fun terminalFramesParse() {
+        assertEquals(StreamMessage.TerminalOutput("t1", "aGk="), parseStreamMessage("""{"type":"terminal_output","terminal_id":"t1","data":"aGk="}"""))
+        assertEquals(StreamMessage.TerminalExited("t1"), parseStreamMessage("""{"type":"terminal_exited","terminal_id":"t1"}"""))
     }
 
     @Test

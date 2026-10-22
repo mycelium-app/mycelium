@@ -2,6 +2,7 @@ package mycelium
 
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -19,6 +20,43 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class StoreTest {
+    @Test
+    fun typedTerminalInputReachesTheNodeInOrderAndIsBatched() = runTest {
+        val posted = MutableStateFlow(emptyList<String>())
+        val engine = MockEngine { request ->
+            posted.update { it + "${request.url.encodedPath} ${String(request.body.toByteArray())}" }
+
+            respond("", HttpStatusCode.NoContent)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.typeIntoTerminal("t1", "l")
+        store.typeIntoTerminal("t1", "s")
+        store.typeIntoTerminal("t1", "\r")
+        store.typeIntoTerminal("t2", "x")
+
+        withTimeout(5_000) { while (posted.value.size < 2) delay(10) }
+        val joined = posted.value.joinToString("|")
+
+        assertEquals("/api/v1/terminals/t1/input {\"data\":\"bHMN\"}|/api/v1/terminals/t2/input {\"data\":\"eA==\"}", joined)
+    }
+
+    @Test
+    fun stoppingATerminalTellsTheNodeToDetach() = runTest {
+        val requested = MutableStateFlow(emptyList<String>())
+        val engine = MockEngine { request ->
+            requested.update { it + "${request.method.value} ${request.url.encodedPath}" }
+
+            respond("", HttpStatusCode.NoContent)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.stopTerminal("t1")
+
+        withTimeout(5_000) { while (requested.value.isEmpty()) delay(10) }
+        assertEquals(listOf("DELETE /api/v1/terminals/t1"), requested.value)
+    }
+
     @Test
     fun openingAConversationFetchesItsWholeHistoryFromTheStart() = runTest {
         val requested = MutableStateFlow(emptyList<String>())

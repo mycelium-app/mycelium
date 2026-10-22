@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -17,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,7 +50,7 @@ import mycelium.state.statusSectionName
 fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
-    var inspectorOpen by remember { mutableStateOf(false) }
+    var panel by remember { mutableStateOf<SidePanel?>(null) }
     var nodeSheetOpen by remember { mutableStateOf(false) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
@@ -85,7 +87,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 node = node,
                 compact = compact,
                 onNode = { nodeSheetOpen = true },
-                onDetails = { inspectorOpen = true },
+                onDetails = { panel = SidePanel.Details },
+                onTerminal = { panel = SidePanel.Terminal },
                 onRename = { title -> store.rename(conversation, title) },
                 onArchive = {
                     store.act {
@@ -122,17 +125,23 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
 
         if (!compact) {
-            if (inspectorOpen) {
-                Inspector(conversation, node)
+            when (panel) {
+                SidePanel.Details -> Inspector(conversation, node)
+                SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
+                null -> Unit
             }
 
-            Rail(inspectorOpen) { inspectorOpen = !inspectorOpen }
+            Rail(panel) { chosen -> panel = if (panel == chosen) null else chosen }
         }
     }
 
-    if (compact && inspectorOpen) {
-        BottomSheet(onDismiss = { inspectorOpen = false }) {
-            InspectorContent(conversation, node)
+    if (compact && panel != null) {
+        BottomSheet(onDismiss = { panel = null }) {
+            when (panel) {
+                SidePanel.Details -> InspectorContent(conversation, node)
+                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet)) }
+                null -> Unit
+            }
         }
     }
 
@@ -148,6 +157,7 @@ private fun ConversationHeader(
     compact: Boolean,
     onNode: () -> Unit,
     onDetails: () -> Unit,
+    onTerminal: () -> Unit,
     onRename: (String) -> Unit,
     onArchive: () -> Unit,
 ) {
@@ -189,6 +199,7 @@ private fun ConversationHeader(
 
         if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
+            MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(
@@ -240,8 +251,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
     ConversationStatus.Done -> MyIcon.Check
 }
 
+private enum class SidePanel { Details, Terminal }
+
 @Composable
-private fun Rail(open: Boolean, onToggle: () -> Unit) {
+private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -251,8 +264,17 @@ private fun Rail(open: Boolean, onToggle: () -> Unit) {
             Modifier.width(Tokens.Size.Rail).fillMaxHeight().background(colors.bgChrome).padding(top = Tokens.Space.S1),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MyButton(onToggle, icon = MyIcon.Info, description = if (open) "Close details" else "Open details", muted = true, selected = open)
+            MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
+            MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
         }
+    }
+}
+
+@Composable
+private fun TerminalSide(store: Store, state: AppState, conversation: Conversation) {
+    Row(Modifier.fillMaxHeight()) {
+        VerticalHairline()
+        TerminalPanel(store, state, conversation, Modifier.width(Tokens.Size.Terminal).fillMaxHeight())
     }
 }
 

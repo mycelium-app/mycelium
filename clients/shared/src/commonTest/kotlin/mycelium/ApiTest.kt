@@ -44,6 +44,33 @@ private const val MemoryJson = """{"id":"m1","text":"Staging listens on 5433","s
 
 class ApiTest {
     @Test
+    fun startingATerminalPostsItsSizeAndReturnsTheId() = runTest {
+        val (api, seen) = apiWith { ok("""{"terminal_id":"t1"}""") }
+
+        val started = api.startTerminal("c1", 80, 24)
+
+        assertEquals("t1", started.terminalId)
+        assertEquals("/api/v1/conversations/c1/terminal", seen.single().url.encodedPath)
+        assertEquals("""{"cols":80,"rows":24}""", String(seen.single().body.toByteArray()))
+    }
+
+    @Test
+    fun terminalInputResizeAndStopUseTheTerminalRoutes() = runTest {
+        val (api, seen) = apiWith { respond("", HttpStatusCode.NoContent) }
+
+        api.terminalInput("t1", "bHM=")
+        api.resizeTerminal("t1", 100, 30)
+        api.stopTerminal("t1")
+
+        assertEquals(
+            listOf(HttpMethod.Post to "/api/v1/terminals/t1/input", HttpMethod.Post to "/api/v1/terminals/t1/resize", HttpMethod.Delete to "/api/v1/terminals/t1"),
+            seen.map { it.method to it.url.encodedPath },
+        )
+        assertEquals("""{"data":"bHM="}""", String(seen[0].body.toByteArray()))
+        assertEquals("""{"cols":100,"rows":30}""", String(seen[1].body.toByteArray()))
+    }
+
+    @Test
     fun listsConversationsAndSendsTheArchivedFlag() = runTest {
         val (api, seen) = apiWith { ok("[$ConversationJson]") }
 

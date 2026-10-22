@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,7 @@ import mycelium.api.MyceliumApi
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
+import kotlin.io.encoding.Base64
 
 private const val EventPageSize = 500
 private const val FirstRetryMillis = 1_000L
@@ -24,9 +26,35 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
+    private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
+
+    init {
+        scope.launch {
+            var carried: Pair<String, String>? = null
+
+            while (true) {
+                val (terminalId, first) = carried ?: typed.receive()
+                var text = first
+                carried = null
+
+                while (true) {
+                    val next = typed.tryReceive().getOrNull() ?: break
+
+                    if (next.first != terminalId) {
+                        carried = next
+                        break
+                    }
+
+                    text += next.second
+                }
+
+                guarded { api.terminalInput(terminalId, Base64.encode(text.encodeToByteArray())) }
+            }
+        }
+    }
 
     fun start() {
         if (streaming != null) {
@@ -111,6 +139,19 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         }
     }
 
+    fun typeIntoTerminal(terminalId: String, text: String) {
+        typed.trySend(terminalId to text)
+    }
+
+    fun stopTerminal(terminalId: String) {
+        val exited = terminalId in state.value.exitedTerminals
+        mutableState.update { it.copy(terminalOutput = it.terminalOutput - terminalId, exitedTerminals = it.exitedTerminals - terminalId) }
+
+        if (!exited) {
+            act { api.stopTerminal(terminalId) }
+        }
+    }
+
     fun rename(conversation: Conversation, title: String) {
         mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(title = title))) }
 
@@ -128,16 +169,19 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     fun act(block: suspend () -> Unit) {
         scope.launch {
             mutableProblem.value = null
+            guarded(block)
+        }
+    }
 
-            try {
-                block()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: ApiException) {
-                mutableProblem.value = failure.message
-            } catch (_: Exception) {
-                mutableProblem.value = "Could not reach the control plane. Check your connection and try again."
-            }
+    private suspend fun guarded(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: ApiException) {
+            mutableProblem.value = failure.message
+        } catch (_: Exception) {
+            mutableProblem.value = "Could not reach the control plane. Check your connection and try again."
         }
     }
 

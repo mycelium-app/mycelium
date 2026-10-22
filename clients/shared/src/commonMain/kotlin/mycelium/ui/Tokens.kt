@@ -137,6 +137,8 @@ object Tokens {
         val SidebarMin: Dp = 200.dp
         val SidebarMax: Dp = 480.dp
         val Inspector: Dp = 296.dp
+        val Terminal: Dp = 440.dp
+        val TerminalSheet: Dp = 360.dp
         val Touch: Dp = 44.dp
         val BarTouch: Dp = 52.dp
         val Rail: Dp = 44.dp

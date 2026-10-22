@@ -145,6 +145,21 @@ class MyceliumApi(
         call("/logins/$loginId") { client.delete(it) { authorise() } }
     }
 
+    suspend fun startTerminal(conversationId: String, cols: Int, rows: Int): StartTerminalResponse =
+        call("/conversations/$conversationId/terminal") { client.post(it) { authorise(); json(StartTerminalRequest(cols, rows)) } }.body()
+
+    suspend fun terminalInput(terminalId: String, data: String) {
+        call("/terminals/$terminalId/input") { client.post(it) { authorise(); json(TerminalInputRequest(data)) } }
+    }
+
+    suspend fun resizeTerminal(terminalId: String, cols: Int, rows: Int) {
+        call("/terminals/$terminalId/resize") { client.post(it) { authorise(); json(ResizeTerminalRequest(cols, rows)) } }
+    }
+
+    suspend fun stopTerminal(terminalId: String) {
+        call("/terminals/$terminalId") { client.delete(it) { authorise() } }
+    }
+
     suspend fun memories(query: String = ""): List<Memory> =
         call("/memories") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("query", query.trim()) } }.body()
 

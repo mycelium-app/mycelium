@@ -9,6 +9,14 @@ import mycelium.api.NodeSummary
 import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 
+const val TerminalChunkLimit = 1024
+
+data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyList()) {
+    fun unseen(consumed: Int): List<String> = chunks.takeLast((received - consumed).coerceIn(0, chunks.size))
+
+    fun with(chunk: String): TerminalFeed = TerminalFeed(received + 1, (chunks + chunk).takeLast(TerminalChunkLimit))
+}
+
 data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
@@ -17,6 +25,8 @@ data class AppState(
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
+    val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
+    val exitedTerminals: Set<String> = emptySet(),
     val sending: Map<String, List<String>> = emptyMap(),
     val connected: Boolean = false,
 )
@@ -59,6 +69,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.LoginFinished ->
         state.copy(finishedLogins = state.finishedLogins + (message.loginId to message.ok))
+
+    is StreamMessage.TerminalOutput ->
+        state.copy(terminalOutput = state.terminalOutput + (message.terminalId to (state.terminalOutput[message.terminalId] ?: TerminalFeed()).with(message.data)))
+
+    is StreamMessage.TerminalExited ->
+        state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
 }
 
 fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> =
