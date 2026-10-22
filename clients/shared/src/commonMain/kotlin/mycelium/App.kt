@@ -2,7 +2,9 @@ package mycelium
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
@@ -27,6 +29,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
@@ -117,7 +120,16 @@ private fun AppContent(platform: Platform) {
                     }
                 }
             }
-            .pointerInput(Unit) { detectTapGestures { root.requestFocus() } }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(pass = PointerEventPass.Final)
+                    val up = waitForUpOrCancellation(PointerEventPass.Final)
+
+                    if (down.type == PointerType.Mouse && up != null && !up.isConsumed) {
+                        root.requestFocus()
+                    }
+                }
+            }
             .focusRequester(root)
             .focusable(),
         contentAlignment = Alignment.TopStart,
