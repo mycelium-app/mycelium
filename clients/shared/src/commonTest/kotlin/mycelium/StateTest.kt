@@ -1,0 +1,140 @@
+package mycelium
+
+import kotlinx.serialization.json.JsonObject
+import mycelium.api.Conversation
+import mycelium.api.ConversationStatus
+import mycelium.api.Event
+import mycelium.api.StreamMessage
+import mycelium.api.parseStreamMessage
+import mycelium.state.AppState
+import mycelium.state.reduce
+import mycelium.state.relativeTime
+import mycelium.state.sidebarSections
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertNull
+import kotlin.time.Instant
+
+private fun conversation(
+    id: String,
+    status: ConversationStatus,
+    updatedAt: String = "2026-10-22T12:00:00Z",
+    archivedAt: String? = null,
+) = Conversation(
+    id = id,
+    owner = "u",
+    nodeId = "n",
+    agent = "claude",
+    cwd = "/home/me/midden",
+    title = "Title $id",
+    status = status,
+    createdAt = "2026-10-22T10:00:00Z",
+    updatedAt = updatedAt,
+    archivedAt = archivedAt,
+)
+
+class StateTest {
+    @Test
+    fun sidebarOrdersByNeedsInputThenFailedThenReviewThenWorkingThenDone() {
+        val sections = sidebarSections(
+            listOf(
+                conversation("done", ConversationStatus.Done),
+                conversation("working", ConversationStatus.Working),
+                conversation("review", ConversationStatus.Review),
+                conversation("failed", ConversationStatus.Failed),
+                conversation("input", ConversationStatus.Input),
+            ),
+        )
+
+        assertEquals(
+            listOf("Needs input", "Failed", "Ready to review", "Working", "Done"),
+            sections.map { it.name },
+        )
+    }
+
+    @Test
+    fun sidebarOmitsEmptySectionsAndArchivedConversations() {
+        val sections = sidebarSections(
+            listOf(
+                conversation("a", ConversationStatus.Working),
+                conversation("gone", ConversationStatus.Done, archivedAt = "2026-10-22T11:00:00Z"),
+            ),
+        )
+
+        assertEquals(listOf("Working"), sections.map { it.name })
+    }
+
+    @Test
+    fun rowsInASectionAreNewestFirst() {
+        val sections = sidebarSections(
+            listOf(
+                conversation("old", ConversationStatus.Working, "2026-10-22T09:00:00Z"),
+                conversation("new", ConversationStatus.Working, "2026-10-22T11:00:00Z"),
+            ),
+        )
+
+        assertEquals(listOf("new", "old"), sections.single().rows.map { it.id })
+    }
+
+    @Test
+    fun streamConversationReplacesTheRow() {
+        val before = AppState(conversations = mapOf("a" to conversation("a", ConversationStatus.Working)))
+        val after = reduce(before, StreamMessage.ConversationChanged(conversation("a", ConversationStatus.Input)))
+
+        assertEquals(ConversationStatus.Input, after.conversations.getValue("a").status)
+    }
+
+    @Test
+    fun replayedEventsAreNotDuplicated() {
+        val event = Event("a", 1, "user_message", JsonObject(emptyMap()))
+        val once = reduce(AppState(), StreamMessage.EventAppended(event))
+        val twice = reduce(once, StreamMessage.EventAppended(event))
+
+        assertEquals(1, twice.events.getValue("a").size)
+    }
+
+    @Test
+    fun loginOutputAccumulatesInOrder() {
+        val state = listOf("Open ", "the link").fold(AppState()) { acc, part ->
+            reduce(acc, StreamMessage.LoginOutput("l1", part))
+        }
+
+        assertEquals("Open the link", state.loginOutput.getValue("l1"))
+    }
+
+    @Test
+    fun streamFramesParseByTypeAndUnknownTypesAreIgnored() {
+        val login = parseStreamMessage("""{"type":"login_output","login_id":"l1","data":"hi"}""")
+        val finished = parseStreamMessage("""{"type":"login_finished","login_id":"l1","ok":true}""")
+        val event = parseStreamMessage("""{"type":"event","conversation_id":"a","seq":3,"kind":"turn_end","payload":{"stop_reason":"end_turn"}}""")
+        val unknown = parseStreamMessage("""{"type":"something_new"}""")
+
+        assertEquals(StreamMessage.LoginOutput("l1", "hi"), login)
+        assertEquals(StreamMessage.LoginFinished("l1", true), finished)
+        assertEquals(3L, assertIs<StreamMessage.EventAppended>(event).event.seq)
+        assertNull(unknown)
+    }
+
+    @Test
+    fun streamConversationFrameParsesTheFlatRow() {
+        val message = parseStreamMessage(
+            """{"type":"conversation","id":"a","owner":"u","node_id":"n","agent":"codex","cwd":"/x","title":"T","status":"input",
+            "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}""",
+        )
+
+        val row = assertIs<StreamMessage.ConversationChanged>(message).conversation
+        assertEquals(ConversationStatus.Input, row.status)
+        assertEquals("codex", row.agent)
+    }
+
+    @Test
+    fun relativeTimeShortensToTheLargestUnit() {
+        val now = Instant.parse("2026-10-22T12:00:00Z")
+
+        assertEquals("now", relativeTime("2026-10-22T11:59:30Z", now))
+        assertEquals("4m", relativeTime("2026-10-22T11:56:00Z", now))
+        assertEquals("3h", relativeTime("2026-10-22T09:00:00Z", now))
+        assertEquals("2d", relativeTime("2026-10-20T12:00:00Z", now))
+    }
+}
