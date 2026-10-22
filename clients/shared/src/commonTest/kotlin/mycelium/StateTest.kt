@@ -198,3 +198,19 @@ class SendingTest {
         assertEquals(emptyList(), reduce(state, StreamMessage.QueueChanged("c1", listOf(queued))).sending["c1"])
     }
 }
+
+class HistoryTest {
+    private fun conversation(id: String, status: ConversationStatus, archivedAt: String? = null) = Conversation(
+        id = id, owner = "u", nodeId = "n", agent = "codex", cwd = "/work", title = id, status = status,
+        createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z", archivedAt = archivedAt,
+    )
+
+    @Test
+    fun allListsEveryConversationWhateverItsStatusAndDoneOnlyTheFinishedOnes() {
+        val current = listOf(conversation("review", ConversationStatus.Review), conversation("done", ConversationStatus.Done), conversation("working", ConversationStatus.Working))
+        val archived = listOf(conversation("old", ConversationStatus.Done, archivedAt = "2026-10-20T10:00:00Z"))
+
+        assertEquals(setOf("review", "done", "working", "old"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.All, "").map { it.id }.toSet())
+        assertEquals(listOf("done"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.Done, "").map { it.id })
+    }
+}

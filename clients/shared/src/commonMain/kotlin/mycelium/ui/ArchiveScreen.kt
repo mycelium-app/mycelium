@@ -32,10 +32,10 @@ import mycelium.state.relativeTime
 
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
-fun pastConversations(done: Collection<Conversation>, archived: Collection<Conversation>, filter: PastFilter, query: String): List<Conversation> {
-    val doneRows = done.filter { it.status == ConversationStatus.Done && it.archivedAt == null }
+fun pastConversations(current: Collection<Conversation>, archived: Collection<Conversation>, filter: PastFilter, query: String): List<Conversation> {
+    val doneRows = current.filter { it.status == ConversationStatus.Done && it.archivedAt == null }
     val source = when (filter) {
-        PastFilter.All -> doneRows + archived
+        PastFilter.All -> current.filter { it.archivedAt == null } + archived
         PastFilter.Done -> doneRows
         PastFilter.Archived -> archived.toList()
     }
@@ -99,14 +99,15 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = rowHeight())
-                        .padding(horizontal = Tokens.Space.S4),
+                        .padding(horizontal = Tokens.Space.S2),
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(
                         Modifier
                             .weight(if (touch) 1f else 3f)
-                            .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape),
+                            .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
+                            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
                         verticalArrangement = Arrangement.Center,
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
