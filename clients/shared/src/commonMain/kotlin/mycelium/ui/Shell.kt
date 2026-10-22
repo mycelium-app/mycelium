@@ -272,7 +272,10 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val appearance = LocalAppearance.current
+
             Box(Modifier.weight(1f))
+            MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
             MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
     }

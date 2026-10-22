@@ -215,9 +215,9 @@ object MyTheme {
         @Composable get() = LocalPalette.current
 }
 
-data class Appearance(val dark: Boolean, val accent: Accent, val accents: List<Accent>, val onAccent: (Accent) -> Unit)
+data class Appearance(val dark: Boolean, val accent: Accent, val accents: List<Accent>, val onAccent: (Accent) -> Unit, val onToggleDark: () -> Unit = {})
 
-val LocalAppearance = staticCompositionLocalOf { Appearance(true, Accent.Neutral, emptyList()) {} }
+val LocalAppearance = staticCompositionLocalOf { Appearance(true, Accent.Neutral, emptyList(), {}) }
 
 @Composable
 fun MyceliumTheme(dark: Boolean = isSystemInDarkTheme(), accent: Accent = Accent.Neutral, systemAccent: Color? = null, content: @Composable () -> Unit) {

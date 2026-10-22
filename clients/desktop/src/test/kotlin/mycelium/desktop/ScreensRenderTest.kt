@@ -80,7 +80,7 @@ private val Conversations = listOf(
 
 @androidx.compose.runtime.Composable
 private fun withAccents(dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit) {
-    CompositionLocalProvider(LocalAppearance provides Appearance(dark, Accent.Neutral, Accent.entries.filter { it != Accent.System }) {}, content = content)
+    CompositionLocalProvider(LocalAppearance provides Appearance(dark, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {}), content = content)
 }
 
 private val PlatformStub = object : Platform {

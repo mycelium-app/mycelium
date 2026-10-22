@@ -55,14 +55,25 @@ private sealed interface Phase {
 
 @Composable
 fun App(platform: Platform, dark: Boolean? = null) {
-    val night = dark ?: isSystemInDarkTheme()
+    val systemDark = isSystemInDarkTheme()
+    var chosenDark by remember { mutableStateOf(platform.loadPreference(ThemePreference)?.let { it == "dark" }) }
+    val night = dark ?: chosenDark ?: systemDark
     val systemAccent = platform.systemAccent(night)?.let { Color(it.toInt()) }
     val accents = Accent.entries.filter { it != Accent.System || systemAccent != null }
     var accent by remember { mutableStateOf(accents.firstOrNull { it.name == platform.loadPreference(AccentPreference) } ?: accents.first()) }
-    val appearance = Appearance(night, accent, accents) { chosen ->
-        accent = chosen
-        platform.savePreference(AccentPreference, chosen.name)
-    }
+    val appearance = Appearance(
+        dark = night,
+        accent = accent,
+        accents = accents,
+        onAccent = { chosen ->
+            accent = chosen
+            platform.savePreference(AccentPreference, chosen.name)
+        },
+        onToggleDark = {
+            chosenDark = !night
+            platform.savePreference(ThemePreference, if (night) "light" else "dark")
+        },
+    )
 
     CompositionLocalProvider(LocalAppearance provides appearance) {
         MyceliumTheme(night, accent, systemAccent) { AppContent(platform) }
@@ -70,6 +81,8 @@ fun App(platform: Platform, dark: Boolean? = null) {
 }
 
 private const val AccentPreference = "accent"
+
+private const val ThemePreference = "theme"
 
 @Composable
 private fun AppContent(platform: Platform) {
