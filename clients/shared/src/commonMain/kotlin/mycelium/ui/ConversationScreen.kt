@@ -35,6 +35,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.ThreadItem
 import mycelium.state.ago
 import mycelium.state.agentName
 import mycelium.state.isLaptop
@@ -80,6 +81,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val node = state.nodes[conversation.nodeId]
     val thread = remember(state.events[id]) { buildThread(state.events[id].orEmpty()) }
+    val sending = state.sending[id].orEmpty()
+    val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
+    val delivering = sending.take(if (goesStraight) 1 else 0)
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -101,7 +105,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             )
 
             ThreadView(
-                items = thread,
+                items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
                 onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
                 onStopWorkflow = { store.act { api.cancel(id) } },
                 modifier = Modifier.weight(1f),
@@ -111,7 +115,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 conversation = conversation,
                 working = conversation.status == ConversationStatus.Working,
                 queue = state.queues[id].orEmpty(),
-                sending = state.sending[id].orEmpty(),
+                sending = sending.drop(delivering.size),
                 onSend = { text -> store.send(id, text) },
                 onStop = { store.act { api.cancel(id) } },
                 onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },

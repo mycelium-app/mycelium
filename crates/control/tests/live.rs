@@ -690,3 +690,27 @@ async fn conversation_changes_reach_only_the_person_who_owns_it_while_nodes_reac
 
     assert!(seen.iter().all(|message| matches!(message, StreamMessage::Node(_) | StreamMessage::Device { .. })), "{seen:?}");
 }
+
+#[tokio::test]
+async fn a_prompt_to_an_idle_conversation_is_streamed_as_sent_without_first_showing_as_queued() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let mut stream = server.user.stream().await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "hello"}))).await;
+
+    let mut queued_first = false;
+    stream
+        .until(|message| match message {
+            StreamMessage::Queue { conversation_id, queue } if conversation_id == id && !queue.is_empty() => {
+                queued_first = true;
+                None
+            }
+            StreamMessage::Event(event) if event.conversation_id == id && event.kind == EventKind::UserMessage => Some(()),
+            _ => None,
+        })
+        .await;
+    assert!(!queued_first);
+}
