@@ -167,6 +167,16 @@
 </div>
 </section>
 
+<section id="install" class="wrap install">
+<h2>Install</h2>
+<ol class="install-steps">
+<li><h3>Run the control plane</h3><p>One container and a Postgres database. The web client comes with it.</p></li>
+<li><h3>Add your machines</h3><pre class="my-mono"><code>curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://your-control-plane</code></pre><p>Approve the code it prints, and the machine appears in your list. NixOS, nix-darwin and home-manager modules are in the flake.</p></li>
+<li><h3>Open a conversation</h3><p>In the browser, or the Linux desktop app.</p></li>
+</ol>
+<p class="install-more">Full steps, written so you can hand them to your agent: <a href="install.md">example.com/mycelium/install.md</a></p>
+</section>
+
 <section id="stages" class="stages">
 <div class="wrap">
 <h2>What ships when</h2>

@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-22T14:20:47.624Z",
         "reason": "user asked for the top bar to match OpenChamber exactly in styling; its 14px mono brand sits beside the page's 13px small print, and the page's own scale is otherwise 58/36/22/17/13"
+      },
+      {
+        "rule": "gpt-thin-border-wide-shadow",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-22T16:39:40.996Z",
+        "reason": "user asked for the Liquid Glass page style; the rim plus drop shadow is the specular recipe in guidelines/liquid-glass.md"
       }
     ]
   }

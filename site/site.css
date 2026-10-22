@@ -99,3 +99,12 @@ a { color: var(--accent); }
   .nav-cluster { background: #181b1a; }
   .show { background: #181b1a; }
 }
+
+.install { padding-block: 24px 96px; display: flex; flex-direction: column; gap: 24px; }
+.install h2 { margin: 0; font-size: clamp(28px, 4vw, 36px); line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+.install-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; counter-reset: step; }
+.install-steps li { counter-increment: step; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.install-steps h3 { margin: 0; font-size: 22px; line-height: 28px; font-weight: 600; }
+.install-steps h3::before { content: counter(step) ". "; color: var(--accent); }
+.install-steps p, .install-more { margin: 0; font-size: 17px; line-height: 26px; color: var(--text-muted); }
+.install-steps pre { margin: 0; padding: 12px; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-block); background: var(--bg-panel); color: var(--text); font-size: 13px; line-height: 20px; }

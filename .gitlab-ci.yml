@@ -25,6 +25,7 @@ pages:
     - test -f public/logo.svg
     - test -f public/favicon.svg
     - test -f public/hero.jpg
+    - test -f public/install.md
     - |
       body=$(grep -n '<body>' public/index.html | head -1 | sed 's/[^0-9].*//')
       disc=$(grep -n 'aria-label="AI disclosure"' public/index.html | head -1 | sed 's/[^0-9].*//')
