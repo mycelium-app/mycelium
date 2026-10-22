@@ -69,10 +69,16 @@ with `auth_required`, and has `logout`. It does not perform the login.
 - Subscription logins on a headless node use the **terminal** method: the daemon runs the agent's
   own interactive login in a PTY and streams it to whichever client you are holding. Open the URL
   on the phone, paste the code back. `codex-acp` documents that its ChatGPT login does not work in
-  remote projects any other way.
-- **One login per node and provider.** Tokens are never copied between nodes: refresh tokens
-  usually rotate, and two machines sharing one would log each other out. (Unchecked for Claude and
-  Codex specifically.)
+  remote projects any other way. Codex has a device-code flow, but only behind
+  `codex login --device-auth` (0.163.0; the flag has no help text and plain `codex login` never
+  falls back to it): the code is entered at `<issuer>/codex/device` within 15 minutes.
+- **One login per node and provider.** Tokens are never copied between nodes: both CLIs treat
+  refresh tokens as single use, and two machines sharing one would log each other out. Codex names
+  a server error for it, `refresh_token_reused`, and treats it as permanent. Claude Code 2.1.308
+  saves the refresh token each refresh returns with a compare-and-swap under a lock file, and on
+  `invalid_grant` blanks the stored login. Both guards only work between processes sharing one
+  credential file. For Claude this is client code only: the server rejecting an old token has not
+  been observed.
 - **API keys** are the exception: the control plane stores them once and injects them as
   environment variables.
 - A **logins grid**, nodes × providers, shows logged in, logged out or expired, and which account.
@@ -183,8 +189,13 @@ ctx sources add laptop-codex  --provider codex  --root /var/lib/mycelium/mirror/
 The source name, not the path, decides citation identity, so relocating a mirror breaks nothing.
 ctx updates itself and sends usage data by default; both are switched off and the release binary
 is pinned. It builds with Bazel across roughly a hundred crates, so the release binary is used
-rather than a Nix source build. Unchecked: whether `ctx blame` works against a bare mirror or needs
-a working tree.
+rather than a Nix source build.
+
+**Blame needs the node.** `ctx blame` (2.2.8) resolves the repository from the checkout it recorded
+at index time, not from the working directory, and requires `git rev-parse --show-toplevel` to
+return that path. A bare mirror always fails that check, and moving the checkout makes blame report
+it unavailable. So the control plane answers search and show; blame runs on the node that holds
+the working tree, with the data root that indexed it.
 
 **Two layers.**
 
@@ -230,9 +241,12 @@ A skill file says when to use which, shipped to every node through the managed c
 
 ## Clients
 
-GPUI, Zed's UI framework, is desktop-first. Coverage of Zed's Delta says its browser version is the
-same Rust app compiled to WebAssembly, but nothing found covers iOS or Android, and Zed is heavy to
-build under Nix. So Zed is a client rather than the client: a small `mycelium acp` stdio bridge
+GPUI, Zed's UI framework, is desktop-first. At zed `03efd49` (2026-10-22) the web backend
+(`gpui_web`, wasm32 over wgpu) is in the tree but CI only type-checks it, and threads need nightly
+Rust and a cross-origin-isolated page. iOS (`gpui_ios`) merged on 2026-10-14 as experimental, with
+no CI. Android has no code: the port PR closed unmerged. Neither backend is on crates.io, whose
+`gpui` 0.2.2 is a year old, so using them means a git dependency on a Zed commit. Zed is also heavy
+to build under Nix. So Zed is a client rather than the client: a small `mycelium acp` stdio bridge
 presents the control plane to Zed as an ACP agent, and Zed lists and resumes Mycelium sessions in
 its own agent panel.
 
@@ -261,7 +275,7 @@ Nix builds of Rust are cheap.
 - **Zed Delta and DeltaDB**: operation-level history between commits, each edit anchored to the
   conversation that made it; terminal Claude Code sessions shown as threads over ACP; work handed
   to a cloud runner. Private beta with no licence or self-hosting found, so ideas only. `ctx blame`
-  covers most of the edit-to-conversation link without a CRDT.
+  covers most of the edit-to-conversation link without a CRDT, on the node that has the checkout.
 
 ## Open questions
 
@@ -274,6 +288,3 @@ Nix builds of Rust are cheap.
    control plane keeps its own users.
 5. **The org guidelines** (`slop/guidelines`): managed like AGENTS.md, or still a per-project
    import.
-6. **Unchecked facts** to settle before building on them: refresh-token rotation for Claude and
-   Codex logins; whether `codex login` offers a device code; `ctx blame` against a bare mirror;
-   GPUI's web and mobile status.
