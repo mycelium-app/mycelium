@@ -19,6 +19,7 @@ mod search;
 mod state;
 mod store;
 mod stream;
+mod tasks;
 mod terminals;
 mod transcripts;
 mod versions;
@@ -113,6 +114,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/worktrees", get(worktrees::list))
+        .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
+        .route("/api/v1/tasks/{id}", delete(tasks::delete))
+        .route("/api/v1/tasks/{id}/start", post(tasks::start))
         .route("/api/v1/issues", get(issues::list))
         .route("/api/v1/projects/{id}/issues/{number}/workspace", post(issues::start_workspace))
         .route("/api/v1/imports", get(imports::list).post(imports::create))

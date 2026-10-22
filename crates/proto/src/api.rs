@@ -386,3 +386,31 @@ pub struct Issues {
 pub struct StartWorkspaceRequest {
     pub agent: AgentId,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Task {
+    pub id: Uuid,
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    pub cwd: String,
+    pub project_id: Option<Uuid>,
+    pub branch: Option<String>,
+    pub title: String,
+    pub prompt: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateTaskRequest {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+}
