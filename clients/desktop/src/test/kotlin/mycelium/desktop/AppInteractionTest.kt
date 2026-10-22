@@ -14,6 +14,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import mycelium.App
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performSemanticsAction
@@ -116,6 +120,50 @@ class AppInteractionTest {
 
         val layout = layouts.single()
         assertTrue(layout.multiParagraph.maxIntrinsicWidth <= layout.size.width + 0.5f && !layout.isLineEllipsized(0), "the name was cut off: width ${layout.size.width}, needs ${layout.multiParagraph.maxIntrinsicWidth}")
+    }
+
+    @Test
+    fun escapeInTheComposerStopsAWorkingAgent() {
+        var stopped = 0
+        val conversation = mycelium.api.Conversation("c1", "u", "n", "claude", "/work", "t", mycelium.api.ConversationStatus.Working, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
+        rule.setContent {
+            MyceliumTheme(true) {
+                mycelium.ui.Composer(
+                    conversation = conversation, working = true, queue = emptyList(), sending = emptyList(), onSend = {}, onStop = { stopped++ },
+                    onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                    options = mycelium.state.SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
+                    onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
+                )
+            }
+        }
+
+        rule.onNode(hasSetTextAction()).performClick()
+        rule.onNode(hasSetTextAction()).performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Escape) }
+
+        kotlin.test.assertEquals(1, stopped)
+    }
+
+    @Test
+    fun aTooltipShowsAtOnceCentredUnderItsButtonWithoutMovingTheButtons() {
+        rule.setContent {
+            MyceliumTheme(true) {
+                androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.padding(start = 300.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+                    MyButton({}, icon = mycelium.ui.MyIcon.Copy, description = "Copy this agent response")
+                    MyButton({}, icon = mycelium.ui.MyIcon.ScrollToTop, description = "Scroll to top")
+                }
+            }
+        }
+        val copy = rule.onNodeWithContentDescription("Copy this agent response")
+        val second = rule.onNodeWithContentDescription("Scroll to top")
+        val before = second.getBoundsInRoot()
+
+        copy.performMouseInput { moveTo(center) }
+        rule.waitForIdle()
+
+        val button = copy.getBoundsInRoot()
+        val tip = rule.onNodeWithText("Copy this agent response").getBoundsInRoot()
+        assertTrue(abs(((tip.left + tip.right) / 2 - (button.left + button.right) / 2).value) < 1f, "tooltip at ${tip.left}..${tip.right}, button at ${button.left}..${button.right}")
+        assertTrue(before == second.getBoundsInRoot(), "the next button moved")
     }
 
     @Test

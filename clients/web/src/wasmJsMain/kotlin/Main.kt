@@ -1,3 +1,4 @@
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
 import mycelium.App
@@ -68,9 +69,14 @@ private object WebPlatform : Platform {
     override fun savePreference(key: String, value: String) = writeStorage(key, value)
 }
 
+@JsFun("() => { const status = document.getElementById('status'); if (status) status.remove(); }")
+private external fun hideLoading()
+
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
     ComposeViewport {
+        LaunchedEffect(Unit) { hideLoading() }
+
         App(WebPlatform)
     }
 }

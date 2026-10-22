@@ -45,9 +45,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.style.TextDecoration
@@ -68,7 +66,6 @@ private const val ShortOutputLimit = 40
 @Composable
 fun ThreadView(
     items: List<ThreadItem>,
-    pending: List<String>,
     onAnswer: (requestId: String, optionId: String) -> Unit,
     onStopWorkflow: () -> Unit,
     modifier: Modifier = Modifier,
@@ -76,7 +73,7 @@ fun ThreadView(
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
-    val oldest = pending.size + items.lastIndex
+    val oldest = items.lastIndex
     val atTop by remember(oldest) {
         derivedStateOf {
             val last = state.layoutInfo.visibleItemsInfo.lastOrNull()
@@ -98,10 +95,6 @@ fun ThreadView(
             ),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
         ) {
-            items(pending.asReversed()) { text ->
-                UserMessage(text, sending = true)
-            }
-
             itemsIndexed(items.asReversed(), key = { _, item -> item.key }) { reversedIndex, item ->
                 val index = items.lastIndex - reversedIndex
 
@@ -114,7 +107,7 @@ fun ThreadView(
                         onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
                         onScrollToMessage = if (asked < 0) null else ({
                             scope.launch {
-                                val target = pending.size + items.lastIndex - asked
+                                val target = items.lastIndex - asked
                                 state.animateScrollToItem(target)
                                 val placed = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target } ?: return@launch
                                 state.animateScrollBy(-(state.layoutInfo.viewportEndOffset - placed.offset - placed.size).toFloat())
@@ -133,7 +126,7 @@ fun ThreadView(
 @Composable
 private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text, sending = false)
+        is ThreadItem.UserMessage -> UserMessage(item.text)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.ToolCall -> ToolCall(item)
         is ThreadItem.Plan -> PlanCard(item)
@@ -145,15 +138,13 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
 }
 
 @Composable
-private fun UserMessage(text: String, sending: Boolean) {
+private fun UserMessage(text: String) {
     val colors = MyTheme.colors
 
     SelectionContainer {
         Box(
             Modifier
                 .fillMaxWidth()
-                .alpha(if (sending) SendingAlpha else 1f)
-                .semantics { if (sending) stateDescription = "Sending" }
                 .background(colors.bgPanel, BlockShape)
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
@@ -485,8 +476,6 @@ private fun TurnEnd(item: ThreadItem.TurnEnd, onCopy: (() -> Unit)?, onScrollToM
         }
     }
 }
-
-private const val SendingAlpha = 0.6f
 
 @Composable
 private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {

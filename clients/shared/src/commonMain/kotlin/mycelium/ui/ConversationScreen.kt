@@ -97,7 +97,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
             ThreadView(
                 items = thread,
-                pending = state.sending[id].orEmpty(),
                 onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
                 onStopWorkflow = { store.act { api.cancel(id) } },
                 modifier = Modifier.weight(1f),
@@ -107,6 +106,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 conversation = conversation,
                 working = conversation.status == ConversationStatus.Working,
                 queue = state.queues[id].orEmpty(),
+                sending = state.sending[id].orEmpty(),
                 onSend = { text -> store.send(id, text) },
                 onStop = { store.act { api.cancel(id) } },
                 onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },

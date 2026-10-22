@@ -1,6 +1,8 @@
 package mycelium.state
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import mycelium.api.ApiException
 import mycelium.api.DevicePoll
 import mycelium.api.DeviceRequest
 import mycelium.api.DeviceResponse
@@ -20,7 +22,17 @@ suspend fun signInWithDeviceCode(
     while (true) {
         delay(device.interval * 1_000)
 
-        when (val poll = api.pollDevice(device.deviceCode)) {
+        val poll = try {
+            api.pollDevice(device.deviceCode)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: ApiException) {
+            throw failure
+        } catch (_: Exception) {
+            DevicePoll.Pending
+        }
+
+        when (poll) {
             DevicePoll.Pending -> Unit
             is DevicePoll.Approved -> return poll.token
             is DevicePoll.Rejected -> throw SignInRejected(rejectionSentence(poll.code))

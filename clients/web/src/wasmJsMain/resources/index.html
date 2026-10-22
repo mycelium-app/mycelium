@@ -6,13 +6,37 @@
   <meta name="color-scheme" content="dark light">
   <title>Mycelium</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #141716; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #161616; color: #a8a8a8; font: 13px/18px system-ui, sans-serif; }
     canvas { display: block; }
-    @media (prefers-color-scheme: light) { html, body { background: #ffffff; } }
+    #status { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; text-align: center; }
+    #status svg { width: 20px; height: 20px; animation: spin 900ms linear infinite; }
+    #status .problem { color: #ec8576; max-width: 40ch; }
+    #status code { display: block; margin-top: 8px; color: #a8a8a8; font: 12px/16px ui-monospace, monospace; word-break: break-word; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #status svg { animation: none; } }
+    @media (prefers-color-scheme: light) {
+      html, body { background: #ffffff; color: #5a5a5a; }
+      #status .problem { color: #b0372a; }
+      #status code { color: #5a5a5a; }
+    }
   </style>
+  <script>
+    function showProblem(detail) {
+      var status = document.getElementById("status");
+      if (!status) return;
+      status.innerHTML = '<p class="problem" role="alert">Mycelium could not start in this browser. Update the browser, or open Mycelium in a current Chrome, Edge or Firefox.<code></code></p>';
+      status.querySelector("code").textContent = String(detail || "");
+    }
+    window.addEventListener("error", function (event) { showProblem(event.message); });
+    window.addEventListener("unhandledrejection", function (event) { showProblem(event.reason && (event.reason.message || event.reason)); });
+  </script>
   <script src="mycelium-web.js"></script>
 </head>
 <body>
+  <div id="status" role="status">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg>
+    <span>Loading Mycelium</span>
+  </div>
   <noscript>Mycelium needs JavaScript to run.</noscript>
 </body>
 </html>

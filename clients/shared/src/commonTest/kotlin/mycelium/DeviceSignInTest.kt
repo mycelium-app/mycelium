@@ -26,6 +26,29 @@ private val Request = DeviceRequest(DeviceKind.Client, "Desktop", "host", "linux
 
 class DeviceSignInTest {
     @Test
+    fun aPollThatCannotReachTheServerIsRetriedInsteadOfEndingTheSignIn() = runTest {
+        var polls = 0
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath.endsWith("/device")) {
+                respond(DeviceBody, HttpStatusCode.OK, Json)
+            } else {
+                polls++
+
+                if (polls == 1) {
+                    throw kotlinx.io.IOException("Software caused connection abort")
+                }
+
+                respond("""{"kind":"client","id":"d1","token":"secret"}""", HttpStatusCode.OK, Json)
+            }
+        }
+
+        val token = signInWithDeviceCode(MyceliumApi("https://x", engine = engine), Request) {}
+
+        assertEquals("secret", token.token)
+        assertEquals(2, polls)
+    }
+
+    @Test
     fun showsTheCodeThenReturnsTheTokenOnceApproved() = runTest {
         var polls = 0
         val engine = MockEngine { request ->

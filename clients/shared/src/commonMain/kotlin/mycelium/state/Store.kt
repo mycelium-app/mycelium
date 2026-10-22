@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
+import mycelium.api.EventKinds
+import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
 
 private const val EventPageSize = 500
@@ -72,7 +74,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
         while (true) {
             val page = api.events(conversationId, after, EventPageSize)
-            mutableState.update { it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), page))) }
+            mutableState.update {
+                val delivered = page.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
+                val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
+
+                it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), page)), sending = sending)
+            }
 
             if (page.size < EventPageSize) {
                 break

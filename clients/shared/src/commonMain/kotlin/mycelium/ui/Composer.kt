@@ -74,6 +74,7 @@ fun Composer(
     conversation: Conversation,
     working: Boolean,
     queue: List<QueuedPrompt>,
+    sending: List<String>,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSendQueuedNow: (String) -> Unit,
@@ -134,6 +135,7 @@ fun Composer(
                 onSubmit = ::submit,
                 onKey = { key ->
                     when {
+                        key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
                         matches.isEmpty() -> false
                         key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
                         key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
@@ -178,8 +180,8 @@ fun Composer(
                     .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
-                if (queue.isNotEmpty()) {
-                    QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
+                if (queue.isNotEmpty() || sending.isNotEmpty()) {
+                    QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -208,9 +210,9 @@ fun Composer(
     ) {
         val measured = Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth()
 
-        if (queue.isNotEmpty()) {
+        if (queue.isNotEmpty() || sending.isNotEmpty()) {
             Box(measured) {
-                QueuedMessages(queue, onSendQueuedNow, onEditQueued, onRemoveQueued)
+                QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
             }
         }
 
@@ -392,6 +394,7 @@ private fun CompletionPopup(title: String, completions: List<Completion>, highli
 @Composable
 private fun QueuedMessages(
     queue: List<QueuedPrompt>,
+    sending: List<String>,
     onSendNow: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onRemove: (String) -> Unit,
@@ -401,6 +404,20 @@ private fun QueuedMessages(
     var draft by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" }) {
+        for (text in sending) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
+                Label(text, Modifier.weight(1f), maxLines = 1)
+                Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted)
+            }
+
+            Hairline()
+        }
+
         for (item in queue) {
             Row(
                 Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),

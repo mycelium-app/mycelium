@@ -34,10 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import kotlinx.coroutines.delay
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -228,35 +225,37 @@ fun MyButton(
     val sized = if (text == null) modifier.size(height) else modifier.height(height)
     val outlined = if (variant == ButtonVariant.Outline) sized.border(Tokens.Size.Hairline, colors.borderControl, ControlShape) else sized
 
-    Row(
-        outlined
-            .pressable(
-                onClick = onClick,
-                description = description,
-                shape = ControlShape,
-                base = if (variant == ButtonVariant.Primary) colors.accent else Color.Transparent,
-                selected = selected,
-                source = source,
-            )
-            .padding(horizontal = if (text == null) 0.dp else padding),
-        horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (icon != null) {
-            Icon(icon, contentColor, iconSize)
+    Box {
+        Row(
+            outlined
+                .pressable(
+                    onClick = onClick,
+                    description = description,
+                    shape = ControlShape,
+                    base = if (variant == ButtonVariant.Primary) colors.accent else Color.Transparent,
+                    selected = selected,
+                    source = source,
+                )
+                .padding(horizontal = if (text == null) 0.dp else padding),
+            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentColor, iconSize)
+            }
+
+            if (text != null) {
+                Label(text, style = textStyle, color = contentColor, maxLines = 1)
+            }
+
+            if (trailingIcon != null) {
+                Icon(trailingIcon, contentColor, iconSize)
+            }
         }
 
-        if (text != null) {
-            Label(text, style = textStyle, color = contentColor, maxLines = 1)
+        if (tooltip != null) {
+            Tooltip(tooltip, source)
         }
-
-        if (trailingIcon != null) {
-            Icon(trailingIcon, contentColor, iconSize)
-        }
-    }
-
-    if (tooltip != null) {
-        Tooltip(tooltip, source)
     }
 }
 
@@ -483,19 +482,9 @@ internal class BelowAnchor(private val gap: Int, private val centred: Boolean = 
 fun Tooltip(text: String, source: MutableInteractionSource) {
     val colors = MyTheme.colors
     val hovered by source.collectIsHoveredAsState()
-    var shown by remember { mutableStateOf(false) }
     val gap = with(LocalDensity.current) { Tokens.Space.S1.roundToPx() }
 
-    LaunchedEffect(hovered) {
-        shown = false
-
-        if (hovered) {
-            delay(TooltipDelayMillis)
-            shown = true
-        }
-    }
-
-    if (shown) {
+    if (hovered) {
         Popup(popupPositionProvider = remember(gap) { BelowAnchor(gap, centred = true) }) {
             Box(
                 Modifier
@@ -508,8 +497,6 @@ fun Tooltip(text: String, source: MutableInteractionSource) {
         }
     }
 }
-
-private const val TooltipDelayMillis = 600L
 
 private object ScreenPopup : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =

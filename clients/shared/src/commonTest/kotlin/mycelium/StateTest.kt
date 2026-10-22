@@ -5,6 +5,7 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Event
 import mycelium.api.StreamMessage
+import mycelium.api.MyceliumJson
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
 import mycelium.state.agentVersion
@@ -176,5 +177,24 @@ class FormatTest {
     fun anAgentVersionDropsThePackageName() {
         assertEquals("2.2.2", agentVersion("@agentclientprotocol/codex-acp 2.2.2"))
         assertEquals("0.94.0", agentVersion("0.94.0"))
+    }
+}
+
+class SendingTest {
+    private fun userMessage(text: String) = StreamMessage.EventAppended(Event("c1", 7, "user_message", MyceliumJson.parseToJsonElement("""{"text":"$text","prompt_id":"p"}""")))
+
+    @Test
+    fun aSentMessageStopsShowingAsSendingOnceTheServerRecordsIt() {
+        val state = AppState(sending = mapOf("c1" to listOf("queued")))
+
+        assertEquals(emptyList(), reduce(state, userMessage("queued")).sending["c1"])
+    }
+
+    @Test
+    fun aMessageTheServerQueuedStopsShowingAsSendingAndTheQueueShowsIt() {
+        val state = AppState(sending = mapOf("c1" to listOf("queued")))
+        val queued = mycelium.api.QueuedPrompt("q1", "c1", 0, "queued", "2026-10-22T10:00:00Z")
+
+        assertEquals(emptyList(), reduce(state, StreamMessage.QueueChanged("c1", listOf(queued))).sending["c1"])
     }
 }
