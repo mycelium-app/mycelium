@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -214,8 +215,7 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
             verticalAlignment = Alignment.CenterVertically,
         ) {
             MyButton({ onRoute(Route.Nodes) }, icon = MyIcon.Server, description = "Nodes", muted = true, selected = route == Route.Nodes)
-            Box(Modifier.weight(1f))
-            Label(me.name.ifBlank { me.email }, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1, modifier = Modifier.weight(3f))
+            Label(me.name.ifBlank { me.email }, style = Tokens.Type.Meta.copy(textAlign = TextAlign.End), color = colors.textMuted, maxLines = 1, modifier = Modifier.weight(1f))
             MyButton(onSignOut, icon = MyIcon.Logout, description = "Sign out ${me.email}", muted = true)
         }
     }

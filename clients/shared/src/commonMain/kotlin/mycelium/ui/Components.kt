@@ -70,6 +70,7 @@ import mycelium.api.ConversationStatus
 val ControlShape = RoundedCornerShape(Tokens.Radius.Control)
 val BlockShape = RoundedCornerShape(Tokens.Radius.Block)
 val FloatShape = RoundedCornerShape(Tokens.Radius.Float)
+val SegmentShape = RoundedCornerShape(Tokens.Radius.Control - Tokens.Space.S0_5)
 
 @Composable
 fun touchMin(base: Dp): Dp = if (LocalTouch.current) maxOf(base, Tokens.Size.Touch) else base
@@ -103,22 +104,24 @@ fun VerticalHairline(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun Modifier.focusRing(focused: Boolean, shape: Shape = RectangleShape): Modifier {
+fun Modifier.focusRing(focused: Boolean, shape: Shape = RectangleShape, inside: Boolean = false): Modifier {
     val ring = MyTheme.colors.focus
 
     return drawWithContent {
         drawContent()
 
         if (focused) {
-            val grow = (Tokens.Size.FocusOffset + Tokens.Size.FocusRing / 2).toPx()
-            val radius = if (shape is RoundedCornerShape) Tokens.Radius.Control.toPx() + grow else 0f
+            val stroke = Tokens.Size.FocusRing.toPx()
+            val grow = if (inside) -stroke / 2 else Tokens.Size.FocusOffset.toPx() + stroke / 2
+            val corner = if (shape is RoundedCornerShape) shape.topStart.toPx(size, this) else 0f
+            val radius = (corner + grow).coerceAtLeast(0f)
 
             drawRoundRect(
                 color = ring,
                 topLeft = Offset(-grow, -grow),
                 size = Size(size.width + grow * 2, size.height + grow * 2),
                 cornerRadius = CornerRadius(radius),
-                style = Stroke(Tokens.Size.FocusRing.toPx()),
+                style = Stroke(stroke),
             )
         }
     }
@@ -133,6 +136,7 @@ fun Modifier.pressable(
     base: Color = Color.Transparent,
     selected: Boolean = false,
     stateDescription: String? = null,
+    ringInside: Boolean = false,
 ): Modifier {
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
@@ -145,7 +149,7 @@ fun Modifier.pressable(
     }
 
     return this
-        .focusRing(focused, shape)
+        .focusRing(focused, shape, ringInside)
         .clip(shape)
         .background(background)
         .hoverable(source)
@@ -396,8 +400,9 @@ fun Segmented(options: List<String>, selected: String, onSelect: (String) -> Uni
                     .pressable(
                         onClick = { onSelect(option) },
                         role = Role.RadioButton,
-                        shape = ControlShape,
+                        shape = SegmentShape,
                         selected = on,
+                        ringInside = true,
                     )
                     .semantics { this.selected = on }
                     .padding(horizontal = Tokens.Space.S2),

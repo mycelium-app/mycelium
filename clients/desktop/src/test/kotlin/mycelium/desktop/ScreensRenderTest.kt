@@ -2,6 +2,10 @@ package mycelium.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.unit.Density
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -17,9 +21,11 @@ import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.ui.Bar
 import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
+import mycelium.ui.Segmented
 import mycelium.ui.Shell
 import mycelium.ui.SignInScreen
 import org.jetbrains.skia.EncodedImageFormat
@@ -82,14 +88,14 @@ private val PlatformStub = object : Platform {
     override fun copyToClipboard(text: String) = Unit
 }
 
-private fun fakeApi(): MyceliumApi {
+private fun fakeApi(nodes: String = Nodes): MyceliumApi {
     val json = headersOf(HttpHeaders.ContentType, "application/json")
     val engine = MockEngine { request ->
         val path = request.url.encodedPath
         val body = when {
             path.endsWith("/events") -> Events
             path.endsWith("/queue") -> "[]"
-            path.endsWith("/nodes") -> Nodes
+            path.endsWith("/nodes") -> nodes
             path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> "[]"
             path.endsWith("/conversations") -> Conversations
             else -> "{}"
@@ -101,11 +107,17 @@ private fun fakeApi(): MyceliumApi {
     return MyceliumApi("https://mycelium.test", "token", engine)
 }
 
-private fun renderAt(name: String, dark: Boolean, phone: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File {
+@OptIn(InternalComposeUiApi::class)
+private fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0, content: @androidx.compose.runtime.Composable () -> Unit): File {
     val scene = ImageComposeScene(if (phone) 390 else 1440, if (phone) 844 else 900, Density(1f)) {
         MyceliumTheme(dark) { CompositionLocalProvider(LocalTouch provides phone, content = content) }
     }
     var image = scene.render(0)
+
+    repeat(tabs) {
+        scene.sendKeyEvent(KeyEvent(Key.Tab, KeyEventType.KeyDown))
+        scene.sendKeyEvent(KeyEvent(Key.Tab, KeyEventType.KeyUp))
+    }
 
     for (frame in 1..6) {
         image = scene.render(frame * 16_000_000L)
@@ -120,13 +132,13 @@ private fun renderAt(name: String, dark: Boolean, phone: Boolean, content: @andr
     return out
 }
 
-private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content)
+private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content = content)
 
 class ScreensRenderTest {
     private val me = Me("u", "user@example.com", "User")
 
-    private fun shell(route: Route): @androidx.compose.runtime.Composable () -> Unit {
-        val store = Store(fakeApi(), CoroutineScope(Dispatchers.Unconfined))
+    private fun shell(route: Route, nodes: String = Nodes): @androidx.compose.runtime.Composable () -> Unit {
+        val store = Store(fakeApi(nodes), CoroutineScope(Dispatchers.Unconfined))
 
         runBlocking {
             store.refresh()
@@ -155,11 +167,21 @@ class ScreensRenderTest {
     @Test
     fun phoneScreensRenderInBothThemes() {
         for (dark in listOf(true, false)) {
-            assertTrue(renderAt("conversation", dark, true, shell(Route.Chat(ConversationId))).length() > 10_000)
-            assertTrue(renderAt("nodes", dark, true, shell(Route.Nodes)).length() > 10_000)
-            assertTrue(renderAt("archive", dark, true, shell(Route.Archive)).length() > 10_000)
-            assertTrue(renderAt("empty", dark, true, shell(Route.Empty)).length() > 5_000)
+            assertTrue(renderAt("conversation", dark, true, content = shell(Route.Chat(ConversationId))).length() > 10_000)
+            assertTrue(renderAt("nodes", dark, true, content = shell(Route.Nodes)).length() > 10_000)
+            assertTrue(renderAt("archive", dark, true, content = shell(Route.Archive)).length() > 10_000)
+            assertTrue(renderAt("empty", dark, true, content = shell(Route.Empty)).length() > 5_000)
             assertTrue(renderAt("signin", dark, true) { SignInScreen(PlatformStub, "mycelium.example.com", null) { _, _ -> } }.length() > 5_000)
+        }
+    }
+
+    @Test
+    fun newConversationWithoutNodesAndFocusedSegmentRender() {
+        for (dark in listOf(true, false)) {
+            for (phone in listOf(false, true)) {
+                assertTrue(renderAt("new-no-node", dark, phone, content = shell(Route.New, "[]")).length() > 5_000)
+                assertTrue(renderAt("segmented-focus", dark, phone, tabs = 2) { Bar { Segmented(listOf("All", "Done", "Archived"), "Done", {}, groupLabel = "State") } }.length() > 1_000)
+            }
         }
     }
 

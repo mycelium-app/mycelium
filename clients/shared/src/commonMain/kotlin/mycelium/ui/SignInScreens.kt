@@ -93,7 +93,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
     CenteredPage {
         Label("Mycelium", Modifier.semantics { heading() }, Tokens.Type.Display)
 
-        Column(Modifier.widthIn(max = Tokens.Size.FormColumn).fillMaxWidth().padding(horizontal = Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Column(Modifier.widthIn(max = Tokens.Size.FormColumn).fillMaxWidth().padding(horizontal = Tokens.Space.S4), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             val code = device
 
             if (code != null) {
@@ -129,7 +129,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
 private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onCancel: () -> Unit) {
     val colors = MyTheme.colors
 
-    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Label("Enter this code on the sign-in page", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
         Row(

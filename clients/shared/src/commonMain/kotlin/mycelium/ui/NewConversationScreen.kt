@@ -63,16 +63,17 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             BarTitle("New conversation")
         }
 
+        if (node == null) {
+            Label("No node is online. Join a node from Nodes, or wait for one to reconnect.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+
+            return@Column
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Column(
                 Modifier.widthIn(max = Tokens.Size.Page).fillMaxWidth().padding(Tokens.Space.S4),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
             ) {
-                if (node == null) {
-                    Label("No node is online. Join a node from Nodes, or wait for one to reconnect.", color = colors.textMuted)
-                    return@Column
-                }
-
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                     Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
