@@ -248,7 +248,7 @@ pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     let updated = sqlx::query_as::<_, crate::store::ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "update conversations set mode = coalesce($2, mode), model = coalesce($3, model), updated_at = now() where id = $1
+        "update conversations set mode = coalesce($2, mode), model = coalesce($3, model) where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
     )

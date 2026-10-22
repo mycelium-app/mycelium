@@ -481,6 +481,21 @@ async fn renaming_and_archiving_move_a_conversation_between_the_lists_and_close_
 }
 
 #[tokio::test]
+async fn renaming_or_archiving_a_conversation_leaves_its_last_activity_alone() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let url = format!("/api/v1/conversations/{id}");
+    sqlx::query("update conversations set updated_at = '2026-09-01T00:00:00Z'").execute(&server.pool).await.unwrap();
+
+    server.user.json(server.user.patch(&url).json(&json!({"title": "Renamed"}))).await;
+    let (_, archived) = server.user.json(server.user.patch(&url).json(&json!({"archived": true}))).await;
+
+    assert_eq!(archived["updated_at"], json!("2026-09-01T00:00:00Z"));
+}
+
+#[tokio::test]
 async fn sending_a_message_to_an_archived_conversation_unarchives_it() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

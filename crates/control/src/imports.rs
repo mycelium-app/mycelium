@@ -273,6 +273,36 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
     Ok((found, pending))
 }
 
+pub async fn repair_activity_dates(state: &AppState) -> anyhow::Result<()> {
+    let claimed = sqlx::query("insert into boot_repairs (name) values ('import_activity_dates') on conflict do nothing").execute(&state.pool).await?;
+
+    if claimed.rows_affected() == 0 {
+        return Ok(());
+    }
+
+    let imports = sqlx::query_as::<_, (Uuid, Uuid, String, String)>(
+        "select c.id, c.node_id, c.agent, c.imported_from from conversations c
+         where c.imported_from is not null
+           and not exists (select 1 from events e where e.conversation_id = c.id and (e.node_seq is not null or (e.kind = 'user_message' and e.payload ? 'prompt_id')))",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    for (id, node_id, agent, path) in imports {
+        let Ok(bytes) = tokio::fs::read(state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path)).await else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let parsed = if agent == enum_text(&AgentId::Codex) { parse_codex(&text) } else { parse_claude(&text) };
+
+        if let Some(last_at) = parsed.and_then(|parsed| parsed.last_at) {
+            sqlx::query("update conversations set updated_at = $2 where id = $1").bind(id).bind(last_at).execute(&state.pool).await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<ImportStatus>>> {
     let nodes = sqlx::query_scalar::<_, Uuid>("select id from nodes where revoked_at is null order by name").fetch_all(&state.pool).await?;
     let mut statuses = Vec::new();

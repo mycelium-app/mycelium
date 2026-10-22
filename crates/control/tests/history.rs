@@ -294,6 +294,26 @@ async fn imports_continued_in_mycelium_are_restored_unless_archived_after_the_up
 }
 
 #[tokio::test]
+async fn a_restart_puts_back_the_last_activity_dates_that_archiving_overwrote() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl"), &claude_transcript(CLAUDE_SESSION, "Fix the build", "Looking at it.")).await;
+    import(&server, link.id, "claude").await;
+    sqlx::query("update conversations set updated_at = now()").execute(&server.pool).await.unwrap();
+    sqlx::query("delete from boot_repairs").execute(&server.pool).await.unwrap();
+
+    let data_dir = server.data_dir.clone();
+    let _restarted = Server::start_on(server.database_url.clone(), |config| config.data_dir = data_dir).await;
+
+    let restored = eventually("restored date", || async {
+        let at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("select updated_at from conversations").fetch_one(&server.pool).await.unwrap();
+        (at.to_rfc3339() == "2026-10-01T10:00:09+00:00").then_some(at)
+    })
+    .await;
+    assert_eq!(restored.to_rfc3339(), "2026-10-01T10:00:09+00:00");
+}
+
+#[tokio::test]
 async fn unreadable_transcripts_are_counted_as_skipped() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;

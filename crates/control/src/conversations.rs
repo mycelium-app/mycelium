@@ -4,7 +4,7 @@ use crate::nodes::node_offline;
 use crate::projects;
 use crate::state::AppState;
 use crate::worktrees;
-use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, set_status, ConversationRow};
+use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -159,8 +159,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
         "update conversations set title = coalesce($2, title),
-             archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
-             updated_at = now()
+             archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
@@ -191,7 +190,11 @@ pub async fn opened(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+    let updated = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = $2 where id = $1 returning {CONVERSATION_COLUMNS}")))
+        .bind(id)
+        .bind(enum_text(&ConversationStatus::Done))
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));

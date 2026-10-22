@@ -52,6 +52,10 @@ pub async fn migrate_until_ready(state: AppState) {
             Ok(()) => {
                 set_readiness(&state, Readiness::Ready);
 
+                if let Err(cause) = crate::imports::repair_activity_dates(&state).await {
+                    tracing::error!("could not restore the activity dates of imported conversations: {cause:#}");
+                }
+
                 return;
             }
             Err(cause) => {
