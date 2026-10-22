@@ -55,13 +55,17 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -354,6 +358,7 @@ fun TextInput(
     large: Boolean = false,
     showLabel: Boolean = true,
     onSubmit: (() -> Unit)? = null,
+    masked: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -371,6 +376,7 @@ fun TextInput(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
+            visualTransformation = if (masked) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = base.themed().copy(color = colors.text),
             cursorBrush = SolidColor(colors.text),
             interactionSource = source,
@@ -589,7 +595,10 @@ fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Mod
             .fillMaxWidth()
             .background(colors.bgPanel)
             .padding(start = Tokens.Space.S3, end = Tokens.Space.S2)
-            .semantics { contentDescription = "Error: $message" },
+            .semantics {
+                contentDescription = "Error: $message"
+                liveRegion = LiveRegionMode.Polite
+            },
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {

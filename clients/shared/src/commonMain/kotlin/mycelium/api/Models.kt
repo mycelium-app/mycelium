@@ -158,6 +158,44 @@ data class Memory(
 data class UpdateMemoryRequest(val text: String)
 
 @Serializable
+data class Forge(
+    val id: String,
+    val kind: String,
+    @SerialName("base_url") val baseUrl: String,
+    val account: String,
+    @SerialName("token_hint") val tokenHint: String,
+    val organisations: List<String> = emptyList(),
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class ConnectForgeRequest(val kind: String, @SerialName("base_url") val baseUrl: String? = null, val token: String)
+
+@Serializable
+data class Repository(
+    @SerialName("forge_id") val forgeId: String,
+    val owner: String,
+    val name: String,
+    @SerialName("full_name") val fullName: String,
+    val description: String? = null,
+    val private: Boolean = false,
+    @SerialName("default_branch") val defaultBranch: String? = null,
+)
+
+@Serializable
+data class RepositoryOrganisation(@SerialName("forge_id") val forgeId: String, val name: String)
+
+@Serializable
+data class RepositoryFailure(@SerialName("forge_id") val forgeId: String, val message: String)
+
+@Serializable
+data class Repositories(
+    val repositories: List<Repository> = emptyList(),
+    val organisations: List<RepositoryOrganisation> = emptyList(),
+    val failures: List<RepositoryFailure> = emptyList(),
+)
+
+@Serializable
 data class StartLoginRequest(val agent: String, val method: String)
 
 @Serializable

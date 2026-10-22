@@ -170,6 +170,25 @@ class MyceliumApi(
         call("/memories/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun forges(): List<Forge> = call("/forges") { client.get(it) { authorise() } }.body()
+
+    suspend fun connectForge(request: ConnectForgeRequest): Forge =
+        call("/forges") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun disconnectForge(id: String) {
+        call("/forges/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = ""): Repositories =
+        call("/repositories") {
+            client.get(it) {
+                authorise()
+                if (forge != null) parameter("forge", forge)
+                if (organisation != null) parameter("organisation", organisation)
+                if (query.isNotBlank()) parameter("q", query.trim())
+            }
+        }.body()
+
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 
     suspend fun startImport(request: ImportRequest): ImportResult =

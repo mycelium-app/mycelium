@@ -12,6 +12,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import mycelium.api.ApiException
+import mycelium.api.ConnectForgeRequest
 import mycelium.api.ConversationStatus
 import mycelium.api.DeviceKind
 import mycelium.api.DevicePoll
@@ -20,6 +21,7 @@ import mycelium.api.MyceliumApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 
 private val JsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
@@ -41,6 +43,9 @@ private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n","ag
 
 private const val MemoryJson = """{"id":"m1","text":"Staging listens on 5433","scopes":["global"],"created_by":"laptop/Fix login","conversation_id":null,
 "created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+
+private const val ForgeJson = """{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"wxyz",
+"organisations":["samexample","acme-org"],"created_at":"2026-10-22T10:00:00Z"}"""
 
 class ApiTest {
     @Test
@@ -256,6 +261,89 @@ class ApiTest {
 
         assertEquals(HttpMethod.Delete, seen.single().method)
         assertEquals("https://mycelium.test/api/v1/memories/m1", seen.single().url.toString())
+    }
+
+    @Test
+    fun forgesDecodeTheAccountAndOrganisationsAndNeverHoldAToken() = runTest {
+        val leaking = ForgeJson.replace("\"token_hint\"", "\"token\":\"ghp_secret\",\"token_hint\"")
+        val (api, seen) = apiWith { ok("[$leaking]") }
+
+        val forge = api.forges().single()
+
+        assertEquals("samexample", forge.account)
+        assertEquals(listOf("samexample", "acme-org"), forge.organisations)
+        assertEquals("wxyz", forge.tokenHint)
+        assertEquals("https://mycelium.test/api/v1/forges", seen.single().url.toString())
+        assertFalse(forge.toString().contains("ghp_secret"))
+    }
+
+    @Test
+    fun connectingAForgePostsTheKindBaseUrlAndTokenAndReturnsTheForge() = runTest {
+        val (api, seen) = apiWith { respond(ForgeJson, HttpStatusCode.Created, JsonHeaders) }
+
+        val forge = api.connectForge(ConnectForgeRequest("gitlab", "https://gitlab.example.com", "glpat-1"))
+
+        assertEquals(HttpMethod.Post, seen.single().method)
+        assertEquals("""{"kind":"gitlab","base_url":"https://gitlab.example.com","token":"glpat-1"}""", String(seen.single().body.toByteArray()))
+        assertEquals("f1", forge.id)
+    }
+
+    @Test
+    fun connectingWithoutABaseUrlLeavesItOutSoTheServerPicksTheDefault() = runTest {
+        val (api, seen) = apiWith { respond(ForgeJson, HttpStatusCode.Created, JsonHeaders) }
+
+        api.connectForge(ConnectForgeRequest("github", null, "ghp_1"))
+
+        assertEquals("""{"kind":"github","token":"ghp_1"}""", String(seen.single().body.toByteArray()))
+    }
+
+    @Test
+    fun aRejectedForgeTokenFailsWithTheServersSentence() = runTest {
+        val (api, _) = apiWith {
+            respond("""{"error":"forge_token_rejected","message":"GitHub did not accept that token. Check it and try again."}""", HttpStatusCode.BadRequest, JsonHeaders)
+        }
+
+        val failure = assertFailsWith<ApiException> { api.connectForge(ConnectForgeRequest("github", null, "bad")) }
+
+        assertEquals("forge_token_rejected", failure.code)
+        assertEquals("GitHub did not accept that token. Check it and try again.", failure.message)
+    }
+
+    @Test
+    fun disconnectingAForgeUsesTheDeleteVerb() = runTest {
+        val (api, seen) = apiWith { respond("", HttpStatusCode.NoContent) }
+
+        api.disconnectForge("f1")
+
+        assertEquals(HttpMethod.Delete, seen.single().method)
+        assertEquals("https://mycelium.test/api/v1/forges/f1", seen.single().url.toString())
+    }
+
+    @Test
+    fun repositoriesDecodeAndFiltersAreSentOnlyWhenSet() = runTest {
+        val (api, seen) = apiWith {
+            ok(
+                """{"repositories":[{"forge_id":"f1","owner":"acme-org","name":"acme-backups","full_name":"acme-org/acme-backups","description":null,"private":true,"default_branch":"main"}],
+                "organisations":[{"forge_id":"f1","name":"acme-org"}],"failures":[{"forge_id":"f2","message":"GitLab could not be reached."}]}""",
+            )
+        }
+
+        val listing = api.repositories(forge = "f1", organisation = "acme-org", query = " backups ")
+
+        assertEquals("acme-org/acme-backups", listing.repositories.single().fullName)
+        assertEquals(true, listing.repositories.single().private)
+        assertEquals("acme-org", listing.organisations.single().name)
+        assertEquals("GitLab could not be reached.", listing.failures.single().message)
+        assertEquals("https://mycelium.test/api/v1/repositories?forge=f1&organisation=acme-org&q=backups", seen.single().url.toString())
+    }
+
+    @Test
+    fun listingRepositoriesWithoutFiltersSendsNone() = runTest {
+        val (api, seen) = apiWith { ok("""{"repositories":[],"organisations":[],"failures":[]}""") }
+
+        api.repositories()
+
+        assertEquals("https://mycelium.test/api/v1/repositories", seen.single().url.toString())
     }
 
     @Test

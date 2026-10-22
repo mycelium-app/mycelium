@@ -38,6 +38,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon) {
     Appearance("Appearance", MyIcon.Sun),
     Agents("Agents", MyIcon.ClaudeMark),
     Memories("Memories", MyIcon.Info),
+    Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
     Account("Account", MyIcon.Settings),
 }
@@ -98,6 +99,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Appearance -> AppearanceSettings()
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
+            SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
             SettingsSection.Account -> AccountSettings(me, controlPlane, onSignOut)
         }
