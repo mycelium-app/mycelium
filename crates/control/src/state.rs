@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -49,6 +49,7 @@ pub struct Hub {
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
+    file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
 }
 
 impl Hub {
@@ -87,6 +88,39 @@ impl Hub {
         }
 
         self.forget_send_now_on(node_id);
+    }
+
+    pub fn request_files(&self, node_id: Uuid, cwd: String, query: String) -> Option<(Uuid, oneshot::Receiver<Vec<String>>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.file_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::ListFiles { request_id, cwd, query }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_file_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_files(&self, node_id: Uuid, request_id: Uuid, paths: Vec<String>) {
+        let waiting = self.file_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, answer)) = waiting {
+            let _ = answer.send(paths);
+        }
+    }
+
+    pub fn forget_file_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.file_requests.lock() {
+            requests.remove(&request_id);
+        }
     }
 
     pub fn is_replaced(&self, node_id: Uuid, connection_id: Uuid) -> bool {

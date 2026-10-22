@@ -73,6 +73,10 @@ pub enum NodeToControl {
         run_id: String,
         line: Value,
     },
+    Files {
+        request_id: Uuid,
+        paths: Vec<String>,
+    },
     Pong,
 }
 
@@ -130,6 +134,11 @@ pub enum ControlToNode {
     TranscriptAck {
         path: String,
         bytes: i64,
+    },
+    ListFiles {
+        request_id: Uuid,
+        cwd: String,
+        query: String,
     },
     Ping,
     Revoked,

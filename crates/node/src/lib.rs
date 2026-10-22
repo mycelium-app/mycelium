@@ -2,6 +2,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 pub mod daemon;
+pub mod files;
 pub mod join;
 pub mod link;
 pub mod login;

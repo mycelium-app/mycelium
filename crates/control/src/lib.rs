@@ -72,6 +72,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))
+        .route("/api/v1/conversations/{id}/files", get(conversations::files))
         .route("/api/v1/conversations/{id}/prompt", post(prompts::prompt))
         .route("/api/v1/conversations/{id}/queue", get(prompts::queue))
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))

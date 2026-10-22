@@ -711,3 +711,26 @@ async fn the_stream_accepts_the_control_planes_own_origin_and_clients_that_send_
     assert_eq!(stream_request(&server, Some(&server.base)).await, Ok(()));
     assert_eq!(stream_request(&server, None).await, Ok(()));
 }
+
+#[tokio::test]
+async fn files_are_listed_by_the_node_running_the_conversation_in_its_folder() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let created = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move { user.json(user.get(&format!("/api/v1/conversations/{}/files?query=flake", created.id))).await });
+
+    let (request_id, cwd, query) = match link.next().await {
+        ControlToNode::ListFiles { request_id, cwd, query } => (request_id, cwd, query),
+        other => panic!("expected list_files, got {other:?}"),
+    };
+    assert_eq!((cwd.as_str(), query.as_str()), ("/work/app", "flake"));
+
+    link.send(NodeToControl::Files { request_id, paths: vec!["flake.nix".into()] }).await;
+
+    let (status, body) = asking.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body, json!(["flake.nix"]));
+}

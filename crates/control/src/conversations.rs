@@ -189,3 +189,23 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     Ok(Json(events))
 }
+
+#[derive(Deserialize)]
+pub struct FilesQuery {
+    #[serde(default)]
+    query: String,
+}
+
+pub async fn files(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<FilesQuery>) -> ApiResult<Json<Vec<String>>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let Some((request_id, answered)) = state.hub.request_files(row.node_id, row.cwd, query.query) else {
+        return Err(node_offline());
+    };
+
+    let paths = tokio::time::timeout(FILES_TIMEOUT, answered).await.ok().and_then(Result::ok).unwrap_or_default();
+    state.hub.forget_file_request(request_id);
+
+    Ok(Json(paths))
+}
+
+const FILES_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);

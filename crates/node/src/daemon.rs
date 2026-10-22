@@ -192,6 +192,14 @@ impl Daemon {
                     transcripts.ack(&path, bytes);
                 }
             }
+            ControlToNode::ListFiles { request_id, cwd, query } => {
+                let out = self.out.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    let paths = crate::files::matching_files(std::path::Path::new(&cwd), &query);
+                    let _ = out.send(NodeToControl::Files { request_id, paths });
+                });
+            }
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }
