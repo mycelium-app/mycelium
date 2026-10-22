@@ -141,3 +141,38 @@ async fn close_kills_the_agent_and_ends_the_keeper() {
     keeper.await.unwrap().unwrap();
     assert!(dir.path().join("exit.json").exists());
 }
+
+#[tokio::test]
+async fn a_long_journal_replays_from_the_given_seq_in_order_then_goes_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let _keeper = start(dir.path(), "i=1; while [ $i -le 60 ]; do echo \"{\\\"n\\\":$i}\"; i=$((i+1)); done; cat");
+
+    let mut warm = Client::attach(dir.path(), 0).await;
+    for _ in 0..60 {
+        warm.next().await.unwrap();
+    }
+    drop(warm);
+
+    let mut client = Client::attach(dir.path(), 40).await;
+    for expected in 41..=60 {
+        let entry = client.next().await.unwrap();
+        assert_eq!(entry["seq"], expected);
+        assert_eq!(entry["frame"]["n"], expected);
+    }
+    assert_eq!(client.next().await.unwrap(), json!({"live": true}));
+
+    client.send(json!({"after": "live"})).await;
+    assert_eq!(client.next().await.unwrap()["seq"], 61);
+}
+
+#[tokio::test]
+async fn attaching_beyond_the_journal_replays_nothing_and_goes_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let _keeper = start(dir.path(), "cat");
+
+    let mut client = Client::attach(dir.path(), 50).await;
+    assert_eq!(client.next().await.unwrap(), json!({"live": true}));
+
+    client.send(json!({"n": 1})).await;
+    assert_eq!(client.next().await.unwrap()["seq"], 1);
+}

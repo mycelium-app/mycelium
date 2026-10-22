@@ -1,18 +1,19 @@
 use mycelium_proto::link::NodeToControl;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use uuid::Uuid;
 
 const METHOD_NOT_FOUND: i64 = -32601;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum ResumeKind {
     Load,
     Resume,
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum Pending {
     Initialize,
     NewSession,
@@ -32,12 +33,13 @@ pub enum Action {
     Emit(i64, NodeToControl),
     Started(NodeToControl),
     Send(Value),
+    PromptWritten(Uuid),
     CloseKeeper,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Prompt { text: String },
+    Prompt { prompt_id: Uuid, text: String },
     Cancel,
     PermissionResponse { request_id: String, outcome: Value },
     SetConfig { mode: Option<String>, model: Option<String>, config: Option<BTreeMap<String, Value>> },
@@ -48,6 +50,30 @@ pub enum Command {
 pub struct StartPlan {
     pub cwd: String,
     pub resume: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionSnapshot {
+    head: i64,
+    next_id: i64,
+    pending: HashMap<String, Pending>,
+    initialize_sent: bool,
+    initialized: bool,
+    resume_kind: ResumeKind,
+    session_requested: bool,
+    session_id: Option<String>,
+    modes_advertised: bool,
+    models_advertised: bool,
+    config_advertised: bool,
+    history_loading: bool,
+    unanswered_requests: HashMap<String, Value>,
+    permissions: HashMap<String, Value>,
+}
+
+impl SessionSnapshot {
+    pub fn position(&self) -> i64 {
+        self.head
+    }
 }
 
 pub struct SessionState {
@@ -68,7 +94,7 @@ pub struct SessionState {
     models_advertised: bool,
     config_advertised: bool,
     history_loading: bool,
-    queued_prompts: VecDeque<String>,
+    queued_prompts: VecDeque<(Uuid, String)>,
     unanswered_requests: HashMap<String, Value>,
     permissions: HashMap<String, Value>,
 }
@@ -128,6 +154,49 @@ impl SessionState {
             unanswered_requests: HashMap::new(),
             permissions: HashMap::new(),
         }
+    }
+
+    pub fn restore(conversation_id: Uuid, snapshot: SessionSnapshot, acked: i64) -> SessionState {
+        let mut state = SessionState::new(conversation_id, None, acked);
+        state.head = snapshot.head;
+        state.next_id = snapshot.next_id;
+        state.pending = snapshot.pending;
+        state.initialize_sent = snapshot.initialize_sent;
+        state.initialized = snapshot.initialized;
+        state.resume_kind = snapshot.resume_kind;
+        state.session_requested = snapshot.session_requested;
+        state.session_id = snapshot.session_id;
+        state.modes_advertised = snapshot.modes_advertised;
+        state.models_advertised = snapshot.models_advertised;
+        state.config_advertised = snapshot.config_advertised;
+        state.history_loading = snapshot.history_loading;
+        state.unanswered_requests = snapshot.unanswered_requests;
+        state.permissions = snapshot.permissions;
+
+        state
+    }
+
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            head: self.head,
+            next_id: self.next_id,
+            pending: self.pending.clone(),
+            initialize_sent: self.initialize_sent,
+            initialized: self.initialized,
+            resume_kind: self.resume_kind,
+            session_requested: self.session_requested,
+            session_id: self.session_id.clone(),
+            modes_advertised: self.modes_advertised,
+            models_advertised: self.models_advertised,
+            config_advertised: self.config_advertised,
+            history_loading: self.history_loading,
+            unanswered_requests: self.unanswered_requests.clone(),
+            permissions: self.permissions.clone(),
+        }
+    }
+
+    pub fn head(&self) -> i64 {
+        self.head
     }
 
     pub fn acp_session_id(&self) -> Option<&str> {
@@ -193,8 +262,8 @@ impl SessionState {
 
     pub fn on_command(&mut self, command: Command) -> Vec<Action> {
         match command {
-            Command::Prompt { text } => {
-                self.queued_prompts.push_back(text);
+            Command::Prompt { prompt_id, text } => {
+                self.queued_prompts.push_back((prompt_id, text));
 
                 self.advance()
             }
@@ -282,9 +351,10 @@ impl SessionState {
         }
 
         if let Some(session_id) = self.session_id.clone() {
-            while let Some(text) = self.queued_prompts.pop_front() {
+            while let Some((prompt_id, text)) = self.queued_prompts.pop_front() {
                 let params = json!({"sessionId": session_id, "prompt": [{"type": "text", "text": text}]});
                 actions.push(self.outgoing_request("session/prompt", params));
+                actions.push(Action::PromptWritten(prompt_id));
             }
         }
 
@@ -566,8 +636,8 @@ mod tests {
     fn prompts_wait_for_the_session_then_go_out_in_order() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         state.on_live();
-        assert!(sent_frames(&state.on_command(Command::Prompt { text: "one".into() })).is_empty());
-        state.on_command(Command::Prompt { text: "two".into() });
+        assert!(sent_frames(&state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "one".into() })).is_empty());
+        state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(2), text: "two".into() });
 
         state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
         let actions = state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}}));
@@ -617,6 +687,49 @@ mod tests {
         let answer = state.on_command(Command::PermissionResponse { request_id: "9001".into(), outcome: outcome.clone() });
 
         assert_eq!(sent_frames(&answer), [json!({"jsonrpc": "2.0", "id": 9001, "result": {"outcome": outcome}})]);
+    }
+
+    #[test]
+    fn a_prompt_is_reported_written_right_after_its_frame_goes_out() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+
+        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into() });
+
+        assert!(matches!(&actions[0], Action::Send(frame) if frame["method"] == "session/prompt"));
+        assert_eq!(actions[1], Action::PromptWritten(Uuid::from_u128(7)));
+    }
+
+    #[test]
+    fn a_prompt_queued_before_the_session_is_reported_written_only_when_it_goes_out() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        state.on_live();
+
+        let queued = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into() });
+        assert!(!queued.iter().any(|action| matches!(action, Action::PromptWritten(_))));
+
+        state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
+        let actions = state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}}));
+
+        assert!(actions.contains(&Action::PromptWritten(Uuid::from_u128(7))));
+    }
+
+    #[test]
+    fn a_restored_snapshot_continues_where_the_session_left_off() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1", "modes": {"currentModeId": "default", "availableModes": []}}));
+        let head = state.head();
+        let snapshot: SessionSnapshot = serde_json::from_value(serde_json::to_value(state.snapshot()).unwrap()).unwrap();
+
+        let mut restored = SessionState::restore(conversation(), snapshot, head);
+        restored.on_live();
+        let frames = sent_frames(&restored.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "again".into() }));
+
+        assert_eq!(restored.acp_session_id(), Some("s1"));
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["method"], "session/prompt");
+        assert_eq!(frames[0]["params"]["sessionId"], "s1");
+        assert!(frames[0]["id"].as_i64().unwrap() > 2, "request ids must not repeat after a restore");
     }
 
     #[test]
@@ -674,7 +787,7 @@ mod tests {
     fn a_prompt_response_becomes_a_turn_end_with_its_stop_reason() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         started(&mut state, json!({"sessionId": "s1"}));
-        let prompt = state.on_command(Command::Prompt { text: "hi".into() });
+        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into() });
         let id = sent_frames(&prompt)[0]["id"].clone();
 
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "cancelled"}}));

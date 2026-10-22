@@ -1,6 +1,7 @@
 mod common;
 
 use futures_util::{SinkExt, StreamExt};
+use mycelium_node::agents::login_command;
 use mycelium_node::config::NodeConfig;
 use mycelium_node::daemon::{DaemonOptions, run_daemon};
 use mycelium_node::link::{Backoff, Liveness};
@@ -149,7 +150,7 @@ impl Fixture {
         let options = DaemonOptions {
             keeper_binary: PathBuf::from(env!("CARGO_BIN_EXE_mycelium")),
             agent_commands: Arc::new(move |agent_id| if agent_id == AgentId::Claude { vec![agent.clone()] } else { vec!["/nonexistent/codex-acp".to_string()] }),
-            login_commands: Arc::new(|_| vec!["sh".into(), "-c".into(), "echo sign-in-link".into()]),
+            login_commands: Arc::new(|agent, method| login_command(agent, method).map(|_| vec!["sh".into(), "-c".into(), "echo sign-in-link".into()])),
             backoff: Backoff { min: Duration::from_millis(20), max: Duration::from_millis(100) },
             liveness: Liveness::default(),
             home: root.path().join("home"),
@@ -243,6 +244,12 @@ async fn start_conversation(connection: &mut Connection, conversation: Uuid) {
 
 fn prompt(connection: &Connection, conversation: Uuid, text: &str) {
     connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id: Uuid::new_v4(), text: text.into() });
+}
+
+fn journalled_prompts(fixture: &Fixture, conversation: Uuid) -> usize {
+    let journal = std::fs::read_to_string(fixture.session_dir(conversation).join("journal.jsonl")).unwrap_or_default();
+
+    journal.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).filter(|entry| entry["frame"]["method"] == "session/prompt").count()
 }
 
 async fn wait_for_file(path: &Path) {
@@ -686,6 +693,155 @@ async fn a_login_streams_its_output_and_reports_the_finish() {
     let finished = connection.next_matching(|message| matches!(message, NodeToControl::LoginFinished { .. })).await;
     assert_eq!(finished, NodeToControl::LoginFinished { login_id, ok: true });
     connection.next_matching(|message| matches!(message, NodeToControl::Logins { .. })).await;
+}
+
+#[tokio::test]
+async fn a_login_with_an_unknown_method_is_refused_with_an_explanation() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let login_id = Uuid::from_u128(13);
+
+    connection.send(ControlToNode::StartLogin { login_id, agent: AgentId::Claude, method: "carrier_pigeon".into() });
+
+    let output = connection.next_matching(|message| matches!(message, NodeToControl::LoginOutput { .. })).await;
+    let NodeToControl::LoginOutput { data, .. } = output else {
+        unreachable!();
+    };
+    assert!(data.contains("carrier_pigeon"), "the explanation must name the method, got {data:?}");
+    let finished = connection.next_matching(|message| matches!(message, NodeToControl::LoginFinished { .. })).await;
+    assert_eq!(finished, NodeToControl::LoginFinished { login_id, ok: false });
+}
+
+#[tokio::test]
+async fn repeated_refusals_for_one_conversation_use_increasing_seqs() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(14);
+
+    let mut seqs = Vec::new();
+    for _ in 0..3 {
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None });
+        let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
+        seqs.push(seq_of(&failed).unwrap());
+    }
+
+    assert!(seqs.windows(2).all(|pair| pair[0] < pair[1]), "refusal seqs must increase, got {seqs:?}");
+}
+
+#[tokio::test]
+async fn a_session_started_after_a_refusal_continues_above_the_refusal_seq() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(15);
+
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None });
+    let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
+    let refused_at = seq_of(&failed).unwrap();
+
+    start_conversation(&mut connection, conversation).await;
+    prompt(&connection, conversation, "hello");
+    let update = connection.next_matching(|message| update_text(message).is_some()).await;
+
+    assert!(seq_of(&update).unwrap() > refused_at);
+}
+
+#[tokio::test]
+async fn a_prompt_is_acknowledged_once_it_is_written_to_the_agent() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(16);
+    let prompt_id = Uuid::new_v4();
+    start_conversation(&mut connection, conversation).await;
+
+    connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+
+    let received = connection.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
+    assert_eq!(received, NodeToControl::PromptReceived { conversation_id: conversation, prompt_id });
+    assert_eq!(journalled_prompts(&fixture, conversation), 1);
+}
+
+#[tokio::test]
+async fn a_prompt_sent_twice_reaches_the_agent_once_and_is_acknowledged_twice() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(17);
+    let prompt_id = Uuid::new_v4();
+    start_conversation(&mut connection, conversation).await;
+
+    for _ in 0..2 {
+        connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+        connection.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
+    }
+
+    connection.next_matching(|message| matches!(message, NodeToControl::TurnEnd { .. })).await;
+    assert_eq!(journalled_prompts(&fixture, conversation), 1);
+}
+
+#[tokio::test]
+async fn a_prompt_received_before_a_daemon_restart_is_not_written_again_after_it() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let daemon = fixture.start_daemon();
+    let mut first = control.accept().await;
+    let conversation = Uuid::from_u128(18);
+    let prompt_id = Uuid::new_v4();
+    start_conversation(&mut first, conversation).await;
+    first.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+    first.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
+
+    daemon.crash();
+    let _restarted = fixture.start_daemon();
+    let mut second = control.accept().await;
+    second.next_matching(is_hello).await;
+
+    second.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+    second.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
+
+    assert_eq!(journalled_prompts(&fixture, conversation), 1);
+}
+
+#[tokio::test]
+async fn a_restarted_daemon_resumes_from_what_it_had_acknowledged_and_keeps_the_session_working() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let daemon = fixture.start_daemon();
+    let mut first = control.accept().await;
+    let conversation = Uuid::from_u128(19);
+    start_conversation(&mut first, conversation).await;
+    prompt(&first, conversation, "hello");
+
+    let mut highest = 0;
+    for _ in 0..5 {
+        let message = first.next_matching(|message| seq_of(message).is_some()).await;
+        highest = highest.max(seq_of(&message).unwrap());
+    }
+    first.send(ControlToNode::Ack { conversation_id: conversation, seq: highest });
+    first.nothing_more().await;
+
+    daemon.crash();
+    let _restarted = fixture.start_daemon();
+    let mut second = control.accept().await;
+    let hello = second.next_matching(is_hello).await;
+    let NodeToControl::Hello { sessions, .. } = hello else {
+        unreachable!();
+    };
+    assert_eq!(sessions[0].last_seq, highest);
+
+    prompt(&second, conversation, "again");
+    let update = second.next_matching(|message| update_text(message).is_some()).await;
+
+    assert!(seq_of(&update).unwrap() > highest);
+    assert_eq!(update_text(&update).as_deref(), Some("one"));
 }
 
 #[tokio::test]

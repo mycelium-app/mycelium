@@ -28,9 +28,13 @@ impl LoginManager {
 
     pub fn start(&self, login_id: Uuid, command: Vec<String>) {
         if let Err(error) = self.try_start(login_id, &command) {
-            let _ = self.out.send(NodeToControl::LoginOutput { login_id, data: format!("{error:#}\r\n") });
-            let _ = self.out.send(NodeToControl::LoginFinished { login_id, ok: false });
+            self.refuse(login_id, format!("{error:#}"));
         }
+    }
+
+    pub fn refuse(&self, login_id: Uuid, explanation: String) {
+        let _ = self.out.send(NodeToControl::LoginOutput { login_id, data: format!("{explanation}\r\n") });
+        let _ = self.out.send(NodeToControl::LoginFinished { login_id, ok: false });
     }
 
     pub fn input(&self, login_id: Uuid, text: &str) {

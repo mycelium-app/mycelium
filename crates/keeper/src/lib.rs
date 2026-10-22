@@ -14,12 +14,13 @@ use tokio::sync::{mpsc, watch};
 const EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct Journal {
-    lines: Vec<String>,
+    written: usize,
     file: std::fs::File,
 }
 
 struct Shared {
     journal: Mutex<Journal>,
+    journal_path: PathBuf,
     head: watch::Sender<usize>,
     exit_code: watch::Sender<Option<i32>>,
     generation: watch::Sender<u64>,
@@ -30,22 +31,14 @@ struct Shared {
 impl Shared {
     fn append(&self, direction: &str, frame: Value) -> Result<()> {
         let mut journal = self.journal.lock().map_err(|_| anyhow::anyhow!("journal lock poisoned"))?;
-        let seq = journal.lines.len() + 1;
+        let seq = journal.written + 1;
         let line = json!({"seq": seq, "dir": direction, "frame": frame}).to_string();
         writeln!(journal.file, "{line}")?;
         journal.file.sync_data()?;
-        journal.lines.push(line);
+        journal.written = seq;
         self.head.send_replace(seq);
 
         Ok(())
-    }
-
-    fn entries_after(&self, cursor: usize) -> Vec<String> {
-        let Ok(journal) = self.journal.lock() else {
-            return Vec::new();
-        };
-
-        journal.lines.iter().skip(cursor).cloned().collect()
     }
 }
 
@@ -60,11 +53,13 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
     let _ = std::fs::remove_file(dir.join("exit.json"));
     let listener = UnixListener::bind(&socket_path).with_context(|| format!("bind {}", socket_path.display()))?;
 
-    let journal_file = OpenOptions::new().create(true).write(true).truncate(true).open(dir.join("journal.jsonl"))?;
+    let journal_path = dir.join("journal.jsonl");
+    let journal_file = OpenOptions::new().create(true).write(true).truncate(true).open(&journal_path)?;
     let stderr_file = OpenOptions::new().create(true).append(true).open(dir.join("stderr.log"))?;
     let (close, mut close_requests) = mpsc::unbounded_channel::<()>();
     let shared = Arc::new(Shared {
-        journal: Mutex::new(Journal { lines: Vec::new(), file: journal_file }),
+        journal: Mutex::new(Journal { written: 0, file: journal_file }),
+        journal_path,
         head: watch::channel(0).0,
         exit_code: watch::channel(None).0,
         generation: watch::channel(0).0,
@@ -165,9 +160,19 @@ async fn serve_client(stream: UnixStream, shared: &Shared, frames_to_agent: mpsc
     let mut replaced = shared.generation.subscribe();
     let mut exit_code = shared.exit_code.subscribe();
     let mut live_marker_sent = false;
+    cursor = cursor.min(*head.borrow());
+    let mut journal = BufReader::new(tokio::fs::File::open(&shared.journal_path).await?).lines();
+    for _ in 0..cursor {
+        journal.next_line().await?;
+    }
 
     loop {
-        for line in shared.entries_after(cursor) {
+        let written = *head.borrow();
+        while cursor < written {
+            let Some(line) = journal.next_line().await? else {
+                break;
+            };
+
             write_half.write_all(line.as_bytes()).await?;
             write_half.write_all(b"\n").await?;
             cursor += 1;

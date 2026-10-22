@@ -88,13 +88,14 @@ fn claude_credential(home: &Path) -> (&'static str, bool) {
     ("oauth_token", home.join(".claude").join(".credentials.json").exists())
 }
 
-pub fn login_command(agent: AgentId) -> Vec<String> {
-    let words: &[&str] = match agent {
-        AgentId::Claude => &["claude", "setup-token"],
-        AgentId::Codex => &["codex", "login", "--device-auth"],
+pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
+    let words: &[&str] = match (agent, method) {
+        (AgentId::Claude, "oauth_token") => &["claude", "setup-token"],
+        (AgentId::Codex, "device_auth") => &["codex", "login", "--device-auth"],
+        _ => return None,
     };
 
-    words.iter().map(|word| word.to_string()).collect()
+    Some(words.iter().map(|word| word.to_string()).collect())
 }
 
 #[cfg(test)]
@@ -146,6 +147,19 @@ mod tests {
         std::fs::write(home.path().join(".codex").join("auth.json"), "{}").unwrap();
 
         assert_eq!(login_state(home.path(), &available)[0].state, LoginState::SignedIn);
+    }
+
+    #[test]
+    fn each_agent_signs_in_with_the_method_it_reports() {
+        assert_eq!(login_command(AgentId::Claude, "oauth_token"), Some(vec!["claude".to_string(), "setup-token".to_string()]));
+        assert_eq!(login_command(AgentId::Codex, "device_auth"), Some(vec!["codex".to_string(), "login".to_string(), "--device-auth".to_string()]));
+    }
+
+    #[test]
+    fn a_method_the_agent_does_not_offer_has_no_command() {
+        assert_eq!(login_command(AgentId::Claude, "device_auth"), None);
+        assert_eq!(login_command(AgentId::Codex, "oauth_token"), None);
+        assert_eq!(login_command(AgentId::Claude, "api_key"), None);
     }
 
     #[test]

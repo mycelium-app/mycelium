@@ -1,9 +1,11 @@
-use crate::acp::{Action, Command, Direction, SessionState, StartPlan};
+use crate::acp::{Action, Command, Direction, SessionSnapshot, SessionState, StartPlan};
 use anyhow::{Context, Result, bail};
 use mycelium_keeper::socket_path;
 use mycelium_proto::link::NodeToControl;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+use std::io::{BufRead, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -80,6 +82,30 @@ fn read_acked(dir: &Path) -> i64 {
     std::fs::read_to_string(acked_path(dir)).ok().and_then(|text| text.trim().parse().ok()).unwrap_or(0)
 }
 
+#[derive(Serialize, Deserialize)]
+struct SavedState {
+    state: SessionSnapshot,
+    started: Option<NodeToControl>,
+}
+
+fn snapshot_path(dir: &Path) -> PathBuf {
+    dir.join("state.json")
+}
+
+fn load_snapshot(dir: &Path, base: i64) -> Option<SavedState> {
+    let saved = std::fs::read_to_string(snapshot_path(dir)).ok().and_then(|text| serde_json::from_str::<SavedState>(&text).ok())?;
+
+    (saved.state.position() >= base).then_some(saved)
+}
+
+fn written_prompts_path(dir: &Path) -> PathBuf {
+    dir.join("prompts_written")
+}
+
+fn read_written_prompts(dir: &Path) -> HashSet<Uuid> {
+    std::fs::read_to_string(written_prompts_path(dir)).map(|text| text.lines().filter_map(|line| Uuid::parse_str(line.trim()).ok()).collect()).unwrap_or_default()
+}
+
 fn closed_path(dir: &Path) -> PathBuf {
     dir.join("closed")
 }
@@ -90,6 +116,24 @@ fn base_path(dir: &Path) -> PathBuf {
 
 fn read_base(dir: &Path) -> i64 {
     std::fs::read_to_string(base_path(dir)).ok().and_then(|text| text.trim().parse().ok()).unwrap_or(0)
+}
+
+fn failure_seq_path(dir: &Path) -> PathBuf {
+    dir.join("failure_seq")
+}
+
+fn read_failure_seq(dir: &Path) -> i64 {
+    std::fs::read_to_string(failure_seq_path(dir)).ok().and_then(|text| text.trim().parse().ok()).unwrap_or(0)
+}
+
+pub fn next_failure_seq(dir: &Path) -> i64 {
+    let seq = journal_head(dir).max(read_failure_seq(dir)) + 1;
+
+    if let Err(error) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(failure_seq_path(dir), seq.to_string())) {
+        tracing::warn!("could not record the failure seq: {error}");
+    }
+
+    seq
 }
 
 pub fn journal_head(dir: &Path) -> i64 {
@@ -105,20 +149,47 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)) };
 
     let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
-    let actor = Actor { conversation_id: spec.conversation_id, dir: spec.dir.clone(), base, out, handle: handle.clone(), outbox: VecDeque::new(), started: None };
-    let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone() });
-    let mut state = SessionState::new(spec.conversation_id, plan, acked.load(Ordering::SeqCst));
+    let saved = if spec.launch.is_none() { load_snapshot(&spec.dir, base) } else { None };
+    let attach_after = saved.as_ref().map_or(0, |saved| (saved.state.position() - base) as usize);
+    let started = saved.as_ref().and_then(|saved| saved.started.clone());
+    if let Some(NodeToControl::SessionStarted { acp_session_id, .. }) = &started
+        && let Ok(mut slot) = handle.acp_session_id.lock()
+    {
+        *slot = Some(acp_session_id.clone());
+    }
+
+    let acked_now = acked.load(Ordering::SeqCst);
+    let mut state = match saved {
+        Some(saved) => SessionState::restore(spec.conversation_id, saved.state, acked_now),
+        None => {
+            let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone() });
+
+            SessionState::new(spec.conversation_id, plan, acked_now)
+        }
+    };
     if spec.launch.is_none() && closed_path(&spec.dir).exists() {
         state.mark_closing();
     }
 
+    let actor = Actor {
+        conversation_id: spec.conversation_id,
+        dir: spec.dir.clone(),
+        base,
+        attach_after,
+        out,
+        handle: handle.clone(),
+        outbox: VecDeque::new(),
+        started,
+        received_prompts: HashSet::new(),
+        written_prompts: read_written_prompts(&spec.dir),
+    };
     tokio::spawn(actor.run(spec, state, inbox));
 
     handle
 }
 
 fn start_new_journal_epoch(dir: &Path) -> i64 {
-    let base = journal_head(dir);
+    let base = journal_head(dir).max(read_failure_seq(dir));
 
     if let Err(error) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(base_path(dir), base.to_string())) {
         tracing::warn!("could not record the journal base: {error}");
@@ -136,21 +207,24 @@ struct Actor {
     conversation_id: Uuid,
     dir: PathBuf,
     base: i64,
+    attach_after: usize,
     out: mpsc::UnboundedSender<NodeToControl>,
     handle: SessionHandle,
     outbox: VecDeque<(i64, NodeToControl)>,
     started: Option<NodeToControl>,
+    received_prompts: HashSet<Uuid>,
+    written_prompts: HashSet<Uuid>,
 }
 
 impl Actor {
     async fn run(mut self, spec: SessionSpec, mut state: SessionState, mut inbox: mpsc::UnboundedReceiver<Message>) {
-        let connection = connect(&spec).await;
+        let connection = connect(&spec, self.attach_after).await;
         let mut connection = match connection {
             Ok(connection) => connection,
             Err(error) => {
                 tracing::error!(conversation = %self.conversation_id, "keeper unavailable: {error:#}");
                 self.handle.ended.store(true, Ordering::SeqCst);
-                let seq = self.base + 1;
+                let seq = next_failure_seq(&self.dir);
                 let message = NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq, message: format!("{error:#}") };
                 self.emit(seq, message);
                 self.serve_commands_only(inbox).await;
@@ -180,6 +254,12 @@ impl Actor {
                         Message::Command(command) => {
                             if matches!(command, Command::Close) {
                                 self.record_close_request();
+                            }
+
+                            if let Command::Prompt { prompt_id, .. } = &command
+                                && self.is_duplicate_prompt(*prompt_id)
+                            {
+                                continue;
                             }
 
                             let actions = state.on_command(command);
@@ -236,6 +316,11 @@ impl Actor {
                     }
                 }
                 Action::Send(frame) => write_to_keeper(connection, json!({"send": frame})).await,
+                Action::PromptWritten(prompt_id) => {
+                    if connection.writer.is_some() && !self.handle.ended() {
+                        self.record_written_prompt(prompt_id);
+                    }
+                }
                 Action::CloseKeeper => write_to_keeper(connection, json!({"close": true})).await,
             }
         }
@@ -246,6 +331,27 @@ impl Actor {
         {
             *slot = Some(acp_session_id.clone());
         }
+    }
+
+    fn is_duplicate_prompt(&mut self, prompt_id: Uuid) -> bool {
+        if self.written_prompts.contains(&prompt_id) {
+            let _ = self.out.send(NodeToControl::PromptReceived { conversation_id: self.conversation_id, prompt_id });
+
+            return true;
+        }
+
+        !self.received_prompts.insert(prompt_id)
+    }
+
+    fn record_written_prompt(&mut self, prompt_id: Uuid) {
+        self.written_prompts.insert(prompt_id);
+
+        let appended = std::fs::OpenOptions::new().create(true).append(true).open(written_prompts_path(&self.dir)).and_then(|mut file| writeln!(file, "{prompt_id}"));
+        if let Err(error) = appended {
+            tracing::warn!(conversation = %self.conversation_id, "could not record the prompt: {error}");
+        }
+
+        let _ = self.out.send(NodeToControl::PromptReceived { conversation_id: self.conversation_id, prompt_id });
     }
 
     fn emit(&mut self, seq: i64, message: NodeToControl) {
@@ -264,6 +370,18 @@ impl Actor {
 
         if let Err(error) = std::fs::write(acked_path(&self.dir), seq.to_string()) {
             tracing::warn!(conversation = %self.conversation_id, "could not record acked seq: {error}");
+        }
+
+        if state.head() == seq {
+            self.save_snapshot(state);
+        }
+    }
+
+    fn save_snapshot(&self, state: &SessionState) {
+        let saved = SavedState { state: state.snapshot(), started: self.started.clone() };
+        let written = serde_json::to_string(&saved).map_err(std::io::Error::other).and_then(|text| std::fs::write(snapshot_path(&self.dir), text));
+        if let Err(error) = written {
+            tracing::warn!(conversation = %self.conversation_id, "could not record the session state: {error}");
         }
     }
 
@@ -297,25 +415,25 @@ async fn write_to_keeper(connection: &mut Connection, message: Value) {
     }
 }
 
-async fn connect(spec: &SessionSpec) -> Result<Connection> {
+async fn connect(spec: &SessionSpec, after: usize) -> Result<Connection> {
     if let Some(launch) = &spec.launch {
         launch_keeper(&spec.dir, launch).await?;
         let stream = connect_socket(&spec.dir).await?;
 
-        return attach(stream).await;
+        return attach(stream, 0).await;
     }
 
     match UnixStream::connect(socket_path(&spec.dir)).await {
-        Ok(stream) => attach(stream).await,
-        Err(_) => replay_ended_journal(&spec.dir),
+        Ok(stream) => attach(stream, after).await,
+        Err(_) => replay_ended_journal(&spec.dir, after),
     }
 }
 
-async fn attach(stream: UnixStream) -> Result<Connection> {
+async fn attach(stream: UnixStream, after: usize) -> Result<Connection> {
     let (read_half, mut write_half) = stream.into_split();
     let (entries_tx, entries) = mpsc::unbounded_channel();
 
-    let attach = format!("{}\n", json!({"attach": {"after": 0}}));
+    let attach = format!("{}\n", json!({"attach": {"after": after}}));
     write_half.write_all(attach.as_bytes()).await?;
 
     tokio::spawn(async move {
@@ -334,20 +452,21 @@ async fn attach(stream: UnixStream) -> Result<Connection> {
     Ok(Connection { entries, writer: Some(write_half) })
 }
 
-fn replay_ended_journal(dir: &Path) -> Result<Connection> {
-    let journal = std::fs::read_to_string(dir.join("journal.jsonl")).with_context(|| format!("The agent session at {} is gone.", dir.display()))?;
+fn replay_ended_journal(dir: &Path, after: usize) -> Result<Connection> {
+    let journal = std::fs::File::open(dir.join("journal.jsonl")).with_context(|| format!("The agent session at {} is gone.", dir.display()))?;
     let (entries_tx, entries) = mpsc::unbounded_channel();
-
-    for line in journal.lines() {
-        if let Ok(entry) = serde_json::from_str::<Value>(line) {
-            let _ = entries_tx.send(entry);
-        }
-    }
-
-    let _ = entries_tx.send(json!({"live": true}));
-
     let exit_code = std::fs::read_to_string(dir.join("exit.json")).ok().and_then(|text| serde_json::from_str::<Value>(&text).ok()).and_then(|exit| exit["exit"].as_i64()).unwrap_or(-1);
-    let _ = entries_tx.send(json!({"exit": exit_code}));
+
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(journal).lines().skip(after).map_while(|line| line.ok()) {
+            if let Ok(entry) = serde_json::from_str::<Value>(&line) {
+                let _ = entries_tx.send(entry);
+            }
+        }
+
+        let _ = entries_tx.send(json!({"live": true}));
+        let _ = entries_tx.send(json!({"exit": exit_code}));
+    });
 
     Ok(Connection { entries, writer: None })
 }
@@ -367,6 +486,7 @@ async fn connect_socket(dir: &Path) -> Result<UnixStream> {
 async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let _ = std::fs::remove_file(acked_path(dir));
+    let _ = std::fs::remove_file(snapshot_path(dir));
     let _ = std::fs::remove_file(closed_path(dir));
     let _ = std::fs::remove_file(socket_path(dir));
     let _ = std::fs::remove_file(dir.join("exit.json"));

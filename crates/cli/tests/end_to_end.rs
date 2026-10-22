@@ -54,8 +54,12 @@ fn fake_agent() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fake-acp").canonicalize().unwrap()
 }
 
-async fn create_database() -> String {
-    let admin = std::env::var("MYCELIUM_TEST_DATABASE_URL").expect("Set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres");
+async fn create_database() -> Option<String> {
+    let Ok(admin) = std::env::var("MYCELIUM_TEST_DATABASE_URL") else {
+        eprintln!("SKIPPED: set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres, to run this test.");
+
+        return None;
+    };
     let name = format!("test_{}", Uuid::new_v4().simple());
     let mut connection = PgConnection::connect(&admin).await.unwrap();
 
@@ -63,7 +67,7 @@ async fn create_database() -> String {
 
     let (base, _) = admin.rsplit_once('/').unwrap();
 
-    format!("{base}/{name}")
+    Some(format!("{base}/{name}"))
 }
 
 struct Api {
@@ -156,7 +160,8 @@ impl Environment {
         command
     }
 
-    async fn start() -> Environment {
+    async fn start() -> Option<Environment> {
+        let database = create_database().await?;
         let directory = TempDir::new().unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -173,7 +178,7 @@ impl Environment {
             .args(["control", "serve"])
             .env("MYCELIUM_PUBLIC_URL", &base)
             .env("MYCELIUM_LISTEN", address.to_string())
-            .env("MYCELIUM_DATABASE_URL", create_database().await)
+            .env("MYCELIUM_DATABASE_URL", database)
             .env("MYCELIUM_DATA_DIR", directory.path().join("data"))
             .env("MYCELIUM_WEB_DIR", &web_dir)
             .env("MYCELIUM_DEV_LOGIN", "dev@example.com")
@@ -198,7 +203,7 @@ impl Environment {
         let api = Api { base, cookie, http };
         let streamed = Arc::new(Mutex::new(Vec::new()));
 
-        Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, data_dir: directory.path().join("data"), streamed, _control: control, _directory: directory }
+        Some(Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, data_dir: directory.path().join("data"), streamed, _control: control, _directory: directory })
     }
 
     async fn join_node(&self) {
@@ -269,7 +274,9 @@ impl Environment {
 
 #[tokio::test]
 async fn a_conversation_runs_through_control_node_and_agent_and_survives_a_daemon_restart() {
-    let environment = Environment::start().await;
+    let Some(environment) = Environment::start().await else {
+        return;
+    };
     let api = &environment.api;
 
     environment.join_node().await;
@@ -347,7 +354,9 @@ async fn a_conversation_runs_through_control_node_and_agent_and_survives_a_daemo
 
 #[tokio::test]
 async fn a_transcript_under_the_node_home_is_copied_to_the_control_plane() {
-    let environment = Environment::start().await;
+    let Some(environment) = Environment::start().await else {
+        return;
+    };
     environment.join_node().await;
     let transcript = environment.node_home.join(".claude").join("projects").join("-work-app").join("session-1.jsonl");
     std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
@@ -365,7 +374,9 @@ async fn a_transcript_under_the_node_home_is_copied_to_the_control_plane() {
 
 #[tokio::test]
 async fn an_archived_conversation_survives_a_daemon_restart_and_resumes_when_restored_and_prompted() {
-    let environment = Environment::start().await;
+    let Some(environment) = Environment::start().await else {
+        return;
+    };
     let api = &environment.api;
     environment.join_node().await;
     let mut daemon = environment.run_daemon();
