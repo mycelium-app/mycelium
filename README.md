@@ -34,6 +34,44 @@ each machine runs the agents and dials in. You steer all of it from web, iOS or 
 Design done, stage 1 in progress. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and the
 stages, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) for the short version.
 
+## Install a node
+
+Script, on Linux or macOS. Run as root for a system service in `/opt/mycelium`, or as yourself for a
+user service in `~/.local/bin`. The script prints a code to approve in the web client.
+
+```sh
+curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://mycelium.example.com
+```
+
+Nix, with the flake's `nixosModules`, `darwinModules` or `homeManagerModules`:
+
+```nix
+{
+  imports = [ mycelium.nixosModules.mycelium-node ];
+  services.mycelium-node = {
+    enable = true;
+    controlPlane = "https://mycelium.example.com";
+  };
+}
+```
+
+`MYCELIUM_BINARY=/path/to/mycelium` makes the script install a local build instead of downloading.
+
+## Run the control plane
+
+```sh
+docker run -d --name mycelium -p 8080:8080 \
+  -e MYCELIUM_DATABASE_URL=postgres://mycelium:secret@db/mycelium \
+  -e MYCELIUM_PUBLIC_URL=https://mycelium.example.com \
+  -e MYCELIUM_OIDC_ISSUER=https://id.example.com \
+  -e MYCELIUM_OIDC_CLIENT_ID=mycelium \
+  -v mycelium-data:/var/lib/mycelium \
+  ghcr.io/mycelium-app/mycelium:latest
+```
+
+Migrations run at boot. `/healthz` stays 200 while the process is up and `/readyz` returns 503 until
+the database is migrated. The full list of variables is in [`docs/STAGE1.md`](docs/STAGE1.md#config-environment).
+
 ## Licence
 
 [WTFPL](LICENSE).
