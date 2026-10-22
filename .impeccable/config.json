@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-22T13:37:30.720Z",
+        "reason": "Claude: the flagged rows, bars, diff lines and frames are the app's docked UI shown as product shots; the design system keeps them square and flush with inline padding inside each row (Zed-style density the operator asked for), and the disclosure and stages sections carry padding on their inner wrappers"
+      }
+    ]
+  }
+}
