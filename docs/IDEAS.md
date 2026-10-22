@@ -65,3 +65,18 @@ the plan; an idea moves there when it is designed.
   it; hover previews for file paths; model, time and duration on finished replies; syntax highlighting.
 - **Tasks board.** Lanes for needs input, running, to review and done; cards with model, project, branch, timer
   and subtasks; stop an agent or answer its permission request from the card.
+
+## Decided in review
+
+- **Navigation.** Tasks and Schedules sit under Nodes at the top of the sidebar. The bottom bar is
+  `[Projects] [Issues]`, then the theme, Activity and Settings icon buttons.
+- **Memory.** Every agent reads and writes Mycelium's memory through its MCP server, and only that:
+  Claude Code's and Codex's own memory features are turned off on every node.
+- **Search.** Every transcript, imported ones included, is indexed on the server with ctx; its status
+  is a Settings section.
+- **Generated UI** can act: send a message, start a side chat, open a file.
+- **Git** follows Zed's git panel: Changes and History tabs, staging, Fetch, commit, undo.
+- **Walkthroughs** are a tab beside the conversation, written by the agent through an MCP tool.
+- **Terminal** is a panel on the conversation's right-hand rail.
+- **Account switcher** shows only when an agent has two or more accounts, with usage left per account.
+- **Queued messages** follow Zed's queue: a collapsible header with Clear all, hover actions per row.
