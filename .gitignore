@@ -5,3 +5,17 @@ CLAUDE.md
 
 .DS_Store
 /target
+
+# Rust
+*.rs.bk
+
+# Gradle and Kotlin
+.gradle/
+build/
+.kotlin/
+local.properties
+*.iml
+.idea/
+
+# Node
+node_modules/

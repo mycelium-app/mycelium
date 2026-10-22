@@ -33,7 +33,7 @@ a { color: var(--accent); }
 .show-2 { background: color-mix(in srgb, var(--status-working) 14%, var(--bg-content)); }
 .show-3 { background: color-mix(in srgb, var(--status-attention) 14%, var(--bg-content)); }
 .show-4 { background: color-mix(in srgb, var(--status-failed) 12%, var(--bg-content)); }
-.frame { border: 1px solid var(--border); border-radius: var(--radius-float); overflow: hidden; background: var(--bg-content); box-shadow: var(--shadow-float); max-width: 100%; font-size: 13px; line-height: 18px; }
+.frame { border: 1px solid var(--border); border-radius: var(--radius-float); overflow: hidden; background: var(--bg-content); max-width: 100%; font-size: 13px; line-height: 18px; }
 .show-hero { padding: 32px 32px 0; margin-bottom: 120px; }
 .window { display: flex; width: 100%; max-width: 1040px; height: 480px; border-bottom: 0; border-radius: var(--radius-float) var(--radius-float) 0 0; }
 .window .my-sidebar { width: 260px; }
