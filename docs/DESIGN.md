@@ -300,8 +300,11 @@ The main app is one codebase for web, iOS and Android. Candidates:
 | Nix | Painful | Already solved in slop/sedge |
 | Prior art | [Paseo](https://github.com/getpaseo/paseo)'s chat and status board | slop/sedge, slop/orchestrator-android |
 
-Leaning Expo: the web client is the one used most, and WCAG 2.2 AA on a canvas means fighting the
-framework. Paseo's sidebar (ready to review, working, done) and its chat view are the reference for
+Leaning Compose Multiplatform for every target, for build times: one Kotlin codebase builds web,
+iOS, Android and desktop, and its Nix build is already solved in slop/sedge, where Expo's is
+painful. The cost lands on the web client, the one used most: Compose renders it to a canvas, so
+WCAG 2.2 AA there means fighting the framework rather than getting the DOM's semantics for free.
+Paseo's sidebar (ready to review, working, done) and its chat view are the reference for
 the interaction design.
 
 Daemon and control plane: Rust on axum and tokio, with Postgres for the control plane. ctx is Rust;
@@ -321,7 +324,8 @@ Nix builds of Rust are cheap.
 
 1. **Fork Paseo or start fresh?** A fork brings the daemon, clients and status board on day one, in
    TypeScript; the control plane and keeper go on top.
-2. **Expo or Compose** for the clients.
+2. **Compose for every target, or Compose plus a DOM web client.** Compose is the lean; whether the
+   web client's accessibility cost is acceptable is open.
 3. **What else a group scopes.** It scopes instructions and memory (see Groups). Whether tasks and
    permissions stop at the group boundary too is open.
 4. **Which identity provider** runs in the homelab, and whether its groups drive permissions or the
