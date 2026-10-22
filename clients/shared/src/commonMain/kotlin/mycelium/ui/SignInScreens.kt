@@ -147,10 +147,8 @@ private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onCancel
 
         MyButton({ platform.openUrl(device.verificationUriComplete) }, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
 
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            StatusMark("Waiting for you to sign in", Tone.Working, MyIcon.Working, Modifier.weight(1f))
-            MyButton(onCancel, text = "Cancel", size = ButtonSize.Sm, muted = true)
-        }
+        StatusMark("Waiting for you to sign in", Tone.Working, MyIcon.Working)
+        MyButton(onCancel, text = "Cancel", size = ButtonSize.Sm, muted = true)
     }
 }
 
