@@ -23,6 +23,7 @@ toml.workspace = true
 dirs.workspace = true
 portable-pty.workspace = true
 rand.workspace = true
+nix.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
