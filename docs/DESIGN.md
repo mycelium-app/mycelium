@@ -304,6 +304,12 @@ Leaning Compose Multiplatform for every target, for build times: one Kotlin code
 iOS, Android and desktop, and its Nix build is already solved in slop/sedge, where Expo's is
 painful. The cost lands on the web client, the one used most: Compose renders it to a canvas, so
 WCAG 2.2 AA there means fighting the framework rather than getting the DOM's semantics for free.
+**Simple first.** The default screen is the conversation list and the conversation. Goals,
+schedules, tickets, walkthroughs, moves and logins are each one click from where they apply and
+invisible until then: the node in the conversation header, the goal in the composer, the
+walkthrough on a diff. The sidebar is ordered by status (needs input, failed, ready to review,
+working, done); group and node are metadata on a row and a filter.
+
 Paseo's sidebar (ready to review, working, done) and its chat view are the reference for
 the interaction design.
 
@@ -315,6 +321,11 @@ Nix builds of Rust are cheap.
 - **[Paseo](https://github.com/getpaseo/paseo)** (Apache-2.0): a daemon per machine with Electron
   and Expo clients and an end-to-end encrypted relay. No central control plane.
 - **[ctx](https://github.com/ctxrs/ctx)**: transcript indexing, search and blame.
+- **[OpenChamber](https://openchamber.dev/)**: the features to borrow. A large diff read as an
+  ordered walkthrough with the key change marked; a conversation started from a GitHub issue, pull
+  request or Linear ticket with the whole thread attached; a goal the agent works towards turn
+  after turn until a separate check says it is done or stuck, with a token budget and Pause; and
+  scheduled tasks that start a conversation on their own.
 - **Zed Delta and DeltaDB**: operation-level history between commits, each edit anchored to the
   conversation that made it; terminal Claude Code sessions shown as threads over ACP; work handed
   to a cloud runner. Private beta with no licence or self-hosting found, so ideas only. `ctx blame`
