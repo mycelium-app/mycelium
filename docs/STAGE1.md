@@ -63,6 +63,8 @@ release binaries are static musl.
 | `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must not report the address as unverified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
 | `MYCELIUM_WEB_DIR` | `/usr/share/mycelium/web` | The built web client, served at `/` |
 | `MYCELIUM_SKIP_MIGRATIONS` | `false` | For gated deploys only |
+| `MYCELIUM_RELEASE_URL` | `https://github.com/mycelium-app/mycelium/releases/latest/download/latest` | Plain-text tag of the newest Mycelium release, checked hourly |
+| `MYCELIUM_NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the newest `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp` are read from, checked hourly |
 | `MYCELIUM_TRUSTED_PROXIES` | empty | Comma-separated addresses or CIDR ranges of reverse proxies. `X-Forwarded-For` is read only on connections from these, taking the nearest address that is not itself a proxy. Empty trusts no header |
 
 ### Boot, health and migrations
@@ -139,7 +141,7 @@ Device codes (one flow for nodes and for desktop clients):
 - The web client serves the approval page at `/approve?code=WDJB-MJHT`.
 
 Nodes:
-- `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins.
+- `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins. A node and each agent carry `update_available` (the newer version) only when the control plane has seen a newer release; a failed check keeps the last known version.
 - `POST /api/v1/nodes/{id}/drain` `{draining}`, `DELETE /api/v1/nodes/{id}` revokes.
 - `POST /api/v1/nodes/{id}/logins` `{agent, method}` → `{login_id}`; starts the agent's own sign-in on
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to

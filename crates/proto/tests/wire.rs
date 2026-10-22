@@ -48,7 +48,7 @@ fn node_hello_is_tagged_snake_case_with_exact_fields() {
         hostname: "h".into(),
         os: "linux".into(),
         arch: "x86_64".into(),
-        agents: vec![AgentInfo { agent: AgentId::Codex, version: None, available: false }],
+        agents: vec![AgentInfo { agent: AgentId::Codex, version: None, available: false, update_available: None }],
         sessions: vec![SessionPosition { conversation_id: id(), last_seq: 4, live: true }],
     });
 
@@ -286,6 +286,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         os: "linux".into(),
         arch: "x86_64".into(),
         version: "0.1.0".into(),
+        update_available: None,
         online: true,
         draining: false,
         last_seen_at: Some(now()),

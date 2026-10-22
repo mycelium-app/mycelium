@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::rate_limit::RateLimiter;
+use crate::versions::LatestVersions;
 use mycelium_proto::link::{ControlToNode, GitCommand};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
@@ -316,6 +317,7 @@ pub struct AppState {
     pub hub: Arc<Hub>,
     pub stream: broadcast::Sender<Streamed>,
     pub rate_limiter: Arc<RateLimiter>,
+    pub latest: Arc<LatestVersions>,
     pub readiness: Arc<Mutex<Readiness>>,
     pub http: reqwest::Client,
 }

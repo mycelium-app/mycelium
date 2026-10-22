@@ -19,6 +19,8 @@ fun loginMethodName(method: String): String = when (method.replace('_', '-')) {
 
 fun agentVersion(version: String?): String = version.orEmpty().trim().substringAfterLast(' ')
 
+fun versionWithUpdate(version: String, updateAvailable: String?): String = if (updateAvailable == null) version else "$version · $updateAvailable available"
+
 fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
     val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
     val elapsed: Duration = now - then

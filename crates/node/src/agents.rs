@@ -50,7 +50,7 @@ pub async fn detect_agents(commands: impl Fn(AgentId) -> Vec<String>) -> Vec<Age
             None => None,
         };
 
-        agents.push(AgentInfo { agent, version, available: resolved.is_some() });
+        agents.push(AgentInfo { agent, version, available: resolved.is_some(), update_available: None });
     }
 
     agents
@@ -122,8 +122,8 @@ mod tests {
         })
         .await;
 
-        assert_eq!(agents[0], AgentInfo { agent: AgentId::Claude, version: Some("claude-acp 1.2.3".into()), available: true });
-        assert_eq!(agents[1], AgentInfo { agent: AgentId::Codex, version: None, available: false });
+        assert_eq!(agents[0], AgentInfo { agent: AgentId::Claude, version: Some("claude-acp 1.2.3".into()), available: true, update_available: None });
+        assert_eq!(agents[1], AgentInfo { agent: AgentId::Codex, version: None, available: false, update_available: None });
     }
 
     #[tokio::test]
@@ -133,13 +133,13 @@ mod tests {
 
         let agents = detect_agents(|_| vec![codex.display().to_string()]).await;
 
-        assert_eq!(agents[1], AgentInfo { agent: AgentId::Codex, version: None, available: true });
+        assert_eq!(agents[1], AgentInfo { agent: AgentId::Codex, version: None, available: true, update_available: None });
     }
 
     #[test]
     fn codex_is_signed_in_when_its_auth_file_exists() {
         let home = tempfile::tempdir().unwrap();
-        let available = [AgentInfo { agent: AgentId::Codex, version: None, available: true }];
+        let available = [AgentInfo { agent: AgentId::Codex, version: None, available: true, update_available: None }];
 
         assert_eq!(login_state(home.path(), &available)[0].state, LoginState::SignedOut);
 
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn unavailable_agents_have_no_login_entry() {
         let home = tempfile::tempdir().unwrap();
-        let unavailable = [AgentInfo { agent: AgentId::Claude, version: None, available: false }];
+        let unavailable = [AgentInfo { agent: AgentId::Claude, version: None, available: false, update_available: None }];
 
         assert!(login_state(home.path(), &unavailable).is_empty());
     }

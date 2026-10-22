@@ -36,6 +36,7 @@ import mycelium.state.agentName
 import mycelium.state.agentVersion
 import mycelium.state.isLaptop
 import mycelium.state.loginMethodName
+import mycelium.state.versionWithUpdate
 
 data class LoginSession(val loginId: String, val agent: String)
 
@@ -203,7 +204,7 @@ private fun NodeGroup(
             if (touch) {
                 Box(Modifier.weight(1f))
             } else {
-                Label("${node.os} ${node.arch}  ·  ${node.version}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                Label("${node.os} ${node.arch}  ·  ${versionWithUpdate(node.version, node.updateAvailable)}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
             }
 
             if (signedOut.isNotEmpty()) {
@@ -307,7 +308,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
             Column(Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                     Label(agentName(agent.agent), maxLines = 1)
-                    Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
+                    Label(versionWithUpdate(agentVersion(agent.version), agent.updateAvailable), color = colors.textMuted, maxLines = 1)
                 }
 
                 val detail = listOfNotNull(login?.account?.ifEmpty { null }, login?.let { loginMethodName(it.method) }).joinToString("  ·  ")
@@ -319,7 +320,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
         } else {
             Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                 Label(agentName(agent.agent), maxLines = 1)
-                Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
+                Label(versionWithUpdate(agentVersion(agent.version), agent.updateAvailable), color = colors.textMuted, maxLines = 1)
             }
 
             Label(login?.account.orEmpty(), Modifier.weight(1.2f), color = colors.text, maxLines = 1)

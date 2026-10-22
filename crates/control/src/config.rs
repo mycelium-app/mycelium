@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
+pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -60,6 +61,9 @@ pub struct Config {
     pub skip_migrations: bool,
     pub trusted_proxies: Vec<Cidr>,
     pub device_code_lifetime: Duration,
+    pub release_url: String,
+    pub npm_registry_url: String,
+    pub version_check_interval: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -118,6 +122,9 @@ impl Config {
                 .transpose()?
                 .unwrap_or_default(),
             device_code_lifetime: DEVICE_CODE_LIFETIME,
+            release_url: optional(lookup, "MYCELIUM_RELEASE_URL").unwrap_or_else(|| "https://github.com/mycelium-app/mycelium/releases/latest/download/latest".into()),
+            npm_registry_url: optional(lookup, "MYCELIUM_NPM_REGISTRY_URL").unwrap_or_else(|| "https://registry.npmjs.org".into()),
+            version_check_interval: VERSION_CHECK_INTERVAL,
         })
     }
 }

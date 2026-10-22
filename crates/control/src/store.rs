@@ -1,7 +1,8 @@
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::versions::newer;
 use mycelium_proto::api::NodeSummary;
-use mycelium_proto::conversation::{AgentInfo, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt};
+use mycelium_proto::conversation::{AgentId, AgentInfo, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -214,7 +215,9 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         let mut node_agents = Vec::new();
 
         for (_, agent, version, available) in agents.iter().filter(|row| row.0 == node.id) {
-            node_agents.push(AgentInfo { agent: parse_enum(agent)?, version: version.clone(), available: *available });
+            let agent_id: AgentId = parse_enum(agent)?;
+            let update_available = version.as_deref().and_then(|installed| newer(installed, state.latest.get(agent)));
+            node_agents.push(AgentInfo { agent: agent_id, version: version.clone(), available: *available, update_available });
         }
 
         let mut node_logins = Vec::new();
@@ -230,6 +233,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             hostname: node.hostname,
             os: node.os,
             arch: node.arch,
+            update_available: newer(&node.version, state.latest.get("mycelium")),
             version: node.version,
             online: state.hub.is_online(node.id),
             draining: node.draining,

@@ -1399,6 +1399,7 @@ dependencies = [
  "mycelium-proto",
  "rand 0.10.3",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.11.1",

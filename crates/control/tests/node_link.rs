@@ -196,7 +196,7 @@ async fn an_agent_the_node_reported_as_missing_cannot_be_started() {
         hostname: "laptop".into(),
         os: "linux".into(),
         arch: "x86_64".into(),
-        agents: vec![mycelium_proto::conversation::AgentInfo { agent: AgentId::Codex, version: None, available: false }],
+        agents: vec![mycelium_proto::conversation::AgentInfo { agent: AgentId::Codex, version: None, available: false, update_available: None }],
         sessions: vec![],
     })
     .await;

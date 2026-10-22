@@ -70,6 +70,8 @@ pub struct NodeSummary {
     pub os: String,
     pub arch: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_available: Option<String>,
     pub online: bool,
     pub draining: bool,
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,

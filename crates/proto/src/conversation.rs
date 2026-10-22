@@ -118,6 +118,8 @@ pub struct AgentInfo {
     pub agent: AgentId,
     pub version: Option<String>,
     pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_available: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

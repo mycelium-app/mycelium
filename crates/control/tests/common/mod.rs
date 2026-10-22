@@ -203,7 +203,7 @@ impl NodeLink {
             hostname: "laptop".into(),
             os: "linux".into(),
             arch: "x86_64".into(),
-            agents: vec![AgentInfo { agent: AgentId::Claude, version: Some("2.1.308".into()), available: true }],
+            agents: vec![AgentInfo { agent: AgentId::Claude, version: Some("2.1.308".into()), available: true, update_available: None }],
             sessions: sessions.into_iter().map(|(conversation_id, last_seq)| mycelium_proto::conversation::SessionPosition { conversation_id, last_seq, live: true }).collect(),
         })
         .await;
@@ -290,6 +290,9 @@ impl Server {
             skip_migrations: false,
             trusted_proxies: Vec::new(),
             device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
+            release_url: "http://127.0.0.1:1/latest".into(),
+            npm_registry_url: "http://127.0.0.1:1".into(),
+            version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

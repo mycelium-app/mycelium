@@ -21,10 +21,11 @@ mod store;
 mod stream;
 mod terminals;
 mod transcripts;
+mod versions;
 mod web;
 mod worktrees;
 
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
@@ -52,6 +53,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     let state = boot::new_state(config)?;
 
     tokio::spawn(boot::migrate_until_ready(state.clone()));
+    tokio::spawn(versions::refresh_regularly(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())

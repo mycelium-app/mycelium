@@ -111,7 +111,12 @@ data class PendingDevice(
 )
 
 @Serializable
-data class AgentInfo(val agent: String, val version: String? = null, val available: Boolean)
+data class AgentInfo(
+    val agent: String,
+    val version: String? = null,
+    val available: Boolean,
+    @SerialName("update_available") val updateAvailable: String? = null,
+)
 
 @Serializable
 data class LoginInfo(
@@ -130,6 +135,7 @@ data class NodeSummary(
     val os: String,
     val arch: String,
     val version: String,
+    @SerialName("update_available") val updateAvailable: String? = null,
     val online: Boolean,
     val draining: Boolean,
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
