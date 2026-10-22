@@ -98,7 +98,14 @@ Other architectures: build from source, or use the Nix package, and run the inst
 
 The flake (`github:mycelium-app/mycelium`, which needs access to the repository)
 exports `nixosModules.mycelium-node`, `darwinModules.mycelium-node` and
-`homeManagerModules.mycelium-node`:
+`homeManagerModules.mycelium-node`. Without access to the repository, use the flake each release
+publishes instead. It installs the released Linux x86_64 binaries and exports
+`packages.x86_64-linux.mycelium`, `packages.x86_64-linux.mycelium-desktop`,
+`nixosModules.mycelium-node` and `homeManagerModules.mycelium-node`:
+
+```nix
+inputs.mycelium.url = "https://github.com/mycelium-app/mycelium/releases/latest/download/mycelium-flake.tar.gz";
+```
 
 ```nix
 services.mycelium-node = {

@@ -112,6 +112,9 @@ desktop:linux:
     - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
     - cd ..
     - ci/s3-upload.sh mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz
+  artifacts:
+    paths: [mycelium-desktop-linux-x86_64.tar.gz.sha256]
+    expire_in: 1 week
 
 web:wasm:
   stage: build
@@ -243,10 +246,30 @@ publish:s3:
     - aws --endpoint-url "$S3_ENDPOINT" s3 cp latest "s3://${S3_BUCKET}/${S3_PREFIX}/latest"
     - aws --endpoint-url "$S3_ENDPOINT" s3 cp install.sh "s3://${S3_BUCKET}/${S3_PREFIX}/install.sh"
 
+publish:flake:
+  stage: release
+  image: nixos/nix:latest
+  needs:
+    - job: binary:x86_64
+      artifacts: true
+    - job: desktop:linux
+      artifacts: true
+    - job: publish:s3
+  <<: *release_rule
+  before_script:
+    - mkdir -p /etc/nix && echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+    - nix-env -iA nixpkgs.awscli2
+    - aws configure set default.s3.addressing_style virtual
+  script:
+    - ci/release-flake.sh "$CI_COMMIT_TAG" "$(cat mycelium-linux-x86_64.sha256)" "$(cat mycelium-desktop-linux-x86_64.tar.gz.sha256)"
+    - ci/s3-upload.sh mycelium-flake.tar.gz
+    - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" AWS_DEFAULT_REGION=us-east-1
+    - aws --endpoint-url "$S3_ENDPOINT" s3 cp mycelium-flake.tar.gz "s3://${S3_BUCKET}/${S3_PREFIX}/mycelium-flake.tar.gz"
+
 publish:release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs: [publish:s3, desktop:linux, web:wasm, build:apk]
+  needs: [publish:s3, publish:flake, desktop:linux, web:wasm, build:apk]
   <<: *release_rule
   script:
     - echo "release ${CI_COMMIT_TAG}"
@@ -270,6 +293,9 @@ publish:release:
           link_type: package
         - name: "mycelium-android.apk"
           url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-android.apk"
+          link_type: package
+        - name: "mycelium-flake.tar.gz"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-flake.tar.gz"
           link_type: package
         - name: "install.sh"
           url: "${S3_PUBLIC}/install.sh"
