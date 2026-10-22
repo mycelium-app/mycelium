@@ -35,6 +35,7 @@ pub async fn revoke(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
 
     state.hub.send(id, ControlToNode::Revoked);
     state.hub.disconnect(id);
+    state.finish_logins_of_node(id);
     state.publish(None, StreamMessage::NodeRemoved { node_id: id });
 
     Ok(StatusCode::NO_CONTENT)
@@ -76,6 +77,7 @@ pub async fn stop_login(State(state): State<AppState>, user: AuthUser, Path(logi
 
     state.hub.send(owner.node_id, ControlToNode::StopLogin { login_id });
     state.hub.finish_login(login_id);
+    state.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok: false });
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -67,6 +67,16 @@ pub enum DeviceKind {
     Client,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceState {
+    Pending,
+    Approved,
+    Denied,
+    Expired,
+    Consumed,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: Uuid,

@@ -14,7 +14,7 @@ mod stream;
 mod transcripts;
 mod web;
 
-pub use config::{Cidr, Config, OidcConfig};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig};
 
 use anyhow::Result;
 use axum::Router;

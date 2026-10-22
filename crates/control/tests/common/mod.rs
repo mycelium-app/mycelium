@@ -279,6 +279,7 @@ impl Server {
             web_dir: web_dir.clone(),
             skip_migrations: false,
             trusted_proxies: Vec::new(),
+            device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

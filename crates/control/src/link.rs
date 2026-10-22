@@ -24,6 +24,7 @@ const SILENCE_LIMIT: Duration = Duration::from_secs(90);
 
 pub async fn connect(State(state): State<AppState>, node: AuthNode, upgrade: WebSocketUpgrade) -> Response {
     let (sender, outgoing) = mpsc::unbounded_channel::<ControlToNode>();
+    state.finish_logins_of_node(node.id);
     let connection_id = state.hub.register(node.id, sender);
 
     upgrade.on_upgrade(move |socket| run_link(state, node.id, connection_id, outgoing, socket))
@@ -83,6 +84,7 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
     }
 
     if state.hub.unregister(node_id, connection_id) {
+        state.finish_logins_of_node(node_id);
         let _ = publish_node(&state, node_id).await;
     }
 }

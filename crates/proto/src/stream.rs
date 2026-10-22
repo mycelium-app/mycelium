@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::NodeSummary;
-use crate::conversation::{Conversation, Event, QueuedPrompt};
+use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -24,5 +24,13 @@ pub enum StreamMessage {
     LoginFinished {
         login_id: Uuid,
         ok: bool,
+    },
+    Device {
+        user_code: String,
+        kind: DeviceKind,
+        label: String,
+        hostname: String,
+        state: DeviceState,
+        result_id: Option<Uuid>,
     },
 }

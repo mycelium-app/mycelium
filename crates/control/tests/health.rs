@@ -41,6 +41,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
             web_dir: directory.path().to_path_buf(),
             skip_migrations: false,
             trusted_proxies: Vec::new(),
+        device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
         };
 
         tokio::spawn(mycelium_control::run(config, listener));
@@ -144,6 +145,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
         web_dir: directory.path().to_path_buf(),
         skip_migrations: false,
         trusted_proxies: Vec::new(),
+        device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
     };
 
     tokio::spawn(mycelium_control::run(config, listener));
