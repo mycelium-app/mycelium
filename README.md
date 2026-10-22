@@ -33,11 +33,20 @@ each machine runs the agents and dials in. You steer all of it from web, iOS or 
 ## Status
 
 [v0.1.0](https://github.com/mycelium-app/mycelium/releases) is stage 1: the control plane, the node daemon, Claude Code
-and Codex over ACP, and the web client. Install a node with:
+and Codex over ACP, and clients for web, desktop and Android. Install a node with:
 
 ```sh
 curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://<your control plane>
 ```
+
+| Client | Where |
+|---|---|
+| Web | Served by the control plane at `/`. `mycelium-web.tar.gz` in each release is the same build for any static host |
+| Desktop | `mycelium-desktop-linux-x86_64.deb` and `.tar.gz` in each release |
+| Android | `mycelium-android.apk` in each release, signed, for sideloading or Obtainium (application id `slop.mycelium`) |
+
+Releases are at `https://github.com/mycelium-app/mycelium/releases/download/<tag>/`, each file with a `.sha256`, and are linked
+from the GitLab release. Android and desktop sign in with a device code, the same way a node does.
 
 [`docs/DESIGN.md`](docs/DESIGN.md) has the architecture and the stages, [`docs/STAGE1.md`](docs/STAGE1.md) the
 contract stage 1 was built to, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) the short version.

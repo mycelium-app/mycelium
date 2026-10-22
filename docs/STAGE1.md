@@ -11,7 +11,7 @@ per-node agent logins, the transcript copy, live workflow progress for Claude Co
 archive, a web client and a desktop client, install by script, Nix or NixOS.
 
 Out until later stages: moving conversations, the git hub, tmux sessions, managed AGENTS.md,
-groups, memory, search, phone and iPad, goals, schedules, tickets, walkthroughs.
+groups, memory, search, iOS and iPad, goals, schedules, tickets, walkthroughs.
 
 ## Repository
 
@@ -22,7 +22,7 @@ crates/control        control plane: axum router, Postgres, auth, node hub, clie
 crates/node           node daemon: control-plane link, ACP client, transcripts, logins
 crates/keeper         keeper: owns an agent's stdio, journals frames, replays over a socket
 crates/cli            the `mycelium` binary
-clients/              Compose Multiplatform: shared UI, web (wasmJs), desktop (JVM)
+clients/              Compose Multiplatform: shared UI, web (wasmJs), desktop (JVM), androidApp
 design/               tokens.css, mycelium.css, tokens.json: the design system's source
 site/                 the landing page
 nix/                  NixOS, nix-darwin and home-manager modules (flake.nix at the root)
@@ -312,9 +312,18 @@ with the design system's tokens and sizes, in dark and light:
   (`services.mycelium-node = { enable; controlPlane; joinTokenFile ? null; }`).
 - `Dockerfile`: control plane image with the web client at `/usr/share/mycelium/web`, non-root uid
   1000, `dumb-init`, `ghcr.io/mycelium-app/mycelium`.
-- CI builds and publishes, never tests: on `main`, the image (`:sha` and `:latest`) and Pages; on a
-  `vX.Y.Z` tag, a static binary for linux x86_64 and the Linux desktop packages, `.sha256` files, the `latest` marker
-  and `install.sh` to `s3://artefacts/mycelium/`, and a GitLab release linking them.
+- Android: `clients/androidApp`, application id `slop.mycelium`. `versionCode` is
+  `major*10000 + minor*100 + patch` and `versionName` is `major.minor.patch`, both read from `CI_COMMIT_TAG` (or
+  `-PappVersion=vX.Y.Z`); off a tag they are `1` and `0.0.0-dev`. The phone layout applies below 600dp wide, on any
+  platform: the conversation is the main screen, the list is a left drawer, menus are bottom sheets, controls are at
+  least 44dp. Sign-in is the client device code flow in the system browser.
+- CI builds and publishes, never tests. On `main`: the image (`:sha` and `:latest`) and Pages. On a `vX.Y.Z` tag, each
+  of these uploads its files and `.sha256` to `s3://artefacts/mycelium/<tag>/` from its own job:
+  `binary:x86_64` (static binary, via `publish:s3`, which also writes the `latest` marker and `install.sh`),
+  `desktop:linux` (`.deb`, `.tar.gz`), `web:wasm` (`mycelium-web.tar.gz`) and `build:apk` (`mycelium-android.apk`).
+  `build:apk` pins its own Android SDK, signs with `apksigner` from `ANDROID_KEYSTORE_BASE64` and
+  `ANDROID_KEYSTORE_PASSWORD` (alias `mycelium`), and refuses to upload unless the APK's application id, version code
+  and version name match the tag and the code exceeds the previous tag's. `publish:release` links all of them.
 
 ## Tests (local only)
 
