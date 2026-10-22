@@ -89,6 +89,13 @@ binary:x86_64:
     RUST_TARGET: x86_64-unknown-linux-musl
     ASSET: mycelium-linux-x86_64
 
+.awscli: &awscli
+  - curl -fsSL -o /tmp/awscli.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install
+  - aws configure set default.s3.addressing_style virtual
+  - aws configure set default.s3.multipart_threshold 1MB
+  - aws configure set default.s3.multipart_chunksize 1MB
+  - aws configure set default.s3.max_concurrent_requests 4
+
 desktop:linux:
   stage: build
   image: eclipse-temurin:21-jdk
@@ -96,25 +103,118 @@ desktop:linux:
   <<: *release_rule
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils curl unzip
-    - curl -fsSL -o /tmp/awscli.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install
-    - aws configure set default.s3.addressing_style virtual
-    - aws configure set default.s3.multipart_threshold 1MB
-    - aws configure set default.s3.multipart_chunksize 1MB
-    - aws configure set default.s3.max_concurrent_requests 4
+    - *awscli
   script:
     - cd clients
     - MYCELIUM_VERSION="$CI_COMMIT_TAG" ./gradlew --no-daemon :desktop:packageDeb :desktop:createDistributable
     - cp desktop/build/compose/binaries/main/deb/*.deb ../mycelium-desktop-linux-x86_64.deb
     - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
     - cd ..
-    - for file in mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do sha256sum "$file" | cut -d' ' -f1 > "$file.sha256"; done
-    - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
-    - export AWS_DEFAULT_REGION=us-east-1 AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=adaptive
-    - ls -l mycelium-desktop-linux-x86_64.*
-    - for file in mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do
-        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file" "s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}/$file";
-        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file.sha256" "s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}/$file.sha256";
-      done
+    - ci/s3-upload.sh mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz
+
+web:wasm:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  needs: []
+  <<: *release_rule
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip
+    - *awscli
+  script:
+    - cd clients
+    - ./gradlew --no-daemon :web:wasmJsBrowserDistribution
+    - tar -C web/build/dist/wasmJs/productionExecutable -czf ../mycelium-web.tar.gz .
+    - cd ..
+    - ci/s3-upload.sh mycelium-web.tar.gz
+
+build:apk:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  needs: []
+  <<: *release_rule
+  variables:
+    GIT_DEPTH: 0
+    KEY_ALIAS: "mycelium"
+    ANDROID_COMPILE_SDK: "37"
+    ANDROID_PLATFORM: "37.0"
+    ANDROID_BUILD_TOOLS: "37.0.0"
+    ANDROID_CMDLINE_TOOLS: "15859902"
+    ANDROID_SDK_ROOT: "$CI_PROJECT_DIR/.android-sdk"
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+    APK_NAME: "mycelium-android.apk"
+  cache:
+    key: "android-sdk-$ANDROID_CMDLINE_TOOLS-$ANDROID_COMPILE_SDK-$ANDROID_BUILD_TOOLS"
+    paths:
+      - .android-sdk/
+      - .gradle/caches/
+      - .gradle/wrapper/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip git > /dev/null
+    - *awscli
+    - |
+      if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+        mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+        curl -fsSL -o /tmp/tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip"
+        unzip -q /tmp/tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+        rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+        mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+      fi
+    - export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+    - yes | sdkmanager --licenses > /dev/null 2>&1 || true
+    - sdkmanager "platform-tools" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null
+    - echo "sdk.dir=$ANDROID_SDK_ROOT" > clients/local.properties
+  script:
+    - base64 -d < "$ANDROID_KEYSTORE_BASE64" > /tmp/release.keystore
+    - cd clients
+    - ./gradlew :androidApp:assembleRelease --no-daemon --stacktrace
+    - cd ..
+    - export UNSIGNED=$(find clients/androidApp/build/outputs/apk/release -name '*-unsigned.apk' | head -n1)
+    - test -n "$UNSIGNED" || { echo 'no APK found'; exit 1; }
+    - |
+      APKSIGNER="$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS/apksigner"
+      "$APKSIGNER" sign \
+        --ks /tmp/release.keystore \
+        --ks-key-alias "$KEY_ALIAS" \
+        --ks-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+        --key-pass "env:ANDROID_KEYSTORE_PASSWORD" \
+        --out "$APK_NAME" \
+        "$UNSIGNED"
+      "$APKSIGNER" verify --verbose "$APK_NAME"
+    - shred -u /tmp/release.keystore
+    - |
+      set -e
+      AAPT2="$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS/aapt2"
+      BADGING=$("$AAPT2" dump badging "$APK_NAME")
+      APK_ID=$(echo "$BADGING" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+      APK_CODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+      APK_VERSION=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+
+      V=${CI_COMMIT_TAG#v}
+      EXPECTED_CODE=$(( ${V%%.*} * 10000 + $(echo "$V" | cut -d. -f2) * 100 + $(echo "$V" | cut -d. -f3) ))
+
+      echo "tag=$CI_COMMIT_TAG  apk id=$APK_ID versionCode=$APK_CODE versionName=$APK_VERSION  expected code=$EXPECTED_CODE"
+
+      [ "$APK_ID" = "slop.mycelium" ] || { echo "FAIL: applicationId $APK_ID is not slop.mycelium."; exit 1; }
+      [ "$APK_CODE" = "$EXPECTED_CODE" ] || {
+        echo "FAIL: APK versionCode $APK_CODE is not the $EXPECTED_CODE derived from $CI_COMMIT_TAG."
+        echo "Either CI_COMMIT_TAG never reached Gradle, or a literal has crept back into androidApp/build.gradle.kts."
+        exit 1; }
+      [ "$APK_VERSION" = "$V" ] || { echo "FAIL: APK versionName $APK_VERSION is not $V."; exit 1; }
+
+      command -v git >/dev/null || { echo 'FAIL: git missing, cannot compare against the previous tag.'; exit 1; }
+      PREV=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${CI_COMMIT_TAG}$" | head -n1)
+      PREV_CODE=0
+      if [ -n "$PREV" ]; then
+        P=${PREV#v}
+        PREV_CODE=$(( ${P%%.*} * 10000 + $(echo "$P" | cut -d. -f2) * 100 + $(echo "$P" | cut -d. -f3) ))
+      fi
+      echo "previous tag ${PREV:-none}: this build must exceed code $PREV_CODE"
+      [ "$APK_CODE" -gt "$PREV_CODE" ] || {
+        echo "FAIL: versionCode $APK_CODE is not greater than $PREV_CODE."
+        echo "Equal means updaters will never offer this release; lower means Android refuses it. Tag a higher version."
+        exit 1; }
+      echo "version gate passed"
+    - ci/s3-upload.sh "$APK_NAME"
 
 publish:s3:
   stage: release
@@ -145,7 +245,7 @@ publish:s3:
 publish:release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs: [publish:s3, desktop:linux]
+  needs: [publish:s3, desktop:linux, web:wasm, build:apk]
   <<: *release_rule
   script:
     - echo "release ${CI_COMMIT_TAG}"
@@ -163,6 +263,12 @@ publish:release:
           link_type: package
         - name: "mycelium-desktop-linux-x86_64.tar.gz"
           url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-desktop-linux-x86_64.tar.gz"
+          link_type: package
+        - name: "mycelium-web.tar.gz"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-web.tar.gz"
+          link_type: package
+        - name: "mycelium-android.apk"
+          url: "${S3_PUBLIC}/${CI_COMMIT_TAG}/mycelium-android.apk"
           link_type: package
         - name: "install.sh"
           url: "${S3_PUBLIC}/install.sh"
