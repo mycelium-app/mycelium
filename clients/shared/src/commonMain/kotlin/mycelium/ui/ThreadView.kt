@@ -22,6 +22,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,13 +88,19 @@ fun ThreadView(
         }
     }
 
-    val shown = remember { intArrayOf(items.size) }
+    val atNewest by remember { derivedStateOf { state.firstVisibleItemIndex == 0 && state.firstVisibleItemScrollOffset == 0 } }
+    var following by remember { mutableStateOf(true) }
 
-    LaunchedEffect(items.size) {
-        val added = items.size - shown[0]
-        shown[0] = items.size
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) {
+                following = atNewest
+            }
+        }
+    }
 
-        if (added > 0 && state.firstVisibleItemIndex <= added && state.firstVisibleItemScrollOffset == 0) {
+    LaunchedEffect(items.size, items.lastOrNull()) {
+        if (following) {
             state.scrollToItem(0)
         }
     }
@@ -133,6 +142,19 @@ fun ThreadView(
                     ThreadRow(item, onAnswer, onStopWorkflow)
                 }
             }
+        }
+
+        if (!atNewest) {
+            MyButton(
+                onClick = {
+                    following = true
+                    scope.launch { state.animateScrollToItem(0) }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Tokens.Space.S3),
+                icon = MyIcon.ScrollToBottom,
+                description = "Scroll to the newest message",
+                variant = ButtonVariant.Outline,
+            )
         }
     }
 }
