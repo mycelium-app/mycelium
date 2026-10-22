@@ -361,3 +361,24 @@ pub struct Worktree {
     pub issue_number: Option<i64>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Issue {
+    pub forge_id: Uuid,
+    pub repository: String,
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Issues {
+    pub issues: Vec<Issue>,
+    pub failures: Vec<ForgeFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartWorkspaceRequest {
+    pub agent: AgentId,
+}

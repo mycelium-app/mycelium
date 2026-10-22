@@ -5,7 +5,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use futures_util::future::join_all;
-use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Repositories, Repository};
+use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Issue, Repositories, Repository};
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -179,6 +179,61 @@ impl ForgeApi {
 
         Ok(repositories)
     }
+}
+
+impl ForgeApi {
+    pub async fn issues(&self, http: &reqwest::Client, repository: &str, query: &str) -> Result<Vec<Issue>, ForgeError> {
+        let path = match self.kind {
+            ForgeKind::Github => {
+                let search = format!("repo:{repository} is:issue is:open {query}");
+                let encoded: String = url::form_urlencoded::byte_serialize(search.trim().as_bytes()).collect();
+
+                format!("/search/issues?per_page=50&q={encoded}")
+            }
+            ForgeKind::Gitlab => {
+                let encoded: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
+
+                format!("/projects/{}/issues?state=opened&per_page=50&search={encoded}", encode_path(repository))
+            }
+        };
+        let body = self.get(http, &path).await?;
+        let items = if self.kind == ForgeKind::Github { body["items"].as_array() } else { body.as_array() };
+
+        Ok(items.map(|items| items.iter().filter_map(|item| self.to_issue(repository, item)).collect()).unwrap_or_default())
+    }
+
+    pub async fn issue(&self, http: &reqwest::Client, repository: &str, number: i64) -> Result<Option<Issue>, ForgeError> {
+        let path = match self.kind {
+            ForgeKind::Github => format!("/repos/{repository}/issues/{number}"),
+            ForgeKind::Gitlab => format!("/projects/{}/issues/{number}", encode_path(repository)),
+        };
+
+        match self.get(http, &path).await {
+            Ok(item) => Ok(self.to_issue(repository, &item)),
+            Err(ForgeError::Failed(404)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn to_issue(&self, repository: &str, item: &Value) -> Option<Issue> {
+        let (number, url, body) = match self.kind {
+            ForgeKind::Github => (&item["number"], &item["html_url"], &item["body"]),
+            ForgeKind::Gitlab => (&item["iid"], &item["web_url"], &item["description"]),
+        };
+
+        Some(Issue {
+            forge_id: self.id,
+            repository: repository.to_string(),
+            number: number.as_i64()?,
+            title: item["title"].as_str()?.to_string(),
+            url: url.as_str().unwrap_or_default().to_string(),
+            body: body.as_str().unwrap_or_default().to_string(),
+        })
+    }
+}
+
+fn encode_path(repository: &str) -> String {
+    repository.replace('/', "%2F")
 }
 
 pub fn display_name(kind: ForgeKind) -> &'static str {

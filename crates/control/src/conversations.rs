@@ -46,8 +46,14 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let conversation = start(&state, &user, request).await?;
+
+    Ok((StatusCode::CREATED, Json(conversation)))
+}
+
+pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversationRequest) -> ApiResult<Conversation> {
     let project = match request.project_id {
-        Some(project_id) => Some(projects::find_owned(&state, project_id, user.id).await?),
+        Some(project_id) => Some(projects::find_owned(state, project_id, user.id).await?),
         None => None,
     };
 
@@ -87,7 +93,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     }
 
     if let (Some(project), Some(branch)) = (&project, &request.branch) {
-        cwd = worktrees::create(&state, project, branch, None).await?.path;
+        cwd = worktrees::create(state, project, branch, None).await?.path;
     }
 
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
@@ -130,9 +136,9 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     let conversation = row.to_proto()?;
     state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
-    publish_queue(&state, user.id, row.id).await?;
+    publish_queue(state, user.id, row.id).await?;
 
-    Ok((StatusCode::CREATED, Json(conversation)))
+    Ok(conversation)
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Conversation>> {

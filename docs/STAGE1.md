@@ -189,6 +189,10 @@ Projects:
 - `POST /api/v1/conversations` with `project_id` and `branch` first has the node create a git worktree on that new branch (`git worktree add -b`), in `<project>-worktrees/<branch with / as ->` beside the project, and the conversation runs there (cwd is the worktree). 400 `branch_required` or `project_required`; 409 `git_failed` with git's message (branch exists, not a valid name) and no conversation is created.
 - `GET /api/v1/worktrees` → `[{id, project_id, branch, path, issue_number, created_at}]` for the caller's projects.
 
+Issues:
+- `GET /api/v1/issues?q=` → `{issues: [{forge_id, repository, number, title, url, body}], failures: [{forge_id, message}]}`: the open issues of every forge repository the caller has set up as a project (a repository set up on several nodes is fetched once). `q` is passed to the forge in its own syntax: GitHub's issue search (added to `repo:<name> is:issue is:open`), GitLab's `search` parameter. A forge that fails is reported in `failures`.
+- `POST /api/v1/projects/{id}/issues/{number}/workspace` `{agent}` → the conversation (201). The control plane fetches the issue, has the node create a worktree on `issue/<number>-<title slug>` (reused when the issue already has one) and starts a conversation there, titled `#<number> <title>`, whose first prompt is `Work on issue #<number>: <title>`, the link and the body. 404 for an issue the forge does not have, 409 `project_without_forge` for a project that was only a folder.
+
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
 
@@ -239,7 +243,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Sign-in ends: node reports it, `DELETE /logins/{id}`, node disconnects or is revoked | `login_finished` | starter |
 | Terminal output | `terminal_output` | opener |
 | Terminal ends: node reports it, `DELETE /terminals/{id}`, node disconnects or is revoked | `terminal_exited` | opener |
-| Conversation created, renamed, archived or restored | `conversation` (and `queue` on create) | owner |
+| Conversation created (also by starting an issue workspace), renamed, archived or restored | `conversation` (and `queue` on create) | owner |
 | History imported (`POST /imports`) | `conversation` per new conversation | owner |
 | `session_started` (session id, mode, model) | `conversation` | owner |
 | Mode or model changed | `conversation` | owner |
