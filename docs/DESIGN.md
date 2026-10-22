@@ -247,9 +247,19 @@ repo; for Codex the daemon has to add the group layer when it starts the session
 option does that without replacing the base instructions (`model_instructions_file` does) is
 unchecked.
 
-**Memory.** Every memory has a scope: global or one group. `recall` from a session returns global
-memories and its own group's. `remember` defaults to the session's group, so a finding about a work
-dependency stays in `work`; making it global is a deliberate step, the operator's from the UI.
+**Memory.** Every memory has a scope: global, or one or more groups. Global memories stay the
+common case: anything true of the tools, the host or the agents themselves. A scope decides what a
+session sees by default, not what it may read:
+
+- `recall` searches global memories and the session's own group, and names how many matches it
+  left out in other groups, so the agent knows when to look further.
+- `recall(query, groups: [...])` or `groups: all` reaches into other groups. A `slop` session
+  bumping an immich dependency can ask `work` what it learned about `@immich/ui`.
+- `remember` defaults to the session's group, so a finding about a work dependency stays in `work`.
+  Widening a memory to more groups, or to global, is a deliberate step, the operator's from the UI.
+
+If question 3 settles on groups gating permissions, reaching into another group follows the same
+rule.
 
 ## Cross-project tools
 
@@ -264,7 +274,7 @@ orchestrator's MCP surface, made aware of nodes:
 | `send_to_conversation` | Queued until idle, delivered over ACP or tmux; held while the node is offline |
 | `move_conversation`, `move_worktree` | The idle-only move above |
 | `ask_question`, `check_answer` | Answerable from any client |
-| `recall`, `remember` | Curated memory, global or scoped to the session's group |
+| `recall`, `remember` | Curated memory: global plus the session's group by default, other groups on request |
 | `search_history`, `show_history` | ctx over every node's transcripts |
 
 A skill file says when to use which, shipped to every node through the managed config.
