@@ -127,13 +127,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     }
 
     fun send(conversationId: String, text: String) {
-        mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + text)) }
+        val prompt = text.trim()
+        mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + prompt)) }
 
         act {
             try {
-                api.sendPrompt(conversationId, text)
+                api.sendPrompt(conversationId, prompt)
             } catch (failure: Exception) {
-                mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, text)) }
+                mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, prompt)) }
                 throw failure
             }
         }
