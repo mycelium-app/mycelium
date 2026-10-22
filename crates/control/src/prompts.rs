@@ -45,7 +45,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     tx.commit().await?;
 
     if !state.hub.has_session(node_id, conversation_id) {
-        state.hub.add_session(node_id, conversation_id);
+        state.add_session(node_id, conversation_id).await?;
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id });
     }
 

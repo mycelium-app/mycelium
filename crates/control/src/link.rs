@@ -118,7 +118,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
-            state.hub.remove_session(node_id, conversation_id);
+            state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
             state.hub.take_send_now(conversation_id);
             record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
@@ -286,7 +286,7 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .await?;
     tx.commit().await?;
 
-    state.hub.add_session(node_id, conversation_id);
+    state.add_session(node_id, conversation_id).await?;
     state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
     pump(state, conversation_id, before.acp_session_id.is_none()).await
 }
@@ -339,7 +339,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if archived {
         state.hub.send(node_id, ControlToNode::CloseSession { conversation_id });
-        state.hub.remove_session(node_id, conversation_id);
+        state.remove_session(node_id, conversation_id).await?;
 
         return Ok(());
     }

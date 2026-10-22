@@ -173,7 +173,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     if request.archived == Some(true) && before.is_idle() {
         state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });
-        state.hub.remove_session(row.node_id, id);
+        state.remove_session(row.node_id, id).await?;
     }
 
     let conversation = row.to_proto()?;

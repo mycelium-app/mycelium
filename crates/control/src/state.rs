@@ -1,5 +1,7 @@
 use crate::config::Config;
+use crate::error::ApiResult;
 use crate::rate_limit::RateLimiter;
+use crate::store::publish_node;
 use crate::versions::LatestVersions;
 use mycelium_proto::link::{ControlToNode, GitCommand};
 use serde_json::Value;
@@ -191,24 +193,32 @@ impl Hub {
         }
     }
 
-    pub fn add_session(&self, node_id: Uuid, conversation_id: Uuid) {
-        if let Ok(mut nodes) = self.nodes.lock()
-            && let Some(connection) = nodes.get_mut(&node_id)
-        {
-            connection.sessions.insert(conversation_id);
-        }
+    pub fn add_session(&self, node_id: Uuid, conversation_id: Uuid) -> bool {
+        let Ok(mut nodes) = self.nodes.lock() else {
+            return false;
+        };
+
+        nodes.get_mut(&node_id).is_some_and(|connection| connection.sessions.insert(conversation_id))
+    }
+
+    pub fn sessions_of(&self, node_id: Uuid) -> Vec<Uuid> {
+        let mut sessions: Vec<Uuid> = self.nodes.lock().ok().and_then(|nodes| nodes.get(&node_id).map(|connection| connection.sessions.iter().copied().collect())).unwrap_or_default();
+
+        sessions.sort();
+
+        sessions
     }
 
     pub fn has_session(&self, node_id: Uuid, conversation_id: Uuid) -> bool {
         self.nodes.lock().is_ok_and(|nodes| nodes.get(&node_id).is_some_and(|connection| connection.sessions.contains(&conversation_id)))
     }
 
-    pub fn remove_session(&self, node_id: Uuid, conversation_id: Uuid) {
-        if let Ok(mut nodes) = self.nodes.lock()
-            && let Some(connection) = nodes.get_mut(&node_id)
-        {
-            connection.sessions.remove(&conversation_id);
-        }
+    pub fn remove_session(&self, node_id: Uuid, conversation_id: Uuid) -> bool {
+        let Ok(mut nodes) = self.nodes.lock() else {
+            return false;
+        };
+
+        nodes.get_mut(&node_id).is_some_and(|connection| connection.sessions.remove(&conversation_id))
     }
 
     pub fn track_login(&self, login_id: Uuid, node_id: Uuid, user_id: Uuid) {
@@ -325,6 +335,22 @@ pub struct AppState {
 impl AppState {
     pub fn publish(&self, owner: Option<Uuid>, message: StreamMessage) {
         let _ = self.stream.send(Streamed { owner, message });
+    }
+
+    pub async fn add_session(&self, node_id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
+        if self.hub.add_session(node_id, conversation_id) {
+            publish_node(self, node_id).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn remove_session(&self, node_id: Uuid, conversation_id: Uuid) -> ApiResult<()> {
+        if self.hub.remove_session(node_id, conversation_id) {
+            publish_node(self, node_id).await?;
+        }
+
+        Ok(())
     }
 
     pub fn finish_logins_of_node(&self, node_id: Uuid) {

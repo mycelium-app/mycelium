@@ -141,6 +141,7 @@ data class NodeSummary(
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
     val agents: List<AgentInfo> = emptyList(),
     val logins: List<LoginInfo> = emptyList(),
+    val sessions: List<String> = emptyList(),
 )
 
 @Serializable

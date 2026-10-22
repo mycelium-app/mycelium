@@ -292,10 +292,12 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         last_seen_at: Some(now()),
         agents: vec![],
         logins: vec![],
+        sessions: vec![id()],
     });
 
     assert_eq!(json["online"], true);
     assert_eq!(json["draining"], false);
+    assert_eq!(json["sessions"], json!([id()]));
 }
 
 #[test]

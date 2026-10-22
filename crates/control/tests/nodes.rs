@@ -87,3 +87,84 @@ async fn a_node_icon_can_be_chosen_from_the_set_and_anything_else_is_refused() {
     assert_eq!(nodes[0]["icon"], "chip");
     assert_eq!(nodes[0]["name"], "pi");
 }
+
+async fn node_sessions(server: &Server, node_id: uuid::Uuid) -> Vec<String> {
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    let node = nodes.as_array().unwrap().iter().find(|node| node["id"] == json!(node_id)).unwrap();
+
+    node["sessions"].as_array().unwrap().iter().map(|id| id.as_str().unwrap().to_string()).collect()
+}
+
+async fn node_with_sessions(stream: &mut common::StreamClient, node_id: uuid::Uuid, wanted: Vec<uuid::Uuid>) {
+    stream
+        .until(|message| match message {
+            mycelium_proto::stream::StreamMessage::Node(node) if node.id == node_id && node.sessions == wanted => Some(()),
+            _ => None,
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_session_that_starts_is_listed_on_its_node_and_streamed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    assert!(node_sessions(&server, link.id).await.is_empty());
+
+    let created = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    assert!(node_sessions(&server, link.id).await.is_empty());
+
+    link.start_session(created.id, "s1").await;
+
+    node_with_sessions(&mut stream, link.id, vec![created.id]).await;
+    assert_eq!(node_sessions(&server, link.id).await, [created.id.to_string()]);
+}
+
+#[tokio::test]
+async fn a_session_that_fails_is_streamed_as_no_longer_running() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let created = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(created.id, "s1").await;
+    common::eventually("the session", || async { (!node_sessions(&server, link.id).await.is_empty()).then_some(()) }).await;
+    let mut stream = server.user.stream().await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: created.id, seq: 1, message: "The agent stopped.".into() }).await;
+
+    node_with_sessions(&mut stream, link.id, vec![]).await;
+    assert!(node_sessions(&server, link.id).await.is_empty());
+}
+
+#[tokio::test]
+async fn archiving_a_conversation_closes_its_session_and_streams_the_change() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let created = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(created.id, "s1").await;
+    common::eventually("the session", || async { (!node_sessions(&server, link.id).await.is_empty()).then_some(()) }).await;
+    let mut stream = server.user.stream().await;
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", created.id)).json(&json!({"archived": true}))).await;
+    assert_eq!(status, 200);
+
+    node_with_sessions(&mut stream, link.id, vec![]).await;
+}
+
+#[tokio::test]
+async fn a_node_reporting_live_sessions_when_it_connects_lists_them_and_loses_them_when_it_leaves() {
+    let server = Server::start().await;
+    let (id, token) = server.join("node", "laptop").await;
+    let conversation = uuid::Uuid::new_v4();
+    let mut link = server.connect_node(id, &token).await;
+    let mut stream = server.user.stream().await;
+
+    link.hello(vec![(conversation, 0)]).await;
+    node_with_sessions(&mut stream, id, vec![conversation]).await;
+
+    drop(link);
+    node_with_sessions(&mut stream, id, vec![]).await;
+    assert!(node_sessions(&server, id).await.is_empty());
+}

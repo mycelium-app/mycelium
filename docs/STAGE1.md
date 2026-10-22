@@ -141,7 +141,7 @@ Device codes (one flow for nodes and for desktop clients):
 - The web client serves the approval page at `/approve?code=WDJB-MJHT`.
 
 Nodes:
-- `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins. A node and each agent carry `update_available` (the newer version) only when the control plane has seen a newer release; a failed check keeps the last known version.
+- `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins. A node lists the conversations whose agent session is running on it as `sessions`, republished when one starts or closes. A node and each agent carry `update_available` (the newer version) only when the control plane has seen a newer release; a failed check keeps the last known version.
 - `POST /api/v1/nodes/{id}/drain` `{draining}`, `DELETE /api/v1/nodes/{id}` revokes.
 - `POST /api/v1/nodes/{id}/logins` `{agent, method}` → `{login_id}`; starts the agent's own sign-in on
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to

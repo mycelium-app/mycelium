@@ -240,6 +240,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             last_seen_at: node.last_seen_at,
             agents: node_agents,
             logins: node_logins,
+            sessions: state.hub.sessions_of(node.id),
         });
     }
 

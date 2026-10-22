@@ -77,6 +77,8 @@ pub struct NodeSummary {
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
     pub agents: Vec<AgentInfo>,
     pub logins: Vec<LoginInfo>,
+    #[serde(default)]
+    pub sessions: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

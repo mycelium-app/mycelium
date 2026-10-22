@@ -332,6 +332,7 @@ private fun SectionHeading(section: SidebarSection) {
 private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit) {
     val colors = MyTheme.colors
     val statusName = statusSectionName(row.status)
+    val notRunning = node != null && (!node.online || row.id !in node.sessions)
 
     Row(
         Modifier
@@ -340,14 +341,14 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
                 onClick,
                 selected = selected,
                 shape = BlockShape,
-                description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}",
+                description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}",
             )
             .padding(start = Tokens.Space.S2 + Tokens.Space.S3, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
-        Label(row.title, Modifier.weight(1f), maxLines = 1)
+        Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
         if (node != null) {
             Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
