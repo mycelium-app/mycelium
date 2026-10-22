@@ -205,7 +205,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
         Route.Nodes -> NodesScreen(store, state, platform)
         Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
-        Route.Settings -> SettingsScreen(me, store.api.baseUrl, onSignOut)
+        Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
     }
 }
 

@@ -141,6 +141,7 @@ object Tokens {
         val BarTouch: Dp = 52.dp
         val Rail: Dp = 44.dp
         val Menu: Dp = 280.dp
+        val SettingsNav: Dp = 200.dp
         val MenuList: Dp = 360.dp
         val Measure: Dp = 720.dp
         val Hairline: Dp = 1.dp
