@@ -230,7 +230,10 @@ impl Actor {
                 Action::Emit(seq, message) => self.emit(seq, message),
                 Action::Started(message) => {
                     self.started = Some(message.clone());
-                    let _ = self.out.send(message);
+
+                    if !self.handle.ended() {
+                        let _ = self.out.send(message);
+                    }
                 }
                 Action::Send(frame) => write_to_keeper(connection, json!({"send": frame})).await,
                 Action::CloseKeeper => write_to_keeper(connection, json!({"close": true})).await,
@@ -271,7 +274,9 @@ impl Actor {
     }
 
     fn replay(&self) {
-        if let Some(started) = &self.started {
+        if let Some(started) = &self.started
+            && !self.handle.ended()
+        {
             let _ = self.out.send(started.clone());
         }
 

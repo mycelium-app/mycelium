@@ -541,3 +541,28 @@ async fn a_running_conversation_the_node_still_holds_is_left_running_when_it_rec
 
     assert_eq!(status_of(&server, id).await, "working");
 }
+
+#[tokio::test]
+async fn a_prompt_sent_before_the_node_says_hello_waits_for_the_sessions_it_reports() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.barrier(id, 1).await;
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let user = server.user.clone();
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        (nodes[0]["online"] == false).then_some(())
+    })
+    .await;
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    assert_eq!(prompt(&server, id, "before hello").await, 204);
+    returned.hello(vec![(id, 1)]).await;
+
+    assert_eq!(returned.expect_prompt().await.1, "before hello");
+    assert_eq!(status_of(&server, id).await, "working");
+}

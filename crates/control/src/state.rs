@@ -25,6 +25,7 @@ struct NodeConnection {
     connection_id: Uuid,
     sender: mpsc::UnboundedSender<ControlToNode>,
     sessions: HashSet<Uuid>,
+    greeted: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,7 +45,7 @@ impl Hub {
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {
         let connection_id = Uuid::new_v4();
         if let Ok(mut nodes) = self.nodes.lock() {
-            nodes.insert(node_id, NodeConnection { connection_id, sender, sessions: HashSet::new() });
+            nodes.insert(node_id, NodeConnection { connection_id, sender, sessions: HashSet::new(), greeted: false });
         }
 
         connection_id
@@ -71,7 +72,7 @@ impl Hub {
     }
 
     pub fn is_online(&self, node_id: Uuid) -> bool {
-        self.nodes.lock().is_ok_and(|nodes| nodes.contains_key(&node_id))
+        self.nodes.lock().is_ok_and(|nodes| nodes.get(&node_id).is_some_and(|connection| connection.greeted))
     }
 
     pub fn send(&self, node_id: Uuid, message: ControlToNode) -> bool {
@@ -87,6 +88,7 @@ impl Hub {
             && let Some(connection) = nodes.get_mut(&node_id)
         {
             connection.sessions = sessions;
+            connection.greeted = true;
         }
     }
 

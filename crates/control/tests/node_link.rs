@@ -146,6 +146,14 @@ async fn a_second_connection_from_the_same_node_replaces_the_first() {
 
     assert!(first.closed().await);
 
+    let user = server.user.clone();
+    common::eventually("the second connection to be online", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        (nodes[0]["online"] == true).then_some(())
+    })
+    .await;
+
     let conversation = server.create_conversation(second.id, None).await;
     assert_eq!(second.expect_start_session().await, conversation.id);
 }

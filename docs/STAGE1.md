@@ -60,6 +60,7 @@ release binaries are static musl.
 | `MYCELIUM_OIDC_CLIENT_ID` | required unless dev login | |
 | `MYCELIUM_OIDC_CLIENT_SECRET` | empty | Public clients use PKCE only |
 | `MYCELIUM_DEV_LOGIN` | empty | An email; signs every browser in as that user. Refused unless `MYCELIUM_PUBLIC_URL` is `http://localhost` or `http://127.0.0.1` |
+| `MYCELIUM_ALLOWED_EMAILS` | empty | Comma-separated email addresses allowed to sign in through OIDC (case-insensitive, the provider must not report the address as unverified). Empty allows every account at the identity provider, and the control plane logs a warning at startup. The dev login ignores it |
 | `MYCELIUM_WEB_DIR` | `/usr/share/mycelium/web` | The built web client, served at `/` |
 | `MYCELIUM_SKIP_MIGRATIONS` | `false` | For gated deploys only |
 
@@ -95,6 +96,10 @@ queued_prompts   id uuid pk, conversation_id, position int, text text, created_a
 transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
 ```
 
+Stage 1 is single-tenant: conversations belong to the person who created them, but nodes are shared by
+everyone who may sign in. Sign-in output, input and stopping belong to the person who started the sign-in.
+Set `MYCELIUM_ALLOWED_EMAILS` unless the identity provider only holds people who may run agents on every node.
+
 Tokens are 32 random bytes, base64url; only their SHA-256 is stored. A node token is sent as
 `Authorization: Bearer myc_node_<token>`, a client token as `Bearer myc_client_<token>`, a browser
 session as the `myc_session` cookie (HttpOnly, Secure unless localhost, SameSite=Lax).
@@ -127,7 +132,7 @@ Device codes (one flow for nodes and for desktop clients):
 - The web client serves the approval page at `/approve?code=WDJB-MJHT`.
 
 Nodes:
-- `GET /api/v1/nodes` → nodes with `online`, `draining`, agents and logins.
+- `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins.
 - `POST /api/v1/nodes/{id}/drain` `{draining}`, `DELETE /api/v1/nodes/{id}` revokes.
 - `POST /api/v1/nodes/{id}/logins` `{agent, method}` → `{login_id}`; starts the agent's own sign-in on
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to
@@ -202,6 +207,8 @@ Control plane to node:
 | `transcript_ack` | `path, bytes` |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
+
+On `hello` the control plane marks every `working` or `input` conversation on that node that has no live session as `failed`, with an `error` event. A prompt for a conversation whose session is not live is preceded by `start_session` with `resume` set to its `acp_session_id`. Journal `seq` values keep increasing across a resume: the node continues from the end of the previous journal.
 
 The node reconnects with exponential backoff (1s to 60s, jitter) and sends `hello` with the last
 acknowledged `seq` per live conversation; the control plane replies with `ack`s and the node

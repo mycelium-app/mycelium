@@ -163,6 +163,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     tx.commit().await?;
 
     let live: HashSet<Uuid> = sessions.iter().filter(|session| session.live).map(|session| session.conversation_id).collect();
+    fail_conversations_without_a_session(state, node_id, &live).await?;
     state.hub.set_sessions(node_id, live.clone());
 
     let conversations = sqlx::query_scalar::<_, Uuid>("select id from conversations where node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
@@ -176,7 +177,6 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     }
 
     publish_node(state, node_id).await?;
-    fail_conversations_without_a_session(state, node_id, &live).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")
         .bind(node_id)
