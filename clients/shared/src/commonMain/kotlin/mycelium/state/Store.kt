@@ -64,7 +64,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     }
 
     suspend fun open(conversationId: String) {
-        var after = state.value.events[conversationId]?.lastOrNull()?.seq ?: 0
+        var after = if (conversationId in state.value.openedConversations) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
+        mutableState.update { it.copy(openedConversations = it.openedConversations + conversationId) }
 
         while (true) {
             val page = api.events(conversationId, after, EventPageSize)

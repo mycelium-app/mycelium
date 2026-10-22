@@ -11,6 +11,7 @@ data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
     val events: Map<String, List<Event>> = emptyMap(),
+    val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
@@ -25,7 +26,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.EventAppended -> {
         val id = message.event.conversationId
-        state.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
+
+        if (id in state.openedConversations) {
+            state.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
+        } else {
+            state
+        }
     }
 
     is StreamMessage.QueueChanged ->

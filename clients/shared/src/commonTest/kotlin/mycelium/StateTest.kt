@@ -88,10 +88,19 @@ class StateTest {
     @Test
     fun replayedEventsAreNotDuplicated() {
         val event = Event("a", 1, "user_message", JsonObject(emptyMap()))
-        val once = reduce(AppState(), StreamMessage.EventAppended(event))
+        val once = reduce(AppState(openedConversations = setOf("a")), StreamMessage.EventAppended(event))
         val twice = reduce(once, StreamMessage.EventAppended(event))
 
         assertEquals(1, twice.events.getValue("a").size)
+    }
+
+    @Test
+    fun eventsStreamedForAConversationThatWasNeverOpenedAreLeftForTheFirstFetch() {
+        val live = Event("a", 7, "turn_end", JsonObject(emptyMap()))
+
+        val state = reduce(AppState(), StreamMessage.EventAppended(live))
+
+        assertNull(state.events["a"])
     }
 
     @Test
