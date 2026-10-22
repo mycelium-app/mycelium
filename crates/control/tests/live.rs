@@ -2,7 +2,7 @@ mod common;
 
 use common::{NodeLink, Server, StreamClient};
 use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, DeviceKind, DeviceState, Event, EventKind, LoginInfo, LoginState, QueuedPrompt};
-use mycelium_proto::link::NodeToControl;
+use mycelium_proto::link::{ControlToNode, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -28,6 +28,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/permission",
     "POST /api/v1/conversations/{id}/config",
     "POST /api/v1/imports",
+    "DELETE /api/v1/terminals/{terminal_id}",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -35,6 +36,9 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/nodes/{id}/logins",
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",
+    "POST /api/v1/conversations/{id}/terminal",
+    "POST /api/v1/terminals/{terminal_id}/input",
+    "POST /api/v1/terminals/{terminal_id}/resize",
     "POST /api/v1/mcp",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
@@ -320,6 +324,132 @@ async fn a_sign_in_ends_in_the_stream_when_its_node_is_revoked() {
     server.user.json(server.user.delete(&format!("/api/v1/nodes/{}", link.id))).await;
 
     stream.until(|message| matches!(message, StreamMessage::LoginFinished { login_id: id, ok: false } if id == login_id).then_some(())).await;
+}
+
+async fn start_terminal(server: &Server, link: &mut NodeLink, conversation_id: Uuid) -> Uuid {
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/conversations/{conversation_id}/terminal")).json(&json!({"cols": 80, "rows": 24}))).await;
+    assert_eq!(status, 200, "{started}");
+    let terminal_id: Uuid = started["terminal_id"].as_str().unwrap().parse().unwrap();
+
+    let ControlToNode::StartTerminal { terminal_id: asked, conversation_id: for_conversation, cwd, cols, rows } = link.next().await else {
+        panic!("expected the node to be told to start a terminal");
+    };
+    assert_eq!((asked, for_conversation, cwd.as_str(), cols, rows), (terminal_id, conversation_id, "/work/app", 80, 24));
+
+    terminal_id
+}
+
+#[tokio::test]
+async fn terminal_output_and_its_end_are_streamed_only_to_the_person_who_opened_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    link.send(NodeToControl::TerminalOutput { terminal_id, data: "bHM=".into() }).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalOutput { terminal_id: id, data } if id == terminal_id && data == "bHM=").then_some(())).await;
+
+    link.send(NodeToControl::TerminalExited { terminal_id }).await;
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+}
+
+#[tokio::test]
+async fn terminal_input_and_resizes_reach_the_node_and_stopping_tells_it_to_detach() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "bHMNCg=="}))).await;
+    assert_eq!(status, 204);
+    assert_eq!(link.next().await, ControlToNode::TerminalInput { terminal_id, data: "bHMNCg==".into() });
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/terminals/{terminal_id}/resize")).json(&json!({"cols": 120, "rows": 40}))).await;
+    assert_eq!(status, 204);
+    assert_eq!(link.next().await, ControlToNode::ResizeTerminal { terminal_id, cols: 120, rows: 40 });
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/terminals/{terminal_id}"))).await;
+    assert_eq!(status, 204);
+    assert_eq!(link.next().await, ControlToNode::StopTerminal { terminal_id });
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "eA=="}))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn another_user_cannot_open_or_drive_a_terminal() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.post(&format!("/api/v1/conversations/{}/terminal", conversation.id)).json(&json!({"cols": 80, "rows": 24}))).await;
+    assert_eq!(status, 404);
+
+    let (status, _) = other.json(other.post(&format!("/api/v1/terminals/{terminal_id}/input")).json(&json!({"data": "eA=="}))).await;
+    assert_eq!(status, 404);
+
+    let (status, _) = other.json(other.delete(&format!("/api/v1/terminals/{terminal_id}"))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn a_node_cannot_stream_output_for_a_terminal_it_does_not_own() {
+    let server = Server::start().await;
+    let mut owner = server.online_node("laptop").await;
+    let mut intruder = server.online_node("server").await;
+    let conversation = server.create_conversation(owner.id, None).await;
+    owner.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut owner, conversation.id).await;
+
+    intruder.send(NodeToControl::TerminalOutput { terminal_id, data: "Zm9yZ2Vk".into() }).await;
+    intruder.send(NodeToControl::TerminalExited { terminal_id }).await;
+    owner.send(NodeToControl::TerminalOutput { terminal_id, data: "cmVhbA==".into() }).await;
+
+    let first = stream.until(|message| matches!(message, StreamMessage::TerminalOutput { .. } | StreamMessage::TerminalExited { .. }).then_some(message)).await;
+    assert_eq!(first, StreamMessage::TerminalOutput { terminal_id, data: "cmVhbA==".into() });
+}
+
+#[tokio::test]
+async fn a_terminal_ends_in_the_stream_when_its_node_disconnects() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+    let terminal_id = start_terminal(&server, &mut link, conversation.id).await;
+
+    drop(link);
+
+    stream.until(|message| matches!(message, StreamMessage::TerminalExited { terminal_id: id } if id == terminal_id).then_some(())).await;
+}
+
+#[tokio::test]
+async fn a_terminal_cannot_be_opened_while_the_node_is_offline_or_with_no_size() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/terminal", conversation.id)).json(&json!({"cols": 0, "rows": 24}))).await;
+    assert_eq!((status, body["error"].as_str()), (400, Some("size_required")));
+
+    drop(link);
+    let path = format!("/api/v1/conversations/{}/terminal", conversation.id);
+    let body = common::eventually("the node to show as offline", || async {
+        let (status, body) = server.user.json(server.user.post(&path).json(&json!({"cols": 80, "rows": 24}))).await;
+        (status == 409).then_some(body)
+    })
+    .await;
+    assert_eq!(body["error"], "node_offline");
 }
 
 async fn conversation_where(stream: &mut StreamClient, id: Uuid, wanted: impl Fn(&Conversation) -> bool) -> Conversation {

@@ -140,6 +140,12 @@ Nodes:
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to
   it; `DELETE /api/v1/logins/{login_id}` stops it.
 
+Terminals:
+- `POST /api/v1/conversations/{id}/terminal` `{cols, rows}` → `{terminal_id}`; 404 for a conversation that is not
+  the caller's, 409 `node_offline`, 400 `size_required` for a zero size. Output streams as `terminal_output`.
+  `POST /api/v1/terminals/{terminal_id}/input` `{data}` (base64 bytes), `POST /api/v1/terminals/{terminal_id}/resize`
+  `{cols, rows}` and `DELETE /api/v1/terminals/{terminal_id}` (detaches; the tmux session keeps running).
+
 Conversations:
 - `GET /api/v1/conversations?archived=false`.
 - `POST /api/v1/conversations` `{node_id, agent, cwd, title?, prompt?}` → the conversation; the node
@@ -162,7 +168,7 @@ History:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `terminal_output` (`{terminal_id, data}`, base64 bytes), `terminal_exited` (`{terminal_id}`, also sent when the terminal is stopped or its node disconnects or is revoked), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Memory:
 - `GET /api/v1/memories?query=` (newest first, or full-text matches when `query` is given), `PATCH /memories/{id}` `{text}`, `DELETE /memories/{id}`. Any signed-in user manages them.
@@ -199,6 +205,8 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Revoke | `node_removed`, plus `login_finished` for its sign-ins | everyone |
 | Sign-in output | `login_output` | starter |
 | Sign-in ends: node reports it, `DELETE /logins/{id}`, node disconnects or is revoked | `login_finished` | starter |
+| Terminal output | `terminal_output` | opener |
+| Terminal ends: node reports it, `DELETE /terminals/{id}`, node disconnects or is revoked | `terminal_exited` | opener |
 | Conversation created, renamed, archived or restored | `conversation` (and `queue` on create) | owner |
 | History imported (`POST /imports`) | `conversation` per new conversation | owner |
 | `session_started` (session id, mode, model) | `conversation` | owner |
@@ -217,7 +225,8 @@ Silent on purpose, because no client shows them: user, web session and client to
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
 `POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
-`POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
+`POST /conversations/{id}/terminal` (the output follows as `terminal_output`), `POST /terminals/{id}/input` and
+`POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened).
 
 ### Events
@@ -248,6 +257,8 @@ Node to control plane:
 | `logins` | `logins: [{agent, account?, method, state}]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
+| `terminal_output` | `terminal_id, data` (base64; raw bytes from the PTY) |
+| `terminal_exited` | `terminal_id` |
 | `transcript` | `path, offset, data` (base64; the bytes at `offset`) |
 | `workflow` | `conversation_id, run_id, line` (the journal line as JSON; no `seq`) |
 | `pong` | |
@@ -266,6 +277,10 @@ Control plane to node:
 | `start_login` | `login_id, agent, method` |
 | `login_input` | `login_id, text` |
 | `stop_login` | `login_id` |
+| `start_terminal` | `terminal_id, conversation_id, cwd, cols, rows` |
+| `terminal_input` | `terminal_id, data` (base64 bytes) |
+| `resize_terminal` | `terminal_id, cols, rows` |
+| `stop_terminal` | `terminal_id` |
 | `transcript_ack` | `path, bytes` |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
@@ -353,6 +368,18 @@ Every user message and every assistant turn, live or imported, is stored in `sea
 Postgres full-text search (`websearch_to_tsquery`, English) for now, not ctx. Search is scoped to the caller's own
 conversations and returns the best matching message per conversation with `**` around the matched words.
 
+### Terminal
+
+Each conversation has a terminal panel on its right-hand rail. Opening it posts `POST /conversations/{id}/terminal`; the
+node runs `tmux new-session -A -s mycelium-<first 8 characters of the conversation id> -c <cwd>` in a PTY of the
+panel's size, so reopening reattaches to the same session, and falls back to `$SHELL` (or `/bin/sh`) in the folder when
+tmux is not installed. Input is written raw, output is read in chunks and relayed as base64, and a resize resizes the
+PTY. Closing the panel stops only the PTY client: the tmux session keeps running on the node. The control plane tracks
+each terminal's owner and node like a sign-in, so only the opener sees its output and a node can only send output for
+terminals it was asked to start. The clients carry their own terminal emulator (cell grid, cursor, SGR colours,
+scroll regions, alternate screen) and send keys as bytes. Not done: scrollback in the fallback shell, mouse reporting,
+text selection and answering the terminal's own queries (device attributes, colour requests).
+
 ## Clients
 
 Compose Multiplatform, Kotlin, one `shared` module and two targets: `web` (wasmJs, served by the
@@ -364,7 +391,7 @@ with the design system's tokens and sizes, in dark and light:
 - The shell: sidebar by status with group-free rows (stage 1 has no groups), conversation header
   with rename, thread rendered from events (messages, tool calls, diffs, plans, permission cards,
   workflow card), composer (mode, model, effort where offered, queue, stop, send), the rail with
-  Details.
+  Details and Terminal.
 - New conversation: node, agent, folder.
 - Nodes: list, join commands (shell, Nix, NixOS), logins with sign-in output, drain, revoke.
 - Past conversations: archived and done.

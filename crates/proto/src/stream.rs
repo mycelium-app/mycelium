@@ -25,6 +25,13 @@ pub enum StreamMessage {
         login_id: Uuid,
         ok: bool,
     },
+    TerminalOutput {
+        terminal_id: Uuid,
+        data: String,
+    },
+    TerminalExited {
+        terminal_id: Uuid,
+    },
     Device {
         user_code: String,
         kind: DeviceKind,

@@ -4,6 +4,7 @@ use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
+use crate::terminal::{TerminalManager, find_on_path, user_shell};
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
 use anyhow::{Context, Result};
@@ -72,6 +73,7 @@ pub struct Daemon {
     out: mpsc::UnboundedSender<NodeToControl>,
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
     logins: LoginManager,
+    terminals: TerminalManager,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
 }
@@ -87,6 +89,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
+        terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
         connected: AtomicBool::new(false),
@@ -187,6 +190,10 @@ impl Daemon {
             },
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
+            ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows),
+            ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
+            ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
+            ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),
             ControlToNode::TranscriptAck { path, bytes } => {
                 if let Ok(mut transcripts) = self.transcripts.lock() {
                     transcripts.ack(&path, bytes);

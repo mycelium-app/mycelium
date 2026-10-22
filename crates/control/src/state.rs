@@ -47,6 +47,7 @@ pub struct UnacknowledgedPrompt {
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
+    terminals: Mutex<HashMap<Uuid, LoginOwner>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
@@ -195,6 +196,33 @@ impl Hub {
         finished
     }
 
+    pub fn track_terminal(&self, terminal_id: Uuid, node_id: Uuid, user_id: Uuid) {
+        if let Ok(mut terminals) = self.terminals.lock() {
+            terminals.insert(terminal_id, LoginOwner { node_id, user_id });
+        }
+    }
+
+    pub fn terminal_owner(&self, terminal_id: Uuid) -> Option<LoginOwner> {
+        self.terminals.lock().ok().and_then(|terminals| terminals.get(&terminal_id).copied())
+    }
+
+    pub fn finish_terminal(&self, terminal_id: Uuid) {
+        if let Ok(mut terminals) = self.terminals.lock() {
+            terminals.remove(&terminal_id);
+        }
+    }
+
+    pub fn finish_terminals_of(&self, node_id: Uuid) -> Vec<(Uuid, LoginOwner)> {
+        let Ok(mut terminals) = self.terminals.lock() else {
+            return Vec::new();
+        };
+        let finished: Vec<(Uuid, LoginOwner)> = terminals.iter().filter(|(_, owner)| owner.node_id == node_id).map(|(terminal_id, owner)| (*terminal_id, *owner)).collect();
+
+        terminals.retain(|_, owner| owner.node_id != node_id);
+
+        finished
+    }
+
     pub fn expect_send_now(&self, conversation_id: Uuid, node_id: Uuid) {
         if let Ok(mut send_now) = self.send_now.lock() {
             send_now.insert(conversation_id, node_id);
@@ -259,6 +287,10 @@ impl AppState {
     pub fn finish_logins_of_node(&self, node_id: Uuid) {
         for (login_id, owner) in self.hub.finish_logins_of(node_id) {
             self.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok: false });
+        }
+
+        for (terminal_id, owner) in self.hub.finish_terminals_of(node_id) {
+            self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
         }
     }
 }

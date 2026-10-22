@@ -63,6 +63,13 @@ pub enum NodeToControl {
         login_id: Uuid,
         ok: bool,
     },
+    TerminalOutput {
+        terminal_id: Uuid,
+        data: String,
+    },
+    TerminalExited {
+        terminal_id: Uuid,
+    },
     Transcript {
         path: String,
         offset: i64,
@@ -130,6 +137,25 @@ pub enum ControlToNode {
     },
     StopLogin {
         login_id: Uuid,
+    },
+    StartTerminal {
+        terminal_id: Uuid,
+        conversation_id: Uuid,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+    },
+    TerminalInput {
+        terminal_id: Uuid,
+        data: String,
+    },
+    ResizeTerminal {
+        terminal_id: Uuid,
+        cols: u16,
+        rows: u16,
+    },
+    StopTerminal {
+        terminal_id: Uuid,
     },
     TranscriptAck {
         path: String,

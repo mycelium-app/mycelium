@@ -142,6 +142,21 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::TerminalOutput { terminal_id, data } => {
+            if let Some(owner) = state.hub.terminal_owner(terminal_id).filter(|owner| owner.node_id == node_id) {
+                state.publish(Some(owner.user_id), StreamMessage::TerminalOutput { terminal_id, data });
+            }
+
+            Ok(())
+        }
+        NodeToControl::TerminalExited { terminal_id } => {
+            if let Some(owner) = state.hub.terminal_owner(terminal_id).filter(|owner| owner.node_id == node_id) {
+                state.hub.finish_terminal(terminal_id);
+                state.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
+            }
+
+            Ok(())
+        }
         NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
         NodeToControl::Files { request_id, paths } => {
             state.hub.answer_files(node_id, request_id, paths);

@@ -8,6 +8,7 @@ pub mod link;
 pub mod login;
 pub mod session;
 pub mod status;
+pub mod terminal;
 pub mod transcripts;
 
 pub use daemon::run;

@@ -69,6 +69,8 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut }] }, "logins"),
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),
         (NodeToControl::LoginFinished { login_id: id(), ok: true }, "login_finished"),
+        (NodeToControl::TerminalOutput { terminal_id: id(), data: "aGk=".into() }, "terminal_output"),
+        (NodeToControl::TerminalExited { terminal_id: id() }, "terminal_exited"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::Pong, "pong"),
@@ -95,6 +97,10 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::StartLogin { login_id: id(), agent: AgentId::Codex, method: "device".into() }, "start_login"),
         (ControlToNode::LoginInput { login_id: id(), text: "x".into() }, "login_input"),
         (ControlToNode::StopLogin { login_id: id() }, "stop_login"),
+        (ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24 }, "start_terminal"),
+        (ControlToNode::TerminalInput { terminal_id: id(), data: "bHM=".into() }, "terminal_input"),
+        (ControlToNode::ResizeTerminal { terminal_id: id(), cols: 100, rows: 30 }, "resize_terminal"),
+        (ControlToNode::StopTerminal { terminal_id: id() }, "stop_terminal"),
         (ControlToNode::TranscriptAck { path: "p".into(), bytes: 10 }, "transcript_ack"),
         (ControlToNode::Ping, "ping"),
         (ControlToNode::Revoked, "revoked"),
@@ -196,6 +202,12 @@ fn stream_login_and_queue_messages_round_trip() {
 
     let finished = round_trip(&StreamMessage::LoginFinished { login_id: id(), ok: false });
     assert_eq!(finished["type"], "login_finished");
+
+    let terminal = round_trip(&StreamMessage::TerminalOutput { terminal_id: id(), data: "aGk=".into() });
+    assert_eq!(terminal["type"], "terminal_output");
+
+    let exited = round_trip(&StreamMessage::TerminalExited { terminal_id: id() });
+    assert_eq!(exited["type"], "terminal_exited");
 
     let removed = round_trip(&StreamMessage::NodeRemoved { node_id: id() });
     assert_eq!(removed["type"], "node_removed");

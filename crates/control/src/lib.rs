@@ -15,6 +15,7 @@ mod search;
 mod state;
 mod store;
 mod stream;
+mod terminals;
 mod transcripts;
 mod web;
 
@@ -77,6 +78,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))
         .route("/api/v1/conversations/{id}/files", get(conversations::files))
+        .route("/api/v1/conversations/{id}/terminal", post(terminals::start))
+        .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))
+        .route("/api/v1/terminals/{terminal_id}/resize", post(terminals::resize))
+        .route("/api/v1/terminals/{terminal_id}", delete(terminals::stop))
         .route("/api/v1/conversations/{id}/prompt", post(prompts::prompt))
         .route("/api/v1/conversations/{id}/queue", get(prompts::queue))
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))
