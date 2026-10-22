@@ -24,6 +24,7 @@ struct Shared {
     exit_code: watch::Sender<Option<i32>>,
     generation: watch::Sender<u64>,
     attached: watch::Sender<usize>,
+    close: mpsc::UnboundedSender<()>,
 }
 
 impl Shared {
@@ -61,12 +62,14 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
 
     let journal_file = OpenOptions::new().create(true).write(true).truncate(true).open(dir.join("journal.jsonl"))?;
     let stderr_file = OpenOptions::new().create(true).append(true).open(dir.join("stderr.log"))?;
+    let (close, mut close_requests) = mpsc::unbounded_channel::<()>();
     let shared = Arc::new(Shared {
         journal: Mutex::new(Journal { lines: Vec::new(), file: journal_file }),
         head: watch::channel(0).0,
         exit_code: watch::channel(None).0,
         generation: watch::channel(0).0,
         attached: watch::channel(0).0,
+        close,
     });
 
     let mut child = Command::new(program)
@@ -123,7 +126,13 @@ pub async fn run(dir: PathBuf, command: Vec<String>) -> Result<()> {
         }
     });
 
-    let status = child.wait().await?;
+    let status = tokio::select! {
+        status = child.wait() => status?,
+        _ = close_requests.recv() => {
+            child.start_kill()?;
+            child.wait().await?
+        }
+    };
     let _ = tokio::time::timeout(EXIT_DRAIN_TIMEOUT, reader).await;
     let code = status.code().unwrap_or(-1);
     std::fs::write(dir.join("exit.json"), json!({"exit": code}).to_string())?;
@@ -194,6 +203,10 @@ async fn serve_client(stream: UnixStream, shared: &Shared, frames_to_agent: mpsc
                 let message: Value = serde_json::from_str(&line)?;
                 if let Some(frame) = message.get("send") {
                     let _ = frames_to_agent.send(frame.clone());
+                }
+
+                if message.get("close").is_some() {
+                    let _ = shared.close.send(());
                 }
             }
         }

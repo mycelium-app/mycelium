@@ -1787,12 +1787,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "axum",
  "clap",
+ "futures-util",
  "mycelium-control",
  "mycelium-keeper",
  "mycelium-node",
+ "mycelium-proto",
  "predicates",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1836,35 +1843,10 @@ name = "mycelium-keeper"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_cmd",
- "axum",
- "base64 0.23.1",
- "chrono",
- "clap",
- "dirs",
- "futures-util",
- "mycelium-proto",
- "nix 0.31.3",
- "notify",
- "openidconnect",
- "portable-pty",
- "predicates",
- "rand 0.10.3",
- "reqwest 0.13.5",
- "serde",
  "serde_json",
- "sha2 0.11.1",
- "sqlx",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
- "tokio-tungstenite 0.30.0",
- "toml",
- "tower-http 0.7.1",
  "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -1879,6 +1861,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "mycelium-keeper",
  "mycelium-proto",
  "nix 0.31.3",
  "notify",

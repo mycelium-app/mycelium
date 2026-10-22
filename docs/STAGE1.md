@@ -248,7 +248,8 @@ starts itself. `cancel` is the ACP `session/cancel` notification.
    `{"seq": n, "dir": "in"|"out", "frame": <json>}`, `seq` starting at 1, fsync'd per frame.
 3. Listens on `<dir>/keeper.sock`. A client sends `{"attach": {"after": n}}` and receives every
    journal entry after `n`, then live entries; it sends `{"send": <frame>}` to write to the agent.
-   One client at a time; a new attach replaces the old.
+   One client at a time; a new attach replaces the old. `{"close": true}` kills the agent, after
+   which step 4 applies.
 4. When the agent exits it writes `{"exit": code}` to `<dir>/exit.json` and quits.
 
 The daemon restarts without touching keepers: it reattaches to every `<dir>/keeper.sock` that

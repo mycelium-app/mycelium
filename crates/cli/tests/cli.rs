@@ -29,7 +29,7 @@ fn node_join_takes_a_url_and_an_optional_join_token_file() {
         .args(["node", "join", "https://mycelium.example", "--join-token-file", "/nonexistent"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not built yet"));
+        .stderr(predicate::str::contains("Join tokens arrive in a later release"));
 }
 
 #[test]
@@ -40,12 +40,12 @@ fn keeper_requires_a_command_after_the_separator() {
         .args(["keeper", "--dir", "/tmp/x", "--", "agent", "--flag"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not built yet"));
+        .stderr(predicate::str::contains("start agent"));
 }
 
 #[test]
 fn unbuilt_commands_exit_non_zero_with_a_reason() {
-    for args in [["control", "serve"].as_slice(), ["node", "run"].as_slice(), ["node", "status"].as_slice()] {
+    for args in [["control", "serve"].as_slice()] {
         mycelium().args(args).assert().failure().stderr(predicate::str::contains("not built yet"));
     }
 }

@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
         Command::Node { command: NodeCommand::Join { url, join_token_file } } => {
-            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file }).await
+            mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, config_path: None }).await
         }
         Command::Node { command: NodeCommand::Run } => mycelium_node::run().await,
         Command::Node { command: NodeCommand::Status } => mycelium_node::status().await,

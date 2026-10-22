@@ -1,19 +1,14 @@
-use anyhow::{Result, bail};
-use std::path::PathBuf;
+pub mod acp;
+pub mod agents;
+pub mod config;
+pub mod daemon;
+pub mod join;
+pub mod link;
+pub mod login;
+pub mod session;
+pub mod status;
+pub mod transcripts;
 
-pub struct JoinOptions {
-    pub control_plane: String,
-    pub join_token_file: Option<PathBuf>,
-}
-
-pub async fn join(_options: JoinOptions) -> Result<()> {
-    bail!("not built yet")
-}
-
-pub async fn run() -> Result<()> {
-    bail!("not built yet")
-}
-
-pub async fn status() -> Result<()> {
-    bail!("not built yet")
-}
+pub use daemon::run;
+pub use join::{JoinOptions, join};
+pub use status::status;
