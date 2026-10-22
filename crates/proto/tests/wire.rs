@@ -283,3 +283,18 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&PatchQueueRequest { text: "edit".into() });
     round_trip(&Me { id: id(), email: "a@b".into(), name: "n".into() });
 }
+
+#[test]
+fn device_stream_message_carries_state_and_a_null_result_until_consumed() {
+    let pending = round_trip(&StreamMessage::Device { user_code: "WDJB-MJHT".into(), kind: DeviceKind::Node, label: "l".into(), hostname: "h".into(), state: DeviceState::Pending, result_id: None });
+
+    assert_eq!(pending["type"], "device");
+    assert_eq!(pending["state"], "pending");
+    assert_eq!(pending["result_id"], Value::Null);
+
+    let consumed = round_trip(&StreamMessage::Device { user_code: "WDJB-MJHT".into(), kind: DeviceKind::Client, label: "l".into(), hostname: "h".into(), state: DeviceState::Consumed, result_id: Some(id()) });
+
+    assert_eq!(consumed["kind"], "client");
+    assert_eq!(consumed["state"], "consumed");
+    assert_eq!(consumed["result_id"], json!(id()));
+}

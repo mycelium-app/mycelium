@@ -157,10 +157,46 @@ Conversations:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished`. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
+
+### Live updates
+
+The rule: every client-visible change publishes. A change a client shows is never learned by refetching.
+`crates/control/tests/live.rs` performs each change below over HTTP or the node link and asserts the
+message arrives on an open stream, and fails when a route that changes state is neither tested there
+nor listed as silent, so a new route cannot skip publishing unnoticed. Owner-scoped messages reach
+only the person who owns the conversation or started the sign-in; the rest reach everyone signed in.
+
+| Change | Message | To |
+|---|---|---|
+| Device code created, approved, denied, expired, exchanged | `device` | everyone |
+| Node credential issued (exchange) | `node` (offline), then `device` consumed | everyone |
+| Node link opened, `hello` (agents), `logins`, link closed or silent for 90s | `node` | everyone |
+| Drain on or off | `node` | everyone |
+| Revoke | `node_removed`, plus `login_finished` for its sign-ins | everyone |
+| Sign-in output | `login_output` | starter |
+| Sign-in ends: node reports it, `DELETE /logins/{id}`, node disconnects or is revoked | `login_finished` | starter |
+| Conversation created, renamed, archived or restored | `conversation` (and `queue` on create) | owner |
+| `session_started` (session id, mode, model) | `conversation` | owner |
+| Mode or model changed | `conversation` | owner |
+| Prompt sent from the queue | `event` user_message, `conversation` working, `queue` | owner |
+| `acp_update`, `workflow` | `event` | owner |
+| `permission_request` | `event`, `conversation` input | owner |
+| Permission answered | `event` permission_resolved, `conversation` working | owner |
+| `turn_end` | `event`, `conversation` review | owner |
+| `session_failed`, or `hello` finding a running conversation without a session | `event` error, `conversation` failed | owner |
+| Opened | `conversation` done | owner |
+| Message queued, edited, removed, sent now | `queue` | owner |
+
+Silent on purpose, because no client shows them: user, web session and client token rows (sign-in,
+`last_used_at`), `nodes.last_seen_at` refreshed by `pong` (clients show `online`, which is published),
+transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
+send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
+`POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
+`POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node).
 
 ### Events
 

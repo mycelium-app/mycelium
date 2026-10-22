@@ -1,6 +1,9 @@
 use anyhow::{Result, bail};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::time::Duration;
+
+pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -56,6 +59,7 @@ pub struct Config {
     pub web_dir: PathBuf,
     pub skip_migrations: bool,
     pub trusted_proxies: Vec<Cidr>,
+    pub device_code_lifetime: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -113,6 +117,7 @@ impl Config {
                 .map(|ranges| ranges.split(',').map(str::trim).filter(|range| !range.is_empty()).map(Cidr::parse).collect::<Result<Vec<_>>>())
                 .transpose()?
                 .unwrap_or_default(),
+            device_code_lifetime: DEVICE_CODE_LIFETIME,
         })
     }
 }

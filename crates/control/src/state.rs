@@ -144,6 +144,17 @@ impl Hub {
         }
     }
 
+    pub fn finish_logins_of(&self, node_id: Uuid) -> Vec<(Uuid, LoginOwner)> {
+        let Ok(mut logins) = self.logins.lock() else {
+            return Vec::new();
+        };
+        let finished: Vec<(Uuid, LoginOwner)> = logins.iter().filter(|(_, owner)| owner.node_id == node_id).map(|(login_id, owner)| (*login_id, *owner)).collect();
+
+        logins.retain(|_, owner| owner.node_id != node_id);
+
+        finished
+    }
+
     pub fn expect_send_now(&self, conversation_id: Uuid, node_id: Uuid) {
         if let Ok(mut send_now) = self.send_now.lock() {
             send_now.insert(conversation_id, node_id);
@@ -203,6 +214,12 @@ pub struct AppState {
 impl AppState {
     pub fn publish(&self, owner: Option<Uuid>, message: StreamMessage) {
         let _ = self.stream.send(Streamed { owner, message });
+    }
+
+    pub fn finish_logins_of_node(&self, node_id: Uuid) {
+        for (login_id, owner) in self.hub.finish_logins_of(node_id) {
+            self.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok: false });
+        }
     }
 }
 
