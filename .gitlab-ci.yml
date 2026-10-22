@@ -102,7 +102,12 @@ desktop:linux:
   needs: []
   <<: *release_rule
   before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils curl unzip
+    - curl -fsSL -o /tmp/awscli.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install
+    - aws configure set default.s3.addressing_style virtual
+    - aws configure set default.s3.multipart_threshold 1MB
+    - aws configure set default.s3.multipart_chunksize 1MB
+    - aws configure set default.s3.max_concurrent_requests 4
   script:
     - cd clients
     - MYCELIUM_VERSION="$CI_COMMIT_TAG" ./gradlew --no-daemon :desktop:packageDeb :desktop:createDistributable
@@ -110,13 +115,13 @@ desktop:linux:
     - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
     - cd ..
     - for file in mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do sha256sum "$file" | cut -d' ' -f1 > "$file.sha256"; done
-  artifacts:
-    paths:
-      - mycelium-desktop-linux-x86_64.deb
-      - mycelium-desktop-linux-x86_64.deb.sha256
-      - mycelium-desktop-linux-x86_64.tar.gz
-      - mycelium-desktop-linux-x86_64.tar.gz.sha256
-    expire_in: 1 week
+    - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+    - export AWS_DEFAULT_REGION=us-east-1 AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=adaptive
+    - ls -l mycelium-desktop-linux-x86_64.*
+    - for file in mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do
+        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file" "s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}/$file";
+        aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file.sha256" "s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}/$file.sha256";
+      done
 
 publish:s3:
   stage: release
@@ -125,8 +130,6 @@ publish:s3:
     - job: binary:x86_64
       artifacts: true
     - job: binary:aarch64
-      artifacts: true
-    - job: desktop:linux
       artifacts: true
   <<: *release_rule
   before_script:
@@ -140,7 +143,7 @@ publish:s3:
     - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
     - export AWS_DEFAULT_REGION=us-east-1 AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=adaptive
     - DEST="s3://${S3_BUCKET}/${S3_PREFIX}/${CI_COMMIT_TAG}"
-    - for file in mycelium-linux-x86_64 mycelium-linux-aarch64 mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz; do
+    - for file in mycelium-linux-x86_64 mycelium-linux-aarch64; do
         aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file" "$DEST/$file";
         aws --endpoint-url "$S3_ENDPOINT" --cli-read-timeout 120 --cli-connect-timeout 30 s3 cp "$file.sha256" "$DEST/$file.sha256";
       done
@@ -151,7 +154,7 @@ publish:s3:
 publish:release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs: [publish:s3]
+  needs: [publish:s3, desktop:linux]
   <<: *release_rule
   script:
     - echo "release ${CI_COMMIT_TAG}"
