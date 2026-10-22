@@ -70,6 +70,7 @@ async fn importing_a_claude_transcript_creates_a_done_conversation_with_events_a
     assert_eq!(streamed.cwd, "/work/app");
     assert_eq!(streamed.created_at.to_rfc3339(), "2026-10-01T10:00:00+00:00");
     assert_eq!(streamed.updated_at.to_rfc3339(), "2026-10-01T10:00:09+00:00");
+    assert_eq!(streamed.archived_at.map(|at| at.to_rfc3339()).as_deref(), Some("2026-10-01T10:00:09+00:00"));
 
     let events = server.events(streamed.id).await;
     let kinds: Vec<&str> = events.iter().map(|event| event["kind"].as_str().unwrap()).collect();
@@ -134,7 +135,7 @@ async fn importing_a_codex_rollout_reads_the_session_meta_and_response_items() {
 
     assert_eq!(import(&server, link.id, "codex").await["imported"], 1);
 
-    let (_, conversations) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    let (_, conversations) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
     let imported = &conversations.as_array().unwrap()[0];
     assert_eq!((imported["agent"].as_str(), imported["cwd"].as_str(), imported["title"].as_str()), (Some("codex"), Some("/work/codex-app"), Some("Add a changelog")));
     assert_eq!(imported["acp_session_id"], "0199aaaa-bbbb-cccc-dddd-eeeeffff0000");
@@ -256,6 +257,21 @@ async fn conversations_that_predate_the_search_index_are_backfilled_by_the_migra
 
     assert_eq!(search(&server, "okapi").await.len(), 1);
     assert_eq!(search(&server, "tapir").await.len(), 1);
+}
+
+#[tokio::test]
+async fn conversations_imported_before_archiving_are_archived_by_the_migration_and_others_are_left_alone() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("aaaa", "Plan the okapi rollout", "The tapir stage comes first.")).await;
+    import(&server, link.id, "claude").await;
+    let live = server.create_conversation(link.id, None).await;
+    sqlx::query("update conversations set archived_at = null").execute(&server.pool).await.unwrap();
+
+    sqlx::raw_sql(include_str!("../migrations/0007_archive_imports.sql")).execute(&server.pool).await.unwrap();
+
+    let archived: Vec<(String, bool)> = sqlx::query_as("select title, archived_at is not null from conversations order by title").fetch_all(&server.pool).await.unwrap();
+    assert_eq!(archived, vec![(live.title, false), ("Plan the okapi rollout".to_string(), true)]);
 }
 
 #[tokio::test]
