@@ -26,6 +26,8 @@ const LONGEST_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 1
 pub struct Launch {
     pub keeper_binary: PathBuf,
     pub agent_command: Vec<String>,
+    pub agent_env: Vec<(String, String)>,
+    pub mcp_server: Value,
     pub cwd: PathBuf,
     pub resume: Option<String>,
 }
@@ -164,7 +166,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     let mut state = match saved {
         Some(saved) => SessionState::restore(spec.conversation_id, saved.state, acked_now),
         None => {
-            let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone() });
+            let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone(), mcp_server: launch.mcp_server.clone() });
 
             SessionState::new(spec.conversation_id, plan, acked_now)
         }
@@ -510,6 +512,7 @@ async fn launch_keeper(dir: &Path, launch: &Launch) -> Result<()> {
         .arg(dir)
         .arg("--")
         .args(&launch.agent_command)
+        .envs(launch.agent_env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -533,7 +536,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_directory_too_deep_for_a_unix_socket_is_refused_with_the_fix() {
         let dir = PathBuf::from("/tmp").join("d".repeat(120));
-        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], cwd: PathBuf::from("/"), resume: None };
+        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, cwd: PathBuf::from("/"), resume: None };
 
         let error = launch_keeper(&dir, &launch).await.unwrap_err().to_string();
 

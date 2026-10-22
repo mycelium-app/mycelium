@@ -50,6 +50,7 @@ pub enum Command {
 pub struct StartPlan {
     pub cwd: String,
     pub resume: Option<String>,
+    pub mcp_server: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,7 @@ pub struct SessionState {
     initialize_sent: bool,
     initialized: bool,
     resume_kind: ResumeKind,
+    http_mcp: bool,
     session_requested: bool,
     session_id: Option<String>,
     modes_advertised: bool,
@@ -144,6 +146,7 @@ impl SessionState {
             initialize_sent: false,
             initialized: false,
             resume_kind: ResumeKind::Unsupported,
+            http_mcp: false,
             session_requested: false,
             session_id: None,
             modes_advertised: false,
@@ -362,15 +365,16 @@ impl SessionState {
     }
 
     fn start_session_request(&mut self, plan: &StartPlan) -> Action {
+        let mcp_servers = if self.http_mcp { json!([plan.mcp_server]) } else { json!([]) };
         let Some(resume) = &plan.resume else {
-            return self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": []}));
+            return self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": mcp_servers}));
         };
 
-        let params = json!({"sessionId": resume, "cwd": plan.cwd, "mcpServers": []});
+        let params = json!({"sessionId": resume, "cwd": plan.cwd, "mcpServers": mcp_servers});
         match self.resume_kind {
             ResumeKind::Load => self.outgoing_request("session/load", params),
             ResumeKind::Resume => self.outgoing_request("session/resume", params),
-            ResumeKind::Unsupported => self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": []})),
+            ResumeKind::Unsupported => self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": mcp_servers})),
         }
     }
 
@@ -488,6 +492,7 @@ impl SessionState {
 
                 self.initialized = true;
                 self.resume_kind = resume_kind_of(&result);
+                self.http_mcp = result["agentCapabilities"]["mcpCapabilities"]["http"].as_bool() == Some(true);
 
                 Vec::new()
             }
@@ -558,7 +563,7 @@ mod tests {
     }
 
     fn plan(resume: Option<&str>) -> Option<StartPlan> {
-        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string) })
+        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), mcp_server: json!({"type": "http", "name": "mycelium"}) })
     }
 
     fn sent_frames(actions: &[Action]) -> Vec<Value> {
@@ -593,6 +598,39 @@ mod tests {
         let frames = sent_frames(&actions);
         assert_eq!(frames[0]["method"], "session/new");
         assert_eq!(frames[0]["params"], json!({"cwd": "/work", "mcpServers": []}));
+    }
+
+    #[test]
+    fn the_mycelium_mcp_server_is_passed_when_the_agent_advertises_http() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"mcpCapabilities": {"http": true}}}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["params"]["mcpServers"], json!([{"type": "http", "name": "mycelium"}]));
+    }
+
+    #[test]
+    fn the_mycelium_mcp_server_is_passed_when_resuming_too() {
+        let mut state = SessionState::new(conversation(), plan(Some("abc")), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true, "mcpCapabilities": {"http": true}}}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["method"], "session/load");
+        assert_eq!(frames[0]["params"]["mcpServers"], json!([{"type": "http", "name": "mycelium"}]));
+    }
+
+    #[test]
+    fn no_mcp_server_is_passed_when_the_agent_does_not_advertise_http() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"mcpCapabilities": {"http": false, "sse": true}}}}));
+
+        assert_eq!(sent_frames(&actions)[0]["params"]["mcpServers"], json!([]));
     }
 
     #[test]
