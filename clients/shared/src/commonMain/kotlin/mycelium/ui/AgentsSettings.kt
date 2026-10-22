@@ -34,6 +34,7 @@ fun AgentsSettings(store: Store) {
     val state by store.state.collectAsState()
     var statuses by remember { mutableStateOf<List<ImportStatus>>(emptyList()) }
     var skipped by remember { mutableStateOf<Map<Pair<String, String>, Int>>(emptyMap()) }
+    var importing by remember { mutableStateOf<Set<Pair<String, String>>>(emptySet()) }
 
     LaunchedEffect(Unit) {
         store.act { statuses = store.api.imports() }
@@ -68,14 +69,21 @@ fun AgentsSettings(store: Store) {
                         Label((status?.imported ?: 0).toString(), Modifier.weight(1f), color = colors.textMuted)
 
                         Column(Modifier.weight(1.5f), horizontalAlignment = Alignment.End) {
-                            if (pending > 0) {
+                            if (node.id to agent in importing) {
+                                IndeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}")
+                            } else if (pending > 0) {
                                 MyButton(
                                     onClick = {
+                                        importing = importing + (node.id to agent)
                                         store.act {
-                                            val result = store.api.startImport(ImportRequest(node.id, agent))
-                                            skipped = skipped + ((node.id to agent) to result.skipped)
-                                            statuses = store.api.imports()
-                                            store.refresh()
+                                            try {
+                                                val result = store.api.startImport(ImportRequest(node.id, agent))
+                                                skipped = skipped + ((node.id to agent) to result.skipped)
+                                                statuses = store.api.imports()
+                                                store.refresh()
+                                            } finally {
+                                                importing = importing - (node.id to agent)
+                                            }
                                         }
                                     },
                                     text = "Import $pending",
