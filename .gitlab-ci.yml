@@ -75,6 +75,14 @@ build:image:
   stage: build
   needs: []
   <<: *release_rule
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  cache:
+    key: "cargo-$RUST_TARGET"
+    paths:
+      - .cargo/registry/
+      - .cargo/git/
+      - target/
   script:
     - MYCELIUM_VERSION="$CI_COMMIT_TAG" cargo build --release --locked --package mycelium-cli --target "$RUST_TARGET"
     - cp "target/$RUST_TARGET/release/mycelium" "$ASSET"
@@ -87,6 +95,7 @@ binary:x86_64:
   extends: .binary
   image: messense/rust-musl-cross:x86_64-musl
   variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
     RUST_TARGET: x86_64-unknown-linux-musl
     ASSET: mycelium-linux-x86_64
 
@@ -102,6 +111,15 @@ desktop:linux:
   image: eclipse-temurin:21-jdk
   needs: []
   <<: *release_rule
+  variables:
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  cache:
+    key: "gradle-desktop-linux"
+    paths:
+      - .gradle/caches/
+      - .gradle/wrapper/
+      - .gradle/nodejs/
+      - .gradle/yarn/
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils curl unzip
     - *awscli
@@ -121,6 +139,15 @@ web:wasm:
   image: eclipse-temurin:21-jdk
   needs: []
   <<: *release_rule
+  variables:
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  cache:
+    key: "gradle-web-wasm"
+    paths:
+      - .gradle/caches/
+      - .gradle/wrapper/
+      - .gradle/nodejs/
+      - .gradle/yarn/
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip libatomic1
     - *awscli
