@@ -80,3 +80,20 @@ the plan; an idea moves there when it is designed.
 - **Terminal** is a panel on the conversation's right-hand rail.
 - **Account switcher** shows only when an agent has two or more accounts, with usage left per account.
 - **Queued messages** follow Zed's queue: a collapsible header with Clear all, hover actions per row.
+
+## Order of work
+
+Each release ships, tagged and verified from its artefacts, before the next starts.
+
+1. Memory and history: Mycelium's memory for every agent, importing past conversations, indexing every
+   transcript on the server, and searching it.
+2. Terminal and git: a terminal panel on a tmux session in the worktree, and Zed's git panel.
+3. Projects: forges, projects, worktrees and new projects, then issues as workspaces.
+4. Tasks and schedules.
+5. Accounts and sessions.
+6. Instructions and groups.
+7. Conversation polish: Zed's queue, predicted titles, suggested replies, side chats and annotations.
+8. Nodes: node pages with resources and ports, and Activity.
+9. Moves.
+10. Hands off: goals and diff walkthroughs.
+11. Chats beside workspaces, local models and generated UI.
