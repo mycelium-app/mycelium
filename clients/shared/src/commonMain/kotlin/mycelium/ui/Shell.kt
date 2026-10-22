@@ -247,7 +247,6 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
             SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
             SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes) { onRoute(Route.Nodes) }
-            SidebarLink("Settings", MyIcon.Settings, selected = route == Route.Settings) { onRoute(Route.Settings) }
         }
 
         Hairline()
@@ -265,6 +264,12 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             }
         }
 
+
+        Hairline()
+
+        Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
+            SidebarLink("Settings", MyIcon.Settings, selected = route == Route.Settings) { onRoute(Route.Settings) }
+        }
     }
 }
 
