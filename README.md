@@ -5,6 +5,8 @@
 
 <div align="center">
 
+<img src="site/logo.svg" alt="" width="72" height="72">
+
 # Mycelium
 
 **Coding agents on every machine you own, steered from one place.**
@@ -29,7 +31,8 @@ each machine runs the agents and dials in. You steer all of it from web, iOS or 
 
 ## Status
 
-Design only. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and the open questions.
+Design done, stage 1 in progress. Read [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture and the
+stages, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) for the short version.
 
 ## Licence
 

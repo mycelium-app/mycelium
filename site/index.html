@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mycelium</title>
+<meta name="description" content="Coding agents on every machine you own, steered from one place.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="mycelium.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<section class="disclosure" aria-label="AI disclosure">
+<div class="wrap">
+<p>Claude Code designed and is writing Mycelium, and wrote this page. Nothing here is finished yet.</p>
+</div>
+</section>
+
+<header class="wrap top">
+<a class="brand" href="./"><img src="logo.svg" alt="" width="28" height="28"><span>Mycelium</span></a>
+<span class="spacer"></span>
+<a class="my-btn my-btn--muted" href="#stages">Roadmap</a>
+<a class="my-btn my-btn--outline" href="https://github.com/mycelium-app/mycelium">Source</a>
+</header>
+
+<main class="my">
+<section class="wrap hero">
+<h1>Your coding agents, on every machine, in one place.</h1>
+<p class="lead">Run Claude Code and Codex on your laptop, your server and your VMs. Steer all of them from a browser, the desktop app or your phone.</p>
+<div class="actions">
+<a class="my-btn my-btn--primary my-btn--lg" href="#stages">See what ships first</a>
+<a class="my-btn my-btn--outline my-btn--lg" href="https://github.com/mycelium-app/mycelium">Read the source</a>
+</div>
+</section>
+
+<div class="wrap">
+<div class="show show-1 show-hero" aria-hidden="true">
+<div class="frame window">
+<nav class="my-sidebar" style="height: 100%; resize: none">
+<div class="my-bar my-bar--chrome" style="padding-left: 8px"><span class="my-btn my-btn--sm" style="font-weight: 500">All groups</span><span class="my-bar__spacer"></span></div>
+<div class="my-scroll" style="padding: 4px 0">
+<div class="my-section__head">Needs input</div>
+<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span><span class="my-row__title">Release v0.3.7 for outline</span><span class="my-row__meta">slop</span></div>
+<div class="my-section__head">Ready to review</div>
+<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></span><span class="my-row__title">Restore flow copy</span><span class="my-row__meta">work</span></div>
+<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></span><span class="my-row__title">Settle the unchecked design facts</span><span class="my-row__meta">slop</span></div>
+<div class="my-section__head">Working</div>
+<div class="my-row" aria-current="page"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Bump @immich/ui in midden</span><span class="my-row__meta">slop</span></div>
+<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Uploads survive a 503 and a timeout</span><span class="my-row__meta">work</span></div>
+<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">@acme-org/backups-core types</span><span class="my-row__meta">work</span></div>
+</div>
+</nav>
+<div class="my-main">
+<div class="my-bar"><span class="my-bar__title">Bump @immich/ui in midden</span><span class="my-row__meta">midden · immich-ui-bump · laptop</span></div>
+<div class="my-scroll">
+<div class="my-thread" style="padding-top: 24px">
+<div class="my-msg-user">Bump @immich/ui to the latest release and make sure nothing else in the tree drifts from it.</div>
+<div class="my-msg-agent">
+<div class="my-tool"><span class="my-tool__name">recall</span><span class="my-tool__arg">"@immich/ui version", groups: ["work"]</span><span class="my-tool__end"><span class="my-muted">1 memory</span></span></div>
+<p>A <strong>work</strong> memory says to keep <span class="my-code">@immich/ui</span> in step with the <span class="my-code">@acme-org/backups-*</span> packages. They pin 0.31.2, so I'll match that.</p>
+<div class="my-card"><div class="my-card__head"><span>package.json</span><span class="my-diffstat"><span class="my-diffstat__add">+1</span> <span class="my-diffstat__del">-1</span></span></div>
+<div class="my-diff">
+<div class="my-diff__line my-diff__line--del"><span class="my-diff__num">18</span><span class="my-diff__num"></span><span class="my-diff__sign">-</span><span>    "@immich/ui": "^0.29.0",</span></div>
+<div class="my-diff__line my-diff__line--add"><span class="my-diff__num"></span><span class="my-diff__num">18</span><span class="my-diff__sign">+</span><span>    "@immich/ui": "0.31.2",</span></div>
+</div></div>
+<div class="my-tool"><span class="my-tool__name">bash</span><span class="my-tool__arg">pnpm -r test</span><span class="my-tool__end"><span class="my-status my-status--working"><span class="my-status__mark"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span>Running</span></span></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<section class="wrap feature">
+<div class="copy"><span class="stage stage-1">First</span><h2>Every machine, one list.</h2><p>Conversations from all your nodes, sorted by what needs you. The group and the machine sit quietly at the end of each row.</p></div>
+<div class="show show-1" aria-hidden="true">
+<div class="frame" style="width: 300px">
+<div class="my-sidebar" style="width: 100%; resize: none; border-right: 0">
+<div class="my-section__head">Needs input</div>
+<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span><span class="my-row__title">Release v0.3.7 for outline</span><span class="my-row__meta">Claude</span></div>
+<div class="my-section__head">Failed</div>
+<div class="my-row"><span class="my-row__lead st-fail"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg></span><span class="my-row__title">Renovate sweep</span><span class="my-row__meta">Claude</span></div>
+<div class="my-section__head">Working</div>
+<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Bump @immich/ui in midden</span><span class="my-row__meta">Claude</span></div>
+<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Uploads survive a 503</span><span class="my-row__meta">Codex</span></div>
+<div class="my-section__head">Done</div>
+<div class="my-row"><span class="my-row__lead st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">Flux image automation for vm</span><span class="my-row__meta">Claude</span></div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap feature flip">
+<div class="copy"><span class="stage stage-1">First</span><h2>Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
+<div class="show show-1" aria-hidden="true">
+<div class="frame" style="width: 560px">
+<div class="my-composer" style="border-top: 0">
+<div class="my-composer__queue">
+<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Also bump @immich/ui in backups-web if it drifts</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
+<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Then open a merge request and ask me before pushing</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
+</div>
+<div class="my-composer__input fake-input">Ask, plan or build</div>
+<div class="my-composer__bar"><span class="my-btn my-btn--icon my-btn--muted"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-attention); font-weight: 500">Auto</span><span class="my-btn my-btn--muted">Opus 5.5</span><span class="my-btn my-btn--outline my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap feature">
+<div class="copy"><span class="stage stage-1">First</span><h2>Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
+<div class="show show-1" aria-hidden="true">
+<div class="frame my-card" style="width: 560px; border-radius: var(--radius-float)">
+<div class="my-card__head" style="font-family: var(--font-sans); height: var(--size-bar); padding: 0 6px 0 10px"><span class="st-work" style="display: inline-flex"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><strong style="font-weight: 600; font-size: 13px">Build flow screens, then verify each</strong><span class="my-muted" style="font-size: 12px">6 of 10 agents · 4m 05s</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Stop</span></div>
+<div class="segments"><i class="s-done"></i><i class="s-done"></i><i class="s-done"></i><i class="s-run"></i><i class="s-run"></i><i class="s-done"></i><i class="s-run"></i><i class="s-run"></i><i></i><i></i></div>
+<div class="my-section__head" style="color: var(--text); height: 28px; padding: 0 10px">Build <span class="my-muted" style="font-weight: 400">3 of 5</span></div>
+<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">New user</span><span class="my-row__meta">Sonnet 5.5 · 3m 12s</span></div>
+<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">Machines and logins</span><span class="my-row__meta">Sonnet 5.5 · 3m 48s</span></div>
+<div class="my-row wf"><span class="st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Schedules, memory, config</span><span class="my-row__meta">Sonnet 5.5 · 3m 40s</span></div>
+<div class="my-section__head" style="color: var(--text); height: 28px; padding: 0 10px">Verify <span class="my-muted" style="font-weight: 400">1 of 5</span></div>
+<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">New user</span><span class="my-row__meta">Sonnet 5.5 · 1m 02s</span></div>
+<div class="my-row wf"><span class="st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Machines and logins</span><span class="my-row__meta">Sonnet 5.5 · 0m 41s</span></div>
+</div>
+</div>
+</section>
+
+<section class="wrap feature flip">
+<div class="copy"><span class="stage stage-2">Next</span><h2>Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
+<div class="show show-2" aria-hidden="true">
+<div class="my-menu" style="width: 300px">
+<div class="my-menu__label">Run on</div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>laptop<span class="my-menu__hint">Here</span></div>
+<div class="my-menu__item" style="background: var(--bg-hover)"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>orion<span class="my-menu__hint">3 running</span></div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>work-mac<span class="my-menu__hint">Draining</span></div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>build-vm<span class="my-menu__hint">Offline, waits</span></div>
+</div>
+</div>
+</section>
+
+<section class="wrap feature">
+<div class="copy"><span class="stage stage-3">Then</span><h2>Pick it up anywhere.</h2><p>The same list and the same conversation on your phone.</p></div>
+<div class="show show-3" aria-hidden="true">
+<div class="frame phone">
+<div class="my-bar" style="height: 52px; padding: 0 8px"><svg class="my-icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="my-bar__title" style="font-size: 15px; padding-left: 8px">Bump @immich/ui</span></div>
+<div class="my-thread" style="padding: 16px">
+<div class="my-msg-user">Bump @immich/ui to the latest release.</div>
+<div class="my-msg-agent"><p>They pin 0.31.2, so I'll match that rather than take the newest.</p>
+<div class="my-tool"><span class="my-tool__name">bash</span><span class="my-tool__arg">pnpm -r test</span><span class="my-tool__end"><span class="my-muted">142 passed</span></span></div></div>
+</div>
+<div class="glass-composer"><span class="fake-input" style="font-size: 16px">Ask, plan or build</span><div class="row2"><span>Opus 5.5 <span class="my-muted">Medium</span></span><span style="color: var(--status-attention); font-weight: 500">Auto</span></div></div>
+</div>
+</div>
+</section>
+
+<section class="wrap feature flip">
+<div class="copy"><span class="stage stage-4">Later</span><h2>Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met.</p></div>
+<div class="show show-4" aria-hidden="true">
+<div class="frame" style="width: 560px">
+<div class="my-composer" style="border-top: 0">
+<div class="my-composer__goal"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg><span style="color: var(--text)">Uploads survive a 503 and a timeout</span><span class="st-work">Turn 9</span><span>184k of 500k tokens</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Pause</span></div>
+<div class="my-composer__input fake-input">Add to the goal or ask</div>
+<div class="my-composer__bar"><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-working); font-weight: 500">Plan</span><span class="my-btn my-btn--muted">GPT-6.1</span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="stages" class="stages">
+<div class="wrap">
+<h2>What ships when</h2>
+<div class="stage-grid">
+<article class="show show-1"><span class="stage stage-1">First</span><h3>Run and steer</h3><ul><li>Nodes join by script or Nix</li><li>Claude Code and Codex over ACP</li><li>One list, live threads, queued messages</li><li>Live workflow progress</li><li>Agent logins from any client</li><li>Web and desktop</li></ul></article>
+<article class="show show-2"><span class="stage stage-2">Next</span><h3>Many machines</h3><ul><li>Move conversations between nodes</li><li>One AGENTS.md everywhere</li><li>Search every transcript</li><li>tmux for the full terminal app</li></ul></article>
+<article class="show show-3"><span class="stage stage-3">Then</span><h3>Everywhere</h3><ul><li>Phone and iPad</li><li>Shared memory</li><li>Zed as a client</li></ul></article>
+<article class="show show-4"><span class="stage stage-4">Later</span><h3>Hands off</h3><ul><li>Goals</li><li>Schedules</li><li>Start from a ticket</li><li>Diff walkthroughs</li></ul></article>
+</div>
+</div>
+</section>
+</main>
+
+<footer class="wrap foot">
+<span>WTFPL</span>
+<a href="https://github.com/mycelium-app/mycelium">github.com/mycelium-app/mycelium</a>
+<span>Not affiliated with Anthropic or OpenAI.</span>
+</footer>
+</body>
+</html>

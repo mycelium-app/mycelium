@@ -1,0 +1,47 @@
+:root, .my-app {
+  --bg-content: #141716; --bg-panel: #181b1a; --bg-chrome: #1d201f; --bg-raised: #242827; --bg-hover: #232827; --bg-selected: #2c3231;
+  --border: #2a302e; --border-control: #646b69;
+  --text: #e3e6e4; --text-muted: #a3a8a6; --text-faint: #969c99;
+  --accent: #7ccba0; --on-accent: #0e1a14; --focus: #7ccba0;
+  --status-working: #7fb2ec; --status-attention: #e2b45f; --status-failed: #ec8576;
+  --diff-add-bg: #17291f; --diff-del-bg: #2f1c19; --diff-add: #7ccba0; --diff-del: #ec8576;
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --space-0-5: 2px; --space-1: 4px; --space-1-5: 6px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  --size-control-sm: 22px; --size-control-md: 28px; --size-control-lg: 32px; --size-row: 32px; --size-touch: 44px; --size-bar: 40px; --size-statusbar: 24px; --size-difffile: 30px;
+  --size-icon-sm: 14px; --size-icon-md: 16px; --size-dot: 6px; --size-sidebar: 248px; --size-inspector: 296px; --size-menu: 280px; --size-measure: 720px;
+  --radius-none: 0px; --radius-control: 4px; --radius-block: 6px; --radius-float: 8px; --radius-full: 9999px;
+  color-scheme: dark;
+}
+.my-app[data-theme="light"] {
+  --bg-content: #ffffff; --bg-panel: #f3f4f3; --bg-chrome: #eceeed; --bg-raised: #ffffff; --bg-hover: #e5e8e7; --bg-selected: #dbe0de;
+  --border: #dde1df; --border-control: #7b8380;
+  --text: #161918; --text-muted: #565d5a; --text-faint: #5a615e;
+  --accent: #1b6a44; --on-accent: #ffffff; --focus: #1b6a44;
+  --status-working: #1f58a8; --status-attention: #875800; --status-failed: #b0372a;
+  --diff-add-bg: #e6f4ea; --diff-del-bg: #fbe7e3; --diff-add: #1b6a44; --diff-del: #b0372a;
+  --shadow-float: 0 8px 24px rgba(22, 25, 24, 0.16);
+  color-scheme: light;
+}
+.my-app { position: relative; overflow: hidden; display: flex; flex-direction: column; box-sizing: border-box; }
+.my-app > .my-shell { flex: 1 1 auto; }
+.my-app .sc-host { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.my-shell > .sc-host, .my-main > .sc-host, .my-app > .sc-host { flex: none; }
+.my-scroll > .sc-host { flex: none; }
+.my-status__mark.my-status--working { color: var(--status-working); }
+.my-status__mark.my-status--attention { color: var(--status-attention); }
+.my-status__mark.my-status--failed { color: var(--status-failed); }
+.my-status__mark.my-status--done { color: var(--text-muted); }
+.my-popover { position: absolute; z-index: 5; }
+.my-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.my-page { width: 100%; max-width: 960px; margin: 0 auto; padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; gap: var(--space-6); }
+.my-page__head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.my-page__title { margin: 0; font-size: 20px; line-height: 26px; font-weight: 600; }
+.my-h2 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.my-glass-dock { position: relative; padding: 32px 12px 28px; background: transparent; }
+.my-glass-dock::before { content: ""; position: absolute; inset: 0; -webkit-backdrop-filter: blur(28px); backdrop-filter: blur(28px); -webkit-mask-image: linear-gradient(to bottom, transparent, #000); mask-image: linear-gradient(to bottom, transparent, #000); pointer-events: none; }
+.my-glass-dock::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 0%, color-mix(in srgb, var(--bg-content) 80%, transparent) 50%, var(--bg-content) 100%); pointer-events: none; }
+.my-glass-dock > * { position: relative; z-index: 1; }
+.my-glass-card { background: color-mix(in srgb, var(--bg-panel) 72%, transparent); -webkit-backdrop-filter: blur(28px); backdrop-filter: blur(28px); border: 1px solid var(--border); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25); }
+@media (prefers-reduced-transparency: reduce) { .my-glass-dock::before { display: none; } .my-glass-card { background: var(--bg-panel); -webkit-backdrop-filter: none; backdrop-filter: none; } }

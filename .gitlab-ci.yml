@@ -1,0 +1,36 @@
+stages:
+  - pages
+
+pages:
+  stage: pages
+  image: alpine:latest
+  needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - site/**/*
+        - design/*.css
+        - .gitlab-ci.yml
+  script:
+    - mkdir -p public
+    - cp -r site/. public/
+    # The page and the app share one design system: tokens.css and mycelium.css live in design/.
+    - cp design/tokens.css design/mycelium.css public/
+    - test -f public/index.html
+    - test -f public/site.css
+    - test -f public/tokens.css
+    - test -f public/mycelium.css
+    - test -f public/logo.svg
+    - test -f public/favicon.svg
+    - |
+      body=$(grep -n '<body>' public/index.html | head -1 | sed 's/[^0-9].*//')
+      disc=$(grep -n 'aria-label="AI disclosure"' public/index.html | head -1 | sed 's/[^0-9].*//')
+      hero=$(grep -n '<header' public/index.html | head -1 | sed 's/[^0-9].*//')
+      test -n "$disc" || { echo "no AI disclosure on the page"; exit 1; }
+      test "$body" -lt "$disc" || { echo "disclosure is not inside the body"; exit 1; }
+      test "$disc" -lt "$hero" || { echo "disclosure must come before the hero"; exit 1; }
+      echo "AI disclosure present at line $disc, ahead of the hero at $hero"
+  pages: true
+  artifacts:
+    paths:
+      - public
