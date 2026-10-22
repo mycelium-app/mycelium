@@ -193,7 +193,7 @@ class ApiTest {
     @Test
     fun importStatusesDecodeAndTheImportPostsTheNodeAndAgent() = runTest {
         val (api, seen) = apiWith { request ->
-            if (request.method == HttpMethod.Post) ok("""{"imported":3}""") else ok("""[{"node_id":"n1","agent":"claude","found":5,"imported":2}]""")
+            if (request.method == HttpMethod.Post) ok("""{"imported":3,"skipped":1}""") else ok("""[{"node_id":"n1","agent":"claude","found":5,"imported":2}]""")
         }
 
         val status = api.imports().single()
@@ -201,6 +201,7 @@ class ApiTest {
 
         assertEquals(3, mycelium.ui.pendingImports(status))
         assertEquals(3, result.imported)
+        assertEquals(1, result.skipped)
         assertEquals("""{"node_id":"n1","agent":"claude"}""", String(seen.last().body.toByteArray()))
     }
 

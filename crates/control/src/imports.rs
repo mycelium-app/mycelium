@@ -237,10 +237,12 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     let (_, pending) = importable_paths(&state, request.node_id, request.agent).await?;
     let mut imported = 0;
+    let mut skipped = 0;
 
     for path in pending {
         let full = state.config.data_dir.join("transcripts").join(request.node_id.to_string()).join(&path);
         let Ok(bytes) = tokio::fs::read(&full).await else {
+            skipped += 1;
             continue;
         };
         let text = String::from_utf8_lossy(&bytes);
@@ -249,6 +251,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             AgentId::Codex => parse_codex(&text),
         };
         let Some(parsed) = parsed else {
+            skipped += 1;
             continue;
         };
 
@@ -303,7 +306,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         state.publish(Some(user.id), StreamMessage::Conversation(row.to_proto()?));
     }
 
-    Ok(Json(ImportResult { imported }))
+    Ok(Json(ImportResult { imported, skipped }))
 }
 
 #[cfg(test)]

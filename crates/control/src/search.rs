@@ -6,9 +6,9 @@ use axum::extract::{Query, State};
 use mycelium_proto::api::{Indexing, NodeIndexing, SearchHit, SearchQuery};
 use uuid::Uuid;
 
-pub async fn indexing(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Indexing>> {
-    let conversations = sqlx::query_scalar::<_, i64>("select count(*) from conversations").fetch_one(&state.pool).await?;
-    let entries = sqlx::query_scalar::<_, i64>("select count(*) from search_entries").fetch_one(&state.pool).await?;
+pub async fn indexing(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Indexing>> {
+    let conversations = sqlx::query_scalar::<_, i64>("select count(*) from conversations where owner = $1").bind(user.id).fetch_one(&state.pool).await?;
+    let entries = sqlx::query_scalar::<_, i64>("select count(*) from search_entries e join conversations c on c.id = e.conversation_id where c.owner = $1").bind(user.id).fetch_one(&state.pool).await?;
     let rows = sqlx::query_as::<_, (Uuid, i64, i64, i64)>(
         "select n.id,
                 (select count(*) from transcripts t where t.node_id = n.id),

@@ -228,3 +228,43 @@ async fn indexing_reports_counts_per_node() {
     assert_eq!((body["conversations"].as_i64(), body["entries"].as_i64()), (Some(2), Some(4)));
     assert_eq!(body["nodes"], json!([{"node_id": link.id, "transcripts": 2, "imported": 2, "conversations": 2}]));
 }
+
+#[tokio::test]
+async fn indexing_counts_only_the_users_own_conversations() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("aaaa", "One", "Reply one.")).await;
+    import(&server, link.id, "claude").await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, body) = other.json(other.get("/api/v1/indexing")).await;
+
+    assert_eq!(status, 200);
+    assert_eq!((body["conversations"].as_i64(), body["entries"].as_i64()), (Some(0), Some(0)));
+}
+
+#[tokio::test]
+async fn conversations_that_predate_the_search_index_are_backfilled_by_the_migration() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("aaaa", "Plan the okapi rollout", "The tapir stage comes first.")).await;
+    import(&server, link.id, "claude").await;
+    sqlx::query("delete from search_entries").execute(&server.pool).await.unwrap();
+    assert_eq!(search(&server, "okapi").await.len(), 0);
+
+    sqlx::raw_sql(include_str!("../migrations/0006_backfill_search_entries.sql")).execute(&server.pool).await.unwrap();
+
+    assert_eq!(search(&server, "okapi").await.len(), 1);
+    assert_eq!(search(&server, "tapir").await.len(), 1);
+}
+
+#[tokio::test]
+async fn unreadable_transcripts_are_counted_as_skipped() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    sqlx::query("insert into transcripts (node_id, path, bytes) values ($1, $2, 10)").bind(link.id).bind(".claude/projects/-work-app/gone.jsonl").execute(&server.pool).await.unwrap();
+
+    let result = import(&server, link.id, "claude").await;
+
+    assert_eq!((result["imported"].as_i64(), result["skipped"].as_i64()), (Some(0), Some(1)));
+}

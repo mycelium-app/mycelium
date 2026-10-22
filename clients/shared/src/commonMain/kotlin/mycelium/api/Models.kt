@@ -159,7 +159,7 @@ data class ImportStatus(@SerialName("node_id") val nodeId: String, val agent: St
 data class ImportRequest(@SerialName("node_id") val nodeId: String, val agent: String)
 
 @Serializable
-data class ImportResult(val imported: Int)
+data class ImportResult(val imported: Int, val skipped: Int = 0)
 
 @Serializable
 data class NodeIndexing(

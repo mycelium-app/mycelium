@@ -184,6 +184,7 @@ pub struct ImportRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImportResult {
     pub imported: i64,
+    pub skipped: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

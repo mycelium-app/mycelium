@@ -33,6 +33,7 @@ fun AgentsSettings(store: Store) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var statuses by remember { mutableStateOf<List<ImportStatus>>(emptyList()) }
+    var skipped by remember { mutableStateOf<Map<Pair<String, String>, Int>>(emptyMap()) }
 
     LaunchedEffect(Unit) {
         store.act { statuses = store.api.imports() }
@@ -55,6 +56,7 @@ fun AgentsSettings(store: Store) {
                 for (node in state.nodes.values.sortedBy { it.name }) {
                     val status = statuses.firstOrNull { it.nodeId == node.id && it.agent == agent }
                     val pending = pendingImports(status)
+                    val unreadable = skipped[node.id to agent] ?: 0
 
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
@@ -65,12 +67,13 @@ fun AgentsSettings(store: Store) {
                         Label((status?.found ?: 0).toString(), Modifier.weight(1.5f), color = colors.textMuted)
                         Label((status?.imported ?: 0).toString(), Modifier.weight(1f), color = colors.textMuted)
 
-                        Box(Modifier.weight(1.5f), contentAlignment = Alignment.CenterEnd) {
+                        Column(Modifier.weight(1.5f), horizontalAlignment = Alignment.End) {
                             if (pending > 0) {
                                 MyButton(
                                     onClick = {
                                         store.act {
-                                            store.api.startImport(ImportRequest(node.id, agent))
+                                            val result = store.api.startImport(ImportRequest(node.id, agent))
+                                            skipped = skipped + ((node.id to agent) to result.skipped)
                                             statuses = store.api.imports()
                                             store.refresh()
                                         }
@@ -81,6 +84,10 @@ fun AgentsSettings(store: Store) {
                                 )
                             } else {
                                 Label("Up to date", color = colors.textMuted)
+                            }
+
+                            if (unreadable > 0) {
+                                Label("$unreadable could not be read", color = colors.textMuted)
                             }
                         }
                     }
