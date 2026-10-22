@@ -106,59 +106,7 @@ binary:x86_64:
   - aws configure set default.s3.multipart_chunksize 1MB
   - aws configure set default.s3.max_concurrent_requests 4
 
-desktop:linux:
-  stage: build
-  image: eclipse-temurin:21-jdk
-  needs: []
-  <<: *release_rule
-  variables:
-    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
-  cache:
-    key: "gradle-desktop-linux"
-    paths:
-      - .gradle/caches/
-      - .gradle/wrapper/
-      - .gradle/nodejs/
-      - .gradle/yarn/
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends fakeroot binutils curl unzip
-    - *awscli
-  script:
-    - cd clients
-    - MYCELIUM_VERSION="$CI_COMMIT_TAG" ./gradlew --no-daemon :desktop:packageDeb :desktop:createDistributable
-    - cp desktop/build/compose/binaries/main/deb/*.deb ../mycelium-desktop-linux-x86_64.deb
-    - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
-    - cd ..
-    - ci/s3-upload.sh mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz
-  artifacts:
-    paths: [mycelium-desktop-linux-x86_64.tar.gz.sha256]
-    expire_in: 1 week
-
-web:wasm:
-  stage: build
-  image: eclipse-temurin:21-jdk
-  needs: []
-  <<: *release_rule
-  variables:
-    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
-  cache:
-    key: "gradle-web-wasm"
-    paths:
-      - .gradle/caches/
-      - .gradle/wrapper/
-      - .gradle/nodejs/
-      - .gradle/yarn/
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip libatomic1
-    - *awscli
-  script:
-    - cd clients
-    - ./gradlew --no-daemon :web:wasmJsBrowserDistribution
-    - tar -C web/build/dist/wasmJs/productionExecutable -czf ../mycelium-web.tar.gz .
-    - cd ..
-    - ci/s3-upload.sh mycelium-web.tar.gz
-
-build:apk:
+build:clients:
   stage: build
   image: eclipse-temurin:21-jdk
   needs: []
@@ -174,13 +122,15 @@ build:apk:
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
     APK_NAME: "mycelium-android.apk"
   cache:
-    key: "android-sdk-$ANDROID_CMDLINE_TOOLS-$ANDROID_COMPILE_SDK-$ANDROID_BUILD_TOOLS"
+    key: "clients-$ANDROID_CMDLINE_TOOLS-$ANDROID_COMPILE_SDK-$ANDROID_BUILD_TOOLS"
     paths:
       - .android-sdk/
       - .gradle/caches/
       - .gradle/wrapper/
+      - .gradle/nodejs/
+      - .gradle/yarn/
   before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip git > /dev/null
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip git fakeroot binutils libatomic1 > /dev/null
     - *awscli
     - |
       if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
@@ -197,8 +147,12 @@ build:apk:
   script:
     - base64 -d < "$ANDROID_KEYSTORE_BASE64" > /tmp/release.keystore
     - cd clients
-    - ./gradlew :androidApp:assembleRelease --no-daemon --stacktrace
+    - MYCELIUM_VERSION="$CI_COMMIT_TAG" ./gradlew --no-daemon --configuration-cache --stacktrace :androidApp:assembleRelease :desktop:packageDeb :desktop:createDistributable :web:wasmJsBrowserDistribution
+    - cp desktop/build/compose/binaries/main/deb/*.deb ../mycelium-desktop-linux-x86_64.deb
+    - tar -C desktop/build/compose/binaries/main/app -czf ../mycelium-desktop-linux-x86_64.tar.gz mycelium
+    - tar -C web/build/dist/wasmJs/productionExecutable -czf ../mycelium-web.tar.gz .
     - cd ..
+    - ci/s3-upload.sh mycelium-desktop-linux-x86_64.deb mycelium-desktop-linux-x86_64.tar.gz mycelium-web.tar.gz
     - export UNSIGNED=$(find clients/androidApp/build/outputs/apk/release -name '*-unsigned.apk' | head -n1)
     - test -n "$UNSIGNED" || { echo 'no APK found'; exit 1; }
     - |
@@ -246,6 +200,9 @@ build:apk:
         exit 1; }
       echo "version gate passed"
     - ci/s3-upload.sh "$APK_NAME"
+  artifacts:
+    paths: [mycelium-desktop-linux-x86_64.tar.gz.sha256]
+    expire_in: 1 week
 
 publish:s3:
   stage: release
@@ -279,7 +236,7 @@ publish:flake:
   needs:
     - job: binary:x86_64
       artifacts: true
-    - job: desktop:linux
+    - job: build:clients
       artifacts: true
     - job: publish:s3
   <<: *release_rule
@@ -296,7 +253,7 @@ publish:flake:
 publish:release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
-  needs: [publish:s3, publish:flake, desktop:linux, web:wasm, build:apk]
+  needs: [publish:s3, publish:flake, build:clients]
   <<: *release_rule
   script:
     - echo "release ${CI_COMMIT_TAG}"

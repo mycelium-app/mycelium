@@ -356,8 +356,8 @@ with the design system's tokens and sizes, in dark and light:
 - CI builds and publishes, never tests. On `main`: the image (`:sha` and `:latest`) and Pages. On a `vX.Y.Z` tag, each
   of these uploads its files and `.sha256` to `s3://artefacts/mycelium/<tag>/` from its own job:
   `binary:x86_64` (static binary, via `publish:s3`, which also writes the `latest` marker and `install.sh`),
-  `desktop:linux` (`.deb`, `.tar.gz`), `web:wasm` (`mycelium-web.tar.gz`) and `build:apk` (`mycelium-android.apk`).
-  `build:apk` pins its own Android SDK, signs with `apksigner` from `ANDROID_KEYSTORE_BASE64` and
+  `build:clients`, one Gradle run for the desktop `.deb` and `.tar.gz`, `mycelium-web.tar.gz` and `mycelium-android.apk`.
+  `build:clients` pins its own Android SDK, signs with `apksigner` from `ANDROID_KEYSTORE_BASE64` and
   `ANDROID_KEYSTORE_PASSWORD` (alias `mycelium`), and refuses to upload unless the APK's application id, version code
   and version name match the tag and the code exceeds the previous tag's. `publish:release` links all of them.
 
