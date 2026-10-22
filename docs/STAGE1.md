@@ -159,8 +159,23 @@ Live:
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
   `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
+Memory:
+- `GET /api/v1/memories?query=` (newest first, or full-text matches when `query` is given), `PATCH /memories/{id}` `{text}`, `DELETE /memories/{id}`. Any signed-in user manages them.
+- `POST /api/v1/mcp` (node token): MCP Streamable HTTP with plain JSON replies. Tools `recall {query, limit?}` and `remember {text}`.
+
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
+
+### Memory
+
+Agents share one memory through two MCP tools served by the control plane at `/api/v1/mcp`, so a
+finding stored in one conversation is recalled in any other, on any node. `remember` stores a global
+memory attributed to `<node>/<conversation title>`; `recall` runs a Postgres full-text search over
+global memories. The node passes the server to the agent at `session/new`, `session/load` and
+`session/resume` when the agent advertises `mcpCapabilities.http`, with the node token and the
+conversation id as headers, and starts Claude with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so its own
+memory is off. Settings has a Memories page to search, edit and delete. Groups do not exist yet, so
+every memory is global.
 
 ### Live updates
 
@@ -196,7 +211,8 @@ Silent on purpose, because no client shows them: user, web session and client to
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
 `POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
-`POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node).
+`POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
+`POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened).
 
 ### Events
 

@@ -166,3 +166,19 @@ impl EventsQuery {
         500
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Memory {
+    pub id: Uuid,
+    pub text: String,
+    pub scopes: Vec<String>,
+    pub created_by: String,
+    pub conversation_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateMemoryRequest {
+    pub text: String,
+}

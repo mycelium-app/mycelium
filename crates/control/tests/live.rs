@@ -34,6 +34,9 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/nodes/{id}/logins",
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",
+    "POST /api/v1/mcp",
+    "PATCH /api/v1/memories/{id}",
+    "DELETE /api/v1/memories/{id}",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
