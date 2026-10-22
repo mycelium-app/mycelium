@@ -1378,6 +1378,7 @@ dependencies = [
  "mycelium-proto",
  "predicates",
  "reqwest",
+ "rustls",
  "serde_json",
  "sqlx",
  "tempfile",

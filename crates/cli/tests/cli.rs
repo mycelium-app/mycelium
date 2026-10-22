@@ -117,3 +117,54 @@ fn control_serve_answers_healthz_and_reports_not_ready_while_the_database_is_dow
     assert!(healthz.starts_with("HTTP/1.0 200"), "{healthz}");
     assert!(readyz.starts_with("HTTP/1.0 503"), "{readyz}");
 }
+
+fn node_config_for(control_plane: &str, dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("node.toml");
+    let text = format!(
+        "control_plane = \"{control_plane}\"\nnode_id = \"00000000-0000-0000-0000-000000000001\"\ntoken = \"myc_node_test\"\nstate_dir = \"{}\"\nprojects_root = \"{}\"\n",
+        dir.join("state").display(),
+        dir.join("projects").display()
+    );
+    std::fs::write(&path, text).unwrap();
+    path
+}
+
+#[test]
+fn node_run_connects_over_tls_without_panicking() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            drop(stream);
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let config = node_config_for(&format!("https://127.0.0.1:{port}"), dir.path());
+
+    let output = mycelium()
+        .args(["node", "run"])
+        .env("MYCELIUM_NODE_CONFIG", &config)
+        .timeout(std::time::Duration::from_secs(4))
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "node run panicked: {stderr}");
+    assert!(!stderr.contains("CryptoProvider"), "no TLS provider chosen: {stderr}");
+}
+
+#[test]
+fn node_run_joins_first_when_given_a_control_plane_and_no_credential() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("node.toml");
+
+    let output = mycelium()
+        .args(["node", "run", "--control-plane", "http://127.0.0.1:9"])
+        .env("MYCELIUM_NODE_CONFIG", &config)
+        .timeout(std::time::Duration::from_secs(10))
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Could not reach http://127.0.0.1:9"), "node run did not try to join: {stderr}");
+}

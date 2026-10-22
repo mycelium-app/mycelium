@@ -10,6 +10,7 @@ name = "mycelium"
 path = "src/main.rs"
 
 [dependencies]
+rustls.workspace = true
 mycelium-control.workspace = true
 mycelium-node.workspace = true
 mycelium-keeper.workspace = true

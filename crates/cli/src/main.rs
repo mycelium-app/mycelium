@@ -49,12 +49,16 @@ enum NodeCommand {
         #[arg(long, env = "MYCELIUM_JOIN_TOKEN_FILE")]
         join_token_file: Option<PathBuf>,
     },
-    Run,
+    Run {
+        #[arg(long, env = "MYCELIUM_CONTROL_PLANE")]
+        control_plane: Option<String>,
+    },
     Status,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let cli = Cli::parse();
 
     match cli.command {
@@ -62,7 +66,14 @@ async fn main() -> Result<()> {
         Command::Node { command: NodeCommand::Join { url, join_token_file } } => {
             mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, config_path: None }).await
         }
-        Command::Node { command: NodeCommand::Run } => mycelium_node::run().await,
+        Command::Node { command: NodeCommand::Run { control_plane } } => {
+            if let Some(url) = control_plane.filter(|_| !mycelium_node::config::config_path().exists())
+            {
+                mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file: None, config_path: None }).await?;
+            }
+
+            mycelium_node::run().await
+        }
         Command::Node { command: NodeCommand::Status } => mycelium_node::status().await,
         Command::Keeper { dir, command } => mycelium_keeper::run(dir, command).await,
         Command::Version => {
