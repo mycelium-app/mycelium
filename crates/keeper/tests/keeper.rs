@@ -127,3 +127,17 @@ async fn lines_that_are_not_json_are_not_journaled() {
     client.next().await.unwrap();
     assert_eq!(client.next().await.unwrap(), json!({"seq": 2, "dir": "in", "frame": {"ok": 1}}));
 }
+
+#[tokio::test]
+async fn close_kills_the_agent_and_ends_the_keeper() {
+    let dir = tempfile::tempdir().unwrap();
+    let keeper = start(dir.path(), "cat");
+
+    let mut client = Client::attach(dir.path(), 0).await;
+    client.next().await.unwrap();
+    client.writer.write_all(format!("{}\n", json!({"close": true})).as_bytes()).await.unwrap();
+
+    assert_eq!(client.next().await.unwrap(), json!({"exit": -1}));
+    keeper.await.unwrap().unwrap();
+    assert!(dir.path().join("exit.json").exists());
+}

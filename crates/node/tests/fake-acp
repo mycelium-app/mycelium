@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Fake ACP agent over stdio.
+
+A prompt containing "permission" asks for permission before answering, "readfile" asks the client to read a file and reports whether it was refused, "slow" waits until
+session/cancel arrives, anything else streams three updates. Every turn is followed by one
+extra update after the prompt response.
+"""
+import json
+import queue
+import sys
+import threading
+
+SESSION_ID = "fake-session-1"
+write_lock = threading.Lock()
+cancelled = threading.Event()
+permission_answers = queue.Queue()
+
+
+def send(frame):
+    with write_lock:
+        sys.stdout.write(json.dumps(frame) + "\n")
+        sys.stdout.flush()
+
+
+def respond(request_id, result):
+    send({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+
+def update(session_id, text):
+    send({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}},
+        },
+    })
+
+
+def prompt_text(params):
+    return "".join(block.get("text", "") for block in params.get("prompt", []))
+
+
+def run_prompt(request_id, params):
+    session_id = params.get("sessionId", SESSION_ID)
+    text = prompt_text(params)
+    cancelled.clear()
+
+    if "slow" in text:
+        update(session_id, "working")
+        if cancelled.wait(30):
+            respond(request_id, {"stopReason": "cancelled"})
+            update(session_id, "stopped")
+            return
+    elif "readfile" in text:
+        send({"jsonrpc": "2.0", "id": 9002, "method": "fs/read_text_file", "params": {"sessionId": session_id, "path": "/etc/hostname"}})
+        answer = permission_answers.get()
+        refused = answer.get("error", {}).get("code") == -32601
+        update(session_id, "fs refused" if refused else "fs answered")
+    elif "permission" in text:
+        update(session_id, "I need to run a command")
+        send({
+            "jsonrpc": "2.0",
+            "id": 9001,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": session_id,
+                "toolCall": {"toolCallId": "call-1", "title": "Run ls", "kind": "execute", "status": "pending"},
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+                ],
+            },
+        })
+        answer = permission_answers.get()
+        outcome = answer.get("result", {}).get("outcome", {})
+        if outcome.get("outcome") == "cancelled":
+            respond(request_id, {"stopReason": "cancelled"})
+            update(session_id, "stopped")
+            return
+        update(session_id, "permission " + outcome.get("optionId", "unknown"))
+    else:
+        update(session_id, "one")
+        update(session_id, "two")
+        update(session_id, "three")
+
+    respond(request_id, {"stopReason": "end_turn"})
+    update(session_id, "late")
+
+
+def handle(frame):
+    method = frame.get("method")
+    request_id = frame.get("id")
+
+    if method is None and request_id in (9001, 9002):
+        permission_answers.put(frame)
+    elif method == "initialize":
+        respond(request_id, {
+            "protocolVersion": 1,
+            "agentCapabilities": {"loadSession": True},
+            "authMethods": [],
+        })
+    elif method == "session/new":
+        respond(request_id, {
+            "sessionId": SESSION_ID,
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}],
+            },
+        })
+    elif method == "session/load":
+        update(frame["params"]["sessionId"], "history")
+        respond(request_id, {"modes": {"currentModeId": "default", "availableModes": []}})
+    elif method == "session/set_mode":
+        respond(request_id, {})
+    elif method == "session/prompt":
+        threading.Thread(target=run_prompt, args=(request_id, frame.get("params", {})), daemon=True).start()
+    elif method == "session/cancel":
+        cancelled.set()
+        permission_answers.put({"result": {"outcome": {"outcome": "cancelled"}}})
+    elif request_id is not None and method is not None:
+        send({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}})
+
+
+for line in sys.stdin:
+    line = line.strip()
+    if line:
+        handle(json.loads(line))

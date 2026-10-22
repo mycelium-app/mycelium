@@ -1360,12 +1360,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "axum",
  "clap",
+ "futures-util",
  "mycelium-control",
  "mycelium-keeper",
  "mycelium-node",
+ "mycelium-proto",
  "predicates",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "tokio-tungstenite 0.30.0",
+ "uuid",
 ]
 
 [[package]]
@@ -1413,6 +1420,7 @@ dependencies = [
  "base64 0.23.1",
  "dirs",
  "futures-util",
+ "mycelium-keeper",
  "mycelium-proto",
  "portable-pty",
  "rand 0.10.3",
