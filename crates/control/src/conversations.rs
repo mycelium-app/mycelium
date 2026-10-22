@@ -1,0 +1,190 @@
+use crate::auth::AuthUser;
+use crate::error::{ApiError, ApiResult};
+use crate::nodes::node_offline;
+use crate::state::AppState;
+use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, set_status, ConversationRow};
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use mycelium_proto::api::{CreateConversationRequest, EventsQuery, PatchConversationRequest};
+use mycelium_proto::conversation::{Conversation, ConversationStatus, Event};
+use mycelium_proto::link::ControlToNode;
+use mycelium_proto::stream::StreamMessage;
+use serde::Deserialize;
+use serde_json::Value;
+use uuid::Uuid;
+
+const TITLE_LIMIT: usize = 60;
+
+#[derive(Deserialize)]
+pub struct ListQuery {
+    #[serde(default)]
+    archived: bool,
+}
+
+pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Conversation>>> {
+    let rows = sqlx::query_as::<_, ConversationRow>(
+        sqlx::AssertSqlSafe(format!(
+        "select {CONVERSATION_COLUMNS}
+         from conversations where owner = $1 and (archived_at is not null) = $2 order by updated_at desc",
+    )),
+    )
+    .bind(user.id)
+    .bind(query.archived)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut conversations = Vec::new();
+
+    for row in rows {
+        conversations.push(row.to_proto()?);
+    }
+
+    Ok(Json(conversations))
+}
+
+pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let cwd = request.cwd.trim().to_string();
+
+    if cwd.is_empty() {
+        return Err(ApiError::bad_request("cwd_required", "Enter the folder the agent should work in."));
+    }
+
+    let draining = sqlx::query_scalar::<_, bool>("select draining from nodes where id = $1 and revoked_at is null").bind(request.node_id).fetch_optional(&state.pool).await?;
+
+    match draining {
+        None => return Err(ApiError::not_found("That node")),
+        Some(true) => return Err(ApiError::conflict("node_draining", "This node is finishing its running conversations and is not starting new ones. Choose another node.")),
+        Some(false) => {}
+    }
+
+    if !state.hub.is_online(request.node_id) {
+        return Err(node_offline());
+    }
+
+    let available = sqlx::query_scalar::<_, bool>("select available from agents where node_id = $1 and agent = $2").bind(request.node_id).bind(enum_text(&request.agent)).fetch_optional(&state.pool).await?;
+
+    if available == Some(false) {
+        return Err(ApiError::conflict("agent_unavailable", format!("{} is not installed on this node. Install it or choose another agent.", enum_text(&request.agent))));
+    }
+
+    let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
+    let title = match (request.title.as_deref().map(str::trim).filter(|title| !title.is_empty()), prompt) {
+        (Some(title), _) => title.to_string(),
+        (None, Some(prompt)) => prompt.lines().next().unwrap_or_default().chars().take(TITLE_LIMIT).collect(),
+        (None, None) => "New conversation".to_string(),
+    };
+    let status = if prompt.is_some() { ConversationStatus::Working } else { ConversationStatus::Done };
+
+    let mut tx = state.pool.begin().await?;
+    let row = sqlx::query_as::<_, ConversationRow>(
+        sqlx::AssertSqlSafe(format!(
+        "insert into conversations (owner, node_id, agent, cwd, title, status) values ($1, $2, $3, $4, $5, $6)
+         returning {CONVERSATION_COLUMNS}",
+    )),
+    )
+    .bind(user.id)
+    .bind(request.node_id)
+    .bind(enum_text(&request.agent))
+    .bind(&cwd)
+    .bind(&title)
+    .bind(enum_text(&status))
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if let Some(prompt) = prompt {
+        sqlx::query("insert into queued_prompts (conversation_id, position, text) values ($1, 1, $2)").bind(row.id).bind(prompt).execute(&mut *tx).await?;
+    }
+
+    tx.commit().await?;
+
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None });
+
+    if !started {
+        sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
+
+        return Err(node_offline());
+    }
+
+    let conversation = row.to_proto()?;
+    state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
+    publish_queue(&state, user.id, row.id).await?;
+
+    Ok((StatusCode::CREATED, Json(conversation)))
+}
+
+pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Conversation>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+
+    Ok(Json(row.to_proto()?))
+}
+
+pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchConversationRequest>) -> ApiResult<Json<Conversation>> {
+    let title = request.title.as_deref().map(str::trim);
+
+    if title == Some("") {
+        return Err(ApiError::bad_request("title_required", "Enter a title for this conversation."));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    let before = lock_owned(&mut tx, id, user.id).await?;
+    let row = sqlx::query_as::<_, ConversationRow>(
+        sqlx::AssertSqlSafe(format!(
+        "update conversations set title = coalesce($2, title),
+             archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
+             updated_at = now()
+         where id = $1
+         returning {CONVERSATION_COLUMNS}",
+    )),
+    )
+    .bind(id)
+    .bind(title)
+    .bind(request.archived)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    if request.archived == Some(true) && before.is_idle() {
+        state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });
+    }
+
+    let conversation = row.to_proto()?;
+    state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
+
+    Ok(Json(conversation))
+}
+
+pub async fn opened(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, user.id).await?;
+
+    if row.status != enum_text(&ConversationStatus::Review) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+    tx.commit().await?;
+
+    state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<EventsQuery>) -> ApiResult<Json<Vec<Event>>> {
+    find_owned(&state.pool, id, user.id).await?;
+
+    let rows = sqlx::query_as::<_, (i64, String, Value)>("select seq, kind, payload from events where conversation_id = $1 and seq > $2 order by seq limit $3")
+        .bind(id)
+        .bind(query.after)
+        .bind(query.limit.clamp(1, 1000))
+        .fetch_all(&state.pool)
+        .await?;
+
+    let mut events = Vec::new();
+
+    for (seq, kind, payload) in rows {
+        events.push(Event { conversation_id: id, seq, kind: parse_enum(&kind)?, payload });
+    }
+
+    Ok(Json(events))
+}

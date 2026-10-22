@@ -1,0 +1,317 @@
+use crate::auth::AuthNode;
+use crate::error::ApiResult;
+use crate::prompts::pump;
+use crate::state::AppState;
+use crate::store::{append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
+use crate::transcripts::{WriteError, write_chunk};
+use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::response::Response;
+use base64::Engine;
+use futures_util::{SinkExt, StreamExt};
+use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
+use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::stream::StreamMessage;
+use serde_json::{Value, json};
+use std::collections::HashSet;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::{Instant, interval_at};
+use uuid::Uuid;
+
+const PING_INTERVAL: Duration = Duration::from_secs(25);
+const SILENCE_LIMIT: Duration = Duration::from_secs(90);
+
+pub async fn connect(State(state): State<AppState>, node: AuthNode, upgrade: WebSocketUpgrade) -> Response {
+    let (sender, outgoing) = mpsc::unbounded_channel::<ControlToNode>();
+    let connection_id = state.hub.register(node.id, sender);
+
+    upgrade.on_upgrade(move |socket| run_link(state, node.id, connection_id, outgoing, socket))
+}
+
+async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgoing: mpsc::UnboundedReceiver<ControlToNode>, socket: WebSocket) {
+    let (mut sink, mut source) = socket.split();
+    let _ = publish_node(&state, node_id).await;
+
+    let mut ping = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    let mut last_frame = Instant::now();
+
+    loop {
+        tokio::select! {
+            message = outgoing.recv() => {
+                let Some(message) = message else {
+                    break;
+                };
+                let Ok(text) = serde_json::to_string(&message) else {
+                    continue;
+                };
+
+                if sink.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+            incoming = source.next() => match incoming {
+                Some(Ok(Message::Text(text))) => {
+                    last_frame = Instant::now();
+
+                    match serde_json::from_str::<NodeToControl>(&text) {
+                        Ok(message) => {
+                            if let Err(cause) = handle(&state, node_id, message).await {
+                                tracing::warn!("node {node_id} message failed: {cause:?}");
+                            }
+                        }
+                        Err(cause) => tracing::warn!("node {node_id} sent an unreadable frame: {cause}"),
+                    }
+                }
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => last_frame = Instant::now(),
+            },
+            _ = ping.tick() => {
+                if last_frame.elapsed() > SILENCE_LIMIT {
+                    break;
+                }
+
+                let Ok(text) = serde_json::to_string(&ControlToNode::Ping) else {
+                    continue;
+                };
+
+                if sink.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+
+    if state.hub.unregister(node_id, connection_id) {
+        let _ = publish_node(&state, node_id).await;
+    }
+}
+
+async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiResult<()> {
+    match message {
+        NodeToControl::Hello { version, hostname, os, arch, agents, sessions } => hello(state, node_id, version, hostname, os, arch, agents, sessions).await,
+        NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, .. } => session_started(state, node_id, conversation_id, acp_session_id, modes, models).await,
+        NodeToControl::AcpUpdate { conversation_id, seq, update } => record(state, node_id, conversation_id, seq, EventKind::AcpUpdate, update, None).await.map(|_| ()),
+        NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
+            let mut payload = request.clone();
+
+            match payload.as_object_mut() {
+                Some(fields) => {
+                    fields.insert("request_id".into(), Value::String(request_id));
+                }
+                None => payload = json!({"request_id": request_id, "request": request}),
+            }
+
+            record(state, node_id, conversation_id, seq, EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
+        }
+        NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
+        NodeToControl::SessionFailed { conversation_id, seq, message } => {
+            record(state, node_id, conversation_id, seq, EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
+        }
+        NodeToControl::Workflow { conversation_id, seq, run_id, line } => {
+            record(state, node_id, conversation_id, seq, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await.map(|_| ())
+        }
+        NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
+        NodeToControl::LoginOutput { login_id, data } => {
+            state.publish(None, StreamMessage::LoginOutput { login_id, data });
+
+            Ok(())
+        }
+        NodeToControl::LoginFinished { login_id, ok } => {
+            state.hub.finish_login(login_id);
+            state.publish(None, StreamMessage::LoginFinished { login_id, ok });
+
+            Ok(())
+        }
+        NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
+        NodeToControl::Pong => {
+            sqlx::query("update nodes set last_seen_at = now() where id = $1").bind(node_id).execute(&state.pool).await?;
+
+            Ok(())
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: String, os: String, arch: String, agents: Vec<AgentInfo>, sessions: Vec<SessionPosition>) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("update nodes set version = $2, hostname = $3, os = $4, arch = $5, last_seen_at = now() where id = $1")
+        .bind(node_id)
+        .bind(version)
+        .bind(hostname)
+        .bind(os)
+        .bind(arch)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("delete from agents where node_id = $1").bind(node_id).execute(&mut *tx).await?;
+
+    for agent in &agents {
+        sqlx::query("insert into agents (node_id, agent, version, available) values ($1, $2, $3, $4)")
+            .bind(node_id)
+            .bind(enum_text(&agent.agent))
+            .bind(&agent.version)
+            .bind(agent.available)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+
+    let live: HashSet<Uuid> = sessions.iter().map(|session| session.conversation_id).collect();
+    state.hub.set_sessions(node_id, live.clone());
+
+    let conversations = sqlx::query_scalar::<_, Uuid>("select id from conversations where node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
+
+    for conversation_id in conversations {
+        let seq = highest_node_seq(&state.pool, conversation_id).await?;
+
+        if seq > 0 || live.contains(&conversation_id) {
+            state.hub.send(node_id, ControlToNode::Ack { conversation_id, seq });
+        }
+    }
+
+    publish_node(state, node_id).await?;
+
+    let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")
+        .bind(node_id)
+        .fetch_all(&state.pool)
+        .await?;
+
+    for conversation_id in waiting {
+        pump(state, conversation_id, false).await?;
+    }
+
+    Ok(())
+}
+
+async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let Some(before) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
+        return Ok(());
+    };
+
+    let mode = modes.as_ref().and_then(|modes| modes["currentModeId"].as_str()).map(str::to_string);
+    let model = models.as_ref().and_then(|models| models["currentModelId"].as_str()).map(str::to_string);
+    let updated = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set acp_session_id = $2, mode = coalesce($3, mode), model = coalesce($4, model), updated_at = now() where id = $1 returning {}",
+        crate::store::CONVERSATION_COLUMNS
+    )))
+    .bind(conversation_id)
+    .bind(acp_session_id)
+    .bind(mode)
+    .bind(model)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    state.hub.add_session(node_id, conversation_id);
+    state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
+    pump(state, conversation_id, before.acp_session_id.is_none()).await
+}
+
+async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, kind: EventKind, payload: Value, transition: Option<ConversationStatus>) -> ApiResult<bool> {
+    let mut tx = state.pool.begin().await?;
+    let Some(row) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
+        return Ok(false);
+    };
+
+    let event = append_event(&mut tx, conversation_id, kind, &payload, Some(seq)).await?;
+    let mut updated = None;
+
+    if event.is_some()
+        && let Some(status) = transition
+        && row.status != enum_text(&ConversationStatus::Failed)
+    {
+        updated = Some(set_status(&mut tx, conversation_id, status).await?);
+    }
+
+    tx.commit().await?;
+
+    let acknowledged = highest_node_seq(&state.pool, conversation_id).await?;
+    state.hub.send(node_id, ControlToNode::Ack { conversation_id, seq: acknowledged });
+
+    let inserted = event.is_some();
+
+    if let Some(event) = event {
+        state.publish(Some(row.owner), StreamMessage::Event(event));
+    }
+
+    if let Some(updated) = updated {
+        state.publish(Some(row.owner), StreamMessage::Conversation(updated.to_proto()?));
+    }
+
+    Ok(inserted)
+}
+
+async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String) -> ApiResult<()> {
+    let inserted = record(state, node_id, conversation_id, seq, EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
+
+    if !inserted {
+        return Ok(());
+    }
+
+    let send_now = state.hub.take_send_now(conversation_id);
+    let archived = sqlx::query_scalar::<_, bool>("select archived_at is not null from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+
+    if archived {
+        state.hub.send(node_id, ControlToNode::CloseSession { conversation_id });
+
+        return Ok(());
+    }
+
+    if stop_reason == "cancelled" && !send_now {
+        return Ok(());
+    }
+
+    pump(state, conversation_id, false).await
+}
+
+async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -> ApiResult<()> {
+    for login in logins {
+        sqlx::query(
+            "insert into logins (node_id, agent, account, method, state) values ($1, $2, $3, $4, $5)
+             on conflict (node_id, agent) do update set account = excluded.account, method = excluded.method, state = excluded.state, updated_at = now()",
+        )
+        .bind(node_id)
+        .bind(enum_text(&login.agent))
+        .bind(login.account)
+        .bind(login.method)
+        .bind(enum_text(&login.state))
+        .execute(&state.pool)
+        .await?;
+    }
+
+    publish_node(state, node_id).await
+}
+
+async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset: i64, data: String) -> ApiResult<()> {
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        tracing::warn!("node {node_id} sent a transcript chunk that is not base64");
+
+        return Ok(());
+    };
+
+    let stored = match write_chunk(&state.config.data_dir, node_id, &path, offset, &bytes).await {
+        Ok(stored) => stored,
+        Err(WriteError::UnsafePath) => {
+            tracing::warn!("node {node_id} sent a transcript path outside its folder: {path:?}");
+
+            return Ok(());
+        }
+        Err(WriteError::Io(cause)) => return Err(crate::error::ApiError::internal(cause)),
+    };
+
+    sqlx::query(
+        "insert into transcripts (node_id, path, bytes) values ($1, $2, $3)
+         on conflict (node_id, path) do update set bytes = excluded.bytes, updated_at = now()",
+    )
+    .bind(node_id)
+    .bind(&path)
+    .bind(stored)
+    .execute(&state.pool)
+    .await?;
+
+    state.hub.send(node_id, ControlToNode::TranscriptAck { path, bytes: stored });
+
+    Ok(())
+}
