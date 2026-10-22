@@ -262,3 +262,65 @@ pub struct SearchHit {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub snippet: String,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForgeKind {
+    Github,
+    Gitlab,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Forge {
+    pub id: Uuid,
+    pub kind: ForgeKind,
+    pub base_url: String,
+    pub account: String,
+    pub token_hint: String,
+    pub organisations: Vec<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectForgeRequest {
+    pub kind: ForgeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub token: String,
+}
+
+impl std::fmt::Debug for ConnectForgeRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("ConnectForgeRequest").field("kind", &self.kind).field("base_url", &self.base_url).field("token", &"<hidden>").finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Repository {
+    pub forge_id: Uuid,
+    pub owner: String,
+    pub name: String,
+    pub full_name: String,
+    pub description: Option<String>,
+    pub private: bool,
+    pub default_branch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgeOrganisation {
+    pub forge_id: Uuid,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgeFailure {
+    pub forge_id: Uuid,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Repositories {
+    pub repositories: Vec<Repository>,
+    pub organisations: Vec<ForgeOrganisation>,
+    pub failures: Vec<ForgeFailure>,
+}

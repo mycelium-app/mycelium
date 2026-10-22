@@ -5,6 +5,7 @@ mod conversations;
 mod git;
 mod device;
 mod error;
+mod forges;
 mod imports;
 mod link;
 mod mcp;
@@ -102,6 +103,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/memories", get(memories::list))
         .route("/api/v1/memories/{id}", patch(memories::update).delete(memories::delete))
         .route("/api/v1/mcp", post(mcp::handle))
+        .route("/api/v1/forges", get(forges::list).post(forges::connect))
+        .route("/api/v1/forges/{id}", delete(forges::disconnect))
+        .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/imports", get(imports::list).post(imports::create))
         .route("/api/v1/indexing", get(search::indexing))
         .route("/api/v1/search", get(search::search))

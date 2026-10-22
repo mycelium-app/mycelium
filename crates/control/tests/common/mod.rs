@@ -387,6 +387,15 @@ impl Server {
     }
 }
 
+pub async fn serve(router: axum::Router) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+
+    tokio::spawn(async move { axum::serve(listener, router).await });
+
+    format!("http://127.0.0.1:{}", address.port())
+}
+
 pub fn session_cookie(response: &reqwest::Response) -> String {
     response
         .headers()

@@ -17,6 +17,10 @@ impl ApiError {
         ApiError { status, error, message: message.into() }
     }
 
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     pub fn unauthorised() -> ApiError {
         ApiError::new(StatusCode::UNAUTHORIZED, "unauthorised", "Sign in to continue.")
     }

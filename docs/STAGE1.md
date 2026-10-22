@@ -95,6 +95,8 @@ events           id bigserial pk, conversation_id, seq bigint, kind text, payloa
                  unique(conversation_id, seq)
 queued_prompts   id uuid pk, conversation_id, position int, text text, created_at
 transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
+forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
+                 organisations text[], created_at, unique(owner, base_url, account)
 ```
 
 Stage 1 is single-tenant: conversations belong to the person who created them, but nodes are shared by
@@ -174,6 +176,10 @@ Memory:
 - `GET /api/v1/memories?query=` (newest first, or full-text matches when `query` is given), `PATCH /memories/{id}` `{text}`, `DELETE /memories/{id}`. Any signed-in user manages them.
 - `POST /api/v1/mcp` (node token): MCP Streamable HTTP with plain JSON replies. Tools `recall {query, limit?}` and `remember {text}`.
 
+Forges:
+- `GET /api/v1/forges` → `[{id, kind: "github"|"gitlab", base_url, account, token_hint, organisations, created_at}]`; `POST /api/v1/forges` `{kind, base_url?, token}` → the forge (201). `base_url` defaults to `https://github.com` or `https://gitlab.com`. The token is checked against the forge's user endpoint first: 400 `forge_token_rejected`, `forge_unreachable`, `forge_failed`, `base_url_invalid` or `token_required`. Connecting an account again replaces its token. `DELETE /api/v1/forges/{id}` disconnects. Forges belong to the person who connected them.
+- `GET /api/v1/repositories?forge=&organisation=&q=` → `{repositories: [{forge_id, owner, name, full_name, description, private, default_branch}], organisations: [{forge_id, name}], failures: [{forge_id, message}]}`: the repositories of every connected forge (up to 500 each), fetched live; a forge that fails is reported in `failures` and does not hide the others.
+
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
 
@@ -187,6 +193,14 @@ global memories. The node passes the server to the agent at `session/new`, `sess
 conversation id as headers, and starts Claude with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so its own
 memory is off. Settings has a Memories page to search, edit and delete. Groups do not exist yet, so
 every memory is global.
+
+### Forges
+
+Settings has a Forges section to connect GitHub and GitLab, including self-hosted ones, with a personal access token. Tokens live
+in `forges.token` in Postgres, in plain text, and no API response carries one: a forge is returned with `token_hint` (the last
+four characters) and the `account` the forge's user endpoint named when the token was saved. The control plane makes every forge
+call itself (GitHub `/user`, `/user/orgs`, `/user/repos`; GitLab `/user`, `/groups`, `/projects`; GitHub Enterprise is
+`<base_url>/api/v3`, GitLab `<base_url>/api/v4`). Organisations always start with the account itself.
 
 ### Live updates
 
@@ -227,7 +241,8 @@ send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logou
 `POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
 `POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
-`POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened).
+`POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
+`POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer).
 
 ### Events
 
