@@ -7,6 +7,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -19,9 +21,9 @@ import kotlin.test.assertTrue
 class StoreTest {
     @Test
     fun openingAConversationFetchesItsWholeHistoryFromTheStart() = runTest {
-        val requested = mutableListOf<String>()
+        val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
-            requested += request.url.toString()
+            requested.update { it + request.url.toString() }
             val body = if (request.url.encodedPath.endsWith("/events")) {
                 """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{}},{"conversation_id":"c1","seq":2,"kind":"turn_end","payload":{}}]"""
             } else {
@@ -34,15 +36,15 @@ class StoreTest {
 
         store.open("c1")
 
-        assertEquals("https://mycelium.test/api/v1/conversations/c1/events?after=0&limit=500", requested.first())
+        assertEquals("https://mycelium.test/api/v1/conversations/c1/events?after=0&limit=500", requested.value.first())
         assertEquals(listOf(1L, 2L), store.state.value.events.getValue("c1").map { it.seq })
     }
 
     @Test
     fun reconnectingFetchesTheOpenConversationsEventsAfterTheLastSeqItHolds() = runTest {
-        val requested = mutableListOf<String>()
+        val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
-            requested += request.url.toString()
+            requested.update { it + request.url.toString() }
             val body = if (request.url.encodedPath.endsWith("/events") && request.url.parameters["after"] == "0") {
                 """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{}},{"conversation_id":"c1","seq":2,"kind":"turn_end","payload":{}}]"""
             } else if (request.url.encodedPath.endsWith("/events")) {
@@ -66,7 +68,7 @@ class StoreTest {
             }
         }
 
-        assertTrue(requested.any { it.contains("/conversations/c1/events?after=2&limit=500") })
+        assertTrue(requested.value.any { it.contains("/conversations/c1/events?after=2&limit=500") })
         assertEquals(listOf(1L, 2L, 3L), store.state.value.events.getValue("c1").map { it.seq })
     }
 }
