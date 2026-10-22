@@ -258,7 +258,7 @@ publish:flake:
   <<: *release_rule
   before_script:
     - mkdir -p /etc/nix && echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
-    - nix-env -iA nixpkgs.awscli2 nixpkgs.gnused
+    - nix-env -iA nixpkgs.awscli2 nixpkgs.gnused nixpkgs.gnutar nixpkgs.gzip
     - aws configure set default.s3.addressing_style virtual
   script:
     - ci/release-flake.sh "$CI_COMMIT_TAG" "$(cat mycelium-linux-x86_64.sha256)" "$(cat mycelium-desktop-linux-x86_64.tar.gz.sha256)"
