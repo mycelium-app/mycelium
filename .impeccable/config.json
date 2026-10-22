@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-10-22T13:37:30.720Z",
         "reason": "Claude: the flagged rows, bars, diff lines and frames are the app's docked UI shown as product shots; the design system keeps them square and flush with inline padding inside each row (Zed-style density the operator asked for), and the disclosure and stages sections carry padding on their inner wrappers"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-22T14:20:47.624Z",
+        "reason": "user asked for the top bar to match OpenChamber exactly in styling; its 14px mono brand sits beside the page's 13px small print, and the page's own scale is otherwise 58/36/22/17/13"
       }
     ]
   }
