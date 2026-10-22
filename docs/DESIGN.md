@@ -49,6 +49,19 @@ Two kinds, side by side:
 - **tmux sessions**: what orchestrator does today. Still the only way to reach a full TUI, and the
   fallback while ACP adapters lag behind the CLIs.
 
+**What ACP carries for Claude Code.** Read from `claude-agent-acp` 0.94.0 and Claude Code 2.1.308
+(22 October 2026), not yet run. Messages, tool calls, permission prompts, modes (default, accept
+edits, plan, auto, bypass), resume, load and fork, subagents, skills, hooks, plugins, MCP servers
+and compaction all come through: the adapter reads the same settings as the CLI. Long-running
+background work is the weak spot. A workflow launches and finishes, but the Workflow call returns
+at launch, there is no live progress or per-workflow stop outside JetBrains AIR's extension, its
+result arrives as a turn the agent starts with no prompt in flight, and `session/cancel` stops
+every running workflow. Background tasks behave the same way. `/clear`, `/cost`, `/login` and the
+terminal-only commands are removed, and the automatic "while you were away" recap is never sent.
+So the client reads `session/update` and `session/request_permission` at any time, not only during
+a prompt; ACP is the default; and a conversation that leans on workflows or long background work
+runs in tmux. ACP v2, still a draft, adds agent-started turns and background state.
+
 **Keeper.** An ACP agent is a child of whoever spawned it over stdio, so a daemon restart would kill
 every running turn. Each ACP session therefore runs under a small keeper process that:
 
@@ -337,6 +350,21 @@ Nix builds of Rust are cheap.
   conversation that made it; terminal Claude Code sessions shown as threads over ACP; work handed
   to a cloud runner. Private beta with no licence or self-hosting found, so ideas only. `ctx blame`
   covers most of the edit-to-conversation link without a CRDT, on the node that has the checkout.
+
+## Stages
+
+Each stage ships alone and is useful without the next.
+
+1. **Run and steer** (the MVP): control plane with OIDC sign-in; node daemon joined by script,
+   Nix or NixOS; ACP sessions under a keeper and tmux sessions beside them; the conversation list by
+   status, thread and composer (mode, model, effort, queue, stop); per-node agent logins; the
+   transcript copy; rename, archive and past conversations; web and desktop clients.
+2. **Many machines**: moving idle conversations and worktrees, the git hub and per-node branch
+   views, node settings, drain and revoke, managed AGENTS.md with group layers, history search
+   with ctx.
+3. **Everywhere**: phone and iPad clients, pairing by QR code, shared memory with group scopes,
+   the details panel, Zed over ACP.
+4. **Hands off**: goals, schedules, ticket integrations, diff walkthroughs, recaps for every agent.
 
 ## Open questions
 
