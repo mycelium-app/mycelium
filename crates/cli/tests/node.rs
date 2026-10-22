@@ -1,7 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use mycelium_node::config::NodeConfig;
 use mycelium_node::daemon::{DaemonOptions, run_daemon};
-use mycelium_node::link::Backoff;
+use mycelium_node::link::{Backoff, Liveness};
 use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
@@ -149,6 +149,7 @@ impl Fixture {
             agent_commands: Arc::new(move |agent_id| if agent_id == AgentId::Claude { vec![agent.clone()] } else { vec!["/nonexistent/codex-acp".to_string()] }),
             login_commands: Arc::new(|_| vec!["sh".into(), "-c".into(), "echo sign-in-link".into()]),
             backoff: Backoff { min: Duration::from_millis(20), max: Duration::from_millis(100) },
+            liveness: Liveness::default(),
             home: root.path().join("home"),
             transcript_roots: vec![root.path().join("home").join("projects")],
             transcript_poll: Duration::from_millis(50),
@@ -588,6 +589,54 @@ async fn a_revoked_node_deletes_its_credential_and_exits_cleanly() {
     connection.send(ControlToNode::Revoked);
 
     let result = tokio::task::spawn_blocking(move || daemon.exit_result()).await.unwrap();
+    assert_eq!(result, Ok(()));
+    assert!(!fixture.config_file().exists());
+}
+
+#[tokio::test]
+async fn a_node_whose_control_plane_goes_silent_gives_up_on_the_link_and_reconnects() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut fixture = Fixture::new(&format!("http://{}", listener.local_addr().unwrap()));
+    fixture.options.liveness = Liveness { ping_every: Duration::from_millis(50), dead_after: Duration::from_millis(400) };
+    let _daemon = fixture.start_daemon();
+
+    let (first, _) = tokio::time::timeout(WAIT, listener.accept()).await.expect("the node never connected").unwrap();
+    let _silent = tokio_tungstenite::accept_async(first).await.unwrap();
+
+    let (second, _) = tokio::time::timeout(WAIT, listener.accept()).await.expect("the node never reconnected after the silence").unwrap();
+    tokio_tungstenite::accept_async(second).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_node_pings_the_control_plane_so_a_quiet_but_healthy_link_stays_up() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    fixture.options.liveness = Liveness { ping_every: Duration::from_millis(50), dead_after: Duration::from_millis(400) };
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    connection.next_matching(is_hello).await;
+
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+
+    assert!(tokio::time::timeout(Duration::from_millis(300), control.connections.recv()).await.is_err(), "the node dropped a link that was answering its pings");
+}
+
+#[tokio::test]
+async fn a_node_the_control_plane_rejects_with_401_deletes_its_credential_and_exits_cleanly() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = Fixture::new(&format!("http://{}", listener.local_addr().unwrap()));
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer).await;
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+        }
+    });
+    let daemon = fixture.start_daemon();
+    assert!(fixture.config_file().exists());
+
+    let result = tokio::task::spawn_blocking(move || daemon.exit_result()).await.unwrap();
+
     assert_eq!(result, Ok(()));
     assert!(!fixture.config_file().exists());
 }

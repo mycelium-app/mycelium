@@ -2,7 +2,7 @@ use crate::acp::Command;
 use crate::agents::{detect_agents, login_command, login_state};
 use crate::config::{NodeConfig, agent_command, config_path};
 use crate::join::hostname;
-use crate::link::{Backoff, run_link};
+use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
 use crate::session::{Launch, SessionHandle, SessionSpec, journal_head, spawn_session};
 use crate::transcripts::TranscriptFollower;
@@ -31,6 +31,7 @@ pub struct DaemonOptions {
     pub agent_commands: CommandSource,
     pub login_commands: CommandSource,
     pub backoff: Backoff,
+    pub liveness: Liveness,
     pub home: PathBuf,
     pub transcript_roots: Vec<PathBuf>,
     pub transcript_poll: Duration,
@@ -45,6 +46,7 @@ impl DaemonOptions {
             agent_commands: Arc::new(agent_command),
             login_commands: Arc::new(login_command),
             backoff: Backoff::default(),
+            liveness: Liveness::default(),
             transcript_roots: vec![home.join(".claude").join("projects"), home.join(".codex").join("sessions")],
             transcript_poll: Duration::from_secs(2),
             home,
@@ -122,6 +124,10 @@ impl Daemon {
 
     pub fn backoff(&self) -> &Backoff {
         &self.options.backoff
+    }
+
+    pub fn liveness(&self) -> &Liveness {
+        &self.options.liveness
     }
 
     pub fn out(&self) -> &mpsc::UnboundedSender<NodeToControl> {

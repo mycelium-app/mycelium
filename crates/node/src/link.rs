@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::tungstenite::{Error, Message};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -20,6 +21,18 @@ pub struct Backoff {
 impl Default for Backoff {
     fn default() -> Backoff {
         Backoff { min: Duration::from_secs(1), max: Duration::from_secs(60) }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Liveness {
+    pub ping_every: Duration,
+    pub dead_after: Duration,
+}
+
+impl Default for Liveness {
+    fn default() -> Liveness {
+        Liveness { ping_every: Duration::from_secs(25), dead_after: Duration::from_secs(90) }
     }
 }
 
@@ -77,7 +90,11 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
     request.headers_mut().insert("Authorization", format!("Bearer {}", daemon.config().bearer_token()).parse()?);
 
     let connecting = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(request)).await.context("The control plane did not answer in time.")?;
-    let (mut socket, _) = connecting.with_context(|| format!("connect to {url}"))?;
+    let mut socket = match connecting {
+        Ok((socket, _)) => socket,
+        Err(Error::Http(response)) if response.status() == StatusCode::UNAUTHORIZED => return Ok(Ended::Revoked),
+        Err(error) => return Err(anyhow::Error::new(error).context(format!("connect to {url}"))),
+    };
 
     while outgoing.try_recv().is_ok() {}
 
@@ -86,12 +103,24 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
     daemon.on_connected();
     *established = true;
 
+    let liveness = daemon.liveness();
+    let mut pings = tokio::time::interval(liveness.ping_every);
+    pings.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut deadline = tokio::time::Instant::now() + liveness.dead_after;
+
     loop {
         tokio::select! {
+            _ = pings.tick() => {
+                socket.send(Message::Ping(Vec::new().into())).await?;
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                anyhow::bail!("The control plane has sent nothing for {} seconds.", liveness.dead_after.as_secs());
+            }
             frame = socket.next() => {
                 let Some(frame) = frame else {
                     return Ok(Ended::Dropped);
                 };
+                deadline = tokio::time::Instant::now() + liveness.dead_after;
 
                 match frame? {
                     Message::Text(text) => {
