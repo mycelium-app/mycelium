@@ -29,7 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -110,9 +109,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
         Sidebar(
             state = state,
             route = route,
-            me = me,
             onRoute = { route = it },
-            onSignOut = onSignOut,
             modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
         )
 
@@ -153,7 +150,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                RouteContent(store, state, platform, me, route, onRoute = { route = it })
+                RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
             }
         }
     }
@@ -175,7 +172,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    RouteContent(store, state, platform, me, route, onRoute = { route = it })
+                    RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }
         }
@@ -193,9 +190,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
             Sidebar(
                 state = state,
                 route = route,
-                me = me,
                 onRoute = { route = it; drawerOpen = false },
-                onSignOut = onSignOut,
                 modifier = Modifier.width(minOf(Tokens.Size.Sidebar + Tokens.Space.S8 * 2, maxWidth * 0.86f)).fillMaxHeight(),
             )
         }
@@ -203,14 +198,14 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
     when (route) {
         Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
         is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
         Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
         Route.Nodes -> NodesScreen(store, state, platform)
         Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
-        Route.Settings -> SettingsScreen(me, store.api.baseUrl)
+        Route.Settings -> SettingsScreen(me, store.api.baseUrl, onSignOut)
     }
 }
 
@@ -243,9 +238,8 @@ private fun EmptyMain(state: AppState, onNew: () -> Unit) {
 }
 
 @Composable
-private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> Unit, onSignOut: () -> Unit, modifier: Modifier = Modifier) {
+private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
-    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
     val sections = sidebarSections(state.conversations.values)
 
     Column(modifier.background(colors.bgPanel)) {
@@ -253,6 +247,7 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
             SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
             SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
             SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes) { onRoute(Route.Nodes) }
+            SidebarLink("Settings", MyIcon.Settings, selected = route == Route.Settings) { onRoute(Route.Settings) }
         }
 
         Hairline()
@@ -263,8 +258,6 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
             for (section in sections) {
                 SidebarSectionView(
                     section = section,
-                    open = collapsed[section.name] != true,
-                    onToggle = { collapsed[section.name] = collapsed[section.name] != true },
                     selectedId = (route as? Route.Chat)?.id,
                     nodes = state.nodes,
                     onOpen = { onRoute(Route.Chat(it)) },
@@ -272,17 +265,6 @@ private fun Sidebar(state: AppState, route: Route, me: Me, onRoute: (Route) -> U
             }
         }
 
-        Hairline()
-
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S1),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Label(me.name.ifBlank { me.email }, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-            MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
-            MyButton(onSignOut, icon = MyIcon.Logout, description = "Sign out ${me.email}", muted = true)
-        }
     }
 }
 
@@ -307,8 +289,6 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
 @Composable
 private fun SidebarSectionView(
     section: SidebarSection,
-    open: Boolean,
-    onToggle: () -> Unit,
     selectedId: String?,
     nodes: Map<String, NodeSummary>,
     onOpen: (String) -> Unit,
@@ -318,23 +298,16 @@ private fun SidebarSectionView(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = rowHeight())
-                .pressable(onToggle, stateDescription = if (open) "Expanded" else "Collapsed", shape = BlockShape)
                 .padding(horizontal = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StatusGlyph(section.status, Tokens.Size.IconMd)
             Label(section.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
-
-            if (!open) {
-                Label("${section.rows.size}", style = Tokens.Type.Meta, color = MyTheme.colors.textFaint)
-            }
         }
 
-        if (open) {
-            for (row in section.rows) {
-                ConversationRow(row, nodes[row.nodeId], selected = row.id == selectedId, onClick = { onOpen(row.id) })
-            }
+        for (row in section.rows) {
+            ConversationRow(row, nodes[row.nodeId], selected = row.id == selectedId, onClick = { onOpen(row.id) })
         }
     }
 }
@@ -346,7 +319,6 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
 
     Row(
         Modifier
-            .padding(start = Tokens.Space.S3)
             .fillMaxWidth()
             .pressable(
                 onClick,
@@ -354,30 +326,18 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
                 shape = BlockShape,
                 description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}",
             )
-            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
+            .padding(start = Tokens.Space.S3, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd, Modifier.padding(top = Tokens.Space.S0_5))
+        Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
+        Label(row.title, Modifier.weight(1f), maxLines = 1)
 
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Label(row.title, Modifier.weight(1f), maxLines = 1)
-                Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                Label(projectName(row.cwd), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-
-                if (node != null) {
-                    val tint = nodeColour(node.name)
-
-                    Label("·", style = Tokens.Type.Meta, color = colors.textFaint)
-                    Icon(nodeIcon(node), tint, Tokens.Size.IconSm)
-                    Label(node.name, style = Tokens.Type.Meta, color = tint, maxLines = 1)
-                }
-            }
+        if (node != null) {
+            Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
         }
+
+        Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
     }
 }
 

@@ -26,7 +26,7 @@ import mycelium.ClientVersion
 import mycelium.api.Me
 
 @Composable
-fun SettingsScreen(me: Me, controlPlane: String) {
+fun SettingsScreen(me: Me, controlPlane: String, onSignOut: () -> Unit) {
     val colors = MyTheme.colors
     val appearance = LocalAppearance.current
 
@@ -67,11 +67,19 @@ fun SettingsScreen(me: Me, controlPlane: String) {
                 }
             }
 
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Account", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                    Label(me.name.ifBlank { me.email }, color = colors.text)
+                    Label(me.email, style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label("Control plane $controlPlane", style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+                MyButton(onSignOut, text = "Sign out", icon = MyIcon.Logout, variant = ButtonVariant.Outline)
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label("About", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                 Label("Mycelium $ClientVersion", color = colors.text)
-                Label("Control plane $controlPlane", style = Tokens.Type.Meta, color = colors.textMuted)
-                Label("Signed in as ${me.email}", style = Tokens.Type.Meta, color = colors.textMuted)
             }
         }
     }
