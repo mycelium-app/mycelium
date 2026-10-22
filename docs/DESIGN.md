@@ -93,6 +93,12 @@ with `auth_required`, and has `logout`. It does not perform the login.
 - **Nodes** join with the OIDC device flow: `mycelium node join https://<control plane>` prints a
   code, you approve it in a browser, and the control plane issues the node its own credential.
   Revoking a node is one button.
+- **From Nix**, without the install script: `nix run github:mycelium-app/mycelium -- node
+  join https://<control plane>` joins a machine ad hoc. The flake also exports NixOS, nix-darwin and
+  home-manager modules (`services.mycelium-node = { enable = true; controlPlane = "…"; }`) that run
+  the daemon; `mycelium node join` then approves it once. The node credential lives in the state
+  directory, never in the Nix store. An unattended machine takes a single-use join token minted in
+  the UI and delivered as a file (`joinTokenFile`, from sops or agenix) instead of a device code.
 
 ## Per-node settings
 
