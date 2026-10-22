@@ -267,8 +267,13 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
 
         Hairline()
 
-        Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
-            SidebarLink("Settings", MyIcon.Settings, selected = route == Route.Settings) { onRoute(Route.Settings) }
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f))
+            MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
     }
 }
