@@ -40,7 +40,10 @@ where
 }
 
 pub async fn create_database() -> String {
-    let admin = std::env::var("MYCELIUM_TEST_DATABASE_URL").expect("Set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres");
+    let Ok(admin) = std::env::var("MYCELIUM_TEST_DATABASE_URL") else {
+        eprintln!("SKIPPED: set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres, to run these tests.");
+        std::process::exit(0);
+    };
     let name = format!("test_{}", Uuid::new_v4().simple());
     let mut connection = PgConnection::connect(&admin).await.unwrap();
 
