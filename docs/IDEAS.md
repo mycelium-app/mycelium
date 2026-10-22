@@ -80,6 +80,7 @@ the plan; an idea moves there when it is designed.
 - **Terminal** is a panel on the conversation's right-hand rail.
 - **Account switcher** shows only when an agent has two or more accounts, with usage left per account.
 - **Queued messages** follow Zed's queue: a collapsible header with Clear all, hover actions per row.
+- **Chats** are not indexed with ctx, but they are searchable: titles and contents both.
 
 ## Order of work
 
