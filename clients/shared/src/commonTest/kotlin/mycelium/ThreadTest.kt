@@ -145,6 +145,17 @@ class ThreadTest {
     }
 
     @Test
+    fun aSmallEditToALongFileShowsOnlyTheEditWithItsRealLineNumbers() {
+        val old = (1..419).joinToString("\n") { "line $it" }
+        val new = old.replace("line 414", "line 414\nnew A\nnew B")
+
+        val changed = diffLines(old, new).filter { it.kind != DiffLine.Kind.Context }
+
+        assertEquals(listOf(DiffLine(DiffLine.Kind.Added, null, 415, "new A"), DiffLine(DiffLine.Kind.Added, null, 416, "new B")), changed)
+        assertEquals(DiffLine(DiffLine.Kind.Context, 419, 421, "line 419"), diffLines(old, new).last())
+    }
+
+    @Test
     fun aNewFileIsAllAddedLines() {
         val lines = diffLines("", "a\nb")
 

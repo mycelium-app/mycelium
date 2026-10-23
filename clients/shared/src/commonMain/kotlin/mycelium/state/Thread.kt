@@ -551,12 +551,19 @@ private fun WorkflowAgent.withStats(line: JsonObject) = copy(
 private fun JsonObject.number(key: String): Long? = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
 
 fun diffLines(oldText: String, newText: String): List<DiffLine> {
-    val old = if (oldText.isEmpty()) emptyList() else oldText.split("\n")
-    val new = if (newText.isEmpty()) emptyList() else newText.split("\n")
+    val allOld = if (oldText.isEmpty()) emptyList() else oldText.split("\n")
+    val allNew = if (newText.isEmpty()) emptyList() else newText.split("\n")
+    val shared = minOf(allOld.size, allNew.size)
+    val head = (0 until shared).firstOrNull { allOld[it] != allNew[it] } ?: shared
+    val tail = (0 until shared - head).firstOrNull { allOld[allOld.size - 1 - it] != allNew[allNew.size - 1 - it] } ?: (shared - head)
+    val old = allOld.subList(head, allOld.size - tail)
+    val new = allNew.subList(head, allNew.size - tail)
+    val before = (0 until head).map { DiffLine(DiffLine.Kind.Context, it + 1, it + 1, allOld[it]) }
+    val after = (0 until tail).map { offset -> DiffLine(DiffLine.Kind.Context, allOld.size - tail + offset + 1, allNew.size - tail + offset + 1, allOld[allOld.size - tail + offset]) }
 
     if (old.size > MaxDiffSide || new.size > MaxDiffSide) {
-        return old.mapIndexed { i, text -> DiffLine(DiffLine.Kind.Removed, i + 1, null, text) } +
-            new.mapIndexed { i, text -> DiffLine(DiffLine.Kind.Added, null, i + 1, text) }
+        return before + old.mapIndexed { i, text -> DiffLine(DiffLine.Kind.Removed, head + i + 1, null, text) } +
+            new.mapIndexed { i, text -> DiffLine(DiffLine.Kind.Added, null, head + i + 1, text) } + after
     }
 
     val lengths = Array(old.size + 1) { IntArray(new.size + 1) }
@@ -574,22 +581,22 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
     while (i < old.size || j < new.size) {
         when {
             i < old.size && j < new.size && old[i] == new[j] -> {
-                result += DiffLine(DiffLine.Kind.Context, i + 1, j + 1, old[i])
+                result += DiffLine(DiffLine.Kind.Context, head + i + 1, head + j + 1, old[i])
                 i++
                 j++
             }
             j < new.size && (i == old.size || lengths[i][j + 1] > lengths[i + 1][j]) -> {
-                result += DiffLine(DiffLine.Kind.Added, null, j + 1, new[j])
+                result += DiffLine(DiffLine.Kind.Added, null, head + j + 1, new[j])
                 j++
             }
             else -> {
-                result += DiffLine(DiffLine.Kind.Removed, i + 1, null, old[i])
+                result += DiffLine(DiffLine.Kind.Removed, head + i + 1, null, old[i])
                 i++
             }
         }
     }
 
-    return result
+    return before + result + after
 }
 
 internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
