@@ -35,14 +35,14 @@ fun sideChatOf(message: String): Pair<String, String>? {
     return found.groupValues[1] to found.groupValues[2].trim()
 }
 
-fun sessionOptions(conversation: Conversation, events: List<Event>): SessionOptions {
+fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<JsonObject> = emptyList()): SessionOptions {
     val stored = conversation.options
     val modes = stored?.get("modes") as? JsonObject
     val models = stored?.get("models") as? JsonObject
     var settings = settingsFrom(stored?.get("config_options"))
     var currentMode = conversation.mode ?: modes?.string("currentModeId")
 
-    for (update in sessionUpdates(events)) {
+    for (update in kept + sessionUpdates(events)) {
         when (update.string("sessionUpdate")) {
             "config_option_update" -> settings = settingsFrom(update["configOptions"])
             "current_mode_update" -> currentMode = update.string("currentModeId") ?: currentMode
@@ -58,8 +58,8 @@ fun sessionOptions(conversation: Conversation, events: List<Event>): SessionOpti
     )
 }
 
-fun slashCommands(events: List<Event>): List<SlashCommand> {
-    val latest = sessionUpdates(events).lastOrNull { it.string("sessionUpdate") == "available_commands_update" } ?: return emptyList()
+fun slashCommands(events: List<Event>, kept: List<JsonObject> = emptyList()): List<SlashCommand> {
+    val latest = (kept + sessionUpdates(events)).lastOrNull { it.string("sessionUpdate") == "available_commands_update" } ?: return emptyList()
     val commands = latest["availableCommands"] as? JsonArray ?: return emptyList()
 
     return commands.mapNotNull { element ->

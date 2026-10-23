@@ -2,10 +2,12 @@ package mycelium
 
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
+import mycelium.api.NodeSummary
 import mycelium.api.UsageWindow
 import mycelium.state.AccountOnNode
 import mycelium.state.AgentAccount
 import mycelium.state.accountChoices
+import mycelium.state.agentAccounts
 import mycelium.state.chatAccountFirst
 import mycelium.state.UnnamedAccount
 import mycelium.state.runsOutBeforeReset
@@ -21,7 +23,42 @@ private val Now = Instant.parse("2026-10-23T14:00:00Z")
 
 private fun utc(millis: Long): String = Instant.fromEpochMilliseconds(millis).toString().replace("Z", "").substring(0, 16)
 
+private fun node(id: String, name: String, vararg logins: LoginInfo) = NodeSummary(id, name, hostname = name, os = "linux", arch = "x86_64", version = "0.4.0", online = true, draining = false, logins = logins.toList())
+
 class AccountUsageTest {
+    @Test
+    fun oneAccountSignedInOnSeveralNodesIsOneEntryListingEachNodeWithTheFreshestUsage() {
+        val older = LoginInfo("claude", "sam@example.com", "token", LoginState.SignedIn, windows = listOf(UsageWindow("five_hour", 10.0)), usageReadAt = "2026-10-23T10:00:00Z")
+        val newer = LoginInfo("claude", "sam@example.com", "token", LoginState.Expired, windows = listOf(UsageWindow("five_hour", 40.0)), usageReadAt = "2026-10-23T12:00:00Z")
+
+        val accounts = agentAccounts(listOf(node("n2", "nas", newer), node("n1", "laptop", older)))
+
+        assertEquals(1, accounts.size)
+        assertEquals(listOf(AccountOnNode("laptop", LoginState.SignedIn), AccountOnNode("nas", LoginState.Expired)), accounts.single().nodes)
+        assertEquals(40.0, accounts.single().windows.single().usedPercent)
+    }
+
+    @Test
+    fun accountNamesThatDifferOnlyInCaseOrSpacingAreOneAccount() {
+        val first = LoginInfo("claude", "Sam@Example.com", "token", LoginState.SignedIn)
+        val second = LoginInfo("claude", " sam@example.com ", "token", LoginState.SignedIn)
+
+        val accounts = agentAccounts(listOf(node("n1", "laptop", first), node("n2", "nas", second)))
+
+        assertEquals(listOf("Sam@Example.com"), accounts.map { it.label })
+        assertEquals(listOf("laptop", "nas"), accounts.single().nodes.map { it.nodeName })
+    }
+
+    @Test
+    fun loginsWithoutANameStayPerNodeAndDifferentAgentsStaySeparate() {
+        val claude = LoginInfo("claude", null, "token", LoginState.SignedIn)
+        val codex = LoginInfo("codex", "sam@example.com", "token", LoginState.SignedIn)
+
+        val accounts = agentAccounts(listOf(node("n1", "laptop", claude, codex), node("n2", "nas", claude)))
+
+        assertEquals(listOf("claude" to "laptop", "claude" to "nas", "codex" to "laptop"), accounts.map { it.agent to it.nodes.single().nodeName })
+    }
+
     @Test
     fun signedOutLoginsWithoutANameBecomeSortedNodesAndEveryOtherAccountStays() {
         val named = AgentAccount("codex", "sam@example.com", "oauth_token", listOf(AccountOnNode("willow", LoginState.SignedIn)))

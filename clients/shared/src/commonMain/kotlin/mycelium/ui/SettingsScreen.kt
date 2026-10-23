@@ -258,6 +258,7 @@ private fun <T> DisplayChoice(title: String, options: List<T>, chosen: T, label:
 private fun AccountSettings(store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit) {
     val colors = MyTheme.colors
     var serverVersion by remember { mutableStateOf<String?>(null) }
+    var showingChanges by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         serverVersion = runCatching { store.api.version() }.getOrNull()
@@ -277,6 +278,11 @@ private fun AccountSettings(store: Store, me: Me, controlPlane: String, onSignOu
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("About", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
             Label("Mycelium $ClientVersion", color = colors.text)
+            MyButton({ showingChanges = true }, text = "What's new", variant = ButtonVariant.Outline)
         }
+    }
+
+    if (showingChanges) {
+        RecentReleasesDialog(onClose = { showingChanges = false })
     }
 }

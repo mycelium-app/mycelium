@@ -6,6 +6,8 @@ import mycelium.api.Conversation
 
 const val ChatAgent = "chat"
 
+const val SubagentKind = "subagent"
+
 const val TodayName = "Today"
 const val ThisWeekName = "This week"
 const val OlderName = "Older"
@@ -16,6 +18,8 @@ private const val DaysInWeek = 7
 data class ChatSection(val name: String, val rows: List<Conversation>)
 
 val Conversation.isChat: Boolean get() = agent == ChatAgent
+
+val Conversation.isSubagent: Boolean get() = sideKind == SubagentKind
 
 fun pinnedChats(conversations: Collection<Conversation>): List<Conversation> =
     conversations.filter { it.isChat && it.archivedAt == null && it.pinnedAt != null && it.parentId == null }.sortedBy { it.pinnedAt }

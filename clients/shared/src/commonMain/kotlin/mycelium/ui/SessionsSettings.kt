@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.NodeSummary
 import mycelium.api.SessionSummary
 import mycelium.state.Store
+import mycelium.state.apiScopeLabel
 
 @Composable
 fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
@@ -51,15 +52,33 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                 Hairline()
 
                 for (session in sessions) {
-                    val where = if (session.hostname.isBlank()) session.label else "${session.label} on ${session.hostname}"
+                    val where = when {
+                        session.kind == "agent" -> session.conversationTitle?.let { "${session.label} for $it" } ?: session.label
+                        session.hostname.isBlank() -> session.label
+                        else -> "${session.label} on ${session.hostname}"
+                    }
 
                     ContentRow {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(if (session.kind == "browser") MyIcon.Globe else MyIcon.Laptop, colors.textMuted, Tokens.Size.IconSm)
-                            Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
+                        Column {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    when (session.kind) {
+                                        "browser" -> MyIcon.Globe
+                                        "agent" -> MyIcon.Key
+                                        else -> MyIcon.Laptop
+                                    },
+                                    colors.textMuted,
+                                    Tokens.Size.IconSm,
+                                )
+                                Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
 
-                            if (session.current) {
-                                Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
+                                if (session.current) {
+                                    Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
+                                }
+                            }
+
+                            session.expiresAt?.let { expiresAt ->
+                                Label("${session.scopes.joinToString(", ") { apiScopeLabel(it) }}. Expires ${timestamp(expiresAt)}", style = Tokens.Type.Meta, color = colors.textMuted)
                             }
                         }
 
@@ -78,10 +97,10 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                                         }
                                     }
                                 },
-                                text = "End session",
+                                text = if (session.kind == "agent") "Revoke" else "End session",
                                 size = ButtonSize.Sm,
                                 variant = ButtonVariant.Outline,
-                                description = "End session $where",
+                                description = if (session.kind == "agent") "Revoke $where" else "End session $where",
                             )
                         }
                     }

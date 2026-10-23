@@ -93,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
 import mycelium.state.clockTime
 import mycelium.state.isLaptop
+import mycelium.state.isSubagent
 import mycelium.state.agentAccounts
 import mycelium.state.chatAccountFirst
 import mycelium.state.sidebarRows
@@ -123,6 +124,8 @@ sealed interface Route {
     data object Issues : Route
 
     data object Archive : Route
+
+    data object Artifacts : Route
 
     data object Activity : Route
 
@@ -162,14 +165,16 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     }
 
     Row(Modifier.fillMaxSize().background(colors.bgContent)) {
-        Sidebar(
-            store = store,
-            platform = platform,
-            state = state,
-            route = route,
-            onRoute = { route = it },
-            modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
-        )
+        CompositionLocalProvider(LocalPlatform provides platform) {
+            Sidebar(
+                store = store,
+                platform = platform,
+                state = state,
+                route = route,
+                onRoute = { route = it },
+                modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
+            )
+        }
 
         ResizeHandle("Resize the sidebar") { moved -> resize(sidebarWidth + moved) }
 
@@ -257,18 +262,20 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClickLabel = "Close conversations") { drawerOpen = false },
             )
 
-            Sidebar(
-                store = store,
-                platform = platform,
-                state = state,
-                route = route,
-                onRoute = { route = it; drawerOpen = false },
-                modifier = Modifier
-                    .width(drawerWidth)
-                    .fillMaxHeight()
-                    .offset { IntOffset((-(1f - progress.value) * drawerWidthPx).roundToInt(), 0) }
-                    .then(drag),
-            )
+            CompositionLocalProvider(LocalPlatform provides platform) {
+                Sidebar(
+                    store = store,
+                    platform = platform,
+                    state = state,
+                    route = route,
+                    onRoute = { route = it; drawerOpen = false },
+                    modifier = Modifier
+                        .width(drawerWidth)
+                        .fillMaxHeight()
+                        .offset { IntOffset((-(1f - progress.value) * drawerWidthPx).roundToInt(), 0) }
+                        .then(drag),
+                )
+            }
         }
     }
 }
@@ -283,7 +290,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(store, state, platform), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -297,6 +304,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
             Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+            Route.Artifacts -> ArtifactsScreen(store, state, me, platform)
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
         }
@@ -376,6 +384,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+                SidebarLink("Artifacts", MyIcon.Layers, selected = route == Route.Artifacts) { onRoute(Route.Artifacts) }
                 SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }
@@ -441,9 +450,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     MyButton({ onRoute(Route.Issues) }, text = "Issues".takeIf { labelled }, icon = MyIcon.Issue, description = "Issues", muted = true, selected = route == Route.Issues)
                 }
 
-                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, text = "Usage".takeIf { labelled }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen)
-
                 Box(Modifier.weight(1f))
+                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen)
                 MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
                 MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
                 MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
@@ -554,7 +562,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val platform = LocalPlatform.current
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
-    val statusName = statusSectionName(row.status)
+    val statusName = if (row.resumeAt != null) WaitingForReset else statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
 
@@ -613,24 +621,31 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected,
                     shape = BlockShape,
-                    description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { ", side chat" }.orEmpty()}",
+                    description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
                 )
                 .padding(start = Tokens.Space.S2 + Tokens.Space.S3 + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box {
-                ProjectIcon(project, Tokens.Size.IconSm)
+                if (row.isSubagent) {
+                    Icon(MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
+                } else {
+                    ProjectIcon(project, Tokens.Size.IconSm)
+                }
 
                 val badge = when (row.status) {
                     ConversationStatus.Working -> colors.statusWorking
                     ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
-                    ConversationStatus.Failed -> colors.statusFailed
+                    ConversationStatus.Failed -> if (row.resumeAt != null) colors.statusAttention else colors.statusFailed
                     ConversationStatus.Done -> null
                 }
 
                 if (badge != null) {
-                    Box(Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5).size(Tokens.Space.S2).background(badge, CircleShape))
+                    val onIcon = project?.icon != null || project?.avatarSha256 != null
+                    val placement = if (onIcon) Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5) else Modifier.align(Alignment.Center)
+
+                    Box(placement.size(Tokens.Space.S2).background(badge, CircleShape))
                 }
             }
 
@@ -638,7 +653,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label(row.title, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
                 if (row.resumeAt != null) {
-                    Label("Resumes at ${clockTime(row.resumeAt) { millis -> platform?.localDateTime(millis) }}", style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
+                    Label(WaitingForReset, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
                 }
             }
 
@@ -656,8 +671,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
         }
 
         if (row.resumeAt != null) {
-            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S2 + Tokens.Size.IconSm + Tokens.Space.S2)) {
-                MyButton(onCancelResume, text = "Cancel", description = "Cancel the automatic resume of ${row.title}", size = ButtonSize.Sm, muted = true)
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S2 * 3 + Tokens.Size.IconSm * 2)) {
+                MyButton(onCancelResume, text = "Cancel", description = "Cancel the automatic resume of ${row.title}, due at ${clockTime(row.resumeAt) { millis -> platform?.localDateTime(millis) }}", size = ButtonSize.Sm, muted = true)
             }
         }
 
@@ -685,8 +700,10 @@ fun nodeColour(node: NodeSummary): Color {
 
 private const val SidebarWidthPreference = "sidebar-width"
 
+private const val WaitingForReset = "Waiting for reset"
+
 private const val UsageOpenPreference = "usage-card-open"
 
-private val FooterLabelsWidth = 440.dp
+private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"

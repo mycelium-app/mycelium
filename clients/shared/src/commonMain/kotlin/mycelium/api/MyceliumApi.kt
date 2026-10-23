@@ -25,6 +25,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.json.JsonObject
 
 private const val OlderUnknownRouteMessage = "That address was not found. Check the address and try again."
 private const val UnknownRouteMessage = "This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."
@@ -314,6 +315,14 @@ class MyceliumApi(
     suspend fun declineMessageProposal(id: String): MessageProposal =
         call("/message-proposals/$id/decline") { client.post(it) { authorise() } }.body()
 
+    suspend fun apiAccessRequests(): List<ApiAccessRequest> = call("/api-access-requests") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveApiAccessRequest(id: String, scopes: List<String>): ApiAccessRequest =
+        call("/api-access-requests/$id/approve") { client.post(it) { authorise(); json(ApproveApiAccessRequest(scopes)) } }.body()
+
+    suspend fun declineApiAccessRequest(id: String): ApiAccessRequest =
+        call("/api-access-requests/$id/decline") { client.post(it) { authorise() } }.body()
+
     suspend fun setInstructionSource(request: SetInstructionSourceRequest): Instructions =
         call("/instruction-source") { client.put(it) { authorise(); json(request) } }.body()
 
@@ -350,6 +359,17 @@ class MyceliumApi(
 
     suspend fun deleteTask(id: String) {
         call("/tasks/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun artifacts(): List<Artifact> = call("/artifacts") { client.get(it) { authorise() } }.body()
+
+    suspend fun artifact(id: String): Artifact = call("/artifacts/$id") { client.get(it) { authorise() } }.body()
+
+    suspend fun editArtifact(id: String, request: PatchArtifactRequest): Artifact =
+        call("/artifacts/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteArtifact(id: String) {
+        call("/artifacts/$id") { client.delete(it) { authorise() } }
     }
 
     suspend fun schedules(): List<Schedule> = call("/schedules") { client.get(it) { authorise() } }.body()
@@ -559,6 +579,8 @@ class MyceliumApi(
     suspend fun gitTownPropose(id: String) {
         call("/conversations/$id/git/town/propose") { client.post(it) { authorise() } }
     }
+
+    suspend fun sessionUpdates(id: String): List<JsonObject> = call("/conversations/$id/session") { client.get(it) { authorise() } }.body()
 
     suspend fun events(id: String, after: Long = 0, limit: Int = 500, before: Long? = null): List<Event> =
         call("/conversations/$id/events") {

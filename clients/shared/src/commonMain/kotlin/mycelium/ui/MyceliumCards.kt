@@ -20,12 +20,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
+import mycelium.Platform
+import mycelium.api.ApiAccessRequest
+import mycelium.api.Artifact
+import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
 import mycelium.api.Task
 import mycelium.api.TaskStatuses
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
 import mycelium.state.Store
+import mycelium.state.apiAccessDuration
+import mycelium.state.apiScopeLabel
+import mycelium.state.artifactOpenUrl
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 
@@ -44,6 +51,20 @@ val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
 fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) })
 
+class ApiAccessRequests(val requests: Map<String, ApiAccessRequest>, val refresh: suspend () -> Unit, val approve: suspend (ApiAccessRequest, List<String>) -> Unit, val decline: suspend (ApiAccessRequest) -> Unit)
+
+val LocalApiAccessRequests = compositionLocalOf<ApiAccessRequests?> { null }
+
+fun apiAccessRequests(store: Store, state: AppState) =
+    ApiAccessRequests(state.apiAccessRequests, { store.refreshApiAccessRequests() }, { request, scopes -> store.approveApiAccessRequest(request, scopes) }, { request -> store.declineApiAccessRequest(request) })
+
+class ArtifactOpener(val artifacts: Map<String, Artifact>, val open: (id: String, kind: String, version: Int) -> Unit)
+
+val LocalArtifactOpener = compositionLocalOf<ArtifactOpener?> { null }
+
+fun artifactOpener(store: Store, state: AppState, platform: Platform) =
+    ArtifactOpener(state.artifacts) { id, kind, version -> platform.navigate(artifactOpenUrl(store.api.baseUrl, id, kind, version)) }
+
 @Composable
 private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
     val sending = parsed as? MyceliumCall.SendToConversation ?: return null
@@ -51,6 +72,15 @@ private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
     val proposals = LocalMessageProposals.current?.proposals ?: return null
 
     return sending.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.message == sending.message && it.reason == sending.reason }.maxByOrNull { it.createdAt }
+}
+
+@Composable
+private fun requestedAccess(parsed: MyceliumCall): ApiAccessRequest? {
+    val asking = parsed as? MyceliumCall.RequestApiAccess ?: return null
+
+    val requests = LocalApiAccessRequests.current?.requests ?: return null
+
+    return asking.requestId?.let { requests[it] } ?: requests.values.filter { it.reason == asking.reason }.maxByOrNull { it.createdAt }
 }
 
 @Composable
@@ -69,7 +99,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
     val heading = when {
         failed -> parsed.tool.label
         verb != null -> runningHeading(parsed, verb)
-        else -> doneHeading(parsed)
+        else -> doneHeading(parsed, LocalArtifactOpener.current?.artifacts.orEmpty())
     }
     val icon = when (parsed) {
         is MyceliumCall.Recall, is MyceliumCall.Remember -> MyIcon.Memory
@@ -80,8 +110,11 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
         is MyceliumCall.FindConversations -> MyIcon.Search
         is MyceliumCall.SendToConversation -> MyIcon.Send
+        is MyceliumCall.RequestApiAccess -> MyIcon.Key
+        is MyceliumCall.CreateArtifact, is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
     val proposal = proposedMessage(parsed)
+    val access = requestedAccess(parsed)
     val answered = askedTask(parsed)?.status == TaskStatuses.Done
     val waiting = when (parsed) {
         is MyceliumCall.ProposeTask -> "Waiting for approval"
@@ -89,6 +122,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         is MyceliumCall.SendToConversation -> "Waiting for approval"
+        is MyceliumCall.RequestApiAccess -> "Waiting for approval"
         else -> null
     }
 
@@ -104,6 +138,8 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "sent" -> StatusMark("Sent", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+                finished && access?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
+                finished && access?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && waiting != null -> StatusMark(waiting, Tone.Muted, MyIcon.Clock)
             }
         }
@@ -125,7 +161,7 @@ private fun runningHeading(parsed: MyceliumCall, verb: String): String = when {
     else -> verb
 }
 
-private fun doneHeading(parsed: MyceliumCall): String = when (parsed) {
+private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>): String = when (parsed) {
     is MyceliumCall.Recall -> "Searched memory for “${parsed.query}”"
     is MyceliumCall.Remember -> "Remembered"
     is MyceliumCall.ProposeTask -> "Proposed a task"
@@ -134,7 +170,12 @@ private fun doneHeading(parsed: MyceliumCall): String = when (parsed) {
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
+    is MyceliumCall.RequestApiAccess -> "Asked for API access"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
+    is MyceliumCall.CreateArtifact -> "Created ${parsed.kind.ifEmpty { "artifact" }} “${parsed.title}”"
+    is MyceliumCall.UpdateArtifact -> (parsed.title ?: artifacts[parsed.artifactId]?.title)?.let { "Updated “$it”" } ?: "Updated an artifact"
+    is MyceliumCall.DesignSetArtboard -> (artifacts[parsed.artifactId]?.title)?.let { "Set an artboard in “$it”" } ?: "Set an artboard"
+    is MyceliumCall.ReadArtifact -> (artifacts[parsed.artifactId]?.title)?.let { "Read “$it”" } ?: "Read an artifact"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -220,8 +261,39 @@ private fun MyceliumBody(parsed: MyceliumCall) {
 
         is MyceliumCall.SendToConversation -> SendToConversationBody(parsed)
 
+        is MyceliumCall.RequestApiAccess -> RequestApiAccessBody(parsed)
+
         is MyceliumCall.Walkthrough -> Collapsible(parsed.steps.mapIndexed { index, title -> "${index + 1}. $title" }, "steps") { Label(it, style = Tokens.Type.Ui, maxLines = 1) }
+
+        is MyceliumCall.CreateArtifact -> {
+            parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+            parsed.artifactId?.let { ArtifactOpenButton(it, parsed.kind.ifEmpty { null }, parsed.version, parsed.title) }
+        }
+
+        is MyceliumCall.UpdateArtifact -> {
+            parsed.note?.let { Label(it, style = Tokens.Type.Ui, maxLines = ExcerptLines) }
+            parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+            ArtifactOpenButton(parsed.artifactId, null, parsed.version)
+        }
+
+        is MyceliumCall.DesignSetArtboard -> {
+            (parsed.name ?: parsed.artboard)?.let { Label(it, style = Tokens.Type.Ui, maxLines = 1) }
+            parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+            ArtifactOpenButton(parsed.artifactId, ArtifactKinds.Design, parsed.version)
+        }
+
+        is MyceliumCall.ReadArtifact -> parsed.artboard?.let { Label("Artboard $it", style = Tokens.Type.Meta, color = colors.textMuted) }
     }
+}
+
+@Composable
+private fun ArtifactOpenButton(artifactId: String, kind: String?, version: Int?, title: String? = null) {
+    val opener = LocalArtifactOpener.current ?: return
+    val known = opener.artifacts[artifactId]
+    val openKind = kind ?: known?.kind ?: return
+    val openVersion = known?.latestVersion ?: version ?: 1
+
+    MyButton({ opener.open(artifactId, openKind, openVersion) }, text = "Open", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Open ${known?.title ?: title ?: "the artifact"}")
 }
 
 @Composable
@@ -274,6 +346,75 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             MyButton({ decide(proposals.approve) }, text = "Send", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
             MyButton({ decide(proposals.decline) }, text = "Don't send", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        }
+    }
+}
+
+@Composable
+private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
+    val colors = MyTheme.colors
+    val access = LocalApiAccessRequests.current
+    val request = requestedAccess(parsed)
+    val scope = rememberCoroutineScope()
+    var ticked by remember(request?.id) { mutableStateOf(request?.scopes.orEmpty().toSet()) }
+    var running by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(request == null) {
+        if (access != null && request == null) {
+            access.refresh()
+        }
+    }
+
+    fun decide(decision: suspend (ApiAccessRequest) -> Unit) {
+        val deciding = request
+
+        if (running || deciding == null) {
+            return
+        }
+
+        failure = null
+        running = true
+
+        scope.launch {
+            failure = attempt { decision(deciding) }
+            running = false
+        }
+    }
+
+    val waiting = access != null && request != null && request.waiting
+
+    for (scopeName in request?.scopes ?: parsed.scopes) {
+        if (waiting) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(scopeName in ticked, "Allow ${apiScopeLabel(scopeName).replaceFirstChar { it.lowercase() }}", { ticked = if (scopeName in ticked) ticked - scopeName else ticked + scopeName }, checkedState = "Allowed", uncheckedState = "Not allowed")
+                Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
+            }
+        } else {
+            Label(apiScopeLabel(scopeName), style = Tokens.Type.Ui)
+        }
+    }
+
+    (request?.hours ?: parsed.hours)?.let { Label("For ${apiAccessDuration(it)}", style = Tokens.Type.Meta, color = colors.textMuted) }
+    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+
+    failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+    if (access != null && request != null && waiting) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            MyButton(
+                {
+                    if (ticked.isEmpty()) {
+                        failure = "Choose at least one kind of access to approve, or decline the request."
+                    } else {
+                        decide { access.approve(it, request.scopes.filter { name -> name in ticked }) }
+                    }
+                },
+                text = "Approve",
+                variant = ButtonVariant.Primary,
+                size = ButtonSize.Sm,
+            )
+            MyButton({ decide(access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 }

@@ -57,6 +57,7 @@ import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.isChat
+import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
@@ -295,51 +296,60 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
 
-                Composer(
-                    conversation = conversation,
-                    working = conversation.status == ConversationStatus.Working,
-                    queue = state.queues[id].orEmpty(),
-                    sending = sending.drop(delivering.size),
-                    onSend = ::send,
-                    annotations = annotations,
-                    onRemoveAnnotation = { removed -> annotations = annotations - removed },
-                    attachments = attached.controls(),
-                    initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
-                    onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
-                    modelPicker = if (chat) ModelPickerControls(providers, conversation.providerId, conversation.model) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
-                    onStop = { store.act { api.cancel(id) } },
-                    onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
-                    onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
-                    onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
-                    options = remember(conversation, state.events[id]) { sessionOptions(conversation, state.events[id].orEmpty()) },
-                    commands = remember(state.events[id]) { slashCommands(state.events[id].orEmpty()) },
-                    onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
-                    onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
-                    onSearchFiles = { query -> api.files(id, query) },
-                    accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
-                    accountLocked = conversation.acpSessionId != null,
-                    onSetAccount = { account ->
-                        store.act {
-                            when {
-                                account.startsWith(SignInPrefix) && node != null -> {
-                                    val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
-                                    signIn = LoginSession(started.loginId, conversation.agent)
+                val parentId = conversation.parentId
+
+                if (conversation.isSubagent && parentId != null) {
+                    Row(Modifier.fillMaxWidth().padding(Tokens.Space.S3), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Label("A subagent's conversation is read-only.", Modifier.weight(1f), color = MyTheme.colors.textMuted)
+                        MyButton({ onOpenConversation(parentId) }, text = "Open the conversation it belongs to", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    }
+                } else {
+                    Composer(
+                        conversation = conversation,
+                        working = conversation.status == ConversationStatus.Working,
+                        queue = state.queues[id].orEmpty(),
+                        sending = sending.drop(delivering.size),
+                        onSend = ::send,
+                        annotations = annotations,
+                        onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                        attachments = attached.controls(),
+                        initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
+                        onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
+                        modelPicker = if (chat) ModelPickerControls(providers, conversation.providerId, conversation.model) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
+                        onStop = { store.act { api.cancel(id) } },
+                        onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
+                        onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
+                        onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
+                        options = remember(conversation, state.events[id], state.sessionUpdates[id]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
+                        commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
+                        onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
+                        onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
+                        onSearchFiles = { query -> api.files(id, query) },
+                        accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
+                        accountLocked = conversation.acpSessionId != null,
+                        onSetAccount = { account ->
+                            store.act {
+                                when {
+                                    account.startsWith(SignInPrefix) && node != null -> {
+                                        val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
+                                        signIn = LoginSession(started.loginId, conversation.agent)
+                                    }
+                                    account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
+                                    else -> api.patchConversation(id, PatchConversationRequest(account = account))
                                 }
-                                account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
-                                else -> api.patchConversation(id, PatchConversationRequest(account = account))
                             }
-                        }
-                    },
-                    onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
-                    onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
-                    goal = if (chat) null else GoalControls(
-                        goal = state.goals[id],
-                        onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
-                        onPause = { store.act { store.pauseGoal(id, true) } },
-                        onResume = { store.act { store.pauseGoal(id, false) } },
-                        onClear = { store.act { store.clearGoal(id) } },
-                    ),
-                )
+                        },
+                        onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
+                        onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
+                        goal = if (chat) null else GoalControls(
+                            goal = state.goals[id],
+                            onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
+                            onPause = { store.act { store.pauseGoal(id, true) } },
+                            onResume = { store.act { store.pauseGoal(id, false) } },
+                            onClear = { store.act { store.clearGoal(id) } },
+                        ),
+                    )
+                }
             }
 
             if (!compact && !chat) {

@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mycelium.Platform
 import mycelium.api.ApiException
+import mycelium.api.Artifact
+import mycelium.api.PatchArtifactRequest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.CreateProjectRequest
@@ -23,6 +25,7 @@ import mycelium.api.InstructionProposal
 import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
+import mycelium.api.ApiAccessRequest
 import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
@@ -353,6 +356,48 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(messageProposals = it.messageProposals + (declined.id to declined)) }
     }
 
+    suspend fun refreshApiAccessRequests() {
+        val requests = api.apiAccessRequests()
+
+        mutableState.update { it.copy(apiAccessRequests = requests.associateBy { request -> request.id }) }
+    }
+
+    suspend fun approveApiAccessRequest(request: ApiAccessRequest, scopes: List<String>) {
+        val approved = api.approveApiAccessRequest(request.id, scopes)
+
+        mutableState.update { it.copy(apiAccessRequests = it.apiAccessRequests + (approved.id to approved)) }
+    }
+
+    suspend fun declineApiAccessRequest(request: ApiAccessRequest) {
+        val declined = api.declineApiAccessRequest(request.id)
+
+        mutableState.update { it.copy(apiAccessRequests = it.apiAccessRequests + (declined.id to declined)) }
+    }
+
+    suspend fun refreshArtifacts() {
+        val artifacts = api.artifacts()
+
+        mutableState.update { it.copy(artifacts = artifacts.associateBy { artifact -> artifact.id }) }
+    }
+
+    suspend fun renameArtifact(artifact: Artifact, title: String) {
+        val changed = api.editArtifact(artifact.id, PatchArtifactRequest(title = title))
+
+        mutableState.update { it.copy(artifacts = it.artifacts + (changed.id to changed)) }
+    }
+
+    suspend fun setArtifactPublic(artifact: Artifact, isPublic: Boolean) {
+        val changed = api.editArtifact(artifact.id, PatchArtifactRequest(isPublic = isPublic))
+
+        mutableState.update { it.copy(artifacts = it.artifacts + (changed.id to changed)) }
+    }
+
+    suspend fun deleteArtifact(artifact: Artifact) {
+        api.deleteArtifact(artifact.id)
+
+        mutableState.update { it.copy(artifacts = it.artifacts - artifact.id) }
+    }
+
     suspend fun refreshSchedules() {
         val schedules = api.schedules()
         val runs = api.scheduleRuns()
@@ -466,6 +511,9 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
             it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
         }
+
+        val sessionUpdates = orNull { api.sessionUpdates(conversationId) }.orEmpty()
+        mutableState.update { it.copy(sessionUpdates = it.sessionUpdates + (conversationId to sessionUpdates)) }
 
         val queue = api.queue(conversationId)
         mutableState.update { it.copy(queues = it.queues + (conversationId to queue.sortedBy { q -> q.position })) }

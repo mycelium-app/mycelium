@@ -156,4 +156,17 @@ class MyceliumToolsTest {
     fun sendToConversationWithoutAMessageFallsBackToTheGenericCard() {
         assertNull(myceliumCall(call("mcp__mycelium__send_to_conversation", """{"conversation":"Fix billing export","reason":"Why"}""")))
     }
+
+    @Test
+    fun requestApiAccessShowsTheScopesTheHoursTheReasonAndTheRequestItWaitsOn() {
+        val output = "Waiting for the person to approve API access (request 33333333-3333-3333-3333-333333333333)."
+        val parsed = assertIs<MyceliumCall.RequestApiAccess>(myceliumCall(call("mcp__mycelium__request_api_access", """{"scopes":["conversations:read","nodes:read"],"hours":2,"reason":"Read the events"}""", output)))
+
+        assertEquals(MyceliumCall.RequestApiAccess(listOf("conversations:read", "nodes:read"), 2, "Read the events", "33333333-3333-3333-3333-333333333333"), parsed)
+    }
+
+    @Test
+    fun requestApiAccessWithoutAReasonFallsBackToTheGenericCard() {
+        assertNull(myceliumCall(call("mcp__mycelium__request_api_access", """{"scopes":["nodes:read"]}""")))
+    }
 }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
+import mycelium.state.isSubagent
 import mycelium.state.sideChatOf
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
@@ -48,6 +49,15 @@ class SideChatsTest {
         val all = listOf(chat("parent", archivedAt = "2026-10-22T11:00:00Z"), chat("side", "parent", ConversationStatus.Input))
 
         assertEquals(listOf("side"), sidebarSections(all).flatMap { it.rows }.map { it.id })
+    }
+
+    @Test
+    fun subagentsSitUnderTheirParentOldestFirstAfterItsOtherSideChats() {
+        fun subagent(id: String, createdAt: String) = chat(id, "parent").copy(sideKind = "subagent", createdAt = createdAt, updatedAt = "2026-10-22T12:00:00Z")
+        val all = listOf(chat("parent"), subagent("late", "2026-10-22T10:05:00Z"), chat("side", "parent", updatedAt = "2026-10-22T09:00:00Z"), subagent("early", "2026-10-22T10:01:00Z"))
+
+        assertEquals(listOf("parent", "side", "early", "late"), sidebarRows(listOf(all[0]), all, emptySet()).map { it.conversation.id })
+        assertEquals(listOf(false, false, true, true), sidebarRows(listOf(all[0]), all, emptySet()).map { it.conversation.isSubagent })
     }
 
     @Test

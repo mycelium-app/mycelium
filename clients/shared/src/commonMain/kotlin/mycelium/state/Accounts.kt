@@ -20,8 +20,8 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
 
     for (node in nodes.sortedBy { it.name }) {
         for (login in node.logins) {
-            val account = login.account?.ifBlank { null }
-            val key = Triple(login.agent, account, if (account == null) node.id else null)
+            val account = login.account?.trim()?.ifBlank { null }
+            val key = Triple(login.agent, account?.lowercase(), if (account == null) node.id else null)
             grouped.getOrPut(key) { mutableListOf() }.add(node to login)
         }
     }
@@ -29,7 +29,7 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     return grouped.map { (key, entries) ->
         val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
 
-        AgentAccount(key.first, key.second ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty())
+        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty())
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 

@@ -317,6 +317,23 @@ data class MessageProposal(
 }
 
 @Serializable
+data class ApiAccessRequest(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String,
+    val scopes: List<String>,
+    val hours: Int,
+    val reason: String,
+    val state: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("decided_at") val decidedAt: String? = null,
+) {
+    val waiting: Boolean get() = state == "requested"
+}
+
+@Serializable
+data class ApproveApiAccessRequest(val scopes: List<String>? = null)
+
+@Serializable
 data class UpdateMemoryRequest(val text: String)
 
 @Serializable
@@ -588,6 +605,34 @@ data class ScheduleRun(
     @SerialName("conversation_id") val conversationId: String? = null,
 )
 
+@Serializable
+data class Artifact(
+    val id: String,
+    val owner: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val kind: String,
+    val title: String,
+    val slug: String = "",
+    @SerialName("public") val isPublic: Boolean = false,
+    @SerialName("latest_version") val latestVersion: Int = 1,
+    val url: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("updated_at") val updatedAt: String,
+)
+
+@Serializable
+data class PatchArtifactRequest(
+    val title: String? = null,
+    @SerialName("public") val isPublic: Boolean? = null,
+)
+
+object ArtifactKinds {
+    const val Design = "design"
+    const val Page = "page"
+    const val Markdown = "markdown"
+    const val File = "file"
+}
+
 object EachRun {
     const val New = "new"
     const val Same = "same"
@@ -753,6 +798,10 @@ data class SessionSummary(
     val address: String = "",
     @SerialName("last_used_at") val lastUsedAt: String,
     val current: Boolean = false,
+    val scopes: List<String> = emptyList(),
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("conversation_title") val conversationTitle: String? = null,
 )
 
 @Serializable
@@ -984,9 +1033,15 @@ sealed interface StreamMessage {
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
+    data class ArtifactChanged(val artifact: Artifact, val deleted: Boolean = false) : StreamMessage
+
+    data class ArtifactCommentAdded(val artifactId: String) : StreamMessage
+
     data class InstructionProposalChanged(val proposal: InstructionProposal) : StreamMessage
 
     data class MessageProposalChanged(val proposal: MessageProposal) : StreamMessage
+
+    data class ApiAccessRequestChanged(val request: ApiAccessRequest) : StreamMessage
 
     data class MemoryChanged(val memory: Memory) : StreamMessage
 
@@ -1035,8 +1090,14 @@ fun parseStreamMessage(text: String): StreamMessage? {
         )
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
+        "artifact" -> StreamMessage.ArtifactChanged(
+            MyceliumJson.decodeFromJsonElement(Artifact.serializer(), element),
+            deleted = (element["deleted"] as? JsonPrimitive)?.contentOrNull == "true",
+        )
+        "artifact_comment" -> StreamMessage.ArtifactCommentAdded(element.requireString("artifact_id"))
         "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))
         "message_proposal" -> StreamMessage.MessageProposalChanged(MyceliumJson.decodeFromJsonElement(MessageProposal.serializer(), element))
+        "api_access_request" -> StreamMessage.ApiAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ApiAccessRequest.serializer(), element))
         "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))
         "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))

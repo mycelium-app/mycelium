@@ -3,10 +3,8 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import mycelium.state.projectName
@@ -19,18 +17,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.BasicText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.serialization.Serializable
 import mycelium.api.ActivityRow
 import mycelium.api.ApiException
 import mycelium.api.Conversation
@@ -39,19 +31,16 @@ import mycelium.api.PatchConversationRequest
 import mycelium.api.SearchHit
 import mycelium.state.AppState
 import mycelium.state.Store
-import mycelium.state.agentName
 import mycelium.state.formatCost
 import mycelium.state.formatTokens
 
 private const val SearchDebounceMillis = 250L
 
-private val ActionWidth = 48.dp
+private const val HistoryColumnsPreference = "history-columns"
 
-private val PastHeaders = listOf("Conversation", "Project", "Agent", "Node", "Last active", "Turns", "Tokens", "Cost", "")
+private const val HistoryWidthsPreference = "history-widths"
 
-private val PastColumns = listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(min = ActionWidth, max = ActionWidth))
-
-private val TouchColumns = listOf(ColumnSpec(flexible = true), ColumnSpec(min = ActionWidth, max = ActionWidth))
+private const val HistoryViewsPreference = "history-views"
 
 fun usageCells(usage: ActivityRow?): List<String> {
     val reported = usage != null && usage.reportedTurns > 0
@@ -63,6 +52,7 @@ fun usageCells(usage: ActivityRow?): List<String> {
     )
 }
 
+@Serializable
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
 fun pastConversations(current: Collection<Conversation>, archived: Collection<Conversation>, filter: PastFilter, query: String): List<Conversation> {
@@ -87,6 +77,20 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     var query by remember { mutableStateOf("") }
     var usage by remember { mutableStateOf<Map<String, ActivityRow>>(emptyMap()) }
     var deleting by remember { mutableStateOf<Conversation?>(null) }
+    val platform = LocalPlatform.current
+    var layout by remember { mutableStateOf(HistoryLayout(columns = decodeHistoryColumns(platform?.loadPreference(HistoryColumnsPreference)))) }
+    var widths by remember { mutableStateOf(decodeHistoryWidths(platform?.loadPreference(HistoryWidthsPreference))) }
+    var views by remember { mutableStateOf(decodeHistoryViews(platform?.loadPreference(HistoryViewsPreference))) }
+    var activeView by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(layout.columns) {
+        platform?.savePreference(HistoryColumnsPreference, encodeHistoryColumns(layout.columns))
+    }
+
+    LaunchedEffect(widths) {
+        delay(SearchDebounceMillis)
+        platform?.savePreference(HistoryWidthsPreference, encodeHistoryWidths(widths))
+    }
 
     LaunchedEffect(Unit) {
         store.act { archived = store.api.conversations(archived = true) }
@@ -118,27 +122,13 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         }
     }
 
-    val rows = pastConversations(state.conversations.values, archived, filter, query)
+    val filters = layout.filters
+    val entries = pastConversations(state.conversations.values, archived, filters.state, query)
+        .map { HistoryEntry(it, projectName(it.cwd), state.nodes[it.nodeId]?.name.orEmpty(), usage[it.id]) }
+    val groups = groupHistory(sortHistory(filterHistory(entries, filters), layout.sort), layout.grouping)
 
     val touch = LocalTouch.current
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val bodyStyle = Tokens.Type.Ui.themed()
-    val headerStyle = Tokens.Type.MetaStrong.themed()
     val stamp = timestamper()
-    val pastCells = { row: Conversation -> listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), stamp(row.updatedAt, false)) + usageCells(usage[row.id]) }
-    val naturalWidths = remember(rows, state.nodes, usage, touch, bodyStyle, headerStyle) {
-        if (touch) {
-            listOf(0.dp, ActionWidth)
-        } else {
-            val widest = { texts: List<String>, style: TextStyle -> with(density) { (texts.maxOfOrNull { measurer.measure(it, style).size.width } ?: 0).toDp() } }
-            val cells = rows.map(pastCells)
-
-            listOf(0.dp) + PastHeaders.drop(1).dropLast(1).mapIndexed { column, header ->
-                widest(listOf(header), headerStyle).coerceAtLeast(widest(cells.map { it[column] }, bodyStyle))
-            } + ActionWidth
-        }
-    }
 
     deleting?.let { doomed ->
         DeleteConversationDialog(
@@ -173,9 +163,15 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         }
 
         if (query.isBlank()) {
-            Bar {
-                Segmented(PastFilter.entries.map { it.label }, filter.label, { picked -> filter = PastFilter.entries.first { it.label == picked } }, groupLabel = "State")
-            }
+            HistoryToolbar(
+                layout,
+                { layout = it },
+                historyOptions(entries),
+                views,
+                { views = it; platform?.savePreference(HistoryViewsPreference, encodeHistoryViews(it)) },
+                activeView,
+                { activeView = it },
+            )
         }
 
         val found = hits
@@ -219,83 +215,25 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
             Label(searchProblem.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), color = colors.textMuted)
         }
 
-        FixedWidthColumns(if (touch) TouchColumns else PastColumns, naturalWidths, Modifier.weight(1f)) {
-            val list = rememberLazyListState()
+        HistoryTable(groups, layout, { layout = it }, widths, { widths = it }, stamp, onOpen, Modifier.weight(1f)) { row ->
+            val isArchived = row.archivedAt != null
 
-            LazyColumn(Modifier.fillMaxWidth().scrollbar(list), list) {
-                if (!touch) {
-                    item(key = "columns") {
-                        ContentRow(Modifier.fillMaxWidth().semantics { contentDescription = "Columns" }) {
-                            for (title in PastHeaders) {
-                                Label(title, style = Tokens.Type.MetaStrong, color = colors.textMuted, maxLines = 1)
-                            }
+            RowMenu(row.title) { close ->
+                MenuItem(
+                    if (isArchived) "Restore" else "Archive",
+                    onClick = {
+                        close()
+                        store.act {
+                            val updated = store.api.patchConversation(row.id, PatchConversationRequest(archived = !isArchived))
+                            archived = if (isArchived) archived.filter { it.id != row.id } else archived + updated
+                            store.refresh()
                         }
+                    },
+                    leading = MyIcon.Archive,
+                )
 
-                        Hairline()
-                    }
-                }
-
-                if (rows.isEmpty()) {
-                    item(key = "empty") {
-                        Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
-                    }
-                }
-
-                items(rows, key = { it.id }) { row ->
-                    val isArchived = row.archivedAt != null
-
-                    ContentRow(Modifier.fillMaxWidth().hoverHighlight()) {
-                        Column(
-                            Modifier
-                                .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
-                                .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                                Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
-
-                                if (isArchived) {
-                                    Tag("Archived")
-                                }
-                            }
-
-                            if (touch) {
-                                Label(
-                                    (listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), stamp(row.updatedAt, false)) + usageCells(usage[row.id]).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
-                                    style = Tokens.Type.Meta,
-                                    color = colors.textMuted,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
-
-                        if (!touch) {
-                            for (cell in pastCells(row)) {
-                                Label(cell, color = colors.textMuted, maxLines = 1)
-                            }
-                        }
-
-                        RowMenu(row.title) { close ->
-                            MenuItem(
-                                if (isArchived) "Restore" else "Archive",
-                                onClick = {
-                                    close()
-                                    store.act {
-                                        val updated = store.api.patchConversation(row.id, PatchConversationRequest(archived = !isArchived))
-                                        archived = if (isArchived) archived.filter { it.id != row.id } else archived + updated
-                                        store.refresh()
-                                    }
-                                },
-                                leading = MyIcon.Archive,
-                            )
-
-                            if (isArchived) {
-                                MenuItem("Delete", onClick = { close(); deleting = row })
-                            }
-                        }
-                    }
-
-                    Hairline()
+                if (isArchived) {
+                    MenuItem("Delete", onClick = { close(); deleting = row })
                 }
             }
         }

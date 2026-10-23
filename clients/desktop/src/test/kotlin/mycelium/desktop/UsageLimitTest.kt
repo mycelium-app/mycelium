@@ -129,8 +129,8 @@ class UsageLimitTest {
     fun aPendingResumeIsMarkedOnItsSidebarRowAndCanBeCancelledThere() {
         show(store(resumeAt = ResumesToday))
 
-        rule.onNodeWithText("Resumes at 15:31").assertExists()
-        rule.onNodeWithContentDescription("Cancel the automatic resume of Plan the rollout").performClick()
+        rule.onNodeWithText("Waiting for reset").assertExists()
+        rule.onNodeWithContentDescription("Cancel the automatic resume of Plan the rollout, due at 15:31").performClick()
 
         rule.waitUntil(5_000) { calls.isNotEmpty() }
 

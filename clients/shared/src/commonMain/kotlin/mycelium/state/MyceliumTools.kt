@@ -14,6 +14,11 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     ProposeInstructionsEdit("propose_instructions_edit", "Propose instructions edit", "Proposing an instructions edit"),
     FindConversations("find_conversations", "Find conversations", "Finding conversations"),
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
+    RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
+    CreateArtifact("create_artifact", "Create artifact", "Creating an artifact"),
+    UpdateArtifact("update_artifact", "Update artifact", "Updating an artifact"),
+    DesignSetArtboard("design_set_artboard", "Set artboard", "Setting an artboard"),
+    ReadArtifact("read_artifact", "Read artifact", "Reading an artifact"),
 }
 
 sealed interface MyceliumCall {
@@ -54,6 +59,26 @@ sealed interface MyceliumCall {
     data class SendToConversation(val target: String, val message: String, val reason: String, val proposalId: String? = null) : MyceliumCall {
         override val tool = MyceliumTool.SendToConversation
     }
+
+    data class RequestApiAccess(val scopes: List<String>, val hours: Int?, val reason: String, val requestId: String? = null) : MyceliumCall {
+        override val tool = MyceliumTool.RequestApiAccess
+    }
+
+    data class CreateArtifact(val kind: String, val title: String, val artifactId: String?, val version: Int?) : MyceliumCall {
+        override val tool = MyceliumTool.CreateArtifact
+    }
+
+    data class UpdateArtifact(val artifactId: String, val title: String?, val version: Int?, val note: String?) : MyceliumCall {
+        override val tool = MyceliumTool.UpdateArtifact
+    }
+
+    data class DesignSetArtboard(val artifactId: String, val artboard: String?, val name: String?, val version: Int?) : MyceliumCall {
+        override val tool = MyceliumTool.DesignSetArtboard
+    }
+
+    data class ReadArtifact(val artifactId: String, val artboard: String?) : MyceliumCall {
+        override val tool = MyceliumTool.ReadArtifact
+    }
 }
 
 private val toolName = Regex("mycelium[_.:/ -]+(${MyceliumTool.entries.joinToString("|") { it.key }})\\b", RegexOption.IGNORE_CASE)
@@ -63,6 +88,10 @@ private val proposedLayer = Regex("made for the (.+) instructions\\.")
 private val askedQuestion = Regex("^Question (\\S+) asked")
 private val foundConversation = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val waitingToSend = Regex("^Waiting for the person to approve sending this to (.+?)(?: \\(proposal ([0-9a-fA-F-]{36})\\))?\\.$")
+private val waitingForApiAccess = Regex("^Waiting for the person to approve API access \\(request ([0-9a-fA-F-]{36})\\)\\.$")
+private val createdArtifact = Regex("^Created (\\S+) \"(.*)\" \\(artifact ([^,)\\s]+), version (\\d+)\\)\\.$")
+private val updatedArtifact = Regex("^Updated \"(.*)\" to version (\\d+)\\.$")
+private val savedVersion = Regex("version (\\d+)")
 private val proposedSchedule = Regex("proposed \\((.+), ([^,]+)\\)\\.")
 
 fun myceliumTool(title: String): MyceliumTool? {
@@ -153,6 +182,43 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val target = waiting?.groupValues?.get(1) ?: fields.string("conversation")?.trim().orEmpty()
 
             MyceliumCall.SendToConversation(target, message, fields.string("reason")?.trim().orEmpty(), waiting?.groupValues?.get(2)?.ifEmpty { null })
+        }
+
+        MyceliumTool.RequestApiAccess -> {
+            val reason = fields.requiredString("reason", input) ?: return null
+
+            MyceliumCall.RequestApiAccess(fields.strings("scopes").orEmpty(), (fields["hours"] as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt(), reason, waitingForApiAccess.matchEntire(output.trim())?.groupValues?.get(1))
+        }
+
+        MyceliumTool.CreateArtifact -> {
+            val title = fields.requiredString("title", input) ?: return null
+            val created = createdArtifact.matchEntire(output.trim())
+
+            MyceliumCall.CreateArtifact(
+                kind = created?.groupValues?.get(1) ?: fields.string("kind").orEmpty(),
+                title = created?.groupValues?.get(2) ?: title,
+                artifactId = created?.groupValues?.get(3),
+                version = created?.groupValues?.get(4)?.toIntOrNull(),
+            )
+        }
+
+        MyceliumTool.UpdateArtifact -> {
+            val artifact = fields.requiredString("artifact", input) ?: return null
+            val updated = updatedArtifact.matchEntire(output.trim())
+
+            MyceliumCall.UpdateArtifact(artifact, updated?.groupValues?.get(1), updated?.groupValues?.get(2)?.toIntOrNull(), fields.string("note")?.trim()?.ifEmpty { null })
+        }
+
+        MyceliumTool.DesignSetArtboard -> {
+            val artifact = fields.requiredString("artifact", input) ?: return null
+
+            MyceliumCall.DesignSetArtboard(artifact, fields.string("artboard")?.trim()?.ifEmpty { null }, fields.string("name")?.trim()?.ifEmpty { null }, savedVersion.find(output)?.groupValues?.get(1)?.toIntOrNull())
+        }
+
+        MyceliumTool.ReadArtifact -> {
+            val artifact = fields.requiredString("artifact", input) ?: return null
+
+            MyceliumCall.ReadArtifact(artifact, fields.string("artboard")?.trim()?.ifEmpty { null })
         }
     }
 }

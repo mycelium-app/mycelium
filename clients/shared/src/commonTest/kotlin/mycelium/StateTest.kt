@@ -62,6 +62,14 @@ class StateTest {
     }
 
     @Test
+    fun aConversationWaitingForALimitToResetSitsUnderWorkingNotFailed() {
+        val waiting = conversation("waiting", ConversationStatus.Failed).copy(resumeAt = "2026-10-22T13:00:00Z")
+        val sections = sidebarSections(listOf(waiting, conversation("failed", ConversationStatus.Failed)))
+
+        assertEquals(listOf("Failed" to listOf("failed"), "Working" to listOf("waiting")), sections.map { it.name to it.rows.map { row -> row.id } })
+    }
+
+    @Test
     fun sidebarOmitsEmptySectionsAndArchivedConversations() {
         val sections = sidebarSections(
             listOf(

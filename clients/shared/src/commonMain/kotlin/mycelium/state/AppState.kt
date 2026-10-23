@@ -1,6 +1,7 @@
 package mycelium.state
 
 import kotlin.time.Instant
+import mycelium.api.Artifact
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
@@ -9,6 +10,7 @@ import mycelium.api.Goal
 import mycelium.api.Group
 import mycelium.api.InstructionProposal
 import mycelium.api.Memory
+import mycelium.api.ApiAccessRequest
 import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
@@ -43,13 +45,16 @@ data class AppState(
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
+    val artifacts: Map<String, Artifact> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
     val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
     val messageProposals: Map<String, MessageProposal> = emptyMap(),
+    val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
     val events: Map<String, List<Event>> = emptyMap(),
+    val sessionUpdates: Map<String, List<JsonObject>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val loadingOlderEvents: Set<String> = emptySet(),
     val completeHistories: Set<String> = emptySet(),
@@ -77,6 +82,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
         state.copy(
             conversations = state.conversations - id,
             events = state.events - id,
+            sessionUpdates = state.sessionUpdates - id,
             openedConversations = state.openedConversations - id,
             loadingOlderEvents = state.loadingOlderEvents - id,
             completeHistories = state.completeHistories - id,
@@ -124,9 +130,16 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
 
+    is StreamMessage.ArtifactChanged ->
+        state.copy(artifacts = if (message.deleted) state.artifacts - message.artifact.id else state.artifacts + (message.artifact.id to message.artifact))
+
+    is StreamMessage.ArtifactCommentAdded -> state
+
     is StreamMessage.InstructionProposalChanged -> state.copy(instructionProposals = state.instructionProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
+
+    is StreamMessage.ApiAccessRequestChanged -> state.copy(apiAccessRequests = state.apiAccessRequests + (message.request.id to message.request))
 
     is StreamMessage.MemoryChanged -> state.copy(
         memories = state.memories + (message.memory.id to message.memory),
@@ -230,7 +243,7 @@ fun pinnedConversations(conversations: Collection<Conversation>, filter: String 
 fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups): List<SidebarSection> {
     return topLevel(conversations, filter)
         .filter { it.pinnedAt == null }
-        .groupBy { it.status }
+        .groupBy { if (it.resumeAt != null) ConversationStatus.Working else it.status }
         .map { (status, rows) -> SidebarSection(status, statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }
 }
@@ -239,7 +252,8 @@ data class SidebarRow(val conversation: Conversation, val depth: Int, val sideCh
 
 fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversation>, collapsed: Set<String>, depth: Int = 0): List<SidebarRow> =
     parents.flatMap { parent ->
-        val sideChats = conversations.filter { it.archivedAt == null && it.parentId == parent.id }.sortedByDescending { it.updatedAt }
+        val children = conversations.filter { it.archivedAt == null && it.parentId == parent.id }
+        val sideChats = children.filter { !it.isSubagent }.sortedByDescending { it.updatedAt } + children.filter { it.isSubagent }.sortedBy { it.createdAt }
         val shown = if (parent.id in collapsed) emptyList() else sidebarRows(sideChats, conversations, collapsed, depth + 1)
 
         listOf(SidebarRow(parent, depth, sideChats.size)) + shown

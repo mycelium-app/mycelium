@@ -83,6 +83,32 @@ class SessionTest {
 
         assertEquals(listOf(SlashCommand("review", "Review the diff", "branch")), slashCommands(events))
     }
+
+    @Test
+    fun stateKeptByTheControlPlaneStandsInWhenTheEarlyEventsAreNotLoaded() {
+        val kept = listOf(
+            MyceliumJson.parseToJsonElement("""{"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "review", "description": "Review the diff"}]}""").jsonObject,
+            MyceliumJson.parseToJsonElement("""{"sessionUpdate": "current_mode_update", "currentModeId": "plan"}""").jsonObject,
+        )
+
+        assertEquals(listOf(SlashCommand("review", "Review the diff", null)), slashCommands(emptyList(), kept))
+        assertEquals("plan", sessionOptions(conversation(offered), emptyList(), kept).currentMode)
+    }
+
+    @Test
+    fun liveEventsOverrideTheStateKeptByTheControlPlane() {
+        val kept = listOf(
+            MyceliumJson.parseToJsonElement("""{"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "review", "description": "Review the diff"}]}""").jsonObject,
+            MyceliumJson.parseToJsonElement("""{"sessionUpdate": "current_mode_update", "currentModeId": "plan"}""").jsonObject,
+        )
+        val events = listOf(
+            update(9, """{"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact", "description": "Shrink"}]}"""),
+            update(10, """{"sessionUpdate": "current_mode_update", "currentModeId": "default"}"""),
+        )
+
+        assertEquals(listOf(SlashCommand("compact", "Shrink", null)), slashCommands(events, kept))
+        assertEquals("default", sessionOptions(conversation(offered), events, kept).currentMode)
+    }
 }
 
 class MentionTest {

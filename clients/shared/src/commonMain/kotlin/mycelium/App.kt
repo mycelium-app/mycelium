@@ -45,6 +45,7 @@ import mycelium.ui.MotionSetting
 import mycelium.ui.RowDensity
 import mycelium.ui.TextSize
 import mycelium.ui.TimestampStyle
+import mycelium.ui.WhatsNewOnLaunch
 import mycelium.ui.LocalAppearance
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
@@ -195,6 +196,8 @@ private fun AppContent(platform: Platform) {
                             platform.listenForNotificationOpens { store.openFromNotification(it) }
                             onDispose { platform.listenForNotificationOpens(null) }
                         }
+
+                        WhatsNewOnLaunch(platform)
 
                         Shell(
                             store = store,
