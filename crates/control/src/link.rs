@@ -6,7 +6,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
+use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -194,9 +194,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::Workflow { conversation_id, run_id, line } => {
             record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await?;
 
-            let idle = sqlx::query_scalar::<_, bool>(
-                "select coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)",
-            )
+            let idle = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}")))
             .bind(conversation_id)
             .fetch_one(&state.pool)
             .await?;
@@ -460,7 +458,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     record_turn(state, conversation_id, usage.as_ref()).await?;
 
-    if has_agents_out(state, conversation_id).await? {
+    if stop_reason != "cancelled" && has_agents_out(state, conversation_id).await? {
         settle_background_work(state, conversation_id, ConversationStatus::Review, ConversationStatus::Working).await?;
     }
 

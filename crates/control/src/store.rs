@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
 pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
+pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {

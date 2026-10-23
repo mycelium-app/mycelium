@@ -6,7 +6,7 @@ use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
-use crate::store::{CONVERSATION_COLUMNS, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
+use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -23,10 +23,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     }
 
     let mut tx = state.pool.begin().await?;
-    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(
+    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(sqlx::AssertSqlSafe(format!(
         "select owner, node_id, archived_at is not null,
-                acp_session_id is not null and status in ('review', 'done'), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
-    )
+                acp_session_id is not null and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
+    )))
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
     .await?;

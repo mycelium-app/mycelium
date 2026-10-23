@@ -826,6 +826,41 @@ async fn a_turn_that_ends_with_workflow_agents_still_out_stays_working_until_the
 }
 
 #[tokio::test]
+async fn stopping_a_turn_while_a_workflow_agent_is_out_leaves_the_conversation_stopped_and_the_next_message_is_sent() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let id = started_conversation(&server, &mut link, Some("run it")).await;
+    link.expect_prompt().await;
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "agentId": "a"}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "cancelled".into(), usage: None }).await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Review).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "carry on"}))).await;
+
+    assert_eq!(link.expect_prompt().await.1, "carry on");
+}
+
+#[tokio::test]
+async fn a_message_is_sent_after_a_turn_ends_even_while_a_workflow_agent_never_reports_back() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let id = started_conversation(&server, &mut link, Some("run it")).await;
+    link.expect_prompt().await;
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "agentId": "a"}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+    event_of(&mut stream, id, EventKind::TurnEnd).await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "next"}))).await;
+
+    assert_eq!(link.expect_prompt().await.1, "next");
+}
+
+#[tokio::test]
 async fn closing_a_working_conversation_streams_it_as_done() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
