@@ -302,3 +302,59 @@ async fn a_started_task_is_claimed_by_its_conversation_and_can_then_be_marked_do
     let (status, done) = server.user.json(server.user.post(&path_of(&task, "done"))).await;
     assert_eq!((status, done["status"].clone()), (200, json!("done")));
 }
+
+async fn task_by_id(server: &Server, id: &Value) -> Value {
+    let (_, tasks) = server.user.json(server.user.get("/api/v1/tasks")).await;
+
+    tasks.as_array().unwrap().iter().find(|task| task["id"] == *id).cloned().unwrap()
+}
+
+#[tokio::test]
+async fn a_task_that_waits_on_an_unfinished_task_cannot_be_started_until_it_is_done() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, first) = add_task(&server, link.id, json!({"title": "Write the migration", "cwd": "/work/app"})).await;
+    let (status, second) = add_task(&server, link.id, json!({"title": "Backfill", "cwd": "/work/app", "depends_on": [first["id"]]})).await;
+    assert_eq!((status, second["waits_on"].clone(), second["depends_on"].clone()), (201, json!(1), json!([first["id"]])));
+
+    let (status, body) = server.user.json(server.user.post(&path_of(&second, "start"))).await;
+    assert_eq!((status, body["error"].clone(), body["message"].clone()), (409, json!("task_waiting"), json!("This task waits on 1 other task. Finish it first.")));
+    assert_eq!(task_by_id(&server, &second["id"]).await["status"], json!("open"));
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&first, "start"))).await;
+    assert_eq!(status, 201);
+    link.expect_start_session().await;
+    let (status, _) = server.user.json(server.user.post(&path_of(&first, "done"))).await;
+    assert_eq!(status, 200);
+
+    assert_eq!(task_by_id(&server, &second["id"]).await["waits_on"], json!(0));
+    let (status, _) = server.user.json(server.user.post(&path_of(&second, "start"))).await;
+    assert_eq!(status, 201);
+    link.expect_start_session().await;
+}
+
+#[tokio::test]
+async fn a_task_can_only_wait_on_open_or_started_tasks_of_its_owner() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+
+    let (status, body) = add_task(&server, link.id, json!({"title": "Backfill", "cwd": "/work/app", "depends_on": [Uuid::new_v4()]})).await;
+    assert_eq!((status, body["error"].clone()), (400, json!("dependency_not_found")));
+}
+
+#[tokio::test]
+async fn a_proposed_task_can_wait_on_other_tasks_through_the_mcp_tool() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    let (_, first) = add_task(&server, link.id, json!({"title": "Write the migration", "cwd": "/work/app"})).await;
+
+    let result = tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Backfill", "depends_on": [first["id"]]})).await;
+    assert_eq!(result["isError"], json!(false), "{result}");
+    let proposed = &tasks_with_status(&server, "proposed").await[0];
+    assert_eq!((proposed["depends_on"].clone(), proposed["waits_on"].clone()), (json!([first["id"]]), json!(1)));
+
+    let refused = tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Tidy", "depends_on": [Uuid::new_v4()]})).await;
+    assert_eq!(refused["isError"], json!(true));
+    assert_eq!(tasks_with_status(&server, "proposed").await.len(), 1);
+}

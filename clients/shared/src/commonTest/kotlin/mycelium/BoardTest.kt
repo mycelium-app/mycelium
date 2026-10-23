@@ -23,6 +23,7 @@ import mycelium.state.until
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 private fun conversation(id: String, status: ConversationStatus, cwd: String = "/other", agent: String = "claude", archived: Boolean = false, updatedAt: String = "2026-10-22T10:00:00Z") =
@@ -190,5 +191,17 @@ class BoardTest {
         assertEquals("r2", pendingPermission(listOf(request(1, "r1"), request(2, "r2")))?.requestId)
         assertEquals("r1", pendingPermission(listOf(request(1, "r1"), request(2, "r2"), resolved))?.requestId)
         assertNull(pendingPermission(listOf(request(2, "r2"), resolved)))
+    }
+
+    @Test
+    fun anOpenTaskWaitsOnlyOnTheTasksItDependsOnThatAreNotDone() {
+        val first = task("a", "claimed")
+        val finished = task("b", "done")
+        val waiting = task("c", "open").copy(dependsOn = listOf("a", "b", "gone"))
+        val tasks = listOf(first, finished, waiting).associateBy { it.id }
+
+        assertEquals(listOf("a"), waitingOn(waiting, tasks).map { it.id })
+        assertTrue(boardCards(state(tasks = tasks.values.toList()))[Lane.Open].orEmpty().single { it.key == "c" }.details.endsWith("waits on 1 task"))
+        assertEquals(emptyList(), waitingOn(finished.copy(status = "open", dependsOn = listOf("b")), tasks))
     }
 }

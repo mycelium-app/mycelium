@@ -12,7 +12,7 @@ use mycelium_proto::api::{AnswerTaskRequest, CreateConversationRequest, CreateTa
 use mycelium_proto::conversation::Conversation;
 use uuid::Uuid;
 
-const TASK_SELECT: &str = "select t.id, t.node_id, t.agent, t.cwd, t.project_id, t.branch, t.title, t.prompt, t.status, t.options, t.answer, t.source_id, s.title as source_title, t.conversation_id, t.created_at from tasks t left join conversations s on s.id = t.source_id";
+const TASK_SELECT: &str = "select t.id, t.node_id, t.agent, t.cwd, t.project_id, t.branch, t.title, t.prompt, t.status, t.options, t.answer, t.source_id, s.title as source_title, t.conversation_id, t.depends_on, (select count(*) from tasks d where d.id = any(t.depends_on) and d.status not in ('done', 'declined')) as waits_on, t.created_at from tasks t left join conversations s on s.id = t.source_id";
 
 #[derive(sqlx::FromRow)]
 struct TaskRow {
@@ -30,6 +30,8 @@ struct TaskRow {
     source_id: Option<Uuid>,
     source_title: Option<String>,
     conversation_id: Option<Uuid>,
+    depends_on: Vec<Uuid>,
+    waits_on: i64,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -50,6 +52,8 @@ impl TaskRow {
             source_id: self.source_id,
             source_title: self.source_title,
             conversation_id: self.conversation_id,
+            depends_on: self.depends_on,
+            waits_on: self.waits_on as u32,
             created_at: self.created_at,
         })
     }
@@ -59,6 +63,12 @@ async fn load(state: &AppState, id: Uuid) -> ApiResult<Task> {
     let row = sqlx::query_as::<_, TaskRow>(sqlx::AssertSqlSafe(format!("{TASK_SELECT} where t.id = $1"))).bind(id).fetch_one(&state.pool).await?;
 
     row.to_proto()
+}
+
+async fn unknown_dependencies(state: &AppState, owner: Uuid, depends_on: &[Uuid]) -> ApiResult<bool> {
+    let found = sqlx::query_scalar::<_, i64>("select count(*) from tasks where owner = $1 and id = any($2) and status in ('proposed', 'open', 'claimed')").bind(owner).bind(depends_on).fetch_one(&state.pool).await?;
+
+    Ok(found != depends_on.len() as i64)
 }
 
 async fn move_to(state: &AppState, user: &AuthUser, id: Uuid, from: TaskStatus, to: TaskStatus) -> ApiResult<Task> {
@@ -112,7 +122,15 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(ApiError::bad_request("project_required", "Choose a project to start a worktree from."));
     }
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into tasks (owner, node_id, agent, cwd, project_id, branch, title, prompt) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id")
+    let mut depends_on = request.depends_on.clone();
+    depends_on.sort();
+    depends_on.dedup();
+
+    if unknown_dependencies(&state, user.id, &depends_on).await? {
+        return Err(ApiError::bad_request("dependency_not_found", "Choose tasks that are still open or started for this task to wait on."));
+    }
+
+    let id = sqlx::query_scalar::<_, Uuid>("insert into tasks (owner, node_id, agent, cwd, project_id, branch, title, prompt, depends_on) values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id")
     .bind(user.id)
     .bind(request.node_id)
     .bind(enum_text(&request.agent))
@@ -121,13 +139,14 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     .bind(branch)
     .bind(title)
     .bind(prompt)
+    .bind(&depends_on)
     .fetch_one(&state.pool)
     .await?;
 
     Ok((StatusCode::CREATED, Json(load(&state, id).await?)))
 }
 
-pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus, title: &str, prompt: Option<&str>, options: &[String], project_name: Option<&str>) -> ApiResult<Result<Task, String>> {
+pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus, title: &str, prompt: Option<&str>, options: &[String], project_name: Option<&str>, depends_on: &[Uuid]) -> ApiResult<Result<Task, String>> {
     let (owner, node_id, agent, cwd, conversation_project) =
         sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let mut place = (node_id, cwd, conversation_project);
@@ -141,7 +160,11 @@ pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus,
         place = (project_node, path, Some(project_id));
     }
 
-    let id = sqlx::query_scalar::<_, Uuid>("insert into tasks (owner, node_id, agent, cwd, project_id, title, prompt, status, options, source_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id")
+    if unknown_dependencies(state, owner, depends_on).await? {
+        return Ok(Err("Nothing was stored. depends_on must list ids of tasks that are proposed, open or started. Leave out any that are done or unknown.".to_string()));
+    }
+
+    let id = sqlx::query_scalar::<_, Uuid>("insert into tasks (owner, node_id, agent, cwd, project_id, title, prompt, status, options, source_id, depends_on) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id")
         .bind(owner)
         .bind(place.0)
         .bind(agent)
@@ -152,6 +175,7 @@ pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus,
         .bind(enum_text(&status))
         .bind(options)
         .bind(conversation_id)
+        .bind(depends_on)
         .fetch_one(&state.pool)
         .await?;
 
@@ -159,6 +183,16 @@ pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus,
 }
 
 pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let found = sqlx::query_as::<_, TaskRow>(sqlx::AssertSqlSafe(format!("{TASK_SELECT} where t.id = $1 and t.owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?;
+    let Some(row) = found else {
+        return Err(ApiError::not_found("That task"));
+    };
+    let waiting = row.to_proto()?;
+
+    if waiting.status == TaskStatus::Open && waiting.waits_on > 0 {
+        return Err(ApiError::conflict("task_waiting", format!("This task waits on {} other {}. Finish {} first.", waiting.waits_on, if waiting.waits_on == 1 { "task" } else { "tasks" }, if waiting.waits_on == 1 { "it" } else { "them" })));
+    }
+
     let task = move_to(&state, &user, id, TaskStatus::Open, TaskStatus::Claimed).await?;
     let prompt = task.prompt.clone().unwrap_or_else(|| task.title.clone());
     let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt), parent_id: None, side_kind: None };

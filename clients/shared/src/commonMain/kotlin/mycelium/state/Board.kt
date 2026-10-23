@@ -26,16 +26,24 @@ data class BoardCard(
     val nodeId: String,
     val conversation: Conversation?,
     val task: Task?,
+    val waitingOn: List<Task> = emptyList(),
 ) {
     val details: String
         get() = when (task?.status) {
             TaskStatuses.Question -> "From ${task.sourceTitle ?: "a conversation that is gone"}"
             TaskStatuses.Proposed -> listOfNotNull(projectName, task.sourceTitle?.let { "from $it" }).joinToString(" · ")
-            else -> listOfNotNull(agentName(agent), model, projectName, branch).joinToString(" · ")
+            else -> listOfNotNull(agentName(agent), model, projectName, branch, waitsOnText(waitingOn.size)).joinToString(" · ")
         }
 }
 
 private const val DoneCardLimit = 50
+
+private val unfinishedStatuses = setOf(TaskStatuses.Question, TaskStatuses.Proposed, TaskStatuses.Open, TaskStatuses.Claimed)
+
+private fun waitsOnText(count: Int): String? = if (count == 0) null else "waits on $count ${if (count == 1) "task" else "tasks"}"
+
+fun waitingOn(task: Task, tasks: Map<String, Task>): List<Task> =
+    if (task.status == TaskStatuses.Open) task.dependsOn.mapNotNull { tasks[it] }.filter { it.status in unfinishedStatuses } else emptyList()
 
 fun laneOf(status: ConversationStatus): Lane = when (status) {
     ConversationStatus.Done -> Lane.Done
@@ -67,7 +75,7 @@ fun boardCards(state: AppState, filter: BoardFilter = BoardFilter()): Map<Lane, 
         val conversation = task.conversationId?.let { state.conversations[it] }
         val project = task.projectId?.let { state.projects[it] }
 
-        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task)
+        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task, waitingOn(task, state.tasks))
     }
     val matching = (fromConversations + fromTasks).filter { (_, card) -> matches(card, filter) }
     val lanes = matching.groupBy({ it.first }, { it.second })

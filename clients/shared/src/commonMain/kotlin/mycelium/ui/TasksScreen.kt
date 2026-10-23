@@ -304,6 +304,7 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
     val colors = MyTheme.colors
     val conversation = card.conversation
     val permission = conversation?.let { pendingPermission(state.events[it.id].orEmpty()) }
+    var explained by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxWidth().background(colors.bgRaised, BlockShape).padding(Tokens.Space.S2),
@@ -357,9 +358,22 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
                     MyButton({ store.act { store.declineTask(task) } }, text = "Decline", description = "Decline ${task.title}", size = ButtonSize.Sm, muted = true)
                 }
 
-                TaskStatuses.Open -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                    MyButton({ store.act { store.startTask(task) } }, text = "Start", description = "Start ${task.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-                    MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+                TaskStatuses.Open -> {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                        MyButton(
+                            { if (card.waitingOn.isEmpty()) store.act { store.startTask(task) } else explained = true },
+                            text = "Start",
+                            description = "Start ${task.title}",
+                            variant = ButtonVariant.Outline,
+                            size = ButtonSize.Sm,
+                            muted = card.waitingOn.isNotEmpty(),
+                        )
+                        MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+                    }
+
+                    if (explained && card.waitingOn.isNotEmpty()) {
+                        Label("Finish ${card.waitingOn.joinToString(", ") { it.title }} before starting this task.", style = Tokens.Type.MetaStrong, color = colors.statusFailed)
+                    }
                 }
 
                 TaskStatuses.Claimed -> if (conversation != null && conversation.status in finishedStatuses) {
@@ -442,6 +456,8 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
     val place = remember { Place() }
     var title by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
+    var dependsOn by remember { mutableStateOf(emptySet<String>()) }
+    val dependencies = state.tasks.values.filter { it.status == TaskStatuses.Open || it.status == TaskStatuses.Claimed }.sortedBy { it.createdAt }
     var titleError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -469,6 +485,7 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
             projectId = target.project?.id,
             branch = place.branch.trim().ifEmpty { null },
             prompt = prompt.trim().ifEmpty { null },
+            dependsOn = dependencies.map { it.id }.filter { it in dependsOn },
         )
 
         failure = null
@@ -490,6 +507,28 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
             TextInput(title, { title = it }, label = "Title", placeholder = "Rebuild install.md for the new flags", error = titleError, onSubmit = ::submit)
             TextInput(prompt, { prompt = it }, label = "Prompt (optional)", placeholder = "Defaults to the title")
             PlacePicker(store, state, place, withBranch = true, cwdError = cwdError)
+
+            if (dependencies.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Waits on (optional)", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                        for (dependency in dependencies) {
+                            val chosen = dependency.id in dependsOn
+
+                            MyButton(
+                                { dependsOn = if (chosen) dependsOn - dependency.id else dependsOn + dependency.id },
+                                text = dependency.title,
+                                description = "Waits on ${dependency.title}",
+                                variant = ButtonVariant.Outline,
+                                size = ButtonSize.Sm,
+                                muted = !chosen,
+                                selected = chosen,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }

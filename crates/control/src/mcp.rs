@@ -65,6 +65,7 @@ fn tool_definitions() -> Value {
                     "title": {"type": "string", "description": "A short title for the task."},
                     "body": {"type": "string", "description": "What the task involves. It becomes the prompt of the conversation that works on it."},
                     "project": {"type": "string", "description": "The name of the project the task belongs to. Defaults to this conversation's project."},
+                    "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Ids of tasks that must be done before this one can be started."},
                 },
                 "required": ["title"],
             },
@@ -224,7 +225,17 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     let options: Vec<String> = arguments.get("options").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|option| !option.is_empty()).map(String::from).collect();
                     let project = arguments.get("project").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty());
 
-                    match tasks::record(&state, conversation_id, status, title, body, &options, project).await? {
+                    let mut depends_on = Vec::new();
+
+                    for value in arguments.get("depends_on").and_then(Value::as_array).into_iter().flatten() {
+                        let Some(task_id) = value.as_str().and_then(|text| Uuid::parse_str(text.trim()).ok()) else {
+                            return Ok(reply(&id, tool_text("Nothing was stored. depends_on must be a list of task ids.", true)));
+                        };
+
+                        depends_on.push(task_id);
+                    }
+
+                    match tasks::record(&state, conversation_id, status, title, body, &options, project, &depends_on).await? {
                         Ok(task) if status == TaskStatus::Question => reply(&id, tool_text(&format!("Question {} asked. End your turn: the answer arrives here as a new message.", task.id), false)),
                         Ok(task) => reply(&id, tool_text(&format!("Task {} proposed. The person can approve it from their Tasks board.", task.id), false)),
                         Err(message) => reply(&id, tool_text(&message, true)),

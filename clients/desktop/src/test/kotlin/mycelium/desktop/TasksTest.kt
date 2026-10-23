@@ -87,7 +87,7 @@ class TasksTest {
     private val posts = mutableListOf<Pair<String, String>>()
     private val platform = BoardPlatform()
 
-    private fun store(): Store {
+    private fun store(tasks: String = BoardTaskList): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -105,7 +105,7 @@ class TasksTest {
                 request.method == HttpMethod.Post && path.endsWith("/tasks") -> respond("""{"id":"t2","node_id":"n1","agent":"claude","cwd":"/srv","title":"Tidy","created_at":"2026-10-22T10:00:00Z"}""", HttpStatusCode.Created, json)
                 path.endsWith("/conversations/c-input/events") -> respond(PermissionEvent, HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") -> respond("[]", HttpStatusCode.OK, json)
-                path.endsWith("/tasks") -> respond(BoardTaskList, HttpStatusCode.OK, json)
+                path.endsWith("/tasks") -> respond(tasks, HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"app","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/worktrees") -> respond("""[{"id":"w1","project_id":"p1","branch":"feature/x","path":"/work/app-wt/feature-x","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(BoardNodes, HttpStatusCode.OK, json)
@@ -120,9 +120,9 @@ class TasksTest {
         return store
     }
 
-    private fun showBoard(store: Store = store(), onOpen: (String) -> Unit = {}) {
+    private fun showBoard(store: Store = store(), onOpen: (String) -> Unit = {}, ready: String = "Rebuild install.md") {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); TasksScreen(store, state, platform, onOpen) } }
-        rule.waitUntil { rule.onAllNodesWithText("Rebuild install.md").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil { rule.onAllNodesWithText(ready).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -365,5 +365,47 @@ class TasksTest {
 
         rule.waitUntil { posts.any { it.first.endsWith("/tasks") } }
         assertEquals("""{"node_id":"n1","agent":"claude","title":"Tidy","cwd":"/srv"}""", posts.first { it.first.endsWith("/tasks") }.second)
+    }
+
+    private fun dependants(): String = "[" + listOf(
+        task("tc", "Merge the Gradle jobs", "claimed", ""","conversation_id":"c-claimed""""),
+        task("t3", "Verify v0.1.11 from S3", "open", ""","depends_on":["tc"]"""),
+    ).joinToString(",") + "]"
+
+    @Test
+    fun aTaskThatWaitsOnAnotherSaysSoAndStartingItExplainsWhyItCannotStart() {
+        showBoard(store(dependants()), ready = "Verify v0.1.11 from S3")
+
+        rule.onNodeWithText("waits on 1 task", substring = true).assertExists()
+
+        rule.onNodeWithContentDescription("Start Verify v0.1.11 from S3").performClick()
+
+        rule.onNodeWithText("Finish Merge the Gradle jobs before starting this task.").assertExists()
+        assertTrue(posts.none { it.first.endsWith("/tasks/t3/start") })
+    }
+
+    @Test
+    fun aTaskBecomesStartableWhenTheTaskItWaitsOnIsDone() {
+        showBoard(store(dependants()), ready = "Verify v0.1.11 from S3")
+
+        rule.onNodeWithContentDescription("Mark Merge the Gradle jobs done").performClick()
+        rule.waitUntil { rule.onAllNodesWithText("waits on 1 task", substring = true).fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithContentDescription("Start Verify v0.1.11 from S3").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t3/start") } }
+    }
+
+    @Test
+    fun aTaskIsAddedWithTheOpenTasksItWaitsOn() {
+        showBoard()
+
+        rule.onNodeWithText("Add a task").performClick()
+        rule.onNodeWithContentDescription("Title").performTextInput("Tidy")
+        rule.onNodeWithContentDescription("Folder").performTextInput("/srv")
+        rule.onNodeWithContentDescription("Waits on Rebuild install.md").performClick()
+        rule.onNodeWithText("Add task").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks") } }
+        assertEquals("""{"node_id":"n1","agent":"claude","title":"Tidy","cwd":"/srv","depends_on":["t1"]}""", posts.first { it.first.endsWith("/tasks") }.second)
     }
 }

@@ -590,6 +590,8 @@ pub struct Task {
     pub source_id: Option<Uuid>,
     pub source_title: Option<String>,
     pub conversation_id: Option<Uuid>,
+    pub depends_on: Vec<Uuid>,
+    pub waits_on: u32,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -611,6 +613,8 @@ pub struct CreateTaskRequest {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
