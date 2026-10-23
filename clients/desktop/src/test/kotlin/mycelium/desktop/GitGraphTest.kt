@@ -66,7 +66,7 @@ private const val ShowJson = """{"diff":"diff --git a/src/importer.kt b/src/impo
 private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work","title":"Importer","status":"review","created_at":"$Now","updated_at":"$Now"}"""
 
 private class GitFake(val status: String = """{"branch":"main","ahead":0,"behind":0,"files":[]}""") {
-    val requests = mutableListOf<HttpRequestData>()
+    val requests: MutableList<HttpRequestData> = java.util.concurrent.CopyOnWriteArrayList()
 
     val api = MyceliumApi(
         "https://mycelium.test",

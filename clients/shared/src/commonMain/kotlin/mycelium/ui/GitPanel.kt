@@ -557,52 +557,61 @@ fun CommitArea(
             }
         }
 
-        BasicTextField(
-            value = message,
-            onValueChange = onMessage,
-            textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
-            cursorBrush = SolidColor(colors.text),
-            interactionSource = source,
-            modifier = Modifier
+        Column(
+            Modifier
                 .fillMaxWidth()
-                .heightIn(min = 72.dp)
                 .focusRing(focused, ControlShape, always = true)
                 .background(colors.bgContent, ControlShape)
-                .border(Tokens.Size.Hairline, colors.borderControl, ControlShape)
-                .onPreviewKeyEvent { event ->
-                    val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
+                .border(Tokens.Size.Hairline, colors.borderControl, ControlShape),
+        ) {
+            BasicTextField(
+                value = message,
+                onValueChange = onMessage,
+                textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
+                cursorBrush = SolidColor(colors.text),
+                interactionSource = source,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .onPreviewKeyEvent { event ->
+                        val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
 
-                    if (commit && event.isShiftPressed) {
-                        onAmend()
-                    } else if (commit) {
-                        onCommit()
+                        if (commit && event.isShiftPressed) {
+                            onAmend()
+                        } else if (commit) {
+                            onCommit()
+                        }
+
+                        commit
                     }
+                    .semantics { contentDescription = "Commit message" },
+                decorationBox = { inner ->
+                    Box(Modifier.padding(Tokens.Space.S2)) {
+                        if (message.isEmpty()) {
+                            Label(status?.preparedMessage ?: "Enter commit message", style = Tokens.Type.Code, color = colors.textFaint)
+                        }
 
-                    commit
-                }
-                .semantics { contentDescription = "Commit message" },
-            decorationBox = { inner ->
-                Box(Modifier.padding(Tokens.Space.S2)) {
-                    if (message.isEmpty()) {
-                        Label(status?.preparedMessage ?: "Enter commit message", style = Tokens.Type.Code, color = colors.textFaint)
+                        inner()
                     }
+                },
+            )
 
-                    inner()
-                }
-            },
-        )
+            Row(
+                Modifier.fillMaxWidth().padding(Tokens.Space.S1),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MyButton(onCommit, text = "Commit", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            MyButton(onCommit, Modifier.weight(1f), text = "Commit", variant = ButtonVariant.Primary)
+                Box {
+                    MyButton({ options = true }, icon = MyIcon.ChevronDown, description = "Commit options", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
 
-            Box {
-                MyButton({ options = true }, icon = MyIcon.ChevronDown, description = "Commit options", variant = ButtonVariant.Outline)
-
-                if (options) {
-                    MenuPopup(onDismiss = { options = false }) {
-                        MenuItem("Amend", onClick = { options = false; onAmend() }, hint = "Ctrl+Shift+Enter")
-                        MenuItem("Signoff", onClick = { options = false; onSignoff() }, checked = signoff)
-                        MenuItem("Skip hooks", onClick = { options = false; onSkipHooks() }, checked = skipHooks)
+                    if (options) {
+                        MenuPopup(onDismiss = { options = false }) {
+                            MenuItem("Amend", onClick = { options = false; onAmend() }, hint = "Ctrl+Shift+Enter")
+                            MenuItem("Signoff", onClick = { options = false; onSignoff() }, checked = signoff)
+                            MenuItem("Skip hooks", onClick = { options = false; onSkipHooks() }, checked = skipHooks)
+                        }
                     }
                 }
             }
