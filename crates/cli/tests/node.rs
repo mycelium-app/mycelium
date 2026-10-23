@@ -993,11 +993,12 @@ async fn transcripts_are_sent_from_the_acknowledged_offset() {
     let mut connection = control.accept().await;
 
     let first = connection.next_matching(|message| matches!(message, NodeToControl::Transcript { .. })).await;
-    let NodeToControl::Transcript { path, offset, data } = first else {
+    let NodeToControl::Transcript { path, offset, data, size } = first else {
         unreachable!();
     };
     assert_eq!(offset, 0);
     assert_eq!(data, "eyJhIjoxfQo=");
+    assert_eq!(size, Some(8));
 
     connection.send(ControlToNode::TranscriptAck { path: path.clone(), bytes: 8 });
     connection.nothing_more().await;
@@ -1038,4 +1039,23 @@ async fn pushed_instructions_never_replace_a_file_the_person_wrote() {
     let held = connection.next_matching(|message| matches!(message, NodeToControl::InstructionsHeld { .. })).await;
     assert_eq!(held, NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec![format!("Claude Code: {}", own.display())] });
     assert_eq!(std::fs::read_to_string(&own).unwrap(), "My own rules\n");
+}
+
+#[tokio::test]
+async fn a_pushed_api_token_is_saved_for_the_conversation_readable_only_by_its_owner() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(7);
+
+    connection.send(ControlToNode::ApiToken { conversation_id: conversation, token: "myc_client_example".into() });
+    let saved = connection.next_matching(|message| matches!(message, NodeToControl::ApiTokenSaved { .. })).await;
+
+    let path = fixture.session_dir(conversation).join("api-token");
+    assert_eq!(saved, NodeToControl::ApiTokenSaved { conversation_id: conversation, path: Some(path.display().to_string()) });
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "myc_client_example");
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
 }

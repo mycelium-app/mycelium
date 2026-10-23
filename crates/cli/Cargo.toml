@@ -14,6 +14,7 @@ rustls.workspace = true
 mycelium-control.workspace = true
 mycelium-node.workspace = true
 mycelium-keeper.workspace = true
+mycelium-artifacts.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true

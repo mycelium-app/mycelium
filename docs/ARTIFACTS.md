@@ -179,6 +179,23 @@ The entry shows in Workspaces mode, where History lives. Whether Chats mode gets
 - `publish_artifact` renders as an artifact card in `MyceliumCards.kt`, next to the walkthrough card: kind icon, title, "v3: note", an Open button and a Versions button. Later versions of the same artifact update the existing card's version label rather than stacking new cards. Each tool call still shows in its own place.
 - The conversation pane gets an Artifacts tab beside Walkthrough when the conversation has any artifacts, so a long thread does not have to be scrolled to find them.
 
+## Running the artifact host
+
+`mycelium artifacts` serves every artifact at `https://{slug}.<domain>`.
+
+| Variable | Meaning |
+|---|---|
+| `MYCELIUM_ARTIFACT_DOMAIN` | The domain the slugs live under, such as `mycelium.example.com`. Required. |
+| `MYCELIUM_CONTROL_URL` | The control plane's address over the mesh. Required. |
+| `MYCELIUM_ARTIFACT_HOST_TOKEN` | Bearer token for `/internal/artifacts`. Set the same value on the control plane. Required. |
+| `MYCELIUM_ARTIFACT_OIDC_ISSUER`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_ID`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_SECRET` | The host's own identity provider. Without them only public artifacts open. |
+| `MYCELIUM_ARTIFACT_LISTEN` | Listen address. Defaults to `0.0.0.0:8081`. |
+| `MYCELIUM_EDITOR_DIR` | The built Design editor, used for the view-only mode. Defaults to `/usr/share/mycelium/editor`. |
+
+- **DNS.** A wildcard record, `*.<domain>`, and a record for `<domain>` itself, both pointing at the host.
+- **TLS.** One certificate covering `<domain>` and `*.<domain>`, terminated in front of the host, which speaks plain HTTP. A wildcard needs a DNS-01 challenge.
+- **OIDC redirect URI.** Register `https://<domain>/_auth/callback` with the provider. Sign-in always runs on the bare domain and the session cookie is scoped to `.<domain>`, so one sign-in covers every artifact.
+
 ## Publishing online
 
 - Publishing creates an `artifact_publications` row and the URL `<artifact_url>/p/<token>`. The token is unguessable. The page is never at a guessable path.

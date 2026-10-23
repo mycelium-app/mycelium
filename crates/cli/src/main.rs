@@ -21,6 +21,8 @@ enum Command {
         #[command(subcommand)]
         command: ControlCommand,
     },
+    /// Run the artifact host
+    Artifacts,
     /// Join this machine to a control plane and run the node daemon
     Node {
         #[command(subcommand)]
@@ -63,6 +65,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Control { command: ControlCommand::Serve } => mycelium_control::serve().await,
+        Command::Artifacts => mycelium_artifacts::serve().await,
         Command::Node { command: NodeCommand::Join { url, join_token_file } } => {
             mycelium_node::join(mycelium_node::JoinOptions { control_plane: url, join_token_file, config_path: None }).await
         }
