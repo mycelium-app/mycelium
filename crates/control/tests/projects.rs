@@ -2,12 +2,16 @@ mod common;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use common::{NodeLink, Server, serve};
 use mycelium_proto::link::{ControlToNode, GitCommand, GitCredentials, NodeToControl};
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+type Seen = Arc<Mutex<Vec<(String, Value)>>>;
 
 const GITHUB_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
 const GITLAB_TOKEN: &str = "glpat-0123456789abcdefghij";
@@ -27,6 +31,50 @@ async fn fake_forge(kind: &str) -> String {
     };
 
     serve(router).await
+}
+
+async fn fake_creating_forge(kind: &str, seen: Seen) -> String {
+    async fn github_user(State(seen): State<Seen>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+        seen.lock().unwrap().push(("POST /user/repos".into(), body));
+
+        (StatusCode::CREATED, Json(json!({})))
+    }
+
+    async fn github_organisation(State(seen): State<Seen>, Path(organisation): Path<String>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+        seen.lock().unwrap().push((format!("POST /orgs/{organisation}/repos"), body.clone()));
+
+        if body["name"] == "taken" {
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"message": "name already exists on this account"})));
+        }
+
+        (StatusCode::CREATED, Json(json!({})))
+    }
+
+    async fn gitlab_namespace(Path(path): Path<String>) -> Json<Value> {
+        Json(json!({"id": if path == "slop/tools" { 77 } else { 5 }}))
+    }
+
+    async fn gitlab_project(State(seen): State<Seen>, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
+        seen.lock().unwrap().push(("POST /projects".into(), body));
+
+        (StatusCode::CREATED, Json(json!({})))
+    }
+
+    let router = if kind == "github" {
+        Router::new()
+            .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+            .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+            .route("/api/v3/user/repos", post(github_user))
+            .route("/api/v3/orgs/{organisation}/repos", post(github_organisation))
+    } else {
+        Router::new()
+            .route("/api/v4/user", get(|| async { Json(json!({"username": "sam"})) }))
+            .route("/api/v4/groups", get(|| async { Json(json!([])) }))
+            .route("/api/v4/namespaces/{path}", get(gitlab_namespace))
+            .route("/api/v4/projects", post(gitlab_project))
+    };
+
+    serve(router.with_state(seen)).await
 }
 
 async fn answer_next(link: &mut NodeLink, outcome: Result<Value, &str>) -> (String, GitCommand) {
@@ -266,4 +314,52 @@ async fn a_branch_needs_a_project_and_a_name() {
     let (_, blank) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "project_id": project["id"], "branch": "  "}))).await;
 
     assert_eq!((without_project["error"].clone(), blank["error"].clone()), (json!("project_required"), json!("branch_required")));
+}
+
+#[tokio::test]
+async fn a_new_github_repository_is_created_on_your_account_or_an_organisation_then_cloned_as_the_project() {
+    let server = Server::start().await;
+    let seen = Seen::default();
+    let github = fake_creating_forge("github", seen.clone()).await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+
+    let ((own, mine), (_, clone)) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "samexample/restore-tool", "new_repository": true}), Ok(json!({"path": "/p/samexample/restore-tool"}))).await;
+    let ((shared, theirs), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/restore-tool", "new_repository": true}), Ok(json!({"path": "/p/acme-org/restore-tool"}))).await;
+
+    assert_eq!((own, mine["repository"].clone(), shared, theirs["repository"].clone()), (201, json!("samexample/restore-tool"), 201, json!("acme-org/restore-tool")));
+    assert!(matches!(clone, GitCommand::Clone { url, .. } if url == format!("{github}/samexample/restore-tool.git")));
+    let created = seen.lock().unwrap().clone();
+    assert_eq!(created[0], ("POST /user/repos".to_string(), json!({"name": "restore-tool", "private": true, "auto_init": true})));
+    assert_eq!(created[1].0, "POST /orgs/acme-org/repos");
+}
+
+#[tokio::test]
+async fn a_new_gitlab_repository_is_created_in_its_namespace_then_cloned_as_the_project() {
+    let server = Server::start().await;
+    let seen = Seen::default();
+    let gitlab = fake_creating_forge("gitlab", seen.clone()).await;
+    let forge_id = connect_forge(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+
+    let ((status, project), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "slop/tools/restore-tool", "new_repository": true}), Ok(json!({"path": "/p/slop/tools/restore-tool"}))).await;
+
+    assert_eq!((status, project["repository"].clone()), (201, json!("slop/tools/restore-tool")));
+    let created = seen.lock().unwrap().clone();
+    assert_eq!(created[0], ("POST /projects".to_string(), json!({"name": "restore-tool", "path": "restore-tool", "namespace_id": 77, "visibility": "private", "initialize_with_readme": true})));
+}
+
+#[tokio::test]
+async fn a_new_repository_the_forge_refuses_is_reported_and_nothing_is_cloned_or_registered() {
+    let server = Server::start().await;
+    let github = fake_creating_forge("github", Seen::default()).await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let link = server.online_node("laptop").await;
+
+    let (status, error) = server.user.json(server.user.post("/api/v1/projects").json(&json!({"node_id": link.id, "forge_id": forge_id, "repository": "acme-org/taken", "new_repository": true}))).await;
+
+    assert_eq!((status, error["error"].clone()), (400, json!("forge_repository_refused")));
+    assert!(error["message"].as_str().unwrap().starts_with("GitHub did not create that repository"));
+    let (_, projects) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(projects, json!([]));
 }

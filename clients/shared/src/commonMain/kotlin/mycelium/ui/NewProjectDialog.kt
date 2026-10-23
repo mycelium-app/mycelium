@@ -1,10 +1,15 @@
 package mycelium.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -14,12 +19,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.CreateProjectRequest
+import mycelium.api.Forge
 import mycelium.api.Group
 import mycelium.api.Project
 import mycelium.api.Repository
@@ -28,7 +35,35 @@ import mycelium.state.Store
 
 private const val RepositoryChoices = 6
 
-private val ProjectSources = listOf("A forge repository", "A folder on a node")
+private const val ForgeRepository = "A forge repository"
+
+private const val NewRepository = "A new repository"
+
+private const val NodeFolder = "A folder on a node"
+
+private val ProjectSources = listOf(ForgeRepository, NewRepository, NodeFolder)
+
+private fun forgeName(forge: Forge): String = "${forge.account} on ${forge.baseUrl.substringAfter("://")}"
+
+@Composable
+private fun StepHeading(number: Int, title: String, filled: Boolean = true) {
+    val colors = MyTheme.colors
+
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(Tokens.Size.StepCircle)
+                .clip(CircleShape)
+                .background(if (filled) colors.text else colors.bgPanel)
+                .border(Tokens.Size.Hairline, if (filled) colors.text else colors.borderControl, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Label(number.toString(), style = Tokens.Type.MetaStrong, color = if (filled) colors.bgPanel else colors.textMuted)
+        }
+
+        Label(title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+    }
+}
 
 @Composable
 fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCreated: (Project) -> Unit) {
@@ -38,6 +73,9 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var query by remember { mutableStateOf("") }
     var found by remember { mutableStateOf<List<Repository>>(emptyList()) }
     var repository by remember { mutableStateOf<Repository?>(null) }
+    var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
+    var forgeId by remember { mutableStateOf<String?>(null) }
+    var created by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("") }
     var nodeId by remember { mutableStateOf<String?>(null) }
     var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
@@ -46,8 +84,19 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var failure by remember { mutableStateOf<String?>(null) }
 
     val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
-    val cloning = source == ProjectSources.first()
-    val action = if (cloning) "Clone and open" else "Register and open"
+    val cloning = source == ForgeRepository
+    val creating = source == NewRepository
+    val forge = forges.firstOrNull { it.id == forgeId } ?: forges.firstOrNull()
+    val action = when {
+        cloning -> "Clone and open"
+        creating -> "Create and open"
+        else -> "Register and open"
+    }
+    val destination = when {
+        cloning -> repository?.fullName
+        creating -> created.trim().ifEmpty { null }
+        else -> folder.trim().ifEmpty { null }
+    }
 
     LaunchedEffect(query) {
         store.act { found = store.api.repositories(query = query).repositories.take(RepositoryChoices) }
@@ -55,6 +104,10 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
     LaunchedEffect(Unit) {
         store.act { groups = store.api.groups() }
+    }
+
+    LaunchedEffect(Unit) {
+        store.act { forges = store.api.forges() }
     }
 
     fun submit() {
@@ -72,7 +125,17 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             return
         }
 
-        if (!cloning && folder.isBlank()) {
+        if (creating && forge == null) {
+            failure = "Connect a forge in Settings, then create the repository."
+            return
+        }
+
+        if (creating && !created.trim().contains('/')) {
+            failure = "Enter the new repository as owner/name, for example acme-org/restore-tool."
+            return
+        }
+
+        if (!cloning && !creating && folder.isBlank()) {
             failure = "Enter the folder on the node, for example work/app."
             return
         }
@@ -80,6 +143,8 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
         val picked = repository
         val request = if (cloning && picked != null) {
             CreateProjectRequest(node.id, picked.forgeId, picked.fullName)
+        } else if (creating && forge != null) {
+            CreateProjectRequest(node.id, forge.id, created.trim(), newRepository = true)
         } else {
             CreateProjectRequest(node.id, path = folder.trim())
         }
@@ -109,22 +174,42 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
         Label("New project", Modifier.semantics { heading() }, Tokens.Type.Title)
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            Label("Start from", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+            StepHeading(1, "Start from")
             Segmented(ProjectSources, source, { source = it; failure = null }, groupLabel = "Start from")
 
             if (cloning) {
-                TextInput(query, { query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false)
+                TextInput(repository?.fullName ?: query, { repository = null; query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false)
 
-                for (option in found) {
-                    MenuItem(option.fullName, onClick = { repository = option }, checked = option.fullName == repository?.fullName && option.forgeId == repository?.forgeId)
+                if (repository == null) {
+                    for (option in found) {
+                        MenuItem(option.fullName, onClick = { repository = option })
+                    }
                 }
+            } else if (creating) {
+                if (forges.size > 1) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                        for (option in forges) {
+                            MyButton(
+                                { forgeId = option.id },
+                                text = forgeName(option),
+                                description = "Create on ${forgeName(option)}",
+                                variant = ButtonVariant.Outline,
+                                size = ButtonSize.Sm,
+                                muted = option.id != forge?.id,
+                                selected = option.id == forge?.id,
+                            )
+                        }
+                    }
+                }
+
+                TextInput(created, { created = it }, label = "New repository", placeholder = "${forge?.organisations?.firstOrNull() ?: "owner"}/name", mono = true, onSubmit = ::submit)
             } else {
                 TextInput(folder, { folder = it }, label = "Folder on the node", placeholder = "work/app", mono = true, onSubmit = ::submit)
             }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            Label("Set up on", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+            StepHeading(2, "Set up on")
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 for (option in nodes) {
@@ -140,11 +225,15 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
                     )
                 }
             }
+
+            if (destination != null) {
+                Label("~/projects/$destination", style = Tokens.Type.Code, color = MyTheme.colors.textMuted)
+            }
         }
 
         if (groups.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                Label("Group", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                StepHeading(3, "Group", filled = false)
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     for (group in groups) {
@@ -165,7 +254,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
         if (running) {
-            IndeterminateProgress(if (cloning) "Cloning ${repository?.fullName.orEmpty()}" else "Registering $folder")
+            IndeterminateProgress(if (cloning) "Cloning ${repository?.fullName.orEmpty()}" else if (creating) "Creating ${created.trim()}" else "Registering $folder")
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {

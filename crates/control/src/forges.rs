@@ -41,6 +41,7 @@ pub enum ForgeError {
     Rejected,
     Unreachable,
     Conflict,
+    CreateRefused,
     Failed(u16),
 }
 
@@ -58,6 +59,7 @@ impl ForgeError {
             ForgeError::Rejected => ApiError::bad_request("forge_token_rejected", format!("{name} did not accept this token. Check that it has not expired and can read your account, then try again.")),
             ForgeError::Unreachable => ApiError::bad_request("forge_unreachable", format!("Mycelium could not reach {base_url}. Check the address and try again.")),
             ForgeError::Conflict => ApiError::conflict("forge_file_changed", format!("The file changed on {name} since Mycelium last read it. Pull the latest version, then make your edit again.")),
+            ForgeError::CreateRefused => ApiError::bad_request("forge_repository_refused", format!("{name} did not create that repository. It may already exist, or the name may not be allowed. Choose a different name and try again.")),
             ForgeError::Failed(status) => ApiError::bad_request("forge_failed", format!("{name} answered with status {status}. Try again in a moment.")),
         }
     }
@@ -376,6 +378,40 @@ impl ForgeApi {
         linked.retain(|request| seen.insert(request.number));
 
         Ok(linked)
+    }
+
+    pub async fn create_repository(&self, http: &reqwest::Client, account: &str, repository: &str) -> Result<(), ForgeError> {
+        let (owner, name) = repository.rsplit_once('/').unwrap_or(("", repository));
+        let (path, body) = match self.kind {
+            ForgeKind::Github => {
+                let path = if owner == account { "/user/repos".to_string() } else { format!("/orgs/{}/repos", encode_path(owner)) };
+
+                (path, serde_json::json!({"name": name, "private": true, "auto_init": true}))
+            }
+            ForgeKind::Gitlab => {
+                let namespace = self.get(http, &format!("/namespaces/{}", encode_path(owner))).await?;
+                let body = serde_json::json!({"name": name, "path": name, "namespace_id": namespace["id"], "visibility": "private", "initialize_with_readme": true});
+
+                ("/projects".to_string(), body)
+            }
+        };
+        let request = self.authorised(http.post(format!("{}{path}", self.api_url()))).json(&body);
+        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let status = response.status();
+
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err(ForgeError::Rejected);
+        }
+
+        if matches!(status.as_u16(), 400 | 409 | 422) {
+            return Err(ForgeError::CreateRefused);
+        }
+
+        if !status.is_success() {
+            return Err(ForgeError::Failed(status.as_u16()));
+        }
+
+        Ok(())
     }
 }
 

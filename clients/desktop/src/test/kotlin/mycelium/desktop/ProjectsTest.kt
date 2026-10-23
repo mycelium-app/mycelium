@@ -218,6 +218,60 @@ class ProjectsTest {
     }
 
     @Test
+    fun theChosenRepositoryFillsTheSearchFieldAndTheFolderItWillLiveInIsShown() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
+
+        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("acme-org/acme-backups").performClick()
+
+        rule.onNodeWithText("acme-org/acme-backups").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().size)
+        rule.onNodeWithText("~/projects/acme-org/acme-backups").assertExists()
+    }
+
+    @Test
+    fun theStepsAreNumbered() {
+        groups = """[{"id":"g1","name":"work","created_at":"2026-10-22T10:00:00Z"}]"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
+
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
+
+        listOf("1", "2", "3").forEach { rule.onNodeWithText(it).assertExists() }
+    }
+
+    @Test
+    fun aNewRepositoryIsCreatedOnTheForgeThenClonedAsTheProject() {
+        val store = store()
+        var created: String? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
+
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("A new repository").performClick()
+        rule.onNodeWithContentDescription("New repository").performTextInput("acme-org/restore-tool")
+        rule.onNodeWithText("~/projects/acme-org/restore-tool").assertExists()
+        rule.onNodeWithText("Create and open").performClick()
+
+        rule.waitUntil { created != null }
+        assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/restore-tool","new_repository":true}""", posts.single().second)
+    }
+
+    @Test
+    fun aNewRepositoryNeedsAnOwnerAndAName() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
+
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("A new repository").performClick()
+        rule.onNodeWithContentDescription("New repository").performTextInput("restore-tool")
+        rule.onNodeWithText("Create and open").performClick()
+
+        rule.onNodeWithText("Enter the new repository as owner/name, for example acme-org/restore-tool.").assertExists()
+        assertEquals(0, posts.size)
+    }
+
+    @Test
     fun aRefusedCloneShowsGitsMessageAndKeepsTheDialogOpen() {
         createProjectAnswer = HttpStatusCode.Conflict to """{"error":"git_failed","message":"repository not found"}"""
         val store = store()

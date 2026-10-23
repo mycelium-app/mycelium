@@ -363,6 +363,7 @@ data class CreateProjectRequest(
     @SerialName("forge_id") val forgeId: String? = null,
     val repository: String? = null,
     val path: String? = null,
+    @SerialName("new_repository") val newRepository: Boolean = false,
 )
 
 @Serializable

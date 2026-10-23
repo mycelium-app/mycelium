@@ -151,6 +151,7 @@ object Tokens {
         val SettingsNav: Dp = 200.dp
         val MenuList: Dp = 360.dp
         val MenuMeter: Dp = 56.dp
+        val StepCircle: Dp = 20.dp
         val Measure: Dp = 720.dp
         val Hairline: Dp = 1.dp
         val FocusRing: Dp = 2.dp
