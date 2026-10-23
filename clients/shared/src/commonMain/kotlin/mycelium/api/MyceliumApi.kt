@@ -246,6 +246,11 @@ class MyceliumApi(
     suspend fun setProjectGroup(projectId: String, groupId: String?): Project =
         call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(groupId)) } }.body()
 
+    suspend fun extensions(): Extensions = call("/extensions") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveExtensions(extensions: Extensions): Extensions =
+        call("/extensions") { client.put(it) { authorise(); json(extensions) } }.body()
+
     suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveInstructions(layer: String, text: String): InstructionLayer =

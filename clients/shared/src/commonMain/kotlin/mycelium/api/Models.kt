@@ -336,6 +336,13 @@ data class GroupFolderRequest(val prefix: String, @SerialName("node_id") val nod
 data class GroupRequest(val name: String)
 
 @Serializable
+data class Extensions(
+    @SerialName("generated_ui") val generatedUi: Boolean,
+    @SerialName("rich_markdown") val richMarkdown: Boolean,
+    @SerialName("mycelium_tools") val myceliumTools: Boolean,
+)
+
+@Serializable
 data class InstructionVersion(val id: String, @SerialName("created_at") val createdAt: String)
 
 @Serializable

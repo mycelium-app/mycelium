@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
 import kotlin.io.encoding.Base64
+import kotlin.math.floor
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.state.AppState
@@ -137,7 +138,7 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
             emulator.resize(columns, rows)
             revision++
 
-            if (id != null && (sentSize[0] != columns || sentSize[1] != rows)) {
+            if (id != null && !exited && (sentSize[0] != columns || sentSize[1] != rows)) {
                 sentSize[0] = columns
                 sentSize[1] = rows
                 store.act { store.api.resizeTerminal(id, columns, rows) }
@@ -267,6 +268,9 @@ private const val CellProbeLength = 20
 private const val DefaultColumns = 80
 private const val DefaultRows = 24
 
+private val ModifierKeys = setOf(Key.ShiftLeft, Key.ShiftRight, Key.CtrlLeft, Key.CtrlRight, Key.AltLeft, Key.AltRight, Key.MetaLeft, Key.MetaRight, Key.CapsLock, Key.Function)
+private val PrivateUseCodePoints = 0xE000..0xF8FF
+
 private fun terminalInputFor(event: KeyEvent, applicationCursorKeys: Boolean): String? {
     if (event.type != KeyEventType.KeyDown) {
         return null
@@ -305,7 +309,7 @@ private fun terminalInputFor(event: KeyEvent, applicationCursorKeys: Boolean): S
 
     val codePoint = event.utf16CodePoint
 
-    if (codePoint < ' '.code || codePoint == 0x7F) {
+    if (event.key in ModifierKeys || codePoint < ' '.code || codePoint == 0x7F || codePoint in PrivateUseCodePoints || codePoint >= 0xFFFE) {
         return null
     }
 
@@ -359,6 +363,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
 ) {
     for (row in 0 until emulator.rows) {
         val top = row * cellHeight
+        val pixelTop = floor(top)
+        val pixelHeight = floor((row + 1) * cellHeight) - pixelTop
+        var fillColour = Color.Transparent
+        var fillStart = 0
+        val paint = { end: Int ->
+            if (fillColour != Color.Transparent) {
+                val left = floor(fillStart * cellWidth)
+                drawRect(fillColour, Offset(left, pixelTop), Size(floor(end * cellWidth) - left, pixelHeight))
+            }
+        }
         val text = buildAnnotatedString {
             var runStyle: SpanStyle? = null
             val run = StringBuilder()
@@ -379,8 +393,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
                 val fill = if (inverse) foreground else background
                 val span = cellSpan(cell.style, painted)
 
-                if (fill != Color.Transparent) {
-                    drawRect(fill, Offset(column * cellWidth, top), Size(cellWidth, cellHeight))
+                if (fill != fillColour) {
+                    paint(column)
+                    fillColour = fill
+                    fillStart = column
                 }
 
                 if (span != runStyle) {
@@ -394,6 +410,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
             flush()
         }
 
+        paint(emulator.columns)
         drawText(measurer, text, Offset(0f, top), style, softWrap = false, maxLines = 1)
     }
 
