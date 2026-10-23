@@ -70,6 +70,7 @@ import mycelium.state.Token
 import mycelium.state.ColumnAlign
 import mycelium.state.TokenKind
 import mycelium.state.highlight
+import mycelium.state.chatToolName
 import mycelium.state.myceliumCall
 import mycelium.state.myceliumTool
 import mycelium.state.MarkdownBlock
@@ -196,7 +197,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            ToolCall(item)
+            ToolCall(item, chat = agent == "chat")
 
             for (image in item.images) {
                 ThreadImageView(image, myceliumTool(item.title)?.label ?: item.title)
@@ -214,6 +215,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         }
         is ThreadItem.Workflow -> WorkflowCard(item.progress, onStopWorkflow)
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
+        is ThreadItem.Note -> Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
     }
 }
 
@@ -678,7 +680,7 @@ fun toolLabel(kind: String, title: String): String = when (kind) {
 }
 
 @Composable
-private fun ToolCall(call: ThreadItem.ToolCall) {
+private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
     val colors = MyTheme.colors
     val diff = call.diff
 
@@ -696,6 +698,11 @@ private fun ToolCall(call: ThreadItem.ToolCall) {
 
     if (mycelium != null) {
         MyceliumCard(call, mycelium)
+        return
+    }
+
+    if (chat) {
+        ChatToolCard(call, chatToolName(call.title))
         return
     }
 
@@ -874,11 +881,17 @@ private fun PlanCard(plan: ThreadItem.Plan) {
 private fun PermissionCard(permission: ThreadItem.Permission, onAnswer: (String, String) -> Unit) {
     Card {
         CardHead {
-            StatusMark(if (permission.resolved) "Answered" else "Needs your answer", if (permission.resolved) Tone.Muted else Tone.Attention, if (permission.resolved) MyIcon.Check else MyIcon.Alert)
+            StatusMark(if (permission.resolved) "Answered" else if (permission.server != null) "Waiting for your approval" else "Needs your answer", if (permission.resolved) Tone.Muted else Tone.Attention, if (permission.resolved) MyIcon.Check else MyIcon.Alert)
         }
 
-        Box(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)) {
+        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             Label(permission.title, style = Tokens.Type.Code)
+
+            if (permission.server != null) {
+                Label("Server: ${permission.server}", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            }
+
+            ArgumentLines(permission.input)
         }
 
         if (!permission.resolved) {

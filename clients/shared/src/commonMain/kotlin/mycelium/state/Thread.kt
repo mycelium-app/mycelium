@@ -70,7 +70,11 @@ sealed interface ThreadItem {
         val title: String,
         val options: List<PermissionOption>,
         val resolved: Boolean,
+        val server: String? = null,
+        val input: JsonObject? = null,
     ) : ThreadItem
+
+    data class Note(override val key: String, val text: String) : ThreadItem
 
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
@@ -253,6 +257,7 @@ private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: Js
         "user_message_chunk" -> Unit
         "tool_call" -> items += toolCallFrom(key, update)
         "tool_call_update" -> mergeToolUpdate(items, update)
+        "note" -> items += ThreadItem.Note(key, update.contentText())
         "plan" -> items += ThreadItem.Plan(key, planEntries(update))
     }
 }
@@ -425,6 +430,8 @@ private fun permissionFrom(key: String, payload: JsonObject): ThreadItem.Permiss
         title = toolCall?.string("title") ?: "Permission needed",
         options = options,
         resolved = false,
+        server = toolCall?.string("server"),
+        input = toolCall?.get("rawInput") as? JsonObject,
     )
 }
 
