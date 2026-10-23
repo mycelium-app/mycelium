@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,7 @@ import mycelium.api.NodeSummary
 import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
 import mycelium.state.Annotation
+import mycelium.state.DiffTabs
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
 import mycelium.state.attachmentProblem
@@ -226,6 +228,27 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     },
                 )
 
+                val diffs = store.diffTabs.collectAsState().value[id] ?: DiffTabs()
+                val activeDiff = diffs.tabs.firstOrNull { it.key == diffs.active }
+
+                if (!compact && !chat && diffs.tabs.isNotEmpty()) {
+                    MainTabStrip(
+                        tabs = listOf(MainTab(ConversationTab, ConversationTab)) + diffs.tabs.map { MainTab(it.key, it.title, it.closeLabel) },
+                        selected = activeDiff?.key ?: ConversationTab,
+                        onSelect = { key -> store.focusDiffTab(id, key.takeIf { it != ConversationTab }) },
+                        onClose = { key -> store.closeDiffTab(id, key) },
+                        groupLabel = "Main view tabs",
+                        modifier = Modifier.padding(horizontal = Tokens.Space.S3),
+                    )
+                    Hairline()
+
+                    if (activeDiff != null) {
+                        key(activeDiff.key) { DiffTabView(store, conversation, activeDiff, Modifier.weight(1f)) }
+
+                        return@Column
+                    }
+                }
+
                 if (walkthrough != null && compact) {
                     TabRow(listOf(ConversationTab, WalkthroughTab), tab, { tab = it }, groupLabel = "Conversation sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
                     Hairline()
@@ -301,7 +324,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize()) }
-                            SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize()) }
+                            SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             null -> Unit
                         }
                     }

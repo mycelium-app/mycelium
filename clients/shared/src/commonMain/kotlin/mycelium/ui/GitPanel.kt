@@ -47,16 +47,19 @@ import mycelium.api.GitFile
 import mycelium.api.GitStatus
 import mycelium.api.GraphCommit
 import mycelium.state.BranchEntry
-import mycelium.state.splitCommitDiff
 import mycelium.state.ChangeRow
+import mycelium.state.DiffTab
 import mycelium.state.Store
 import mycelium.state.ToolStatus
 import mycelium.state.changeRows
+import mycelium.state.commitDiffTab
 import mycelium.state.commitProblem
 import mycelium.state.diffIsStaged
+import mycelium.state.fileDiffTab
 import mycelium.state.firstChange
 import mycelium.state.fullyStaged
 import mycelium.state.parseUnifiedDiff
+import mycelium.state.splitCommitDiff
 
 private enum class GitTab { Changes, History, Graph }
 
@@ -67,7 +70,7 @@ private const val GraphPage = 200
 private const val DiskPollMillis = 2_000L
 
 @Composable
-fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier) {
+fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier, onOpenDiff: ((DiffTab) -> Unit)? = null) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
     val id = conversation.id
@@ -219,9 +222,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     selected = selectedCommit,
                     onSelect = { selectedCommit = it },
                     onOpen = { commit ->
-                        openCommit = commit
-                        commitDiff = null
-                        run { commitDiff = store.api.gitShow(id, commit.hash) }
+                        if (onOpenDiff != null) {
+                            onOpenDiff(commitDiffTab(commit.hash, commit.subject))
+                        } else {
+                            openCommit = commit
+                            commitDiff = null
+                            run { commitDiff = store.api.gitShow(id, commit.hash) }
+                        }
                     },
                     hasMore = !graphComplete && !graphLoading,
                     onMore = {
@@ -244,9 +251,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     ChangesList(
                         files = files,
                         onViewDiff = { file ->
-                            viewing = file
-                            diff = null
-                            run { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
+                            if (onOpenDiff != null) {
+                                onOpenDiff(fileDiffTab(file.path, diffIsStaged(file)))
+                            } else {
+                                viewing = file
+                                diff = null
+                                run { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
+                            }
                         },
                         onStageAll = { run { store.api.gitStageAll(id); refresh() } },
                         onToggle = { file ->
