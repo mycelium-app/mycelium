@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -63,7 +64,7 @@ private const val ShowJson = """{"diff":"diff --git a/src/importer.kt b/src/impo
 
 private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work","title":"Importer","status":"review","created_at":"$Now","updated_at":"$Now"}"""
 
-private class GitFake {
+private class GitFake(val status: String = """{"branch":"main","ahead":0,"behind":0,"files":[]}""") {
     val requests = mutableListOf<HttpRequestData>()
 
     val api = MyceliumApi(
@@ -73,7 +74,7 @@ private class GitFake {
             requests += request
             val path = request.url.encodedPath
             val body = when {
-                path.endsWith("/git/status") -> """{"branch":"main","ahead":0,"behind":0,"files":[]}"""
+                path.endsWith("/git/status") -> status
                 path.endsWith("/git/graph") -> if (request.url.parameters["skip"] == "0") HistoryJson else "[]"
                 path.endsWith("/git/show") -> ShowJson
                 path.endsWith("/git/branches") -> BranchesJson
@@ -105,6 +106,13 @@ class GitGraphTest {
 
     private fun awaitText(description: String) {
         rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription(description, substring = true)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aWaitingSquashMessageFillsTheEmptyCommitBox() {
+        open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[],"squash_message":"Squashed commit of the following:\n\n    Add the importer"}"""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Squashed commit of the following:", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

@@ -23,11 +23,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -55,6 +63,8 @@ import mycelium.state.parseUnifiedDiff
 private enum class GitTab { Changes, History, Graph }
 
 private const val ShortHashLength = 7
+
+private const val DiskPollMillis = 2_000L
 
 private const val GraphPage = 200
 
@@ -108,6 +118,32 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 
     LaunchedEffect(id, conversation.status) {
         run { refresh() }
+    LaunchedEffect(id) {
+        while (true) {
+            delay(DiskPollMillis)
+
+            try {
+                val latest = store.api.gitStatus(id)
+
+                if (latest != status) {
+                    status = latest
+                    log = store.api.gitLog(id)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    LaunchedEffect(status?.squashMessage) {
+        val squash = status?.squashMessage
+
+        if (squash != null && message.isBlank()) {
+            message = squash
+        }
+    }
+
     }
 
     LaunchedEffect(id, tab) {
@@ -463,6 +499,15 @@ fun CommitArea(
                 .fillMaxWidth()
                 .heightIn(min = 72.dp)
                 .focusRing(focused, ControlShape, always = true)
+                .onPreviewKeyEvent { event ->
+                    val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
+
+                    if (commit) {
+                        onCommit()
+                    }
+
+                    commit
+                }
                 .background(colors.bgContent, ControlShape)
                 .border(Tokens.Size.Hairline, colors.borderControl, ControlShape)
                 .semantics { contentDescription = "Commit message" },

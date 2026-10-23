@@ -208,7 +208,10 @@ fn status(cwd: &Path) -> Result<Value, String> {
         }
     }
 
-    Ok(json!({"branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "files": files}))
+    let squash_path = String::from_utf8_lossy(&git(cwd, &["rev-parse", "--git-path", "SQUASH_MSG"], &[])?).trim().to_string();
+    let squash_message = std::fs::read_to_string(cwd.join(squash_path)).ok().map(|text| text.trim_end().to_string()).filter(|text| !text.is_empty());
+
+    Ok(json!({"branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "files": files, "squash_message": squash_message}))
 }
 
 fn counts(numstat: &[u8]) -> HashMap<String, (u64, u64)> {
@@ -617,6 +620,24 @@ mod tests {
 
         assert_eq!((status["upstream"].as_str(), status["ahead"].as_u64(), status["behind"].as_u64()), (Some("origin/main"), Some(1), Some(0)));
         assert!(run(dir.path(), GitCommand::Fetch).is_ok());
+    }
+
+    #[test]
+    fn status_carries_the_squash_message_while_a_squash_merge_waits_to_be_committed() {
+        let dir = repository();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "first");
+        git(dir.path(), &["switch", "-c", "feature"], &[]).unwrap();
+        write(&dir, "a.txt", "two\n");
+        commit_all(&dir, "feature work");
+        git(dir.path(), &["switch", "main"], &[]).unwrap();
+
+        assert_eq!(run(dir.path(), GitCommand::Status).unwrap()["squash_message"], Value::Null);
+
+        git(dir.path(), &["merge", "--squash", "feature"], &[]).unwrap();
+        let message = run(dir.path(), GitCommand::Status).unwrap()["squash_message"].as_str().unwrap().to_string();
+
+        assert!(message.contains("feature work"), "{message}");
     }
 
     #[test]
