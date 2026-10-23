@@ -229,8 +229,6 @@ fun Composer(
         for (setting in settings) {
             OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
         }
-
-        goal?.let { GoalButton(it) }
     }
 
     if (LocalTouch.current) {
@@ -261,6 +259,7 @@ fun Composer(
 
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     attach()
+                    goal?.let { GoalButton(it) }
                     pickers()
                 }
             }
@@ -310,6 +309,7 @@ fun Composer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 attach()
+                goal?.let { GoalButton(it) }
                 Box(Modifier.weight(1f))
 
                 if (working) {
