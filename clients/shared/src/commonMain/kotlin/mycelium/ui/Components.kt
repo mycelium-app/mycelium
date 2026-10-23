@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -579,23 +580,25 @@ fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
     val colors = MyTheme.colors
 
     Popup(popupPositionProvider = ScreenPopup, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.32f))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Column(
+        CompositionLocalProvider(LocalOpenList provides null) {
+            Box(
                 Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) { detectTapGestures { } }
-                    .background(colors.bgRaised, RoundedCornerShape(topStart = Tokens.Radius.Card, topEnd = Tokens.Radius.Card))
-                    .navigationBarsPadding()
-                    .verticalScrollWithBar()
-                    .padding(vertical = Tokens.Space.S2),
-                content = content,
-            )
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) { detectTapGestures { } }
+                        .background(colors.bgRaised, RoundedCornerShape(topStart = Tokens.Radius.Card, topEnd = Tokens.Radius.Card))
+                        .navigationBarsPadding()
+                        .verticalScrollWithBar()
+                        .padding(vertical = Tokens.Space.S2),
+                    content = content,
+                )
+            }
         }
     }
 }
