@@ -3,7 +3,7 @@ use crate::auth::AuthNode;
 use crate::device::client_address;
 use crate::error::ApiResult;
 use crate::prompts::pump;
-use crate::state::{AppState, GitAnswer};
+use crate::state::{AppState, GitAnswer, ProcessAnswer};
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -212,6 +212,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::GitResult { request_id, ok, output, error } => {
             state.hub.answer_git(node_id, request_id, GitAnswer { ok, output, error });
+
+            Ok(())
+        }
+        NodeToControl::ProcessStopped { request_id, ok, error } => {
+            state.hub.answer_stop(node_id, request_id, ProcessAnswer { ok, error });
 
             Ok(())
         }

@@ -170,10 +170,17 @@ data class ProcessUsage(
     @SerialName("memory_bytes") val memoryBytes: Long,
     val agent: Boolean = false,
     @SerialName("conversation_id") val conversationId: String? = null,
+    val stoppable: Boolean = false,
     val cwd: String? = null,
 )
 
 @Serializable
+@Serializable
+data class DockerContainer(val name: String, val state: String)
+
+@Serializable
+data class DockerUsage(val running: Int = 0, val containers: List<DockerContainer> = emptyList())
+
 data class ListeningPort(
     val port: Int,
     val address: String,
@@ -198,6 +205,7 @@ data class ResourceSample(
     val processes: List<ProcessUsage> = emptyList(),
     val ports: List<ListeningPort> = emptyList(),
 )
+    val docker: DockerUsage? = null,
 
 @Serializable
 data class CpuPoint(@SerialName("at_ms") val atMs: Long, @SerialName("cpu_percent") val cpuPercent: Double)

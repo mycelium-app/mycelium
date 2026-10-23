@@ -289,6 +289,15 @@ impl Daemon {
 
         match handle {
             Some(handle) => action(&handle),
+            ControlToNode::StopProcess { request_id, pid, name } => {
+                let out = self.out.clone();
+                let proc_root = self.watcher.proc_root().to_path_buf();
+
+                tokio::task::spawn_blocking(move || {
+                    let stopped = crate::resources::Sampler::new(proc_root, Vec::new()).stop(pid, &name);
+                    let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
+                });
+            }
             None => tracing::warn!(conversation = %conversation_id, "the control plane addressed a conversation this node does not run"),
         }
     }

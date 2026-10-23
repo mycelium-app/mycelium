@@ -148,8 +148,9 @@ private val BoardActivity = """{"range":"7d","totals":{"key":"all","name":"All",
 private val BoardResources = """{"latest":{"at_ms":${Clock.System.now().toEpochMilliseconds()},"available":true,"cpu_percent":38.0,"cores":8,"load":[2.1,1.8,1.5],
 "memory_total_bytes":34359738368,"memory_available_bytes":11400000000,"swap_total_bytes":0,"swap_free_bytes":0,
 "disks":[{"mount":"/","total_bytes":512000000000,"free_bytes":13000000000}],
-"processes":[{"pid":10,"name":"gradle daemon","cpu_percent":212.0,"memory_bytes":3300000000,"agent":false},{"pid":11,"name":"claude","cpu_percent":14.0,"memory_bytes":670000000,"agent":true,"conversation_id":"$BackupsId"},{"pid":12,"name":"postgres","cpu_percent":3.0,"memory_bytes":440000000}],
-"ports":[{"port":5173,"address":"127.0.0.1","pid":13,"process":"vite"}]},
+"processes":[{"pid":10,"name":"gradle daemon","cpu_percent":212.0,"memory_bytes":3300000000,"agent":false,"stoppable":true},{"pid":11,"name":"claude","cpu_percent":14.0,"memory_bytes":670000000,"agent":true,"stoppable":true,"conversation_id":"$BackupsId"},{"pid":12,"name":"postgres","cpu_percent":3.0,"memory_bytes":440000000}],
+"ports":[{"port":5173,"address":"127.0.0.1","pid":13,"process":"vite"}],
+"docker":{"running":9,"containers":[${(1..14).joinToString(",") { """{"name":"service-$it","state":"${if (it <= 9) "running" else "exited"}"}""" }}]}},
 "history":[${(0..59).joinToString(",") { """{"at_ms":${Clock.System.now().toEpochMilliseconds() - (60 - it) * 10_000},"cpu_percent":${25 + (it * 7) % 30}.0}""" }}]}"""
 
 private val BoardIssues = """{"issues":[

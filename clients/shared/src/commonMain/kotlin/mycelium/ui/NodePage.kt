@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import mycelium.Platform
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.ProcessUsage
 import mycelium.api.ResourceSample
 import mycelium.state.AppState
 import mycelium.state.Store
@@ -98,7 +99,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             when (tab) {
                 "Agents" -> AgentsTab(node, state, onOpenConversation)
-                "Resources" -> ResourcesTab(node, state)
+                "Resources" -> ResourcesTab(store, node, state)
                 else -> PortsTab(node, state, platform)
             }
         }
@@ -137,8 +138,10 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun ResourcesTab(node: NodeSummary, state: AppState) {
+private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
     val colors = MyTheme.colors
+    var stopping by remember { mutableStateOf<ProcessUsage?>(null) }
+    var stopped by remember { mutableStateOf<String?>(null) }
     val resources = state.resources[node.id]
     val sample = readableSample(node, resources?.latest) ?: return
 
@@ -146,7 +149,7 @@ private fun ResourcesTab(node: NodeSummary, state: AppState) {
         val cpu = sample.cpuPercent.roundToInt()
         val memoryPercent = percentOf(memoryUsedBytes(sample), sample.memoryTotalBytes)
 
-        Kpi("CPU", "$cpu%", kpiSlot(), caption = "${sample.cores} cores", meterPercent = cpu.coerceIn(0, 100))
+        Kpi("CPU", "$cpu%", kpiSlot(), caption = listOfNotNull("${sample.cores} cores", sample.load.firstOrNull()?.let { "load $it" }).joinToString("  ·  "), meterPercent = cpu.coerceIn(0, 100))
         Kpi(
             "Memory",
             "${formatBytes(memoryUsedBytes(sample))} of ${formatBytes(sample.memoryTotalBytes)}",
@@ -159,37 +162,81 @@ private fun ResourcesTab(node: NodeSummary, state: AppState) {
             Kpi("Disk ${disk.mount}", "${formatBytes(disk.freeBytes)} free", kpiSlot(), caption = "of ${formatBytes(disk.totalBytes)}", meterPercent = 100 - percentOf(disk.freeBytes, disk.totalBytes))
         }
 
-        if (sample.load.size == 3) {
-            Kpi("Load", sample.load[0].toString(), kpiSlot(), caption = "5 min ${sample.load[1]}  ·  15 min ${sample.load[2]}")
+        val docker = sample.docker
+
+        when {
+            docker == null -> Kpi("Docker", "Not available", kpiSlot(), caption = "Docker is not installed on this node, or its service is not running.")
+            docker.containers.isEmpty() -> Kpi("Docker", "No containers", kpiSlot())
+            else -> Kpi("Docker", "${docker.containers.size} ${if (docker.containers.size == 1) "container" else "containers"}", kpiSlot(), caption = "${docker.running} running")
         }
     }
 
     val history = resources?.history.orEmpty()
 
     Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, BlockShape).background(colors.bgPanel, BlockShape).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-        Label("CPU", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-
         val summary = cpuSummary(history)
         val minutes = if (history.size > 1) ((history.last().atMs - history.first().atMs) / 60_000).coerceAtLeast(1) else 0
+
+        Label(if (minutes > 0) "CPU, last $minutes minutes" else "CPU", Modifier.semantics { heading() }, Tokens.Type.Meta, colors.textMuted)
 
         if (summary == null || history.size < 2) {
             Label("The chart appears after a few samples.", style = Tokens.Type.Meta, color = colors.textMuted)
         } else {
-            LineChart(history, "CPU over the last $minutes minutes. $summary.")
-            Label("Last $minutes minutes  ·  $summary", style = Tokens.Type.Meta, color = colors.textMuted)
+            BarChart(history.map { it.cpuPercent.roundToInt().toLong() }, "CPU over the last $minutes minutes. $summary.", ceiling = 100)
+            Label(summary, style = Tokens.Type.Meta, color = colors.textMuted)
         }
     }
+
+    val processNames = sample.processes.map { process -> listOfNotNull(process.command.ifEmpty { process.name }, state.conversationTitle(process.conversationId)).joinToString(" · ") }
 
     DataTable(
         "Busiest processes",
         listOf(TableColumn("Process", 2f), TableColumn("CPU"), TableColumn("Memory")),
-        sample.processes.map { process ->
-            val conversation = state.conversationTitle(process.conversationId)
-
-            listOf(listOfNotNull(process.command.ifEmpty { process.name }, conversation).joinToString(" · "), "${process.cpuPercent.roundToInt()}%", formatBytes(process.memoryBytes))
-        },
+        sample.processes.mapIndexed { index, process -> listOf(processNames[index], "${process.cpuPercent.roundToInt()}%", formatBytes(process.memoryBytes)) },
         "No processes reported.",
+        trailing = { index ->
+            if (sample.processes[index].stoppable) {
+                MyButton({ stopping = sample.processes[index] }, text = "Stop", size = ButtonSize.Sm, muted = true, description = "Stop ${processNames[index]}")
+            }
+        },
+        monospaceColumns = setOf(0),
     )
+
+    stopped?.let { Label(it, color = colors.textMuted) }
+
+    if (sample.docker != null && sample.docker.containers.isNotEmpty()) {
+        DataTable(
+            "Docker containers",
+            listOf(TableColumn("Container", 2f), TableColumn("State")),
+            sample.docker.containers.map { listOf(it.name, it.state) },
+            "No containers on this node.",
+            monospaceColumns = setOf(0),
+        )
+    }
+
+    stopping?.let { process ->
+        val name = process.command.ifEmpty { process.name }
+
+        Dialog(onDismiss = { stopping = null }) {
+            Label("Stop $name?", Modifier.semantics { heading() }, Tokens.Type.Title)
+            Label("Mycelium asks $name (process ${process.pid}) on ${node.name} to shut down. Work it has not saved may be lost, and a process that ignores the request keeps running.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                MyButton({ stopping = null }, text = "Cancel", muted = true)
+                MyButton(
+                    {
+                        stopping = null
+                        store.act {
+                            store.api.stopProcess(node.id, process.pid)
+                            stopped = "Asked $name to stop. It leaves this list once it has exited."
+                        }
+                    },
+                    text = "Stop $name",
+                    variant = ButtonVariant.Danger,
+                )
+            }
+        }
+    }
 }
 
 @Composable

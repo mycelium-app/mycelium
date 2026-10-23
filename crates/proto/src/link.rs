@@ -100,6 +100,12 @@ pub enum NodeToControl {
     Resources {
         sample: ResourceSample,
     },
+    ProcessStopped {
+        request_id: Uuid,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     Pong,
 }
 
@@ -119,10 +125,24 @@ pub struct ProcessUsage {
     pub memory_bytes: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stoppable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DockerContainer {
+    pub name: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DockerUsage {
+    pub running: u32,
+    pub containers: Vec<DockerContainer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -153,6 +173,8 @@ pub struct ResourceSample {
     pub disks: Vec<DiskUsage>,
     pub processes: Vec<ProcessUsage>,
     pub ports: Vec<ListeningPort>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker: Option<DockerUsage>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -318,6 +340,11 @@ pub enum ControlToNode {
     },
     Watch {
         seconds: u32,
+    },
+    StopProcess {
+        request_id: Uuid,
+        pid: u32,
+        name: String,
     },
     Ping,
     Revoked,

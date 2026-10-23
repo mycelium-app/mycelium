@@ -136,7 +136,7 @@ async fn sessions_of(moving: &Moving, node_id: Uuid) -> Vec<Value> {
 
 fn sample(conversation: Uuid) -> ResourceSample {
     let port = |port: u16, owner: Option<Uuid>, cwd: Option<&str>| ListeningPort { port, address: "127.0.0.1".into(), pid: Some(7), process: Some("vite".into()), conversation_id: owner, cwd: cwd.map(str::to_string) };
-    let process = |name: &str, agent: bool, cwd: Option<&str>| ProcessUsage { pid: 9, name: name.into(), command: name.into(), cpu_percent: 1.0, memory_bytes: 1, agent, conversation_id: None, cwd: cwd.map(str::to_string) };
+    let process = |name: &str, agent: bool, cwd: Option<&str>| ProcessUsage { pid: 9, name: name.into(), command: name.into(), cpu_percent: 1.0, memory_bytes: 1, agent, stoppable: false, conversation_id: None, cwd: cwd.map(str::to_string) };
 
     ResourceSample {
         at_ms: 1,
@@ -151,6 +151,7 @@ fn sample(conversation: Uuid) -> ResourceSample {
         disks: vec![],
         processes: vec![process("node", false, Some("/w/acme-org/app/web")), process("claude", true, Some(SOURCE_PATH)), process("postgres", false, Some("/var/lib"))],
         ports: vec![port(5173, Some(conversation), Some(SOURCE_PATH)), port(3000, None, Some("/w/acme-org/app/web")), port(22, None, None)],
+        docker: None,
     }
 }
 

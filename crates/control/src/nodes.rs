@@ -11,6 +11,7 @@ use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
 const WATCH_LEASE_SECONDS: u32 = 30;
+const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<NodeSummary>>> {
     Ok(Json(node_summaries(&state, None).await?))
@@ -87,6 +88,34 @@ pub async fn watch(State(state): State<AppState>, _user: AuthUser, Path(id): Pat
     }
 
     Ok(Json(state.hub.resources_of(id)))
+}
+
+pub async fn stop_process(State(state): State<AppState>, _user: AuthUser, Path((id, pid)): Path<(Uuid, u32)>) -> ApiResult<StatusCode> {
+    let process = state.hub.resources_of(id).latest.and_then(|sample| sample.processes.into_iter().find(|process| process.pid == pid));
+    let Some(process) = process else {
+        return Err(ApiError::not_found("That process"));
+    };
+
+    if !process.stoppable {
+        return Err(ApiError::conflict("process_not_stoppable", format!("{} does not belong to a Mycelium conversation or to the node user, so Mycelium cannot stop it.", process.name)));
+    }
+
+    let Some((request_id, answered)) = state.hub.request_stop(id, pid, process.name) else {
+        return Err(node_offline());
+    };
+
+    let answer = tokio::time::timeout(STOP_TIMEOUT, answered).await.ok().and_then(Result::ok);
+    state.hub.forget_stop_request(request_id);
+
+    let Some(answer) = answer else {
+        return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "stop_timeout", "The node did not answer in time. Try again in a moment."));
+    };
+
+    if !answer.ok {
+        return Err(ApiError::conflict("stop_failed", answer.error.unwrap_or_else(|| "The node could not stop that process.".into())));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn start_login(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<StartLoginRequest>) -> ApiResult<Json<StartLoginResponse>> {

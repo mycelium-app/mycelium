@@ -1,7 +1,7 @@
 mod common;
 
 use common::Server;
-use mycelium_proto::link::{ControlToNode, ListeningPort, NodeToControl, ResourceSample};
+use mycelium_proto::link::{ControlToNode, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
 
@@ -19,6 +19,7 @@ fn sample(at_ms: i64, cpu_percent: f32) -> ResourceSample {
         disks: vec![],
         processes: vec![],
         ports: vec![ListeningPort { port: 3000, address: "0.0.0.0".into(), pid: None, process: Some("node".into()), conversation_id: None, cwd: None }],
+        docker: None,
     }
 }
 
@@ -253,5 +254,64 @@ async fn watching_an_offline_or_unknown_node_is_refused_with_a_reason() {
     assert_eq!((status, body["error"].as_str()), (409, Some("node_offline")));
 
     let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/watch", uuid::Uuid::new_v4()))).await;
+    assert_eq!((status, body["error"].as_str()), (404, Some("not_found")));
+}
+
+async fn node_reporting_a_process(server: &Server, stoppable: bool) -> common::NodeLink {
+    let mut sample = sample(1000, 10.0);
+    sample.processes = vec![ProcessUsage { pid: 42, name: "gradle".into(), command: "gradle".into(), cpu_percent: 5.0, memory_bytes: 1, agent: false, stoppable, conversation_id: None, cwd: None }];
+    let mut link = server.online_node("laptop").await;
+    link.send(NodeToControl::Resources { sample }).await;
+    common::eventually("the sample", || async { (server.user.json(server.user.post(&format!("/api/v1/nodes/{}/watch", link.id))).await.1["latest"] != json!(null)).then_some(()) }).await;
+
+    link
+}
+
+async fn answer_stop(link: &mut common::NodeLink, ok: bool, error: Option<&str>) -> (u32, String) {
+    loop {
+        if let ControlToNode::StopProcess { request_id, pid, name } = link.next().await {
+            link.send(NodeToControl::ProcessStopped { request_id, ok, error: error.map(str::to_string) }).await;
+
+            return (pid, name);
+        }
+    }
+}
+
+async fn stop(server: &Server, node: uuid::Uuid, pid: u32) -> (u16, serde_json::Value) {
+    server.user.json(server.user.post(&format!("/api/v1/nodes/{node}/processes/{pid}/stop"))).await
+}
+
+#[tokio::test]
+async fn stopping_a_process_asks_its_node_to_stop_it_by_the_name_it_reported() {
+    let server = Server::start().await;
+    let mut link = node_reporting_a_process(&server, true).await;
+    let node = link.id;
+
+    let ((status, body), asked) = tokio::join!(stop(&server, node, 42), answer_stop(&mut link, true, None));
+
+    assert_eq!(status, 204, "{body}");
+    assert_eq!(asked, (42, "gradle".to_string()));
+}
+
+#[tokio::test]
+async fn a_process_the_node_refuses_to_stop_reports_why() {
+    let server = Server::start().await;
+    let mut link = node_reporting_a_process(&server, true).await;
+    let node = link.id;
+
+    let ((status, body), _) = tokio::join!(stop(&server, node, 42), answer_stop(&mut link, false, Some("gradle has already exited.")));
+
+    assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (409, Some("stop_failed"), Some("gradle has already exited.")));
+}
+
+#[tokio::test]
+async fn a_process_that_is_not_stoppable_or_not_reported_is_never_sent_to_the_node() {
+    let server = Server::start().await;
+    let link = node_reporting_a_process(&server, false).await;
+
+    let (status, body) = stop(&server, link.id, 42).await;
+    assert_eq!((status, body["error"].as_str()), (409, Some("process_not_stoppable")));
+
+    let (status, body) = stop(&server, link.id, 7).await;
     assert_eq!((status, body["error"].as_str()), (404, Some("not_found")));
 }

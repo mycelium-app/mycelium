@@ -46,6 +46,7 @@ const SILENT_ROUTES: &[&str] = &[
     "DELETE /api/v1/sessions/{id}",
     "POST /api/v1/nodes/{id}/logins",
     "POST /api/v1/nodes/{id}/watch",
+    "POST /api/v1/nodes/{id}/processes/{pid}/stop",
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",
     "POST /api/v1/conversations/{id}/terminal",

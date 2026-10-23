@@ -62,6 +62,11 @@ pub struct GitAnswer {
     pub error: Option<String>,
 }
 
+pub struct ProcessAnswer {
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -71,6 +76,7 @@ pub struct Hub {
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
+    stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
@@ -200,6 +206,39 @@ impl Hub {
 
     pub fn forget_git_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.git_requests.lock() {
+            requests.remove(&request_id);
+        }
+    }
+
+    pub fn request_stop(&self, node_id: Uuid, pid: u32, name: String) -> Option<(Uuid, oneshot::Receiver<ProcessAnswer>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.stop_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::StopProcess { request_id, pid, name }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_stop_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_stop(&self, node_id: Uuid, request_id: Uuid, answer: ProcessAnswer) {
+        let waiting = self.stop_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    pub fn forget_stop_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.stop_requests.lock() {
             requests.remove(&request_id);
         }
     }

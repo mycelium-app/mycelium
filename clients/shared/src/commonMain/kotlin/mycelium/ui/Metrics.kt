@@ -21,10 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -32,7 +28,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import mycelium.api.CpuPoint
 
 data class TableColumn(val title: String, val weight: Float = 1f)
 
@@ -88,40 +83,13 @@ fun Meter(percent: Int, description: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun LineChart(points: List<CpuPoint>, description: String, modifier: Modifier = Modifier) {
-    val colors = MyTheme.colors
-
-    Canvas(modifier.fillMaxWidth().height(ChartHeight).clearAndSetSemantics { contentDescription = description }) {
-        drawLine(colors.border, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1f)
-        drawLine(colors.border, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 1f)
-
-        if (points.size < 2) {
-            return@Canvas
-        }
-
-        val first = points.first().atMs
-        val span = (points.last().atMs - first).coerceAtLeast(1).toFloat()
-        val path = Path()
-
-        points.forEachIndexed { index, point ->
-            val x = (point.atMs - first) / span * size.width
-            val y = size.height - (point.cpuPercent.toFloat().coerceIn(0f, 100f) / 100f * size.height)
-
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-
-        drawPath(path, colors.accent, style = Stroke(width = 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-    }
-}
-
-@Composable
-fun BarChart(values: List<Long>, description: String, modifier: Modifier = Modifier) {
+fun BarChart(values: List<Long>, description: String, modifier: Modifier = Modifier, ceiling: Long? = null) {
     val colors = MyTheme.colors
 
     Canvas(modifier.fillMaxWidth().height(ChartHeight).clearAndSetSemantics { contentDescription = description }) {
         drawLine(colors.border, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 1f)
 
-        val peak = values.maxOrNull()?.coerceAtLeast(1L) ?: return@Canvas
+        val peak = ceiling ?: values.maxOrNull()?.coerceAtLeast(1L) ?: return@Canvas
         val slot = size.width / values.size
         val gap = if (slot > 6f) 2f else 0f
 
@@ -143,6 +111,7 @@ fun DataTable(
     onRow: ((Int) -> Unit)? = null,
     rowDescription: (Int) -> String = { rows[it].joinToString(", ") },
     trailing: (@Composable (Int) -> Unit)? = null,
+    monospaceColumns: Set<Int> = emptySet(),
 ) {
     val colors = MyTheme.colors
 
@@ -177,7 +146,13 @@ fun DataTable(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 columns.forEachIndexed { position, column ->
-                    Label(cells.getOrElse(position) { "" }, Modifier.weight(column.weight), color = if (position == 0) colors.text else colors.textMuted, maxLines = 1)
+                    Label(
+                        cells.getOrElse(position) { "" },
+                        Modifier.weight(column.weight),
+                        if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui,
+                        if (position == 0) colors.text else colors.textMuted,
+                        maxLines = 1,
+                    )
                 }
 
                 if (trailing != null) {

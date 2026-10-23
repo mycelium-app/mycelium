@@ -35,11 +35,12 @@ private const val Conversation = """[{"id":"c1","owner":"u","node_id":"n1","agen
 private const val Sample = """{"at_ms":12000,"available":true,"cpu_percent":38.4,"cores":8,"load":[0.52,0.4,0.31],
 "memory_total_bytes":32000000000,"memory_available_bytes":10600000000,"swap_total_bytes":0,"swap_free_bytes":0,
 "disks":[{"mount":"/","total_bytes":140000000000,"free_bytes":13000000000}],
-"processes":[{"pid":10,"name":"gradle","command":"gradle","cpu_percent":212.0,"memory_bytes":3100000000},
+"processes":[{"pid":10,"name":"gradle","command":"gradle","cpu_percent":212.0,"memory_bytes":3100000000,"stoppable":true},
 {"pid":11,"name":"node","command":"claude-agent-acp","cpu_percent":14.0,"memory_bytes":640000000,"agent":true,"conversation_id":"c1"}],
 "ports":[{"port":3000,"address":"0.0.0.0","pid":11,"process":"node","conversation_id":"c1","cwd":"/work/backups"},
 {"port":5432,"address":"0.0.0.0","pid":12,"process":"postgres"},
-{"port":8080,"address":"127.0.0.1","pid":13,"process":"dev"}]}"""
+{"port":8080,"address":"127.0.0.1","pid":13,"process":"dev"}],
+"docker":{"running":2,"containers":[{"name":"db","state":"running"},{"name":"cache","state":"running"},{"name":"old-web","state":"exited"}]}}"""
 
 private object NodePagePlatform : Platform {
     var opened: String? = null
@@ -62,10 +63,20 @@ class NodePageTest {
     @get:Rule
     val rule = createComposeRule()
 
+    private val stopped = mutableListOf<String>()
+
     private fun showNodes(nodes: String, watched: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
+        stopped.clear()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            if (request.method == HttpMethod.Post && path.endsWith("/stop")) {
+                stopped += path
+
+                return@MockEngine respond("", HttpStatusCode.NoContent)
+            }
+
             val body = when {
                 request.method == HttpMethod.Post && path.endsWith("/watch") -> watched
                 path.endsWith("/nodes") -> nodes
@@ -108,10 +119,70 @@ class NodePageTest {
         rule.onNodeWithText("38%").assertExists()
         rule.onNodeWithText("21.4 GB of 32 GB").assertExists()
         rule.onNodeWithText("13 GB free").assertExists()
-        rule.onNodeWithText("0.52").assertExists()
+        rule.onNodeWithText("8 cores  ·  load 0.52").assertExists()
         rule.onNodeWithText("212%").assertExists()
         rule.onNodeWithText("claude-agent-acp · Backups").assertExists()
         rule.onNodeWithContentDescription("CPU over the last 5 minutes. Average 40%, peak 70%.").assertExists()
+    }
+
+    @Test
+    fun theDockerCardCountsContainersAndListsEachWithItsState() {
+        showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
+
+        openNode("Resources")
+
+        rule.onNodeWithText("3 containers").assertExists()
+        rule.onNodeWithText("2 running").assertExists()
+        rule.onNodeWithText("old-web").assertExists()
+        rule.onNodeWithText("exited").assertExists()
+    }
+
+    @Test
+    fun aNodeWithoutDockerSaysSoAndTheRestOfThePageStillShows() {
+        showNodes(nodeJson(), """{"latest":${Sample.substringBefore(",\n\"docker\"")}},"history":[]}""")
+
+        openNode("Resources")
+
+        rule.onNodeWithText("Not available").assertExists()
+        rule.onNodeWithText("Docker is not installed on this node, or its service is not running.").assertExists()
+        rule.onNodeWithText("38%").assertExists()
+    }
+
+    @Test
+    fun stoppingAProcessNamesItInAConfirmationAndOnlyThenAsksTheNode() {
+        showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
+        openNode("Resources")
+
+        rule.onNodeWithContentDescription("Stop gradle").performClick()
+        rule.onNodeWithText("Stop gradle?").assertExists()
+        assertEquals(emptyList<String>(), stopped)
+
+        rule.onNodeWithText("Stop gradle").performClick()
+        rule.waitForIdle()
+
+        assertEquals(listOf("/api/v1/nodes/n1/processes/10/stop"), stopped)
+        rule.onNodeWithText("Asked gradle to stop. It leaves this list once it has exited.").assertExists()
+    }
+
+    @Test
+    fun cancellingTheConfirmationStopsNothing() {
+        showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
+        openNode("Resources")
+
+        rule.onNodeWithContentDescription("Stop gradle").performClick()
+        rule.onNodeWithText("Cancel").performClick()
+        rule.waitForIdle()
+
+        assertEquals(emptyList<String>(), stopped)
+        assertEquals(0, rule.onAllNodesWithText("Stop gradle?").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aProcessTheNodeDoesNotOwnHasNoStopAction() {
+        showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
+        openNode("Resources")
+
+        assertEquals(1, rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Stop", substring = true)).fetchSemanticsNodes().size)
     }
 
     @Test

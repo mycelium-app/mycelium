@@ -1,10 +1,13 @@
-use mycelium_proto::link::{DiskUsage, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
+use mycelium_proto::link::{DiskUsage, DockerContainer, DockerUsage, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::{Pid, geteuid};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -14,6 +17,7 @@ const CLOCK_TICKS_PER_SECOND: f32 = 100.0;
 const BUSIEST_PROCESSES: usize = 8;
 const AGENT_PROGRAMS: &[&str] = &["claude-agent-acp", "codex-acp", "claude", "codex"];
 const LISTEN_STATE: &str = "0A";
+const DOCKER_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Memory {
@@ -117,6 +121,20 @@ fn decode_address(hex: &str) -> Option<String> {
     }
 }
 
+pub fn parse_status_uid(status: &str) -> Option<u32> {
+    status.lines().find_map(|line| line.strip_prefix("Uid:")?.split_whitespace().nth(1)?.parse().ok())
+}
+
+pub fn parse_docker_containers(text: &str) -> Vec<DockerContainer> {
+    text.lines()
+        .filter_map(|line| {
+            let (name, state) = line.split_once('|')?;
+
+            Some(DockerContainer { name: name.trim().to_string(), state: state.trim().to_string() }).filter(|container| !container.name.is_empty())
+        })
+        .collect()
+}
+
 pub fn keeper_conversation(arguments: &[&str]) -> Option<Uuid> {
     let keeper = arguments.iter().position(|argument| *argument == "keeper")?;
     let directory = arguments.get(keeper..)?.windows(2).find(|pair| pair[0] == "--dir")?[1];
@@ -136,6 +154,7 @@ struct Seen {
     agent: bool,
     keeper_of: Option<Uuid>,
     cwd: Option<String>,
+    uid: Option<u32>,
 }
 
 pub struct Sampler {
@@ -143,16 +162,24 @@ pub struct Sampler {
     disks: Vec<PathBuf>,
     previous_cpu: Option<(u64, u64)>,
     previous_ticks: HashMap<u32, u64>,
+    docker_program: PathBuf,
+    own_uid: u32,
 }
 
 impl Sampler {
     pub fn new(proc_root: PathBuf, disks: Vec<PathBuf>) -> Sampler {
         let previous_cpu = std::fs::read_to_string(proc_root.join("stat")).ok().as_deref().and_then(parse_cpu_times);
 
-        let mut sampler = Sampler { proc_root, disks, previous_cpu, previous_ticks: HashMap::new() };
+        let mut sampler = Sampler { proc_root, disks, previous_cpu, previous_ticks: HashMap::new(), docker_program: PathBuf::from("docker"), own_uid: geteuid().as_raw() };
         sampler.previous_ticks = sampler.read_processes().into_iter().map(|(pid, process)| (pid, process.stat.ticks)).collect();
 
         sampler
+    }
+
+    pub fn with_docker_program(mut self, program: PathBuf) -> Sampler {
+        self.docker_program = program;
+
+        self
     }
 
     pub fn available(&self) -> bool {
@@ -174,6 +201,7 @@ impl Sampler {
                 disks: Vec::new(),
                 processes: Vec::new(),
                 ports: Vec::new(),
+                docker: None,
             };
         }
 
@@ -189,6 +217,7 @@ impl Sampler {
         let seen = self.read_processes();
         let owners = self.listening_owners(&seen);
         let conversation_of = |pid: u32| conversation_of(&seen, pid);
+        let own_uid = self.own_uid;
 
         let mut ticks = HashMap::new();
         let mut processes: Vec<ProcessUsage> = seen
@@ -198,6 +227,8 @@ impl Sampler {
                 let spent = process.stat.ticks.saturating_sub(self.previous_ticks.get(pid).copied().unwrap_or(process.stat.ticks));
                 let cpu_percent = if elapsed_seconds > 0.0 { spent as f32 / CLOCK_TICKS_PER_SECOND / elapsed_seconds * 100.0 } else { 0.0 };
 
+                let conversation_id = conversation_of(*pid);
+
                 ProcessUsage {
                     pid: *pid,
                     name: process.stat.name.clone(),
@@ -205,7 +236,8 @@ impl Sampler {
                     cpu_percent,
                     memory_bytes: self.resident_bytes(*pid),
                     agent: process.agent,
-                    conversation_id: conversation_of(*pid),
+                    stoppable: conversation_id.is_some() || process.uid == Some(own_uid),
+                    conversation_id,
                     cwd: process.cwd.clone(),
                 }
             })
@@ -253,7 +285,45 @@ impl Sampler {
             disks: self.disks.iter().filter_map(|mount| disk_usage(mount)).collect(),
             processes,
             ports,
+            docker: self.docker(),
         }
+    }
+
+    pub fn stop(&self, pid: u32, name: &str) -> Result<(), String> {
+        let seen = self.read_processes();
+        let Some(process) = seen.get(&pid) else {
+            return Err(format!("{name} has already exited."));
+        };
+
+        if process.stat.name != name {
+            return Err(format!("Process {pid} is no longer {name}. Reload the page and try again."));
+        }
+
+        if conversation_of(&seen, pid).is_none() && process.uid != Some(self.own_uid) {
+            return Err(format!("{name} belongs to another user, so Mycelium cannot stop it."));
+        }
+
+        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|error| format!("Could not stop {name}: {error}."))
+    }
+
+    fn docker(&self) -> Option<DockerUsage> {
+        let program = self.docker_program.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            let output = Command::new(program).args(["ps", "--all", "--format", "{{.Names}}|{{.State}}"]).stdin(Stdio::null()).stderr(Stdio::null()).output();
+            let _ = sender.send(output);
+        });
+
+        let output = receiver.recv_timeout(DOCKER_TIMEOUT).ok()?.ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let containers = parse_docker_containers(&String::from_utf8_lossy(&output.stdout));
+
+        Some(DockerUsage { running: containers.iter().filter(|container| container.state == "running").count() as u32, containers })
     }
 
     fn read(&self, relative: &str) -> String {
@@ -280,7 +350,9 @@ impl Sampler {
             let program = arguments.first().and_then(|first| Path::new(first).file_name()).and_then(|name| name.to_str()).unwrap_or(&stat.name).to_string();
             let cwd = std::fs::read_link(self.proc_root.join(pid.to_string()).join("cwd")).ok().map(|path| path.to_string_lossy().into_owned());
 
-            seen.insert(pid, Seen { agent: is_agent(&arguments), keeper_of: keeper_conversation(&arguments), program, cwd, stat });
+            let uid = parse_status_uid(&self.read(&format!("{pid}/status")));
+
+            seen.insert(pid, Seen { agent: is_agent(&arguments), keeper_of: keeper_conversation(&arguments), program, cwd, uid, stat });
         }
 
         seen
@@ -367,6 +439,10 @@ pub struct Watcher {
 impl Watcher {
     pub fn new(out: mpsc::UnboundedSender<NodeToControl>, proc_root: PathBuf, disks: Vec<PathBuf>, interval: Duration) -> Watcher {
         Watcher { out, proc_root, disks, interval, deadline: Arc::new(Mutex::new(Instant::now())), sampling: Arc::new(AtomicBool::new(false)) }
+    }
+
+    pub fn proc_root(&self) -> &Path {
+        &self.proc_root
     }
 
     pub fn extend(&self, lease: Duration) -> Option<JoinHandle<()>> {

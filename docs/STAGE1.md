@@ -159,7 +159,8 @@ Device codes (one flow for nodes and for desktop clients):
 Nodes:
 - `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins. A node lists the conversations whose agent session is running on it as `sessions`, republished when one starts or closes. A node and each agent carry `update_available` (the newer version) only when the control plane has seen a newer release; a failed check keeps the last known version.
 - `POST /api/v1/nodes/{id}/drain` `{draining}`, `DELETE /api/v1/nodes/{id}` revokes.
-- `POST /api/v1/nodes/{id}/watch` → `{latest, history}`: asks the node to sample for the next 30 seconds and returns its newest sample (`null` until one arrives) and the last 200 CPU points `[{at_ms, cpu_percent}]`. A client calls it when a node's page opens and every 15 seconds while the page stays open; the samples follow as `node_resources`. 404 for an unknown node, 409 `node_offline`. A sample is `{at_ms, available, cpu_percent, cores, load: [1, 5, 15 minutes], memory_total_bytes, memory_available_bytes, swap_total_bytes, swap_free_bytes, disks: [{mount, total_bytes, free_bytes}], processes: [{pid, name, command, cpu_percent, memory_bytes, agent, conversation_id?, cwd?}], ports: [{port, address, pid?, process?, conversation_id?, cwd?}]}`. `available` is false on a node that cannot read `/proc` (only Linux is read); `cpu_percent` of a process counts one core as 100. `command` is the program name only, never its arguments.
+- `POST /api/v1/nodes/{id}/watch` → `{latest, history}`: asks the node to sample for the next 30 seconds and returns its newest sample (`null` until one arrives) and the last 200 CPU points `[{at_ms, cpu_percent}]`. A client calls it when a node's page opens and every 15 seconds while the page stays open; the samples follow as `node_resources`. 404 for an unknown node, 409 `node_offline`. A sample is `{at_ms, available, cpu_percent, cores, load: [1, 5, 15 minutes], memory_total_bytes, memory_available_bytes, swap_total_bytes, swap_free_bytes, disks: [{mount, total_bytes, free_bytes}], processes: [{pid, name, command, cpu_percent, memory_bytes, agent, stoppable, conversation_id?, cwd?}], ports: [{port, address, pid?, process?, conversation_id?, cwd?}], docker?: {running, containers: [{name, state}]}}`. `stoppable` is true for a process that belongs to a Mycelium conversation or that the node user owns. `docker` comes from `docker ps --all` run without a shell (so `DOCKER_HOST` and the default socket apply) and is absent when the CLI is missing, fails or takes over 3 seconds, which never fails the sample. `available` is false on a node that cannot read `/proc` (only Linux is read); `cpu_percent` of a process counts one core as 100. `command` is the program name only, never its arguments.
+- `POST /api/v1/nodes/{id}/processes/{pid}/stop` → 204: asks the node to send SIGTERM to a process from its latest sample. 404 when the sample does not hold the pid, 409 `process_not_stoppable` when `stoppable` is false, 409 `node_offline`, 409 `stop_failed` with the node's reason (the process has exited, is no longer the named one, or belongs to another user), 504 `stop_timeout` after 10 seconds. The node re-checks the name and the ownership against `/proc` before signalling, so a reused pid is never stopped.
 - `POST /api/v1/nodes/{id}/logins` `{agent, method}` → `{login_id}`; starts the agent's own sign-in on
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to
   it; `DELETE /api/v1/logins/{login_id}` stops it.
@@ -346,7 +347,7 @@ Silent on purpose, because no client shows them: user, web session and client to
 `last_used_at`), `nodes.last_seen_at` refreshed by `pong` (clients show `online`, which is published),
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
-`POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /nodes/{id}/watch` (the samples follow as `node_resources`), `POST /logins/{id}/input` and
+`POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /nodes/{id}/watch` (the samples follow as `node_resources`), `POST /nodes/{id}/processes/{pid}/stop` (the process leaves the next `node_resources` sample), `POST /logins/{id}/input` and
 `POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
@@ -395,6 +396,7 @@ Control plane to node:
 | `ack` | `conversation_id, seq` |
 | `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?, instructions?` |
 | `instructions` | `revision, global?` |
+| `process_stopped` | `request_id, ok, error?` (the answer to `stop_process`) |
 | `prompt` | `conversation_id, prompt_id, text` |
 | `cancel` | `conversation_id` |
 | `permission_response` | `conversation_id, request_id, outcome` (ACP `RequestPermissionOutcome`) |
@@ -402,6 +404,7 @@ Control plane to node:
 | `close_session` | `conversation_id` |
 | `start_login` | `login_id, agent, method, account?` |
 | `login_input` | `login_id, text` |
+| `stop_process` | `request_id, pid, name` (send SIGTERM to the process if it is still called `name` and is stoppable) |
 | `stop_login` | `login_id` |
 | `start_terminal` | `terminal_id, conversation_id, cwd, cols, rows` |
 | `terminal_input` | `terminal_id, data` (base64 bytes) |
