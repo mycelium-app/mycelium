@@ -24,6 +24,7 @@ mod link;
 mod mcp;
 mod mcp_client;
 mod memories;
+mod message_proposals;
 mod model_providers;
 mod moves;
 mod nodes;
@@ -116,6 +117,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/logins/{login_id}", delete(nodes::stop_login))
         .route("/api/v1/conversations", get(conversations::list).post(conversations::create))
         .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch).delete(conversations::delete))
+        .route("/api/v1/conversations/{id}/close", post(conversations::close))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
@@ -193,6 +195,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-proposals", get(instruction_proposals::list))
         .route("/api/v1/instruction-proposals/{id}/approve", post(instruction_proposals::approve))
         .route("/api/v1/instruction-proposals/{id}/decline", post(instruction_proposals::decline))
+        .route("/api/v1/message-proposals", get(message_proposals::list))
+        .route("/api/v1/message-proposals/{id}/approve", post(message_proposals::approve))
+        .route("/api/v1/message-proposals/{id}/decline", post(message_proposals::decline))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))

@@ -318,7 +318,7 @@ async fn fail_conversations_without_a_session(state: &AppState, node_id: Uuid, l
             continue;
         }
 
-        let message = "The agent stopped while this conversation was running, so the last message may not have been handled. Start a new conversation to continue.";
+        let message = "The agent stopped while this conversation was running, so the last message may not have been handled. Send a message to carry on; it resumes from where it stopped.";
         let event = append_event(&mut tx, conversation_id, EventKind::Error, &json!({"message": message}), None).await?;
         let updated = set_status(&mut tx, conversation_id, ConversationStatus::Failed).await?;
         tx.commit().await?;

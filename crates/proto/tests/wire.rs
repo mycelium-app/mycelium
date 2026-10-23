@@ -335,7 +335,10 @@ fn request_bodies_treat_optional_fields_as_optional() {
     assert_eq!(config.mode.as_deref(), Some("plan"));
 
     let query: EventsQuery = serde_json::from_value(json!({})).unwrap();
-    assert_eq!((query.after, query.limit), (0, 500));
+    assert_eq!((query.after, query.limit, query.before), (0, 500, None));
+
+    let older: EventsQuery = serde_json::from_value(json!({"before": 40})).unwrap();
+    assert_eq!(older.before, Some(40));
 }
 
 #[test]

@@ -122,6 +122,97 @@ async fn events_are_paged_by_seq() {
     assert_eq!(numbers, vec![3, 4]);
 }
 
+async fn seed_turns(server: &Server, id: Uuid, turns: i64, updates_per_turn: i64) {
+    let mut seq = 100;
+
+    for turn in 0..turns {
+        seq += 1;
+        sqlx::query("insert into events (conversation_id, seq, kind, payload) values ($1, $2, 'user_message', $3)")
+            .bind(id)
+            .bind(seq)
+            .bind(json!({"text": format!("turn {turn}")}))
+            .execute(&server.pool)
+            .await
+            .unwrap();
+
+        for _ in 0..updates_per_turn {
+            seq += 1;
+            sqlx::query("insert into events (conversation_id, seq, kind, payload) values ($1, $2, 'acp_update', $3)")
+                .bind(id)
+                .bind(seq)
+                .bind(json!({}))
+                .execute(&server.pool)
+                .await
+                .unwrap();
+        }
+    }
+}
+
+async fn events_before(server: &Server, id: Uuid, before: i64, limit: i64) -> Vec<(i64, String)> {
+    let (_, page) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/events?before={before}&limit={limit}"))).await;
+
+    page.as_array().unwrap().iter().map(|event| (event["seq"].as_i64().unwrap(), event["kind"].as_str().unwrap().to_string())).collect()
+}
+
+#[tokio::test]
+async fn the_newest_events_page_is_ascending_and_starts_at_a_user_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    seed_turns(&server, id, 10, 4).await;
+
+    let page = events_before(&server, id, i64::MAX, 12).await;
+
+    let seqs: Vec<i64> = page.iter().map(|(seq, _)| *seq).collect();
+    assert!(seqs.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(page[0].1, "user_message");
+    assert_eq!(*seqs.last().unwrap(), 150);
+    assert!(page.len() >= 12);
+}
+
+#[tokio::test]
+async fn paging_backwards_from_the_oldest_seq_has_no_gap_and_no_overlap() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    seed_turns(&server, id, 10, 4).await;
+
+    let newest = events_before(&server, id, i64::MAX, 12).await;
+    let previous = events_before(&server, id, newest[0].0, 12).await;
+
+    assert_eq!(previous.last().unwrap().0 + 1, newest[0].0);
+    assert_eq!(previous[0].1, "user_message");
+}
+
+#[tokio::test]
+async fn a_conversation_shorter_than_a_page_is_returned_whole_before_any_seq() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    seed_turns(&server, id, 2, 2).await;
+
+    let page = events_before(&server, id, i64::MAX, 500).await;
+    let all = server.events(id).await;
+
+    assert_eq!(page.len(), all.len());
+    assert_eq!(page[0].0, all[0]["seq"].as_i64().unwrap());
+
+    let beyond_the_start = events_before(&server, id, page[0].0, 500).await;
+    assert!(beyond_the_start.is_empty());
+}
+
+#[tokio::test]
+async fn events_before_a_seq_of_another_persons_conversation_is_not_found() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let other = server.second_user("eve@example.com").await;
+
+    let (status, _) = other.json(other.get(&format!("/api/v1/conversations/{id}/events?before=100"))).await;
+
+    assert_eq!(status, 404);
+}
+
 #[tokio::test]
 async fn a_permission_request_asks_for_input_and_the_answer_goes_back_to_the_agent() {
     let server = Server::start().await;
@@ -631,6 +722,55 @@ async fn sending_a_message_to_an_archived_conversation_unarchives_it() {
     assert_eq!(active[0]["archived_at"], json!(null));
 }
 
+async fn close(server: &Server, id: Uuid) -> u16 {
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/close"))).await.0
+}
+
+#[tokio::test]
+async fn closing_a_working_conversation_ends_its_agent_and_leaves_it_done_and_not_archived() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+    assert_eq!(status_of(&server, id).await, "working");
+
+    assert_eq!(close(&server, id).await, 204);
+
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+    assert_eq!(status_of(&server, id).await, "done");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    assert!(listed.as_array().unwrap().iter().any(|conversation| conversation["id"] == id.to_string()));
+}
+
+#[tokio::test]
+async fn a_message_after_closing_a_working_conversation_resumes_the_session() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+    close(&server, id).await;
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+
+    prompt(&server, id, "carry on").await;
+
+    link.expect_start_session().await;
+    assert_eq!(link.expect_prompt().await.1, "carry on");
+}
+
+#[tokio::test]
+async fn closing_an_idle_conversation_succeeds_and_tells_the_node_nothing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    assert_eq!(status_of(&server, id).await, "done");
+
+    assert_eq!(close(&server, id).await, 204);
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+    assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
+    assert_eq!(status_of(&server, id).await, "done");
+}
+
 #[tokio::test]
 async fn a_conversation_belongs_to_its_owner() {
     let server = Server::start().await;
@@ -643,6 +783,7 @@ async fn a_conversation_belongs_to_its_owner() {
         other.get(&format!("/api/v1/conversations/{id}")),
         other.get(&format!("/api/v1/conversations/{id}/events")),
         other.post(&format!("/api/v1/conversations/{id}/cancel")),
+        other.post(&format!("/api/v1/conversations/{id}/close")),
         other.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "hi"})),
     ] {
         assert_eq!(other.json(request).await.0, 404);

@@ -2,6 +2,7 @@ use crate::auth::AuthNode;
 use crate::error::ApiResult;
 use crate::instruction_proposals;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
+use crate::message_proposals;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::state::AppState;
 use crate::tasks;
@@ -18,6 +19,8 @@ use uuid::Uuid;
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
 const DEFAULT_RECALL_LIMIT: i64 = 5;
 const MAX_RECALL_LIMIT: i64 = 20;
+const DEFAULT_FIND_LIMIT: i64 = 10;
+const MAX_FIND_LIMIT: i64 = 50;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
@@ -162,6 +165,30 @@ pub fn tool_definitions() -> Value {
                     "layer": {"type": "string", "description": "global, or the name of a group. Defaults to this conversation's group, or global."},
                 },
                 "required": ["text", "base_revision", "reason"],
+            },
+        },
+        {
+            "name": "find_conversations",
+            "description": "Look up the person's other conversations, most recent first, to find the one to message with send_to_conversation. Archived conversations are left out. It only reads and needs no approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Words that must each appear in the conversation's title, project name or folder."},
+                    "limit": {"type": "number", "description": "How many conversations to return. Defaults to 10."},
+                },
+            },
+        },
+        {
+            "name": "send_to_conversation",
+            "description": "Propose a message to send to another of the person's conversations. It never sends directly: it waits for the person to approve it in a card in this conversation, and only then is the message queued in the other conversation, prefixed with the title of this one. Find the target with find_conversations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "conversation": {"type": "string", "description": "The id of the target conversation, or its exact title."},
+                    "message": {"type": "string", "description": "The message to send. Write it so it makes sense without this conversation."},
+                    "reason": {"type": "string", "description": "A short reason the person should approve it."},
+                },
+                "required": ["conversation", "message", "reason"],
             },
         },
     ])
@@ -423,7 +450,58 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions or propose_instructions_edit."),
+                Some("find_conversations") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("The conversations belong to a person, and this call did not come from one of them.", true)));
+                    };
+                    let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_FIND_LIMIT).clamp(1, MAX_FIND_LIMIT);
+                    let words: Vec<String> = arguments.get("query").and_then(Value::as_str).unwrap_or_default().split_whitespace().map(String::from).collect();
+                    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, String, chrono::DateTime<chrono::Utc>)>(
+                        "select c.id, c.title, p.name, coalesce(n.name, ''), c.agent, c.status, c.updated_at
+                         from conversations c left join projects p on p.id = c.project_id left join nodes n on n.id = c.node_id
+                         where c.owner = (select owner from conversations where id = $1) and c.archived_at is null
+                           and not exists (select 1 from unnest($2::text[]) as word where not (strpos(lower(c.title), lower(word)) > 0 or strpos(lower(coalesce(p.name, '')), lower(word)) > 0 or strpos(lower(c.cwd), lower(word)) > 0))
+                         order by c.updated_at desc, c.id limit $3",
+                    )
+                    .bind(conversation_id)
+                    .bind(&words)
+                    .bind(limit)
+                    .fetch_all(&state.pool)
+                    .await?;
+
+                    if rows.is_empty() {
+                        reply(&id, tool_text("No conversations match that query.", false))
+                    } else {
+                        let lines: Vec<String> = rows
+                            .iter()
+                            .map(|(found, title, project, node_name, agent, status, updated_at)| {
+                                format!("{found}: {} (project {}, node {node_name}, agent {agent}, status {status}, last activity {})", message_proposals::label(*found, title).replace('\n', " "), project.as_deref().unwrap_or("none"), updated_at.to_rfc3339())
+                            })
+                            .collect();
+
+                        reply(&id, tool_text(&lines.join("\n"), false))
+                    }
+                }
+                Some("send_to_conversation") => {
+                    let field = |name: &str| arguments.get(name).and_then(Value::as_str).map(str::trim);
+                    let (Some(target), Some(message), Some(reason)) = (field("conversation"), field("message"), field("reason")) else {
+                        return Ok(failure(&id, INVALID_PARAMS, "send_to_conversation needs conversation, message and reason, strings."));
+                    };
+
+                    if target.is_empty() || message.is_empty() || reason.is_empty() {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. Give the conversation, the message and the reason.", true)));
+                    }
+
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. A message proposal belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match message_proposals::propose(&state, conversation_id, target, message, reason).await? {
+                        Ok(proposal) => reply(&id, tool_text(&format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions, propose_instructions_edit, find_conversations or send_to_conversation."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

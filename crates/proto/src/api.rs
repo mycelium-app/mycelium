@@ -253,6 +253,8 @@ pub struct EventsQuery {
     pub after: i64,
     #[serde(default = "EventsQuery::default_limit")]
     pub limit: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<i64>,
 }
 
 impl EventsQuery {
@@ -660,6 +662,29 @@ pub struct DeclineInstructionProposalRequest {
     pub note: Option<String>,
     #[serde(default)]
     pub redo: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageProposalState {
+    Proposed,
+    Sent,
+    Declined,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessageProposal {
+    pub id: Uuid,
+    pub conversation_id: Option<Uuid>,
+    pub target_id: Uuid,
+    pub target_title: String,
+    pub target_node: String,
+    pub target_project: Option<String>,
+    pub message: String,
+    pub reason: String,
+    pub state: MessageProposalState,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

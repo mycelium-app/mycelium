@@ -7,7 +7,7 @@ use crate::nodes::node_offline;
 use crate::projects;
 use crate::state::AppState;
 use crate::worktrees;
-use crate::store::{CONVERSATION_COLUMNS, append_event, enum_text, find_owned, lock_owned, parse_enum, publish_queue, ConversationRow};
+use crate::store::{CONVERSATION_COLUMNS, append_event, enum_text, find_owned, lock_owned, parse_enum, publish_queue, set_status, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -374,6 +374,28 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     Ok(Json(conversation))
 }
 
+pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, user.id).await?;
+
+    if chats::is_chat(&row) || !matches!(row.status.as_str(), "working" | "input") {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    if !state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id }) {
+        return Err(node_offline());
+    }
+
+    state.hub.forget_prompts_of(id);
+    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+    tx.commit().await?;
+
+    state.remove_session(row.node_id, id).await?;
+    state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
@@ -471,12 +493,32 @@ pub async fn opened(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<EventsQuery>) -> ApiResult<Json<Vec<Event>>> {
     find_owned(&state.pool, id, user.id).await?;
 
-    let rows = sqlx::query_as::<_, (i64, String, Value)>("select seq, kind, payload from events where conversation_id = $1 and seq > $2 order by seq limit $3")
-        .bind(id)
-        .bind(query.after)
-        .bind(query.limit.clamp(1, 1000))
-        .fetch_all(&state.pool)
-        .await?;
+    let limit = query.limit.clamp(1, 1000);
+
+    let rows = match query.before {
+        Some(before) => {
+            sqlx::query_as::<_, (i64, String, Value)>(
+                "with page_start as (select min(seq) as seq from (select seq from events where conversation_id = $1 and seq < $2 order by seq desc limit $3) newest)
+                 select seq, kind, payload from events
+                 where conversation_id = $1 and seq < $2
+                   and seq >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message' and seq <= (select seq from page_start)), 0)
+                 order by seq",
+            )
+            .bind(id)
+            .bind(before)
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as::<_, (i64, String, Value)>("select seq, kind, payload from events where conversation_id = $1 and seq > $2 order by seq limit $3")
+                .bind(id)
+                .bind(query.after)
+                .bind(limit)
+                .fetch_all(&state.pool)
+                .await?
+        }
+    };
 
     let mut events = Vec::new();
 

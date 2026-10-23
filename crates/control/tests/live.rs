@@ -34,9 +34,12 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/schedules/{id}/decline",
     "POST /api/v1/instruction-proposals/{id}/approve",
     "POST /api/v1/instruction-proposals/{id}/decline",
+    "POST /api/v1/message-proposals/{id}/approve",
+    "POST /api/v1/message-proposals/{id}/decline",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
     "PATCH /api/v1/conversations/{id}",
     "DELETE /api/v1/conversations/{id}",
+    "POST /api/v1/conversations/{id}/close",
     "POST /api/v1/conversations/{id}/opened",
     "POST /api/v1/conversations/{id}/prompt",
     "POST /api/v1/conversations/{id}/retry",
@@ -786,6 +789,20 @@ async fn retrying_a_failed_conversation_streams_it_as_no_longer_failed() {
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Failed).await;
 
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
+}
+
+#[tokio::test]
+async fn closing_a_working_conversation_streams_it_as_done() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let id = started_conversation(&server, &mut link, Some("run it")).await;
+    link.expect_prompt().await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/close"))).await;
 
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
 }
