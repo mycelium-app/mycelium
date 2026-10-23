@@ -244,5 +244,7 @@ fun MyceliumTheme(dark: Boolean = isSystemInDarkTheme(), accent: Accent = Accent
         ),
     )
 
-    CompositionLocalProvider(LocalPalette provides palette(dark, accent, systemAccent), LocalFonts provides fonts, content = content)
+    CompositionLocalProvider(LocalPalette provides palette(dark, accent, systemAccent), LocalFonts provides fonts) {
+        ThemedContextMenus(content)
+    }
 }
