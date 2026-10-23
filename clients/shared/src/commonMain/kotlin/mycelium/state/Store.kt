@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
+import mycelium.api.DeclineInstructionProposalRequest
+import mycelium.api.InstructionProposal
 import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
@@ -244,6 +246,24 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         api.deleteTask(task.id)
 
         mutableState.update { it.copy(tasks = it.tasks - task.id) }
+    }
+
+    suspend fun refreshInstructionProposals() {
+        val proposals = api.instructionProposals()
+
+        mutableState.update { it.copy(instructionProposals = proposals.associateBy { proposal -> proposal.id }) }
+    }
+
+    suspend fun approveInstructionProposal(proposal: InstructionProposal) {
+        val approved = api.approveInstructionProposal(proposal.id)
+
+        mutableState.update { it.copy(instructionProposals = it.instructionProposals + (approved.id to approved)) }
+    }
+
+    suspend fun declineInstructionProposal(proposal: InstructionProposal, note: String?, redo: Boolean) {
+        val declined = api.declineInstructionProposal(proposal.id, DeclineInstructionProposalRequest(note?.trim()?.takeIf { it.isNotEmpty() }, redo))
+
+        mutableState.update { it.copy(instructionProposals = it.instructionProposals + (declined.id to declined)) }
     }
 
     suspend fun refreshSchedules() {

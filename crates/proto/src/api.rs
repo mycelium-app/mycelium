@@ -534,6 +534,41 @@ pub struct SaveInstructionsRequest {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionProposalState {
+    Proposed,
+    Approved,
+    Declined,
+    Superseded,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InstructionProposal {
+    pub id: Uuid,
+    pub conversation_id: Option<Uuid>,
+    pub conversation_title: Option<String>,
+    pub layer: String,
+    pub layer_name: String,
+    pub base_revision: String,
+    pub base_text: String,
+    pub text: String,
+    pub reason: String,
+    pub state: InstructionProposalState,
+    pub note: Option<String>,
+    pub out_of_date: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DeclineInstructionProposalRequest {
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub redo: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetInstructionSourceRequest {
     pub forge_id: Uuid,

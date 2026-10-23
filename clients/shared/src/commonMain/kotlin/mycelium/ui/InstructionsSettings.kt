@@ -122,6 +122,8 @@ fun InstructionsSettings(store: Store) {
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
+        InstructionProposals(store)
+
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), itemVerticalAlignment = Alignment.CenterVertically) {
             for (entry in layers) {
                 MyButton(

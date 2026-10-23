@@ -3,6 +3,7 @@ use crate::chats::{RICH_MARKDOWN_INSTRUCTIONS, generated_ui_instructions};
 use crate::mcp::tools_instructions;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
+use crate::instruction_proposals;
 use crate::groups::{self, GroupRow};
 use crate::projects::valid_repository;
 use crate::state::AppState;
@@ -32,9 +33,9 @@ struct VersionRow {
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
-struct Layer {
-    key: String,
-    name: String,
+pub struct Layer {
+    pub key: String,
+    pub name: String,
     group_id: Option<Uuid>,
 }
 
@@ -88,7 +89,7 @@ async fn layers_of(state: &AppState, user: &AuthUser) -> ApiResult<Vec<Layer>> {
     Ok(layers)
 }
 
-async fn find_layer(state: &AppState, user: &AuthUser, key: &str) -> ApiResult<Layer> {
+pub async fn find_layer(state: &AppState, user: &AuthUser, key: &str) -> ApiResult<Layer> {
     if key == GLOBAL {
         return Ok(Layer::global());
     }
@@ -143,6 +144,7 @@ async fn record(state: &AppState, user: &AuthUser, layer: &Layer, text: &str, fo
         .bind(user.id)
         .execute(&state.pool)
         .await?;
+    instruction_proposals::republish_layer(state, user.id, &layer.key).await?;
 
     Ok(())
 }
@@ -215,27 +217,34 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
     Ok(Json(describe(&state, &user).await?))
 }
 
-pub async fn save(State(state): State<AppState>, user: AuthUser, Path(key): Path<String>, Json(request): Json<SaveInstructionsRequest>) -> ApiResult<Json<InstructionLayer>> {
-    let layer = find_layer(&state, &user, &key).await?;
-    let unchanged = latest(&state, &layer.key).await?.is_some_and(|version| version.text == request.text);
+pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str) -> ApiResult<()> {
+    let unchanged = latest(state, &layer.key).await?.is_some_and(|version| version.text == text);
 
     if !unchanged {
-        let source = source(&state).await?;
+        let source = source(state).await?;
         let commit = match &source {
             Some(source) => {
-                let api = forge_for(&state, &user, source).await?;
+                let api = forge_for(state, user, source).await?;
                 let path = layer.path(&source.path);
                 let existing = api.file(&state.http, &source.repository, &path).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
                 let message = format!("docs: update {path}");
 
-                Some(api.write_file(&state.http, &source.repository, &path, &request.text, &message, existing.as_ref()).await.map_err(|error| error.into_api(api.kind, &api.base_url))?)
+                Some(api.write_file(&state.http, &source.repository, &path, text, &message, existing.as_ref()).await.map_err(|error| error.into_api(api.kind, &api.base_url))?)
             }
             None => None,
         };
 
-        record(&state, &user, &layer, &request.text, commit).await?;
-        push_to_every_node(&state).await?;
+        record(state, user, layer, text, commit).await?;
+        push_to_every_node(state).await?;
     }
+
+    Ok(())
+}
+
+pub async fn save(State(state): State<AppState>, user: AuthUser, Path(key): Path<String>, Json(request): Json<SaveInstructionsRequest>) -> ApiResult<Json<InstructionLayer>> {
+    let layer = find_layer(&state, &user, &key).await?;
+
+    apply(&state, &user, &layer, &request.text).await?;
 
     let described = describe(&state, &user).await?;
 

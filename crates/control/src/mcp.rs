@@ -1,5 +1,6 @@
 use crate::auth::AuthNode;
 use crate::error::ApiResult;
+use crate::instruction_proposals;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::state::AppState;
@@ -139,6 +140,30 @@ fn tool_definitions() -> Value {
             },
         },
     ])
+        {
+            "name": "get_instructions",
+            "description": "Read the current text and revision of one layer of the person's agent instructions (the AGENTS.md files). Call it before propose_instructions_edit: the proposal must be made on that revision. Without a layer it reads this conversation's group layer, or the global layer when the conversation has no group.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "layer": {"type": "string", "description": "global, or the name of a group. Defaults to this conversation's group, or global."},
+                },
+            },
+        },
+        {
+            "name": "propose_instructions_edit",
+            "description": "Propose an edit to the person's agent instructions (AGENTS.md) for them to approve. Use it when the person corrects how you work and the correction is a lasting rule, not a one-off: quote their words in reason. Never edit instruction files directly. Read the layer with get_instructions first, then send the complete new text of that layer and the revision you read. It waits in Settings, Instructions until the person approves or declines it, and a decline arrives in this conversation as a message. Layer defaults to this conversation's group, or global without one; pass layer global for a rule that applies everywhere.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The complete new text of the layer, with your edit applied to the text you read."},
+                    "base_revision": {"type": "string", "description": "The revision get_instructions returned for the text you edited. A proposal on an older revision is refused."},
+                    "reason": {"type": "string", "description": "One paragraph saying why, quoting the person's own words."},
+                    "layer": {"type": "string", "description": "global, or the name of a group. Defaults to this conversation's group, or global."},
+                },
+                "required": ["text", "base_revision", "reason"],
+            },
+        },
 }
 
 pub fn tools_instructions() -> String {
@@ -364,7 +389,40 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule or walkthrough."),
+                Some("get_instructions") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("The instructions belong to a person, and this call did not come from a conversation.", true)));
+                    };
+
+                    match instruction_proposals::layer_text(&state, conversation_id, arguments.get("layer").and_then(Value::as_str)).await? {
+                        Ok(layer) => reply(&id, tool_text(&format!("Layer: {}\nRevision: {}\n\n{}", layer.name, layer.revision, layer.text), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some("propose_instructions_edit") => {
+                    let field = |name: &str| arguments.get(name).and_then(Value::as_str);
+                    let (Some(text), Some(base_revision), Some(reason)) = (field("text"), field("base_revision"), field("reason").map(str::trim)) else {
+                        return Ok(failure(&id, INVALID_PARAMS, "propose_instructions_edit needs text, base_revision and reason, strings."));
+                    };
+
+                    if text.trim().is_empty() {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. Give the complete new text of the layer.", true)));
+                    }
+
+                    if reason.is_empty() {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. Give the reason, quoting the person's own words.", true)));
+                    }
+
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. A proposal belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match instruction_proposals::propose(&state, conversation_id, field("layer"), base_revision, text, reason).await? {
+                        Ok(proposal) => reply(&id, tool_text(&format!("Proposal {} made for the {} instructions. It waits for the person to approve it in Settings, Instructions. If they decline it, the reason arrives here as a message.", proposal.id, proposal.layer_name), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions or propose_instructions_edit."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

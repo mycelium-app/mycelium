@@ -277,6 +277,29 @@ data class Memory(
 )
 
 @Serializable
+data class InstructionProposal(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("conversation_title") val conversationTitle: String? = null,
+    val layer: String,
+    @SerialName("layer_name") val layerName: String,
+    @SerialName("base_revision") val baseRevision: String,
+    @SerialName("base_text") val baseText: String,
+    val text: String,
+    val reason: String,
+    val state: String,
+    val note: String? = null,
+    @SerialName("out_of_date") val outOfDate: Boolean = false,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("decided_at") val decidedAt: String? = null,
+) {
+    val waiting: Boolean get() = state == "proposed"
+}
+
+@Serializable
+data class DeclineInstructionProposalRequest(val note: String? = null, val redo: Boolean = false)
+
+@Serializable
 data class UpdateMemoryRequest(val text: String)
 
 @Serializable
@@ -861,6 +884,8 @@ sealed interface StreamMessage {
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
+    data class InstructionProposalChanged(val proposal: InstructionProposal) : StreamMessage
+
     data class MemoryChanged(val memory: Memory) : StreamMessage
 
     data class MemoryRemoved(val memoryId: String) : StreamMessage
@@ -901,6 +926,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
+        "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))
         "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))
         "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))

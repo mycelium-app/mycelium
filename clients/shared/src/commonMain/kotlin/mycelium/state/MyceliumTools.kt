@@ -11,6 +11,7 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     AskQuestion("ask_question", "Ask question", "Asking a question"),
     ProposeSchedule("propose_schedule", "Propose schedule", "Proposing a schedule"),
     Walkthrough("walkthrough", "Walkthrough", "Writing a walkthrough"),
+    ProposeInstructionsEdit("propose_instructions_edit", "Propose instructions edit", "Proposing an instructions edit"),
 }
 
 sealed interface MyceliumCall {
@@ -28,7 +29,7 @@ sealed interface MyceliumCall {
         override val tool = MyceliumTool.ProposeTask
     }
 
-    data class AskQuestion(val question: String, val options: List<String>) : MyceliumCall {
+    data class AskQuestion(val question: String, val options: List<String>, val taskId: String? = null) : MyceliumCall {
         override val tool = MyceliumTool.AskQuestion
     }
 
@@ -39,11 +40,17 @@ sealed interface MyceliumCall {
     data class Walkthrough(val steps: List<String>) : MyceliumCall {
         override val tool = MyceliumTool.Walkthrough
     }
+
+    data class ProposeInstructionsEdit(val layer: String?, val reason: String) : MyceliumCall {
+        override val tool = MyceliumTool.ProposeInstructionsEdit
+    }
 }
 
 private val toolName = Regex("mycelium[_.:/ -]+(${MyceliumTool.entries.joinToString("|") { it.key }})\\b", RegexOption.IGNORE_CASE)
 private val recalledMemory = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val rememberedAs = Regex("^Remembered as \\S+?, shared with (.+)\\.$")
+private val proposedLayer = Regex("made for the (.+) instructions\\.")
+private val askedQuestion = Regex("^Question (\\S+) asked")
 private val proposedSchedule = Regex("proposed \\((.+), ([^,]+)\\)\\.")
 
 fun myceliumTool(title: String): MyceliumTool? {
@@ -88,7 +95,7 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
         MyceliumTool.AskQuestion -> {
             val question = fields.requiredString("question", input) ?: return null
 
-            MyceliumCall.AskQuestion(question, fields.strings("options").orEmpty())
+            MyceliumCall.AskQuestion(question, fields.strings("options").orEmpty(), askedQuestion.find(output.trim())?.groupValues?.get(1))
         }
 
         MyceliumTool.ProposeSchedule -> {
@@ -114,6 +121,12 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             }
 
             MyceliumCall.Walkthrough(steps.orEmpty())
+        }
+
+        MyceliumTool.ProposeInstructionsEdit -> {
+            val reason = fields.requiredString("reason", input) ?: return null
+
+            MyceliumCall.ProposeInstructionsEdit(proposedLayer.find(output)?.groupValues?.get(1) ?: fields.string("layer"), reason)
         }
     }
 }

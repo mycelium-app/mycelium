@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.Goal
 import mycelium.api.Group
+import mycelium.api.InstructionProposal
 import mycelium.api.Memory
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
@@ -42,6 +43,7 @@ data class AppState(
     val tasks: Map<String, Task> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
+    val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
@@ -113,6 +115,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
+
+    is StreamMessage.InstructionProposalChanged -> state.copy(instructionProposals = state.instructionProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.MemoryChanged -> state.copy(
         memories = state.memories + (message.memory.id to message.memory),

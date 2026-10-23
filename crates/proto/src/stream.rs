@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{Goal, Memory, MoveProgress, NodeSummary, Schedule, Walkthrough};
+use crate::api::{Goal, InstructionProposal, Memory, MoveProgress, NodeSummary, Schedule, Walkthrough};
 use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
@@ -27,6 +27,7 @@ pub enum StreamMessage {
     ScheduleRemoved {
         schedule_id: Uuid,
     },
+    InstructionProposal(InstructionProposal),
     Memory(Memory),
     MemoryRemoved {
         memory_id: Uuid,

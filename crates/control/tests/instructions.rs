@@ -793,3 +793,242 @@ async fn mycelium_tools_note_lists_every_tool_the_mcp_server_offers_only_while_t
     assert!(on.contains("not skills") && on.contains("memory features are off on purpose"), "{on}");
     assert!(!off.unwrap().contains("mcp__mycelium__"));
 }
+
+async fn conversation_with_session(server: &Server, link: &mut NodeLink, cwd: &str) -> Uuid {
+    let (conversation, _) = start_in_folder(server, link, cwd).await;
+    link.start_session(conversation, "acp").await;
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{conversation}/prompt")).json(&json!({"text": "go"}))).await;
+    assert_eq!(status, 204);
+    link.expect_prompt().await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(conversation, 3).await;
+
+    conversation
+}
+
+async fn propose(server: &Server, token: &str, conversation: Uuid, arguments: Value) -> (String, Value) {
+    tool(server, token, conversation, "propose_instructions_edit", arguments).await
+}
+
+async fn proposals(server: &Server) -> Value {
+    let (status, body) = server.user.json(server.user.get("/api/v1/instruction-proposals")).await;
+    assert_eq!(status, 200, "{body}");
+
+    body
+}
+
+fn revision_in(text: &str) -> String {
+    text.lines().find_map(|line| line.strip_prefix("Revision: ")).unwrap().to_string()
+}
+
+#[tokio::test]
+async fn an_agent_reads_a_layer_and_proposes_an_edit_that_waits_and_is_streamed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    save(&server, "global", "# Rules\nBe brief.").await;
+    expect_instructions(&mut link).await;
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let mut stream = server.user.stream().await;
+
+    let (read, is_error) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    let revision = revision_in(&read);
+    let (answer, proposed_error) = propose(&server, &token, conversation, json!({"text": "# Rules\nBe brief.\nNever commit unasked.", "base_revision": revision, "reason": "\"Do not commit unless I say so\""})).await;
+
+    assert_eq!((is_error, read.starts_with("Layer: Global\nRevision: ")), (json!(false), true), "{read}");
+    assert!(read.ends_with("# Rules\nBe brief."), "{read}");
+    assert_eq!(proposed_error, json!(false), "{answer}");
+    let streamed = stream.until(|message| match message {
+        StreamMessage::InstructionProposal(proposal) => Some(proposal),
+        _ => None,
+    })
+    .await;
+    assert_eq!((streamed.layer_name.as_str(), streamed.text.as_str(), streamed.base_text.as_str(), streamed.out_of_date), ("Global", "# Rules\nBe brief.\nNever commit unasked.", "# Rules\nBe brief.", false));
+    assert_eq!(streamed.conversation_id, Some(conversation));
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], "# Rules\nBe brief.");
+    let listed = proposals(&server).await;
+    assert_eq!((listed[0]["state"].clone(), listed[0]["reason"].clone()), (json!("proposed"), json!("\"Do not commit unless I say so\"")));
+}
+
+#[tokio::test]
+async fn a_proposal_defaults_to_the_conversations_group_and_global_must_be_asked_for() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let group = create_group(&server, "slop").await;
+    claim(&server, group, "/slop", None).await;
+    let conversation = conversation_with_session(&server, &mut link, "/slop/app").await;
+
+    let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    let (global_read, _) = tool(&server, &token, conversation, "get_instructions", json!({"layer": "GLOBAL"})).await;
+    propose(&server, &token, conversation, json!({"text": "Group rule", "base_revision": "none", "reason": "because"})).await;
+    propose(&server, &token, conversation, json!({"text": "Everywhere rule", "base_revision": "none", "reason": "because", "layer": "global"})).await;
+    let (unknown, is_error) = propose(&server, &token, conversation, json!({"text": "x", "base_revision": "none", "reason": "because", "layer": "nope"})).await;
+
+    assert!(read.starts_with("Layer: slop\nRevision: none"), "{read}");
+    assert!(global_read.starts_with("Layer: Global\nRevision: none"), "{global_read}");
+    let listed = proposals(&server).await;
+    let names: Vec<(&str, &str)> = listed.as_array().unwrap().iter().map(|proposal| (proposal["layer_name"].as_str().unwrap(), proposal["text"].as_str().unwrap())).collect();
+    assert_eq!(names.len(), 2);
+    assert!(names.contains(&("slop", "Group rule")) && names.contains(&("Global", "Everywhere rule")), "{names:?}");
+    assert_eq!(is_error, json!(true), "{unknown}");
+    assert!(unknown.contains("No instructions layer is called nope"), "{unknown}");
+}
+
+#[tokio::test]
+async fn a_proposal_on_a_stale_base_or_without_a_reason_is_refused_with_what_to_do() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    save(&server, "global", "# One").await;
+    expect_instructions(&mut link).await;
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    let stale = revision_in(&read);
+    save(&server, "global", "# Two").await;
+
+    let (refused, is_error) = propose(&server, &token, conversation, json!({"text": "# Three", "base_revision": stale, "reason": "because"})).await;
+    let (no_reason, no_reason_error) = propose(&server, &token, conversation, json!({"text": "# Three", "base_revision": stale, "reason": "  "})).await;
+    let (unchanged, unchanged_error) = {
+        let (current, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+        propose(&server, &token, conversation, json!({"text": "# Two", "base_revision": revision_in(&current), "reason": "because"})).await
+    };
+
+    assert_eq!(is_error, json!(true));
+    assert!(refused.starts_with("Nothing was proposed.") && refused.contains("Read the current text with get_instructions"), "{refused}");
+    assert_eq!((no_reason_error, unchanged_error), (json!(true), json!(true)), "{no_reason} {unchanged}");
+    assert!(no_reason.contains("quoting the person's own words") && unchanged.contains("same as the current"), "{no_reason} {unchanged}");
+    assert_eq!(proposals(&server).await, json!([]));
+}
+
+#[tokio::test]
+async fn approving_saves_the_layer_like_the_editor_and_reaches_nodes() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    save(&server, "global", "# One").await;
+    expect_instructions(&mut link).await;
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    propose(&server, &token, conversation, json!({"text": "# One\nNew rule", "base_revision": revision_in(&read), "reason": "because"})).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    let before = instructions(&server).await["revision"].clone();
+
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
+
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!((approved["state"].clone(), approved["out_of_date"].clone()), (json!("approved"), json!(false)));
+    let after = instructions(&server).await;
+    assert_eq!(layer(&after, "Global")["text"], "# One\nNew rule");
+    assert_ne!(after["revision"], before);
+    let (revision, global) = expect_instructions(&mut link).await;
+    assert_eq!((json!(revision), global.as_deref()), (after["revision"].clone(), Some("# One\nNew rule")));
+    let (again, body) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
+    assert_eq!((again, body["error"].clone()), (409, json!("proposal_not_proposed")));
+}
+
+#[tokio::test]
+async fn approving_with_a_source_commits_to_the_forge() {
+    let server = Server::start().await;
+    let shared = Shared::default();
+    github_source(&server, shared.clone()).await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    propose(&server, &token, conversation, json!({"text": "# From a proposal", "base_revision": "none", "reason": "because"})).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
+
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(shared.lock().unwrap().files["AGENTS.md"].0, "# From a proposal");
+    assert_eq!(layer(&instructions(&server).await, "Global")["version"]["id"], json!(commit_id(1)));
+}
+
+#[tokio::test]
+async fn a_proposal_goes_out_of_date_when_the_layer_is_saved_and_cannot_be_approved() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    save(&server, "global", "# One").await;
+    expect_instructions(&mut link).await;
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    let (read, _) = tool(&server, &token, conversation, "get_instructions", json!({})).await;
+    propose(&server, &token, conversation, json!({"text": "# One\nRule", "base_revision": revision_in(&read), "reason": "because"})).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    let mut stream = server.user.stream().await;
+
+    save(&server, "global", "# Edited by hand").await;
+
+    let streamed = stream.until(|message| match message {
+        StreamMessage::InstructionProposal(proposal) => Some(proposal),
+        _ => None,
+    })
+    .await;
+    assert!(streamed.out_of_date);
+    assert_eq!(proposals(&server).await[0]["out_of_date"], json!(true));
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
+    assert_eq!((status, body["error"].clone()), (409, json!("proposal_out_of_date")));
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], "# Edited by hand");
+}
+
+#[tokio::test]
+async fn declining_records_the_note_and_tells_the_agent_and_redo_asks_it_to_propose_again() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    propose(&server, &token, conversation, json!({"text": "First", "base_revision": "none", "reason": "because"})).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, declined) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/decline")).json(&json!({"note": "Too broad"}))).await;
+
+    assert_eq!(status, 200, "{declined}");
+    assert_eq!((declined["state"].clone(), declined["note"].clone()), (json!("declined"), json!("Too broad")));
+    let (_, message) = link.expect_prompt().await;
+    assert!(message.contains("declined the edit") && message.contains("Global") && message.ends_with("My note: Too broad"), "{message}");
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(conversation, 5).await;
+    assert_eq!(layer(&instructions(&server).await, "Global")["text"], "");
+    let (again, body) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{id}/decline")).json(&json!({}))).await;
+    assert_eq!((again, body["error"].clone()), (409, json!("proposal_not_proposed")));
+
+    propose(&server, &token, conversation, json!({"text": "Second", "base_revision": "none", "reason": "because"})).await;
+    let second = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    let (_, redone) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{second}/decline")).json(&json!({"redo": true}))).await;
+    let (_, redo_message) = link.expect_prompt().await;
+    assert_eq!(redone["state"], json!("declined"));
+    assert!(redo_message.contains("propose it again on the current text"), "{redo_message}");
+}
+
+#[tokio::test]
+async fn a_newer_proposal_from_the_same_conversation_supersedes_the_waiting_one() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+
+    propose(&server, &token, conversation, json!({"text": "First", "base_revision": "none", "reason": "because"})).await;
+    propose(&server, &token, conversation, json!({"text": "Second", "base_revision": "none", "reason": "because"})).await;
+
+    let listed = proposals(&server).await;
+    assert_eq!((listed[0]["text"].clone(), listed[0]["state"].clone()), (json!("Second"), json!("proposed")));
+    assert_eq!((listed[1]["text"].clone(), listed[1]["state"].clone()), (json!("First"), json!("superseded")));
+}
+
+#[tokio::test]
+async fn another_persons_proposal_is_not_listed_or_decided() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    propose(&server, &token, conversation, json!({"text": "First", "base_revision": "none", "reason": "because"})).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    let other = server.second_user("other@example.com").await;
+
+    let (listed_status, listed) = other.json(other.get("/api/v1/instruction-proposals")).await;
+    let (approve_status, _) = other.json(other.post(&format!("/api/v1/instruction-proposals/{id}/approve"))).await;
+
+    assert_eq!((listed_status, listed), (200, json!([])));
+    assert_eq!(approve_status, 404);
+}

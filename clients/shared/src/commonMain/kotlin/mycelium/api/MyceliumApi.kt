@@ -266,6 +266,14 @@ class MyceliumApi(
 
     suspend fun pullInstructions(): Instructions = call("/instructions/pull") { client.post(it) { authorise() } }.body()
 
+    suspend fun instructionProposals(): List<InstructionProposal> = call("/instruction-proposals") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveInstructionProposal(id: String): InstructionProposal =
+        call("/instruction-proposals/$id/approve") { client.post(it) { authorise() } }.body()
+
+    suspend fun declineInstructionProposal(id: String, request: DeclineInstructionProposalRequest): InstructionProposal =
+        call("/instruction-proposals/$id/decline") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun setInstructionSource(request: SetInstructionSourceRequest): Instructions =
         call("/instruction-source") { client.put(it) { authorise(); json(request) } }.body()
 

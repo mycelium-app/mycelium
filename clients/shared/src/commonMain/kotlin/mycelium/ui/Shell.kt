@@ -252,7 +252,15 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
 @Composable
 private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
-    CompositionLocalProvider(LocalPlatform provides platform) {
+    var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
+
+    LaunchedEffect(route) {
+        if (route != Route.Settings) {
+            settingsStart = null
+        }
+    }
+
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -267,7 +275,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
+            Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
         }
     }
 }

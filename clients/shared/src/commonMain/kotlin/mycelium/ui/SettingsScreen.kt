@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.Alignment
@@ -50,10 +52,20 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit) {
-    var section by remember { mutableStateOf<SettingsSection?>(null) }
+fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, onSignOut: () -> Unit) {
+    var section by remember { mutableStateOf(startOn) }
     val touch = LocalTouch.current
     val opened = section
+    val waitingProposals = waitingInstructionProposals(store.state.collectAsState().value)
+
+    LaunchedEffect(Unit) {
+        try {
+            store.refreshInstructionProposals()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+        }
+    }
 
     BackHandler(enabled = touch && opened != null) { section = null }
 
@@ -87,6 +99,10 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> 
                                 entry.summary?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
                             }
 
+                            if (entry == SettingsSection.Instructions && waitingProposals > 0) {
+                                CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
+                            }
+
                             Icon(MyIcon.ChevronRight, MyTheme.colors.textFaint, Tokens.Size.IconSm)
                         }
 
@@ -114,6 +130,10 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> 
                         ) {
                             Icon(entry.icon, MyTheme.colors.textMuted)
                             Label(entry.label, maxLines = 1)
+
+                            if (entry == SettingsSection.Instructions && waitingProposals > 0) {
+                                CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
+                            }
                         }
                     }
                 }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,12 +18,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import mycelium.api.Task
+import mycelium.api.TaskStatuses
+import mycelium.state.AppState
 import mycelium.state.MyceliumCall
+import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 
 private const val CollapsedLimit = 3
 private const val ExcerptLines = 3
+
+internal class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> Unit, val answer: suspend (Task, String) -> Unit)
+
+internal val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
+
+internal fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
+
+@Composable
+private fun askedTask(parsed: MyceliumCall): Task? {
+    val taskId = (parsed as? MyceliumCall.AskQuestion)?.taskId ?: return null
+
+    return LocalQuestionAnswers.current?.tasks?.get(taskId)
+}
 
 @Composable
 internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
@@ -40,11 +59,14 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.AskQuestion -> MyIcon.Question
         is MyceliumCall.ProposeSchedule -> MyIcon.Calendar
         is MyceliumCall.Walkthrough -> MyIcon.List
+        is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
     }
+    val answered = askedTask(parsed)?.status == TaskStatuses.Done
     val waiting = when (parsed) {
         is MyceliumCall.ProposeTask -> "Waiting for approval"
         is MyceliumCall.AskQuestion -> "Waiting for your answer"
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
+        is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         else -> null
     }
 
@@ -56,6 +78,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
             when {
                 failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
                 verb != null -> StatusMark("Running", Tone.Working, MyIcon.Working)
+                finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && waiting != null -> StatusMark(waiting, Tone.Muted, MyIcon.Clock)
             }
         }
@@ -83,6 +106,7 @@ private fun doneHeading(parsed: MyceliumCall): String = when (parsed) {
     is MyceliumCall.ProposeTask -> "Proposed a task"
     is MyceliumCall.AskQuestion -> "Asked a question"
     is MyceliumCall.ProposeSchedule -> "Proposed a schedule"
+    is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
 }
 
@@ -114,9 +138,22 @@ private fun MyceliumBody(parsed: MyceliumCall) {
         }
 
         is MyceliumCall.AskQuestion -> {
+            val answers = LocalQuestionAnswers.current
+            val task = askedTask(parsed)
+
+            LaunchedEffect(parsed.taskId, task == null) {
+                if (answers != null && parsed.taskId != null && task == null) {
+                    answers.refresh()
+                }
+            }
+
             Label(parsed.question, style = Tokens.Type.Ui, maxLines = ExcerptLines)
 
-            if (parsed.options.isNotEmpty()) {
+            if (answers != null && task != null && task.status == TaskStatuses.Question) {
+                AnswerForm(task, send = { text -> answers.answer(task, text) }, spacing = Tokens.Space.S2)
+            } else if (task?.answer != null) {
+                Label("Answered: ${task.answer}", style = Tokens.Type.Ui, color = colors.textMuted)
+            } else if (parsed.options.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                     for (option in parsed.options) {
                         Tag(option)
@@ -133,6 +170,16 @@ private fun MyceliumBody(parsed: MyceliumCall) {
                     Icon(MyIcon.Clock, colors.textMuted, Tokens.Size.IconSm)
                     Label(it, style = Tokens.Type.Meta, color = colors.textMuted)
                 }
+            }
+        }
+
+        is MyceliumCall.ProposeInstructionsEdit -> {
+            val review = LocalReviewInstructions.current
+
+            Label(parsed.reason, style = Tokens.Type.Ui, maxLines = ExcerptLines)
+
+            if (review != null) {
+                MyButton(review, text = "Review", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Review the proposed instructions edit in Settings")
             }
         }
 

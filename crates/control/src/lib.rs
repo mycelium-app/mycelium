@@ -15,6 +15,7 @@ mod error;
 mod forge_cache;
 mod forges;
 mod imports;
+mod instruction_proposals;
 mod instructions;
 mod issues;
 mod link;
@@ -170,6 +171,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instructions/pull", post(instructions::pull))
         .route("/api/v1/instructions/{layer}", put(instructions::save))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
+        .route("/api/v1/instruction-proposals", get(instruction_proposals::list))
+        .route("/api/v1/instruction-proposals/{id}/approve", post(instruction_proposals::approve))
+        .route("/api/v1/instruction-proposals/{id}/decline", post(instruction_proposals::decline))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
