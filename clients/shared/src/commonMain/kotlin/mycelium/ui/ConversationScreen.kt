@@ -63,6 +63,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember { mutableStateOf<SidePanel?>(null) }
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
+    var tab by remember(id) { mutableStateOf(ConversationTab) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
@@ -129,6 +130,19 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     },
                 )
 
+                val walkthrough = state.walkthroughs[id]
+
+                if (walkthrough != null) {
+                    TabRow(listOf(ConversationTab, WalkthroughTab), tab, { tab = it }, groupLabel = "Conversation sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
+                    Hairline()
+
+                    if (tab == WalkthroughTab) {
+                        WalkthroughView(walkthrough, Modifier.weight(1f))
+
+                        return@Column
+                    }
+                }
+
                 ThreadView(
                     items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
                     onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
@@ -170,6 +184,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     },
                     onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                     onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, kind, text.ifEmpty { null }).id) } },
+                    goal = GoalControls(
+                        goal = state.goals[id],
+                        onSet = { text, budget -> store.act { store.setGoal(id, text, budget) } },
+                        onPause = { store.act { store.pauseGoal(id, true) } },
+                        onResume = { store.act { store.pauseGoal(id, false) } },
+                        onClear = { store.act { store.clearGoal(id) } },
+                    ),
                 )
             }
 
@@ -327,6 +348,9 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
     ConversationStatus.Failed -> MyIcon.Failed
     ConversationStatus.Done -> MyIcon.Check
 }
+
+private const val ConversationTab = "Conversation"
+private const val WalkthroughTab = "Walkthrough"
 
 private enum class SidePanel { Details, Terminal, Git }
 

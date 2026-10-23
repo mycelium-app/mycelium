@@ -4,7 +4,9 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
+import mycelium.api.Goal
 import mycelium.api.MoveProgress
+import mycelium.api.Walkthrough
 import mycelium.api.EventKinds
 import mycelium.api.CpuPoint
 import mycelium.api.NodeResources
@@ -40,6 +42,8 @@ data class AppState(
     val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
     val moves: Map<String, MoveProgress> = emptyMap(),
+    val goals: Map<String, Goal> = emptyMap(),
+    val walkthroughs: Map<String, Walkthrough> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
@@ -52,7 +56,7 @@ data class SidebarSection(val status: ConversationStatus, val name: String, val 
 
 fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ConversationChanged ->
-        state.copy(conversations = state.conversations + (message.conversation.id to message.conversation))
+        if (message.conversation.sideKind == GoalCheckKind) state else state.copy(conversations = state.conversations + (message.conversation.id to message.conversation))
 
     is StreamMessage.EventAppended -> {
         val id = message.event.conversationId
@@ -76,6 +80,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
             sending = state.sending + (message.conversationId to waiting),
         )
     }
+
+    is StreamMessage.GoalChanged -> state.copy(goals = state.goals + (message.goal.conversationId to message.goal))
+
+    is StreamMessage.GoalCleared -> state.copy(goals = state.goals - message.conversationId)
+
+    is StreamMessage.WalkthroughChanged -> state.copy(walkthroughs = state.walkthroughs + (message.walkthrough.conversationId to message.walkthrough))
 
     is StreamMessage.MoveChanged -> state.copy(moves = state.moves + (message.progress.conversationId to message.progress))
 

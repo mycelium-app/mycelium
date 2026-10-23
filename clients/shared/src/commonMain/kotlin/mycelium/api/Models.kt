@@ -629,6 +629,55 @@ data class MoveProgress(
 )
 
 @Serializable
+enum class GoalState {
+    @SerialName("active")
+    Active,
+
+    @SerialName("paused")
+    Paused,
+
+    @SerialName("met")
+    Met,
+
+    @SerialName("stuck")
+    Stuck,
+
+    @SerialName("over_budget")
+    OverBudget,
+}
+
+@Serializable
+data class Goal(
+    @SerialName("conversation_id") val conversationId: String,
+    val text: String,
+    @SerialName("token_budget") val tokenBudget: Long,
+    @SerialName("tokens_used") val tokensUsed: Long = 0,
+    val turns: Long = 0,
+    val state: GoalState,
+    val reason: String? = null,
+)
+
+@Serializable
+data class SetGoalRequest(val text: String, @SerialName("token_budget") val tokenBudget: Long)
+
+@Serializable
+data class PatchGoalRequest(val paused: Boolean)
+
+@Serializable
+data class WalkthroughFile(val path: String, val diff: String)
+
+@Serializable
+data class WalkthroughStep(val title: String, val key: Boolean = false, val explanation: String = "", val files: List<WalkthroughFile> = emptyList())
+
+@Serializable
+data class Walkthrough(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String,
+    val steps: List<WalkthroughStep>,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
 data class QueuedPrompt(
     val id: String,
     @SerialName("conversation_id") val conversationId: String,
@@ -645,6 +694,12 @@ sealed interface StreamMessage {
     data class QueueChanged(val conversationId: String, val queue: List<QueuedPrompt>) : StreamMessage
 
     data class MoveChanged(val progress: MoveProgress) : StreamMessage
+
+    data class GoalChanged(val goal: Goal) : StreamMessage
+
+    data class GoalCleared(val conversationId: String) : StreamMessage
+
+    data class WalkthroughChanged(val walkthrough: Walkthrough) : StreamMessage
 
     data class NodeChanged(val node: NodeSummary) : StreamMessage
 
@@ -676,6 +731,9 @@ fun parseStreamMessage(text: String): StreamMessage? {
             ),
         )
         "move" -> StreamMessage.MoveChanged(MyceliumJson.decodeFromJsonElement(MoveProgress.serializer(), element))
+        "goal" -> StreamMessage.GoalChanged(MyceliumJson.decodeFromJsonElement(Goal.serializer(), element))
+        "goal_cleared" -> StreamMessage.GoalCleared(element.requireString("conversation_id"))
+        "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(

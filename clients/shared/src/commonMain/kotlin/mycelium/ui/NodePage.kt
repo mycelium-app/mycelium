@@ -94,24 +94,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
             return@Column
         }
 
-        Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3).semantics { contentDescription = "Node sections" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            for (option in Tabs) {
-                val on = option == tab
-
-                Column(
-                    Modifier
-                        .heightIn(min = rowHeight())
-                        .pressable({ tab = option }, role = Role.Tab, shape = ControlShape, ringInside = true)
-                        .semantics { selected = on }
-                        .padding(horizontal = Tokens.Space.S2),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Label(option, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
-                    Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.accent else colors.bgContent))
-                }
-            }
-        }
+        TabRow(Tabs, tab, { tab = it }, groupLabel = "Node sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
 
         Hairline()
 

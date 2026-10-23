@@ -102,6 +102,7 @@ fun Composer(
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
     annotations: List<Annotation> = emptyList(),
     onRemoveAnnotation: (Annotation) -> Unit = {},
+    goal: GoalControls? = null,
 ) {
     val colors = MyTheme.colors
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
@@ -194,6 +195,8 @@ fun Composer(
         for (setting in settings) {
             OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
         }
+
+        goal?.let { GoalButton(it) }
     }
 
     if (LocalTouch.current) {
@@ -208,6 +211,8 @@ fun Composer(
                     .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
+                goal?.goal?.let { GoalBar(it, goal.onPause, goal.onResume, goal.onClear) }
+
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
                     QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
                 }
@@ -239,6 +244,12 @@ fun Composer(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val measured = Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth()
+
+        goal?.goal?.let { held ->
+            Box(measured) {
+                GoalBar(held, goal.onPause, goal.onResume, goal.onClear)
+            }
+        }
 
         if (queue.isNotEmpty() || sending.isNotEmpty()) {
             Box(measured) {

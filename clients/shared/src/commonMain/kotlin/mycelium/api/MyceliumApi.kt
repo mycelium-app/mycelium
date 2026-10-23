@@ -306,6 +306,18 @@ class MyceliumApi(
         call("/conversations/$id/move") { client.delete(it) { authorise() } }
     }
 
+    suspend fun goal(id: String): Goal? = call("/conversations/$id/goal") { client.get(it) { authorise() } }.body()
+
+    suspend fun setGoal(id: String, request: SetGoalRequest): Goal = call("/conversations/$id/goal") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun pauseGoal(id: String, paused: Boolean): Goal = call("/conversations/$id/goal") { client.patch(it) { authorise(); json(PatchGoalRequest(paused)) } }.body()
+
+    suspend fun clearGoal(id: String) {
+        call("/conversations/$id/goal") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun walkthrough(id: String): Walkthrough? = call("/conversations/$id/walkthrough") { client.get(it) { authorise() } }.body()
+
     suspend fun markOpened(id: String) {
         call("/conversations/$id/opened") { client.post(it) { authorise() } }
     }

@@ -19,6 +19,7 @@ import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
 import mycelium.api.MoveState
 import mycelium.api.Schedule
+import mycelium.api.SetGoalRequest
 import mycelium.api.ScheduleRun
 import mycelium.api.Task
 import mycelium.api.Project
@@ -151,6 +152,24 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         mutableState.update { held -> held.moves[conversationId]?.let { held.copy(moves = held.moves + (conversationId to it.copy(state = MoveState.Cancelled))) } ?: held }
     }
 
+    suspend fun setGoal(conversationId: String, text: String, tokenBudget: Long) {
+        val goal = api.setGoal(conversationId, SetGoalRequest(text, tokenBudget))
+
+        mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
+    }
+
+    suspend fun pauseGoal(conversationId: String, paused: Boolean) {
+        val goal = api.pauseGoal(conversationId, paused)
+
+        mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
+    }
+
+    suspend fun clearGoal(conversationId: String) {
+        api.clearGoal(conversationId)
+
+        mutableState.update { it.copy(goals = it.goals - conversationId) }
+    }
+
     suspend fun setProjectGroup(projectId: String, groupId: String?): Project {
         val project = api.setProjectGroup(projectId, groupId)
 
@@ -247,6 +266,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         val queue = api.queue(conversationId)
         mutableState.update { it.copy(queues = it.queues + (conversationId to queue.sortedBy { q -> q.position })) }
 
+        val goal = orNull { api.goal(conversationId) }
+        mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
+
+        val walkthrough = orNull { api.walkthrough(conversationId) }
+        mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
+
         val conversation = state.value.conversations[conversationId]
 
         if (conversation != null && conversation.status == mycelium.api.ConversationStatus.Review) {
@@ -316,6 +341,15 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
             mutableProblem.value = "Could not reach the control plane. Check your connection and try again."
         }
     }
+
+    private suspend fun <T> orNull(block: suspend () -> T?): T? =
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
 
     fun dismissProblem() {
         mutableProblem.value = null
