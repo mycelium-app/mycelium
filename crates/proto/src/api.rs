@@ -451,12 +451,29 @@ pub struct PatchProjectRequest {
 pub struct Group {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub folders: Vec<GroupFolder>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupRequest {
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupFolder {
+    pub id: Uuid,
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    pub prefix: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupFolderRequest {
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    pub prefix: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

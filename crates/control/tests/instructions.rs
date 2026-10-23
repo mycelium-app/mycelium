@@ -364,7 +364,7 @@ async fn memories_remembered_into_the_group_are_recalled_only_by_its_projects() 
 
     assert!(stored.starts_with("Remembered as"), "{stored}");
     assert!(inside.contains("slop pipeline"), "{inside}");
-    assert_eq!(elsewhere, "No memories match that query.");
+    assert!(elsewhere.starts_with("No memories match that query.\n1 more match in other groups (slop) left out."), "{elsewhere}");
     assert_eq!(is_error, json!(true), "{ungrouped}");
     let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
     assert_eq!(memories[0]["scopes"], json!([format!("group:{group}")]));
@@ -470,4 +470,190 @@ async fn the_source_is_checked_and_can_be_cleared() {
     let (cleared, _) = server.user.json(server.user.delete("/api/v1/instruction-source")).await;
     let (pull, body) = server.user.json(server.user.post("/api/v1/instructions/pull")).await;
     assert_eq!((cleared, pull, body["error"].clone()), (204, 409, json!("no_source")));
+}
+
+async fn claim(server: &Server, group: Uuid, prefix: &str, node: Option<Uuid>) -> (u16, Value) {
+    server.user.json(server.user.post(&format!("/api/v1/groups/{group}/folders")).json(&json!({"prefix": prefix, "node_id": node}))).await
+}
+
+async fn start_in_folder(server: &Server, link: &mut NodeLink, cwd: &str) -> (Uuid, Option<String>) {
+    let (status, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": cwd}))).await;
+    assert_eq!(status, 201, "{conversation}");
+
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, instructions, .. } => (conversation_id, instructions),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+}
+
+async fn tool(server: &Server, token: &str, conversation: Uuid, name: &str, arguments: Value) -> (String, Value) {
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {token}"))
+        .header("x-mycelium-conversation", conversation.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}));
+    let (_, body) = anonymous.json(request).await;
+
+    (body["result"]["content"][0]["text"].as_str().unwrap().to_string(), body["result"]["isError"].clone())
+}
+
+#[tokio::test]
+async fn a_group_claims_folders_and_says_plainly_when_one_is_wrong_or_taken() {
+    let server = Server::start().await;
+    let slop = create_group(&server, "slop").await;
+    let work = create_group(&server, "work").await;
+
+    let (created, folder) = claim(&server, slop, "/home/claude/projects/", None).await;
+    let (relative, relative_body) = claim(&server, slop, "projects", None).await;
+    let (dotted, _) = claim(&server, slop, "/home/../etc", None).await;
+    let (taken, taken_body) = claim(&server, work, "/home/claude/projects", None).await;
+    let (unknown_node, _) = claim(&server, work, "/srv", Some(Uuid::new_v4())).await;
+
+    assert_eq!((created, folder["prefix"].clone()), (201, json!("/home/claude/projects")));
+    assert_eq!((relative, relative_body["error"].clone()), (400, json!("folder_invalid")));
+    assert_eq!(dotted, 400);
+    assert_eq!((taken, taken_body["error"].clone()), (409, json!("folder_claimed")));
+    assert_eq!(unknown_node, 404);
+
+    let (_, groups) = server.user.json(server.user.get("/api/v1/groups")).await;
+    assert_eq!(groups[0]["folders"][0]["prefix"], "/home/claude/projects");
+
+    let folder_id = folder["id"].as_str().unwrap();
+    let (removed, _) = server.user.json(server.user.delete(&format!("/api/v1/groups/{slop}/folders/{folder_id}"))).await;
+    let (again, _) = server.user.json(server.user.delete(&format!("/api/v1/groups/{slop}/folders/{folder_id}"))).await;
+    assert_eq!((removed, again), (204, 404));
+}
+
+#[tokio::test]
+async fn a_conversation_without_a_project_joins_the_group_with_the_longest_matching_folder() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let slop = create_group(&server, "slop").await;
+    let mycelium = create_group(&server, "mycelium").await;
+    claim(&server, slop, "/projects", None).await;
+    claim(&server, mycelium, "/projects/mycelium", None).await;
+    save(&server, &slop.to_string(), "Slop rules.").await;
+    save(&server, &mycelium.to_string(), "Mycelium rules.").await;
+    expect_instructions(&mut link).await;
+    expect_instructions(&mut link).await;
+
+    let (_, in_slop) = start_in_folder(&server, &mut link, "/projects/other/src").await;
+    let (_, in_mycelium) = start_in_folder(&server, &mut link, "/projects/mycelium/crates").await;
+    let (_, sibling) = start_in_folder(&server, &mut link, "/projects2/app").await;
+
+    assert_eq!((in_slop.as_deref(), in_mycelium.as_deref(), sibling), (Some("Slop rules."), Some("Mycelium rules."), None));
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations")).await;
+    let groups: Vec<(String, Value)> = listed.as_array().unwrap().iter().map(|conversation| (conversation["cwd"].as_str().unwrap().to_string(), conversation["group_id"].clone())).collect();
+    assert!(groups.contains(&("/projects/other/src".to_string(), json!(slop))), "{groups:?}");
+    assert!(groups.contains(&("/projects/mycelium/crates".to_string(), json!(mycelium))), "{groups:?}");
+    assert!(groups.contains(&("/projects2/app".to_string(), Value::Null)), "{groups:?}");
+}
+
+#[tokio::test]
+async fn an_imported_conversation_is_in_the_group_that_claims_its_folder_without_a_new_import() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let slop = create_group(&server, "slop").await;
+    sqlx::query("insert into conversations (owner, node_id, agent, cwd, title, status, imported_from, archived_at) select created_by, $1, 'claude', '/projects/app', 'Old work', 'done', '/x.jsonl', now() from nodes where id = $1")
+        .bind(link.id)
+        .execute(&server.pool)
+        .await
+        .unwrap();
+
+    let (_, before) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
+    claim(&server, slop, "/projects", None).await;
+    let (_, after) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
+
+    assert_eq!((before[0]["group_id"].clone(), after[0]["group_id"].clone()), (Value::Null, json!(slop)));
+}
+
+#[tokio::test]
+async fn a_folder_claimed_for_one_node_leaves_the_same_folder_on_another_node_alone() {
+    let server = Server::start().await;
+    let mut laptop = server.online_node("laptop").await;
+    let mut desktop = server.online_node("desktop").await;
+    let slop = create_group(&server, "slop").await;
+    claim(&server, slop, "/projects", Some(laptop.id)).await;
+    save(&server, &slop.to_string(), "Slop rules.").await;
+    expect_instructions(&mut laptop).await;
+    expect_instructions(&mut desktop).await;
+
+    let (_, on_laptop) = start_in_folder(&server, &mut laptop, "/projects/app").await;
+    let (_, on_desktop) = start_in_folder(&server, &mut desktop, "/projects/app").await;
+
+    assert_eq!((on_laptop.as_deref(), on_desktop), (Some("Slop rules."), None));
+}
+
+#[tokio::test]
+async fn a_projects_own_group_wins_over_a_folder_claim() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let work = create_group(&server, "work").await;
+    let slop = create_group(&server, "slop").await;
+    claim(&server, slop, "/w", None).await;
+    let project = project_in(&server, &mut link, "app", Some(work)).await;
+    save(&server, &work.to_string(), "Work rules.").await;
+    expect_instructions(&mut link).await;
+
+    let (_, instructions) = start_in(&server, &mut link, project).await;
+
+    assert_eq!(instructions.as_deref(), Some("Work rules."));
+}
+
+#[tokio::test]
+async fn remember_defaults_to_the_sessions_group_and_global_scope_is_explicit() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let slop = create_group(&server, "slop").await;
+    claim(&server, slop, "/projects", None).await;
+    let (grouped, _) = start_in_folder(&server, &mut link, "/projects/app").await;
+    let (loose, _) = start_in_folder(&server, &mut link, "/elsewhere").await;
+    let token = link.token.clone();
+
+    let (default, _) = tool(&server, &token, grouped, "remember", json!({"text": "Pipelines publish on tags"})).await;
+    let (explicit, _) = tool(&server, &token, grouped, "remember", json!({"text": "The host has 8 cores", "scope": "global"})).await;
+    let (ungrouped, _) = tool(&server, &token, loose, "remember", json!({"text": "Everything is UTC"})).await;
+    let (refused, is_error) = tool(&server, &token, loose, "remember", json!({"text": "Nope", "scope": "group"})).await;
+
+    assert!(default.ends_with("shared with the slop group."), "{default}");
+    assert!(explicit.ends_with("shared with every conversation."), "{explicit}");
+    assert!(ungrouped.ends_with("shared with every conversation."), "{ungrouped}");
+    assert_eq!(is_error, json!(true), "{refused}");
+    let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
+    let scopes: Vec<(String, Value)> = memories.as_array().unwrap().iter().map(|memory| (memory["text"].as_str().unwrap().to_string(), memory["scopes"].clone())).collect();
+    assert!(scopes.contains(&("Pipelines publish on tags".to_string(), json!([format!("group:{slop}")]))), "{scopes:?}");
+    assert!(scopes.contains(&("The host has 8 cores".to_string(), json!(["global"]))), "{scopes:?}");
+    assert!(scopes.contains(&("Everything is UTC".to_string(), json!(["global"]))), "{scopes:?}");
+}
+
+#[tokio::test]
+async fn recall_names_what_other_groups_hold_and_groups_reaches_into_them() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let slop = create_group(&server, "slop").await;
+    let work = create_group(&server, "work").await;
+    claim(&server, slop, "/projects", None).await;
+    claim(&server, work, "/job", None).await;
+    let (in_slop, _) = start_in_folder(&server, &mut link, "/projects/app").await;
+    let (in_work, _) = start_in_folder(&server, &mut link, "/job/app").await;
+    let token = link.token.clone();
+    tool(&server, &token, in_work, "remember", json!({"text": "Keep the immich ui version in step with backups"})).await;
+    tool(&server, &token, in_work, "remember", json!({"text": "The immich ui package needs a pinned release"})).await;
+    tool(&server, &token, in_slop, "remember", json!({"text": "Slop uses an immich mirror", "scope": "global"})).await;
+
+    let (default, _) = tool(&server, &token, in_slop, "recall", json!({"query": "immich"})).await;
+    let (named, _) = tool(&server, &token, in_slop, "recall", json!({"query": "immich", "groups": ["Work"]})).await;
+    let (everywhere, _) = tool(&server, &token, in_slop, "recall", json!({"query": "immich", "groups": "all"})).await;
+    let (own, _) = tool(&server, &token, in_work, "recall", json!({"query": "immich"})).await;
+    let (unknown, is_error) = tool(&server, &token, in_slop, "recall", json!({"query": "immich", "groups": ["nobody"]})).await;
+
+    assert!(default.contains("Slop uses an immich mirror") && !default.contains("pinned release"), "{default}");
+    assert!(default.contains("2 more matches in other groups (work) left out"), "{default}");
+    assert!(named.contains("pinned release") && !named.contains("left out"), "{named}");
+    assert!(everywhere.contains("pinned release") && !everywhere.contains("left out"), "{everywhere}");
+    assert!(own.contains("pinned release") && !own.contains("left out"), "{own}");
+    assert_eq!(is_error, json!(true));
+    assert_eq!(unknown, "No group is called nobody. Use a group name, or groups: \"all\".");
 }

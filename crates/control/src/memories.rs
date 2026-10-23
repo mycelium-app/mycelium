@@ -58,6 +58,19 @@ pub async fn search(pool: &PgPool, query: Option<&str>, visible_scopes: Option<&
     .await
 }
 
+pub async fn omitted_groups(pool: &PgPool, query: &str, visible_scopes: &[String]) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        "select g.name, count(distinct m.id) from memories m
+         join groups g on 'group:' || g.id = any(m.scopes)
+         where to_tsvector('english', m.text) @@ websearch_to_tsquery('english', $1) and not (m.scopes && $2)
+         group by g.name order by g.name",
+    )
+    .bind(query.trim())
+    .bind(visible_scopes)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn list(State(state): State<AppState>, _user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Memory>>> {
     let rows = search(&state.pool, query.query.as_deref(), None, i64::MAX).await?;
 

@@ -1,6 +1,6 @@
 use crate::auth::AuthNode;
 use crate::error::ApiResult;
-use crate::memories::search;
+use crate::memories::{omitted_groups, search};
 use crate::state::AppState;
 use crate::tasks;
 use crate::walkthroughs;
@@ -34,24 +34,25 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "recall",
-            "description": "Search the shared memory for what earlier conversations learned. Use it before starting work that may have been done or decided before.",
+            "description": "Search the shared memory for what earlier conversations learned. Use it before starting work that may have been done or decided before. It searches the global memories and this conversation's group, and says how many matches it left out in other groups. Pass groups to search other groups too.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Words to search for."},
                     "limit": {"type": "number", "description": "How many memories to return. Defaults to 5."},
+                    "groups": {"description": "Other groups to search as well as this conversation's own: a list of group names, or \"all\" for every group.", "oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string", "enum": ["all"]}]},
                 },
                 "required": ["query"],
             },
         },
         {
             "name": "remember",
-            "description": "Store a short, confirmed finding in the shared memory so later conversations on any node can recall it.",
+            "description": "Store a short, confirmed finding in the shared memory so later conversations on any node can recall it. It is kept in this conversation's group, or globally when the conversation has no group.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "What to remember."},
-                    "scope": {"type": "string", "enum": ["global", "group"], "description": "global (default) is recalled in every conversation. group is recalled only in conversations whose project is in the same group."},
+                    "scope": {"type": "string", "enum": ["global", "group"], "description": "group (default when the conversation is in a group) is recalled only by conversations in the same group. global is recalled in every conversation: use it for what is true of the tools, the host or the agents themselves."},
                 },
                 "required": ["text"],
             },
@@ -130,13 +131,27 @@ async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uu
     }
 }
 
-async fn group_scope_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<String>> {
+async fn group_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {
     let Some((conversation_id, _)) = claimed_conversation(state, headers, node_id).await? else {
         return Ok(None);
     };
-    let group = sqlx::query_scalar::<_, Option<Uuid>>("select p.group_id from conversations c join projects p on p.id = c.project_id where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.flatten();
 
-    Ok(group.map(|group_id| format!("group:{group_id}")))
+    Ok(sqlx::query_as::<_, (Uuid, String)>("select g.id, g.name from conversations c join groups g on g.id = conversation_group(c.cwd, c.node_id, c.project_id) where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?)
+}
+
+async fn scopes_named(state: &AppState, node_id: Uuid, names: &[String]) -> ApiResult<Result<Vec<String>, String>> {
+    let mut scopes = Vec::new();
+
+    for name in names {
+        let found = sqlx::query_scalar::<_, Uuid>("select g.id from groups g join nodes n on n.created_by = g.owner where n.id = $1 and lower(g.name) = lower($2)").bind(node_id).bind(name.trim()).fetch_optional(&state.pool).await?;
+
+        match found {
+            Some(group_id) => scopes.push(format!("group:{group_id}")),
+            None => return Ok(Err(format!("No group is called {}. Use a group name, or groups: \"all\".", name.trim()))),
+        }
+    }
+
+    Ok(Ok(scopes))
 }
 
 pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
@@ -162,16 +177,47 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         return Ok(failure(&id, INVALID_PARAMS, "recall needs a query, a string."));
                     };
                     let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_RECALL_LIMIT).clamp(1, MAX_RECALL_LIMIT);
-                    let group_scope = group_scope_of(&state, &headers, node.id).await?;
-                    let visible: Vec<String> = ["global".to_string()].into_iter().chain(group_scope).collect();
-                    let rows = search(&state.pool, Some(query), Some(&visible), limit).await?;
+                    let group = group_of(&state, &headers, node.id).await?;
+                    let mut visible: Vec<String> = ["global".to_string()].into_iter().chain(group.map(|(group_id, _)| format!("group:{group_id}"))).collect();
+                    let everywhere = match arguments.get("groups") {
+                        Some(Value::String(text)) if text == "all" => true,
+                        Some(Value::String(name)) => {
+                            match scopes_named(&state, node.id, std::slice::from_ref(name)).await? {
+                                Ok(scopes) => visible.extend(scopes),
+                                Err(message) => return Ok(reply(&id, tool_text(&message, true))),
+                            }
+
+                            false
+                        }
+                        Some(Value::Array(names)) => {
+                            let names: Vec<String> = names.iter().filter_map(Value::as_str).map(String::from).collect();
+
+                            match scopes_named(&state, node.id, &names).await? {
+                                Ok(scopes) => visible.extend(scopes),
+                                Err(message) => return Ok(reply(&id, tool_text(&message, true))),
+                            }
+
+                            false
+                        }
+                        _ => false,
+                    };
+                    let rows = search(&state.pool, Some(query), (!everywhere).then_some(visible.as_slice()), limit).await?;
+                    let omitted = if everywhere { Vec::new() } else { omitted_groups(&state.pool, query, &visible).await? };
+                    let note = if omitted.is_empty() {
+                        String::new()
+                    } else {
+                        let count: i64 = omitted.iter().map(|(_, count)| count).sum();
+                        let names: Vec<&str> = omitted.iter().map(|(name, _)| name.as_str()).collect();
+
+                        format!("\n{count} more {} in other groups ({}) left out. Search them with groups: [\"name\"], or every group with groups: \"all\".", if count == 1 { "match" } else { "matches" }, names.join(", "))
+                    };
 
                     if rows.is_empty() {
-                        reply(&id, tool_text("No memories match that query.", false))
+                        reply(&id, tool_text(&format!("No memories match that query.{note}"), false))
                     } else {
                         let lines: Vec<String> = rows.iter().map(|row| format!("{}: {}", row.id, row.text.replace('\n', " "))).collect();
 
-                        reply(&id, tool_text(&lines.join("\n"), false))
+                        reply(&id, tool_text(&format!("{}{note}", lines.join("\n")), false))
                     }
                 }
                 Some("remember") => {
@@ -191,12 +237,11 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Some((_, title)) => title.clone(),
                         None => "unknown conversation".to_string(),
                     };
-                    let scopes = match arguments.get("scope").and_then(Value::as_str) {
-                        Some("group") => match group_scope_of(&state, &headers, node.id).await? {
-                            Some(scope) => vec![scope],
-                            None => return Ok(reply(&id, tool_text("Nothing was stored. This conversation's project is not in a group, so remember it without a scope to share it with every conversation.", true))),
-                        },
-                        _ => vec!["global".to_string()],
+                    let group = group_of(&state, &headers, node.id).await?;
+                    let (scopes, shared_with) = match (arguments.get("scope").and_then(Value::as_str), group) {
+                        (Some("group"), None) => return Ok(reply(&id, tool_text("Nothing was stored. This conversation is not in a group, so remember it without a scope, or with scope global, to share it with every conversation.", true))),
+                        (Some("global"), _) | (_, None) => (vec!["global".to_string()], "every conversation".to_string()),
+                        (_, Some((group_id, name))) => (vec![format!("group:{group_id}")], format!("the {name} group")),
                     };
                     let memory_id = sqlx::query_scalar::<_, Uuid>("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning id")
                         .bind(text)
@@ -206,7 +251,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         .fetch_one(&state.pool)
                         .await?;
 
-                    reply(&id, tool_text(&format!("Remembered as {memory_id}."), false))
+                    reply(&id, tool_text(&format!("Remembered as {memory_id}, shared with {shared_with}."), false))
                 }
                 Some(tool @ ("propose_task" | "ask_question")) => {
                     let (field, status) = if tool == "propose_task" { ("title", TaskStatus::Proposed) } else { ("question", TaskStatus::Question) };

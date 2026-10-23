@@ -105,6 +105,7 @@ schedules        id uuid pk, owner uuid, node_id uuid, agent text, cwd text, pro
                  each_run text ('new'|'same'), paused bool, next_run_at, last_run_at null, last_conversation_id null, created_at
 schedule_runs    id uuid pk, schedule_id uuid, ran_at, outcome text ('started'|'skipped'), reason text null, conversation_id uuid null
 groups           id uuid pk, owner uuid, name text, created_at, unique(owner, name)
+group_folders    id uuid pk, group_id uuid, node_id uuid null (any node), prefix text (absolute, no trailing slash), created_at, unique(group_id, node_id, prefix)
 instruction_versions  id text pk (commit SHA with a source, else 40 hex characters), seq bigserial, layer text ('global' or a group id), group_id uuid null,
                  text text, author uuid null, created_at
 instruction_source    singleton row: forge_id uuid, repository text, path text
@@ -222,7 +223,7 @@ Projects:
 - `GET /api/v1/worktrees` → `[{id, project_id, branch, path, issue_number, created_at}]` for the caller's projects.
 
 Groups and instructions:
-- `GET /api/v1/groups` → the caller's groups `[{id, name, created_at}]`. `POST /api/v1/groups` `{name}` (201; 400 `name_required` or `name_invalid`, which allows up to 40 letters, numbers, dots, dashes and underscores; 409 `group_exists`). `PATCH /api/v1/groups/{id}` `{name}` renames. `DELETE /api/v1/groups/{id}` leaves its projects ungrouped; memories stored in its scope stay in the list.
+- `GET /api/v1/groups` → the caller's groups `[{id, name, folders: [{id, node_id?, prefix}], created_at}]`. `POST /api/v1/groups` `{name}` (201; 400 `name_required` or `name_invalid`, which allows up to 40 letters, numbers, dots, dashes and underscores; 409 `group_exists`). `PATCH /api/v1/groups/{id}` `{name}` renames. `DELETE /api/v1/groups/{id}` leaves its projects ungrouped; memories stored in its scope stay in the list. `POST /api/v1/groups/{id}/folders` `{prefix, node_id?}` makes the group claim a folder, on one node or on any (201 `{id, node_id, prefix}`; 400 `folder_invalid` unless it is a full path below the root with no `.` or `..`; 404 for an unknown node; 409 `folder_claimed` when a group already claims it on that node). `DELETE /api/v1/groups/{id}/folders/{folder_id}` removes the claim (204).
 - `PATCH /api/v1/projects/{id}` `{group_id}` puts a project in one of the caller's groups, or takes it out when `group_id` is null (404 for another person's project or group). Projects carry `group_id`.
 - `GET /api/v1/instructions` → `{source: {forge_id, repository, path} | null, revision, layers: [{layer, name, path, text, version: {id, created_at} | null}]}`. `layer` is `global` or a group id; `revision` is the id of the newest version of any layer. `path` is the layer's file in the source repository, null without a source.
 - `PUT /api/v1/instructions/{layer}` `{text}` saves the layer as a new version and pushes to every node; saving the text the layer already holds changes nothing. Without a source the version id is a 40-character hash held in Postgres only. With a source the save is a commit through the forge's contents API (GitHub `PUT /repos/{r}/contents/{path}`, GitLab `/projects/{id}/repository/files/{path}`) and the version id is the commit SHA; a file that changed on the forge since it was read answers 409 `forge_file_changed` and nothing is saved.
@@ -256,12 +257,19 @@ global memories. The node passes the server to the agent at `session/new`, `sess
 conversation id as headers, and starts Claude with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so its own
 memory is off. Settings has a Memories page to search, edit and delete.
 
-A project can belong to a group (see Groups and instructions), and a conversation started from a
-project carries `project_id`. Memory scopes are `global` and `group:<group id>`. `recall` searches
-`global` plus the scope of the group of the conversation's project (the node's
-`x-mycelium-conversation` header names the conversation). `remember` takes an optional `scope`:
-`global` (the default) or `group`, which stores into the project's group scope and is refused, with
-a plain message, when the conversation's project has no group.
+A conversation's group is its project's group if the project has one, else the group whose claimed folder is the
+longest prefix of the conversation's `cwd` (a claim on a specific node beats one on any node; `/projects` matches
+`/projects/app` but not `/projects2`). It is resolved when read, by the SQL function `conversation_group`, so
+imported conversations are grouped without a re-import and a changed claim applies at once. Conversations carry
+`group_id`. Memory scopes are `global` and `group:<group id>`. The node's `x-mycelium-conversation` header names the
+conversation.
+
+- `recall` searches `global` plus the conversation's group and, when other groups hold matches, appends how many it
+  left out and in which groups. `groups` takes group names or `"all"` to search those too; an unknown name is an error
+  result.
+- `remember` stores into the conversation's group, or globally when it has none. `scope: "global"` stores globally;
+  `scope: "group"` is refused, with a plain message, when the conversation has no group. The reply names where the
+  memory went.
 
 ### Instructions
 
@@ -277,7 +285,7 @@ The node answers `instructions_held {revision, unmanaged: [label]}`; `GET /nodes
 `instructions_unmanaged` and `sessions_on_older_instructions`, the running sessions whose
 conversation started on a revision other than the newest.
 
-A group's layer reaches a conversation whose project is in the group without touching the project's git
+A group's layer reaches a conversation in the group (by project or by folder) without touching the project's git
 tree: `start_session` carries `instructions` (the layer's text) and the node appends it to the system
 prompt through `_meta.systemPrompt.append` on `session/new`, `session/load` and `session/resume`, which
 `claude-agent-acp` reads. The node sends it for Claude Code only: Codex has no documented per-session

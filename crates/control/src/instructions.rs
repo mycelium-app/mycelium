@@ -166,8 +166,8 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
     sqlx::query("update conversations set instructions_revision = $2 where id = $1").bind(conversation_id).bind(revision).execute(&state.pool).await?;
 
     let text = sqlx::query_scalar::<_, String>(
-        "select v.text from conversations c join projects p on p.id = c.project_id
-         join instruction_versions v on v.layer = p.group_id::text
+        "select v.text from conversations c
+         join instruction_versions v on v.layer = conversation_group(c.cwd, c.node_id, c.project_id)::text
          where c.id = $1 order by v.seq desc limit 1",
     )
     .bind(conversation_id)

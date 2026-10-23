@@ -143,6 +143,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chats", post(chats::create))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
+        .route("/api/v1/groups/{id}/folders", post(groups::add_folder))
+        .route("/api/v1/groups/{id}/folders/{folder_id}", delete(groups::remove_folder))
         .route("/api/v1/instructions", get(instructions::get))
         .route("/api/v1/instructions/pull", post(instructions::pull))
         .route("/api/v1/instructions/{layer}", put(instructions::save))

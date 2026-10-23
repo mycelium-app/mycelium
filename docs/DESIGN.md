@@ -245,7 +245,9 @@ Today each machine needs `install.sh` and a `git pull` of agents-md. Instead:
 ## Groups
 
 A group (`slop`, `work`, `stoat`, `homelab`) is a namespace. Each project belongs to exactly one,
-and the group carries its own agent instructions and its own memories, layered between the global
+and a group can also claim folders, on one node or on any, so conversations without a project belong
+too: a conversation's group is its project's group, else the group whose folder is the longest prefix
+of its working directory. That covers imported conversations and ones started in a folder. The group carries its own agent instructions and its own memories, layered between the global
 ones and the project's:
 
 | Layer | Instructions | Memory |
@@ -259,14 +261,16 @@ step with the one the `@acme-org/backups-*` packages use". A session in a `work`
 a session in a `slop` project never does. The org guidelines (`slop/guidelines`) become the `slop`
 group's instructions rather than a per-project import.
 
-**Instructions** are delivered through the directory layout, so no repo is touched: projects live
+**Instructions** reach a Claude Code session through `_meta.systemPrompt.append` when the control plane
+starts it, for any conversation in the group by project or by folder; no repo is touched. The earlier
+idea below, the directory layout, is not what is built: projects live
 at `<projects root>/<group>/<project>` on each node, and the node writes the group's file beside
 them. Claude Code reads `CLAUDE.md` from every parent of its working directory, so
 `<projects root>/<group>/CLAUDE.md` is enough. Codex stops at the project root, marked by `.git`
 unless `project_root_markers` says otherwise (codex 0.163.0), so it never sees a file above the
-repo; for Codex the daemon has to add the group layer when it starts the session. Which Codex
-option does that without replacing the base instructions (`model_instructions_file` does) is
-unchecked.
+repo; for Codex the daemon has to add the group layer when it starts the session. No Codex option
+is known that does that without replacing the base instructions (`model_instructions_file` does),
+so the group layer reaches Claude Code only.
 
 **Memory.** Every memory has a scope: global, or one or more groups. Global memories stay the
 common case: anything true of the tools, the host or the agents themselves. A scope decides what a
@@ -276,7 +280,8 @@ session sees by default, not what it may read:
   left out in other groups, so the agent knows when to look further.
 - `recall(query, groups: [...])` or `groups: all` reaches into other groups. A `slop` session
   bumping an immich dependency can ask `work` what it learned about `@immich/ui`.
-- `remember` defaults to the session's group, so a finding about a work dependency stays in `work`.
+- `remember` defaults to the session's group, so a finding about a work dependency stays in `work`;
+  a session with no group remembers globally, and `scope: "global"` saves globally on purpose.
   Widening a memory to more groups, or to global, is a deliberate step, the operator's from the UI.
 
 If question 3 settles on groups gating permissions, reaching into another group follows the same

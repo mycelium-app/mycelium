@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, created_at, updated_at, archived_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at";
 
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
@@ -44,6 +44,7 @@ pub struct ConversationRow {
     pub side_kind: Option<String>,
     pub provider_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
+    pub group_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -69,6 +70,7 @@ impl ConversationRow {
             side_kind: self.side_kind.as_deref().map(parse_enum).transpose()?,
             provider_id: self.provider_id,
             project_id: self.project_id,
+            group_id: self.group_id,
             created_at: self.created_at,
             updated_at: self.updated_at,
             archived_at: self.archived_at,
