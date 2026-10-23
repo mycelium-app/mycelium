@@ -3,6 +3,7 @@ package mycelium.state
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import kotlin.random.Random
 
 const val UnnamedAccount = "Account name not reported"
 
@@ -30,13 +31,28 @@ fun accountsOn(node: NodeSummary, agent: String): List<LoginInfo> = node.logins.
 
 fun switchableAccounts(node: NodeSummary?, agent: String): List<LoginInfo> = node?.let { accountsOn(it, agent) }.orEmpty().takeIf { it.size >= 2 }.orEmpty()
 
-fun accountChoices(logins: List<LoginInfo>): List<Choice> = logins.map { login ->
-    Choice(login.account.orEmpty(), login.account ?: "Default account", when (login.state) {
-        LoginState.SignedIn -> null
-        LoginState.Expired -> "Expired"
-        LoginState.SignedOut -> "Signed out"
-        LoginState.Unknown -> "Unknown"
-    })
+const val DefaultAccountId = "(default)"
+
+const val SignInPrefix = "sign in:"
+
+fun accountChoiceId(login: LoginInfo): String = login.account ?: DefaultAccountId
+
+fun accountsElsewhere(nodes: Collection<NodeSummary>, node: NodeSummary, agent: String): List<String> {
+    val here = accountsOn(node, agent).mapNotNull { it.account }.toSet()
+
+    return nodes.filter { it.id != node.id }.flatMap { accountsOn(it, agent) }.mapNotNull { it.account }.distinct().filter { it !in here }.sorted()
 }
+
+fun accountChoices(logins: List<LoginInfo>, elsewhere: List<String>, nodeName: String): List<Choice> =
+    logins.map { login ->
+        Choice(accountChoiceId(login), login.account ?: "Default account", when (login.state) {
+            LoginState.SignedIn -> null
+            LoginState.Expired -> "Expired"
+            LoginState.SignedOut -> "Signed out"
+            LoginState.Unknown -> "Unknown"
+        })
+    } + elsewhere.map { Choice(SignInPrefix + it, it, "Sign in on $nodeName") }
+
+fun newAccountName(): String = "account-${Random.nextInt(1000, 10000)}"
 
 private val AgentOrder = listOf("claude", "codex")

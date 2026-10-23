@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -21,19 +24,23 @@ import mycelium.state.Store
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
 import mycelium.state.loginMethodName
+import mycelium.state.newAccountName
 
 @Composable
 fun AccountsSettings(store: Store) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     val accounts = agentAccounts(state.nodes.values)
+    val agents = (accounts.map { it.agent } + state.nodes.values.flatMap { node -> node.agents.filter { it.available }.map { it.agent } }).distinct()
+    var signIn by remember { mutableStateOf<LoginSession?>(null) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
         if (accounts.isEmpty()) {
             Label("No agent account is signed in on any node. Add a login from a node on the Nodes page.", color = colors.textMuted)
         }
 
-        for (agent in accounts.map { it.agent }.distinct()) {
+        for (agent in agents) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
@@ -69,7 +76,37 @@ fun AccountsSettings(store: Store) {
 
                     Hairline()
                 }
+
+                val signInNodes = state.nodes.values.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }.sortedBy { it.name }
+
+                if (signInNodes.isNotEmpty()) {
+                    Box {
+                        MyButton({ menuFor = agent }, text = "Sign in on a node", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on a node")
+
+                        if (menuFor == agent) {
+                            MenuPopup(onDismiss = { menuFor = null }) {
+                                MenuLabel("Sign in ${agentName(agent)} on")
+
+                                for (node in signInNodes) {
+                                    MenuItem(
+                                        node.name,
+                                        onClick = {
+                                            menuFor = null
+                                            store.act {
+                                                val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
+                                                signIn = LoginSession(started.loginId, agent)
+                                            }
+                                        },
+                                        leading = nodeIcon(node),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
+    signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 }

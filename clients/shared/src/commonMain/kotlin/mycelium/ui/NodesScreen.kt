@@ -98,9 +98,9 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
                     finished = sessions[node.id]?.let { state.finishedLogins[it.loginId] },
                     confirmingRevoke = revoking == node.id,
                     platform = platform,
-                    onLogin = { agent ->
+                    onLogin = { agent, account ->
                         store.act {
-                            val started = api.startLogin(node.id, agent, loginMethodFor(agent))
+                            val started = api.startLogin(node.id, agent, loginMethodFor(agent), account)
                             sessions[node.id] = LoginSession(started.loginId, agent)
                         }
                     },
@@ -155,7 +155,7 @@ private fun NodeGroup(
     finished: Boolean?,
     confirmingRevoke: Boolean,
     platform: Platform,
-    onLogin: (String) -> Unit,
+    onLogin: (String, String?) -> Unit,
     onLoginInput: (String) -> Unit,
     onLoginClose: () -> Unit,
     onDrain: () -> Unit,
@@ -216,7 +216,7 @@ private fun NodeGroup(
                             MenuLabel("Sign in an agent on ${node.name}")
 
                             for (agent in signedOut) {
-                                MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent) })
+                                MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent, null) })
                             }
                         }
                     }
@@ -263,12 +263,16 @@ private fun NodeGroup(
         }
 
         for (agent in installed) {
-            AgentLoginRow(agent, node.logins.firstOrNull { it.agent == agent.agent }, onLogin = { onLogin(agent.agent) })
-            Hairline()
+            val accounts = node.logins.filter { it.agent == agent.agent }
+
+            for (login in accounts.ifEmpty { listOf(null) }) {
+                AgentLoginRow(agent, login, onLogin = { onLogin(agent.agent, login?.account) })
+                Hairline()
+            }
         }
 
         if (session != null) {
-            LoginPanel(session, output, finished, platform, onLoginInput, onLoginClose)
+            LoginPanel(session, output, finished, platform::openUrl, onLoginInput, onLoginClose)
             Hairline()
         }
     }
@@ -343,11 +347,11 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
 }
 
 @Composable
-private fun LoginPanel(
+fun LoginPanel(
     session: LoginSession,
     output: String,
     finished: Boolean?,
-    platform: Platform,
+    onOpenUrl: (String) -> Unit,
     onInput: (String) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -375,7 +379,7 @@ private fun LoginPanel(
         }
 
         if (link != null && finished == null) {
-            MyButton({ platform.openUrl(link) }, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
+            MyButton({ onOpenUrl(link) }, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
         }
 
         when (finished) {

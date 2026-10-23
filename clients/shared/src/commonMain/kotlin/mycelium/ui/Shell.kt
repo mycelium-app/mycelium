@@ -209,18 +209,20 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
 @Composable
 private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
-    when (route) {
-        Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
-        is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
-        Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
-        is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
-        Route.Nodes -> NodesScreen(store, state, platform)
-        Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
-        Route.Schedules -> SchedulesScreen(store, state)
-        Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
-        Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
-        Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
-        Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
+    CompositionLocalProvider(LocalPlatform provides platform) {
+        when (route) {
+            Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
+            is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
+            Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+            is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
+            Route.Nodes -> NodesScreen(store, state, platform)
+            Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
+            Route.Schedules -> SchedulesScreen(store, state)
+            Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
+            Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
+            Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+            Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
+        }
     }
 }
 

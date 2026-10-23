@@ -37,7 +37,10 @@ import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.ago
+import mycelium.state.DefaultAccountId
+import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
+import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
@@ -56,6 +59,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var panel by remember { mutableStateOf<SidePanel?>(null) }
     var nodeSheetOpen by remember { mutableStateOf(false) }
+    var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
 
@@ -128,9 +132,20 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
                 onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                 onSearchFiles = { query -> api.files(id, query) },
-                accounts = remember(node, conversation.agent) { accountChoices(switchableAccounts(node, conversation.agent)) },
+                accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                 accountLocked = conversation.acpSessionId != null,
-                onSetAccount = { account -> store.act { api.patchConversation(id, PatchConversationRequest(account = account)) } },
+                onSetAccount = { account ->
+                    store.act {
+                        when {
+                            account.startsWith(SignInPrefix) && node != null -> {
+                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
+                                signIn = LoginSession(started.loginId, conversation.agent)
+                            }
+                            account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
+                            else -> api.patchConversation(id, PatchConversationRequest(account = account))
+                        }
+                    }
+                },
                 onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
             )
         }
@@ -157,6 +172,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
         }
     }
+
+    signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 
     if (compact && nodeSheetOpen) {
         NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() })

@@ -381,7 +381,12 @@ data class CreateConversationRequest(
 )
 
 @Serializable
-data class PatchConversationRequest(val title: String? = null, val archived: Boolean? = null, val account: String? = null)
+data class PatchConversationRequest(
+    val title: String? = null,
+    val archived: Boolean? = null,
+    val account: String? = null,
+    @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
+)
 
 @Serializable
 data class SessionSummary(

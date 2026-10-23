@@ -140,8 +140,8 @@ class MyceliumApi(
         call("/nodes/$id") { client.delete(it) { authorise() } }
     }
 
-    suspend fun startLogin(nodeId: String, agent: String, method: String): StartLoginResponse =
-        call("/nodes/$nodeId/logins") { client.post(it) { authorise(); json(StartLoginRequest(agent, method)) } }.body()
+    suspend fun startLogin(nodeId: String, agent: String, method: String, account: String? = null): StartLoginResponse =
+        call("/nodes/$nodeId/logins") { client.post(it) { authorise(); json(StartLoginRequest(agent, method, account)) } }.body()
 
     suspend fun loginInput(loginId: String, text: String) {
         call("/logins/$loginId/input") { client.post(it) { authorise(); json(LoginInputRequest(text)) } }

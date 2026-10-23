@@ -21,7 +21,10 @@ import mycelium.api.CreateConversationRequest
 import mycelium.api.LoginState
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.SignInPrefix
+import mycelium.state.accountChoiceId
 import mycelium.state.accountChoices
+import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
@@ -44,6 +47,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
     var account by remember { mutableStateOf<String?>(null) }
+    var signIn by remember { mutableStateOf<LoginSession?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshProjects() }
@@ -56,7 +60,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
-    val chosenAccount = accounts.firstOrNull { it.account.orEmpty() == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+    val chosenAccount = accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
 
     fun create() {
         if (node == null || chosenAgent == null) {
@@ -193,7 +197,21 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                         Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-                        OptionMenu("Account", accountChoices(accounts), chosenAccount?.account.orEmpty(), { picked -> account = picked })
+                        OptionMenu(
+                            "Account",
+                            accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()),
+                            chosenAccount?.let(::accountChoiceId),
+                            { picked ->
+                                if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
+                                    store.act {
+                                        val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), picked.removePrefix(SignInPrefix))
+                                        signIn = LoginSession(started.loginId, chosenAgent)
+                                    }
+                                } else {
+                                    account = picked
+                                }
+                            },
+                        )
                     }
                 }
 
@@ -220,4 +238,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             }
         }
     }
+
+    signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 }

@@ -1,12 +1,16 @@
 package mycelium.desktop
 
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
@@ -15,15 +19,21 @@ import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import mycelium.Connection
+import mycelium.DeviceInfo
+import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
 import mycelium.state.Choice
+import mycelium.state.DefaultAccountId
+import mycelium.state.SignInPrefix
 import mycelium.state.SessionOptions
 import mycelium.state.Store
 import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
 import mycelium.ui.MyceliumTheme
+import mycelium.ui.NodesScreen
 import mycelium.ui.SessionsSettings
 import org.junit.Rule
 import kotlin.test.Test
@@ -42,11 +52,25 @@ private const val SessionsJson = """[
 {"id":"s1","kind":"browser","label":"Firefox on Linux","hostname":"","address":"100.64.4.18","last_used_at":"2026-10-23T10:00:00Z","current":true},
 {"id":"s2","kind":"client","label":"Desktop app","hostname":"willow","address":"100.64.4.18","last_used_at":"2026-10-23T09:00:00Z","current":false}]"""
 
+private object AccountsPlatform : Platform {
+    override val originUrl: String? = null
+    override val signsInThroughTheBrowser = false
+    override fun loadConnection(): Connection? = null
+    override fun saveConnection(connection: Connection?) = Unit
+    override fun device() = DeviceInfo("Desktop", "host", "linux", "x86_64")
+    override fun approveCode(): String? = null
+    override fun currentPath() = "/"
+    override fun navigate(url: String) = Unit
+    override fun openUrl(url: String) = Unit
+    override fun copyToClipboard(text: String) = Unit
+}
+
 class AccountsAndSessionsTest {
     @get:Rule
     val rule = createComposeRule()
 
     private val requests = mutableListOf<HttpRequestData>()
+    private val bodies = mutableListOf<String>()
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -56,6 +80,10 @@ class AccountsAndSessionsTest {
 
             when {
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
+                path.endsWith("/logins") -> {
+                    bodies += String(request.body.toByteArray())
+                    respond("""{"login_id":"l1"}""", HttpStatusCode.OK, json)
+                }
                 path.endsWith("/sessions") -> respond(SessionsJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(NodesJson, HttpStatusCode.OK, json)
                 else -> respond("[]", HttpStatusCode.OK, json)
@@ -172,5 +200,53 @@ class AccountsAndSessionsTest {
         composerWith(accounts = listOf(Choice("sam@example.com", "sam@example.com"), Choice("work@acme.example", "work@acme.example")), started = true)
 
         rule.onNodeWithContentDescription("Account: work@acme.example, fixed once the conversation has started").assertExists()
+    }
+
+    @Test
+    fun signingInOnANodeStartsASignInForANewAccountFolder() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
+
+        rule.onNodeWithContentDescription("Sign in Claude Code on a node").performClick()
+        rule.onAllNodesWithText("willow").onLast().performClick()
+
+        rule.waitUntil { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(Regex(""""account":"account-\d{4}"""").containsMatchIn(bodies.last()), bodies.last())
+        assertTrue(requests.last { it.method == HttpMethod.Post }.url.encodedPath.endsWith("/nodes/n1/logins"))
+    }
+
+    @Test
+    fun thePickerOffersToSignInOnThisNodeToAnAccountKnownElsewhere() {
+        var picked: String? = null
+        composerWith(
+            accounts = listOf(Choice("sam@example.com", "sam@example.com"), Choice("work@acme.example", "work@acme.example"), Choice(SignInPrefix + "side@example.com", "side@example.com", "Sign in on willow")),
+            started = false,
+            onSetAccount = { picked = it },
+        )
+
+        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
+        rule.onNodeWithText("Sign in on willow").performClick()
+
+        assertEquals("sign in:side@example.com", picked)
+    }
+
+    @Test
+    fun theDefaultAccountIsAnExplicitChoice() {
+        var picked: String? = null
+        composerWith(accounts = listOf(Choice(DefaultAccountId, "Default account"), Choice("work@acme.example", "work@acme.example")), started = false, onSetAccount = { picked = it })
+
+        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
+        rule.onNodeWithText("Default account").performClick()
+
+        assertEquals(DefaultAccountId, picked)
+    }
+
+    @Test
+    fun theNodesPageListsEveryAccountOfAnAgentOnANode() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, AccountsPlatform) } }
+
+        rule.onNodeWithText("work@acme.example").assertExists()
+        assertEquals(2, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
     }
 }

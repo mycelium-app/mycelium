@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.state.Choice
+import mycelium.state.DefaultAccountId
 import mycelium.state.SessionOptions
 import mycelium.state.SlashCommand
 import mycelium.state.mentionAt
@@ -157,9 +158,9 @@ fun Composer(
 
     val pickers: @Composable () -> Unit = {
         if (accounts.isNotEmpty() && accountLocked) {
-            Label(conversation.account ?: "Account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
+            Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
         } else if (accounts.isNotEmpty()) {
-            OptionMenu("Account", accounts, conversation.account, onSetAccount)
+            OptionMenu("Account", accounts, conversation.account ?: DefaultAccountId.takeIf { id -> accounts.any { it.id == id } }, onSetAccount)
         }
 
         if (modes.isNotEmpty()) {
