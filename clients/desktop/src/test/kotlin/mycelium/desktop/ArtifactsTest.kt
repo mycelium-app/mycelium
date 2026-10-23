@@ -207,4 +207,23 @@ class ArtifactsScreenTest {
 
         assertEquals(listOf("https://landing-sketch-ab12.artifacts.test"), platform.copied)
     }
+
+    @Test
+    fun aPublicArtifactAlsoOffersItsPrivateLink() {
+        showArtifacts()
+
+        rule.onNodeWithContentDescription("More for Release notes").performClick()
+        rule.onNodeWithText("Copy private link").performClick()
+
+        assertEquals(listOf("https://mycelium.test/api/v1/artifacts/a3/versions/2/content"), platform.copied)
+    }
+
+    @Test
+    fun aPrivateArtifactHasNoSeparatePrivateLink() {
+        showArtifacts()
+
+        rule.onNodeWithContentDescription("More for Landing sketch").performClick()
+
+        rule.onNodeWithText("Copy private link").assertDoesNotExist()
+    }
 }

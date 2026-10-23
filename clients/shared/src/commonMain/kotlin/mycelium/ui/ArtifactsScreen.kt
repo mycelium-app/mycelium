@@ -132,6 +132,10 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
                 MenuItem("Open", onClick = { close(); platform.navigate(artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Globe)
                 MenuItem("Copy link", onClick = { close(); platform.copyToClipboard(artifact.url ?: artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Copy)
 
+                if (artifact.isPublic) {
+                    MenuItem("Copy private link", onClick = { close(); platform.copyToClipboard(artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Key)
+                }
+
                 if (mine) {
                     MenuItem(if (artifact.isPublic) "Make private" else "Make public", onClick = { close(); store.act { store.setArtifactPublic(artifact, !artifact.isPublic) } }, leading = MyIcon.Key)
                     MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
