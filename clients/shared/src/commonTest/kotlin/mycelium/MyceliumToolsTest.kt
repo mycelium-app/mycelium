@@ -84,6 +84,13 @@ class MyceliumToolsTest {
     }
 
     @Test
+    fun askQuestionKeepsTheIdOfTheTaskTheControlPlaneRecordedForIt() {
+        val parsed = assertIs<MyceliumCall.AskQuestion>(myceliumCall(call("mcp__mycelium__ask_question", """{"question":"Which?"}""", "Question 66666666-6666-6666-6666-666666666666 asked. End your turn: the answer arrives here as a new message.")))
+
+        assertEquals("66666666-6666-6666-6666-666666666666", parsed.taskId)
+    }
+
+    @Test
     fun proposeScheduleDescribesTheCronFromTheResultInWords() {
         val output = "Schedule 11111111-1111-1111-1111-111111111111 proposed (0 20 * * 1-5, Europe/London). It waits for the person to confirm and will not run until they do."
         val parsed = assertIs<MyceliumCall.ProposeSchedule>(myceliumCall(call("mcp__mycelium__propose_schedule", """{"prompt":"Check CI","preset":"weekdays at 20:00"}""", output)))

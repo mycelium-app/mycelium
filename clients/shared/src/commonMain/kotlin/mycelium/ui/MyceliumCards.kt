@@ -29,11 +29,11 @@ import mycelium.state.ToolStatus
 private const val CollapsedLimit = 3
 private const val ExcerptLines = 3
 
-internal class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> Unit, val answer: suspend (Task, String) -> Unit)
+class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> Unit, val answer: suspend (Task, String) -> Unit)
 
-internal val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
+val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
 
-internal fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
+fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
 
 @Composable
 private fun askedTask(parsed: MyceliumCall): Task? {

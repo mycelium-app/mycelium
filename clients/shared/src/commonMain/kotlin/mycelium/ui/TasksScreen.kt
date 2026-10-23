@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -418,6 +419,19 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
 
 @Composable
 private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
+    Dialog(onDismiss) {
+        Label("Answer a question", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label(task.title, style = Tokens.Type.UiStrong)
+
+        AnswerForm(task, send = { text ->
+            store.answerTask(task, text)
+            onDismiss()
+        }, onCancel = onDismiss)
+    }
+}
+
+@Composable
+internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp = Tokens.Space.S4, onCancel: (() -> Unit)? = null) {
     val scope = rememberCoroutineScope()
     var answer by remember { mutableStateOf("") }
     var answerError by remember { mutableStateOf<String?>(null) }
@@ -439,18 +453,12 @@ private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
         running = true
 
         scope.launch {
-            failure = attempt {
-                store.answerTask(task, text.trim())
-                onDismiss()
-            }
+            failure = attempt { send(text.trim()) }
             running = false
         }
     }
 
-    Dialog(onDismiss) {
-        Label("Answer a question", Modifier.semantics { heading() }, Tokens.Type.Title)
-        Label(task.title, style = Tokens.Type.UiStrong)
-
+    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
         if (task.options.isNotEmpty()) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                 for (option in task.options) {
@@ -464,7 +472,7 @@ private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
-            MyButton(onDismiss, text = "Cancel", muted = true)
+            onCancel?.let { MyButton(it, text = "Cancel", muted = true) }
             MyButton({ submit(answer) }, text = "Send answer", variant = ButtonVariant.Outline)
         }
     }
