@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -9,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -209,6 +212,24 @@ class TasksTest {
 
         rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
         assertEquals("""{"answer":"Tag it tomorrow"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
+    }
+
+    @Test
+    fun aSpaceTypedIntoTheAnswerKeepsTheDialogOpenAndTheAnswerIsSent() {
+        showBoard()
+
+        rule.onNodeWithContentDescription("Answer Tag now, or wait?").performClick()
+        rule.onNodeWithContentDescription("Answer").performTextInput("test reply")
+        rule.onNodeWithContentDescription("Answer").performKeyInput {
+            pressKey(Key.Spacebar)
+            pressKey(Key.E)
+        }
+
+        rule.onNodeWithText("Answer a question").assertExists()
+        rule.onNodeWithText("Send answer").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        assertEquals("""{"answer":"test reply"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
     }
 
     @Test

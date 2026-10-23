@@ -575,6 +575,8 @@ private object ScreenPopup : PopupPositionProvider {
         IntOffset.Zero
 }
 
+private fun Modifier.dismissOnTap(onDismiss: () -> Unit): Modifier = pointerInput(onDismiss) { detectTapGestures { onDismiss() } }
+
 @Composable
 fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val colors = MyTheme.colors
@@ -585,7 +587,7 @@ fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.32f))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
+                    .dismissOnTap(onDismiss),
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 Column(
@@ -620,7 +622,7 @@ fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.35f))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = onDismiss),
+                .dismissOnTap(onDismiss),
             contentAlignment = Alignment.Center,
         ) {
             Column(
