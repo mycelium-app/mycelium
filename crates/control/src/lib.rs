@@ -213,6 +213,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/issues", get(issues::list))
         .route("/api/v1/projects/{id}/issues/{number}/workspace", post(issues::start_workspace))
         .route("/api/v1/imports", get(imports::list).post(imports::create))
+        .route("/api/v1/imports/jobs", get(imports::jobs))
         .route("/api/v1/indexing", get(search::indexing))
         .route("/api/v1/search", get(search::search))
         .route("/api/v1/stream", get(stream::connect))

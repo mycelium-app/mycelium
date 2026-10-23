@@ -3,20 +3,66 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::activity::{ImportedTurn, record_imported_turns};
 use crate::pricing::{Tokens, estimated_cost};
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, Tx, enum_text, parse_enum, text_without_nul, without_nul};
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
-use mycelium_proto::api::{ImportRequest, ImportResult, ImportStatus};
-use mycelium_proto::conversation::{AgentId, ConversationStatus, EventKind};
+use mycelium_proto::api::{ImportJob, ImportJobState, ImportProblem, ImportRequest, ImportStatus};
+use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 80;
 const AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
 const WORKING_CAP_MS: i64 = 2 * 60 * 60 * 1000;
+const RECENT_WRITE: Duration = Duration::from_secs(300);
+const PROGRESS_EVERY: Duration = Duration::from_secs(1);
+const EVENTS_PER_INSERT: usize = 500;
+const SEARCH_TEXT_LIMIT: usize = 100_000;
+const JOB_COLUMNS: &str = "id, node_id, agent, state, total, done, imported, skipped, waiting, failed";
+
+enum Outcome {
+    Imported(Conversation),
+    Skipped,
+    Waiting,
+}
+
+#[derive(sqlx::FromRow)]
+struct JobRow {
+    id: Uuid,
+    node_id: Uuid,
+    agent: String,
+    state: String,
+    total: i32,
+    done: i32,
+    imported: i32,
+    skipped: i32,
+    waiting: i32,
+    failed: sqlx::types::Json<Vec<ImportProblem>>,
+}
+
+impl JobRow {
+    fn to_proto(self) -> ApiResult<ImportJob> {
+        Ok(ImportJob {
+            id: self.id,
+            node_id: self.node_id,
+            agent: parse_enum(&self.agent)?,
+            state: parse_enum(&self.state)?,
+            total: self.total.into(),
+            done: self.done.into(),
+            imported: self.imported.into(),
+            skipped: self.skipped.into(),
+            waiting: self.waiting.into(),
+            failed: self.failed.0,
+        })
+    }
+}
 
 struct Usage {
     message_id: String,
@@ -120,12 +166,12 @@ fn codex_output(payload: &Value) -> Item {
     Item::ToolResult { id: payload["call_id"].as_str().unwrap_or_default().to_string(), output, failed: false }
 }
 
-fn parse_claude(text: &str) -> Option<Parsed> {
+fn parse_claude(lines: impl Iterator<Item = impl AsRef<str>>) -> Option<Parsed> {
     let mut parsed = Parsed { session_id: String::new(), cwd: String::new(), first_at: None, last_at: None, items: Vec::new() };
     let mut usage_positions: HashMap<String, usize> = HashMap::new();
 
-    for line in text.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+    for line in lines {
+        let Ok(entry) = serde_json::from_str::<Value>(line.as_ref()) else {
             continue;
         };
 
@@ -207,13 +253,13 @@ fn parse_claude(text: &str) -> Option<Parsed> {
     (!parsed.session_id.is_empty()).then_some(parsed)
 }
 
-fn parse_codex(text: &str) -> Option<Parsed> {
+fn parse_codex(lines: impl Iterator<Item = impl AsRef<str>>) -> Option<Parsed> {
     let mut parsed = Parsed { session_id: String::new(), cwd: String::new(), first_at: None, last_at: None, items: Vec::new() };
     let mut model = String::new();
     let mut counted = [0i64; 3];
 
-    for line in text.lines() {
-        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+    for line in lines {
+        let Ok(entry) = serde_json::from_str::<Value>(line.as_ref()) else {
             continue;
         };
         let payload = &entry["payload"];
@@ -403,11 +449,14 @@ async fn parsed_pure_imports(state: &AppState) -> anyhow::Result<Vec<(Uuid, Pars
     let mut found = Vec::new();
 
     for (id, node_id, agent, path) in imports {
-        let Ok(bytes) = tokio::fs::read(state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path)).await else {
+        let full = state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path);
+        let codex = agent == enum_text(&AgentId::Codex);
+        let Ok(parsed) = tokio::task::spawn_blocking(move || parse_file(&full, if codex { AgentId::Codex } else { AgentId::Claude })).await else {
             continue;
         };
-        let text = String::from_utf8_lossy(&bytes);
-        let parsed = if agent == enum_text(&AgentId::Codex) { parse_codex(&text) } else { parse_claude(&text) };
+        let Ok(parsed) = parsed else {
+            continue;
+        };
 
         if let Some(parsed) = parsed {
             found.push((id, parsed));
@@ -465,7 +514,17 @@ pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<J
     Ok(Json(statuses))
 }
 
-pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<ImportRequest>) -> ApiResult<Json<ImportResult>> {
+pub async fn jobs(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<ImportJob>>> {
+    let rows = sqlx::query_as::<_, JobRow>(sqlx::AssertSqlSafe(format!(
+        "select distinct on (node_id, agent) {JOB_COLUMNS} from import_jobs where node_id in (select id from nodes where revoked_at is null) order by node_id, agent, started_at desc"
+    )))
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(JobRow::to_proto).collect::<ApiResult<Vec<_>>>()?))
+}
+
+pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<ImportRequest>) -> ApiResult<(StatusCode, Json<ImportJob>)> {
     let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(request.node_id).fetch_one(&state.pool).await?;
 
     if !exists {
@@ -473,79 +532,245 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     }
 
     let (_, pending) = importable_paths(&state, request.node_id, request.agent).await?;
-    let mut imported = 0;
-    let mut skipped = 0;
+    let started = sqlx::query_as::<_, JobRow>(sqlx::AssertSqlSafe(format!(
+        "insert into import_jobs (owner, node_id, agent, total) values ($1, $2, $3, $4)
+         on conflict (node_id, agent) where state = 'running' do nothing
+         returning {JOB_COLUMNS}"
+    )))
+    .bind(user.id)
+    .bind(request.node_id)
+    .bind(enum_text(&request.agent))
+    .bind(pending.len() as i32)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some(started) = started else {
+        let running = sqlx::query_as::<_, JobRow>(sqlx::AssertSqlSafe(format!("select {JOB_COLUMNS} from import_jobs where node_id = $1 and agent = $2 and state = 'running'")))
+            .bind(request.node_id)
+            .bind(enum_text(&request.agent))
+            .fetch_one(&state.pool)
+            .await?;
+
+        return Ok((StatusCode::ACCEPTED, Json(running.to_proto()?)));
+    };
+
+    let job = started.to_proto()?;
+    tokio::spawn(run_job(state, user.id, job.clone(), pending));
+
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+async fn run_job(state: AppState, owner: Uuid, mut job: ImportJob, pending: Vec<String>) {
+    let mut saved_at = Instant::now();
 
     for path in pending {
-        let full = state.config.data_dir.join("transcripts").join(request.node_id.to_string()).join(&path);
-        let Ok(bytes) = tokio::fs::read(&full).await else {
-            skipped += 1;
-            continue;
-        };
-        let text = String::from_utf8_lossy(&bytes);
-        let parsed = match request.agent {
-            AgentId::Claude => parse_claude(&text),
-            AgentId::Codex => parse_codex(&text),
-        };
-        let Some(parsed) = parsed else {
-            skipped += 1;
-            continue;
-        };
+        let node_id = job.node_id;
+        let agent = job.agent;
+        let outcome = tokio::spawn(import_file(state.clone(), owner, node_id, agent, path.clone())).await;
 
-        let taken = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where node_id = $1 and acp_session_id = $2)").bind(request.node_id).bind(&parsed.session_id).fetch_one(&state.pool).await?;
+        job.done += 1;
 
-        if taken {
-            continue;
+        match outcome {
+            Ok(Ok(Outcome::Imported(conversation))) => {
+                job.imported += 1;
+                state.publish(Some(owner), StreamMessage::Conversation(conversation));
+            }
+            Ok(Ok(Outcome::Skipped)) => job.skipped += 1,
+            Ok(Ok(Outcome::Waiting)) => job.waiting += 1,
+            Ok(Err(reason)) => job.failed.push(ImportProblem { path, reason }),
+            Err(_) => job.failed.push(ImportProblem { path, reason: "The file could not be read.".to_string() }),
         }
 
-        let events = events_of(&parsed.items);
-        let title = parsed
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::User(text) if !text.trim().is_empty() => Some(text.trim().lines().next().unwrap_or_default().trim().chars().take(TITLE_LIMIT).collect::<String>()),
-                _ => None,
-            })
-            .unwrap_or_else(|| "Untitled conversation".to_string());
-        let created_at = parsed.first_at.unwrap_or_else(Utc::now);
-        let updated_at = parsed.last_at.unwrap_or(created_at);
-
-        let mut tx = state.pool.begin().await?;
-        let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "insert into conversations (owner, node_id, agent, cwd, title, status, acp_session_id, imported_from, created_at, updated_at, archived_at, project_id)
-             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, (select id from projects where owner = $1 and node_id = $2 and ($4 = path or left($4, length(path) + 1) = path || '/') order by length(path) desc limit 1))
-             on conflict (node_id, imported_from) where imported_from is not null do nothing
-             returning {CONVERSATION_COLUMNS}"
-        )))
-        .bind(user.id)
-        .bind(request.node_id)
-        .bind(enum_text(&request.agent))
-        .bind(&parsed.cwd)
-        .bind(title)
-        .bind(enum_text(&ConversationStatus::Done))
-        .bind(&parsed.session_id)
-        .bind(&path)
-        .bind(created_at)
-        .bind(updated_at)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        let Some(row) = row else {
-            continue;
-        };
-
-        for (kind, payload) in &events {
-            append_event(&mut tx, row.id, *kind, payload, None).await?;
+        if saved_at.elapsed() >= PROGRESS_EVERY {
+            save_progress(&state, owner, &job).await;
+            saved_at = Instant::now();
         }
-
-        record_imported_turns(&mut tx, row.id, &turns_of(&parsed.items)).await?;
-
-        tx.commit().await?;
-        imported += 1;
-        state.publish(Some(user.id), StreamMessage::Conversation(row.to_proto()?));
     }
 
-    Ok(Json(ImportResult { imported, skipped }))
+    job.state = ImportJobState::Finished;
+    save_progress(&state, owner, &job).await;
+}
+
+async fn save_progress(state: &AppState, owner: Uuid, job: &ImportJob) {
+    let saved = sqlx::query(
+        "update import_jobs set state = $2, done = $3, imported = $4, skipped = $5, waiting = $6, failed = $7, finished_at = case when $2 = 'finished' then now() end where id = $1",
+    )
+    .bind(job.id)
+    .bind(enum_text(&job.state))
+    .bind(job.done as i32)
+    .bind(job.imported as i32)
+    .bind(job.skipped as i32)
+    .bind(job.waiting as i32)
+    .bind(sqlx::types::Json(&job.failed))
+    .execute(&state.pool)
+    .await;
+
+    if let Err(cause) = saved {
+        tracing::warn!("could not record the progress of import {}: {cause}", job.id);
+    }
+
+    state.publish(Some(owner), StreamMessage::ImportJob(job.clone()));
+}
+
+pub async fn end_interrupted(state: &AppState) -> anyhow::Result<()> {
+    sqlx::query("update import_jobs set state = 'finished', finished_at = now() where state = 'running'").execute(&state.pool).await?;
+
+    Ok(())
+}
+
+fn store_failure(path: &str, cause: impl std::fmt::Display) -> String {
+    tracing::warn!("could not import {path}: {cause}");
+
+    "The database could not store it. Try again.".to_string()
+}
+
+fn parse_file(path: &Path, agent: AgentId) -> std::io::Result<Option<Parsed>> {
+    let file = std::fs::File::open(path)?;
+    let lines = BufReader::new(file).split(b'\n').map_while(Result::ok).map(|line| String::from_utf8_lossy(&line).into_owned());
+
+    Ok(match agent {
+        AgentId::Claude => parse_claude(lines),
+        AgentId::Codex => parse_codex(lines),
+    })
+}
+
+fn searchable(text: &str) -> String {
+    text.chars().take(SEARCH_TEXT_LIMIT).collect()
+}
+
+async fn insert_events(tx: &mut Tx<'_>, conversation_id: Uuid, events: &[(EventKind, Value)]) -> sqlx::Result<()> {
+    let mut seq = 0i64;
+    let mut agent_text = String::new();
+    let mut entries: Vec<(i64, String)> = Vec::new();
+
+    for batch in events.chunks(EVENTS_PER_INSERT) {
+        let mut seqs = Vec::new();
+        let mut kinds = Vec::new();
+        let mut payloads = Vec::new();
+
+        for (kind, payload) in batch {
+            seq += 1;
+
+            match kind {
+                EventKind::UserMessage => {
+                    agent_text.clear();
+
+                    if let Some(text) = payload["text"].as_str().map(str::trim).filter(|text| !text.is_empty()) {
+                        entries.push((seq, searchable(text)));
+                    }
+                }
+                EventKind::TurnEnd if !agent_text.is_empty() => entries.push((seq, searchable(&agent_text))),
+                EventKind::AcpUpdate if payload["update"]["sessionUpdate"] == "agent_message_chunk" => {
+                    if agent_text.chars().count() < SEARCH_TEXT_LIMIT {
+                        agent_text.push_str(payload["update"]["content"]["text"].as_str().unwrap_or_default());
+                    }
+                }
+                _ => {}
+            }
+
+            seqs.push(seq);
+            kinds.push(enum_text(kind));
+            payloads.push(payload.clone());
+        }
+
+        sqlx::query("insert into events (conversation_id, seq, kind, payload) select $1, * from unnest($2::bigint[], $3::text[], $4::jsonb[])")
+            .bind(conversation_id)
+            .bind(seqs)
+            .bind(kinds)
+            .bind(payloads)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    for batch in entries.chunks(EVENTS_PER_INSERT) {
+        sqlx::query("insert into search_entries (conversation_id, seq, text) select $1, * from unnest($2::bigint[], $3::text[]) on conflict do nothing")
+            .bind(conversation_id)
+            .bind(batch.iter().map(|(seq, _)| *seq).collect::<Vec<_>>())
+            .bind(batch.iter().map(|(_, text)| text.clone()).collect::<Vec<_>>())
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn import_file(state: AppState, owner: Uuid, node_id: Uuid, agent: AgentId, path: String) -> Result<Outcome, String> {
+    let full = state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path);
+    let metadata = tokio::fs::metadata(&full).await.map_err(|_| "The control plane no longer has this file.".to_string())?;
+    let idle = metadata.modified().ok().and_then(|at| at.elapsed().ok()).unwrap_or_default();
+
+    if idle < RECENT_WRITE {
+        return Ok(Outcome::Waiting);
+    }
+
+    let parsed = tokio::task::spawn_blocking(move || parse_file(&full, agent)).await.map_err(|_| "The file could not be read.".to_string())?;
+    let parsed = parsed.map_err(|_| "The file could not be read.".to_string())?;
+    let Some(parsed) = parsed else {
+        return Err("There is no conversation in this file.".to_string());
+    };
+    let Parsed { session_id, cwd, first_at, last_at, items } = parsed;
+    let session_id = text_without_nul(&session_id);
+
+    let taken = sqlx::query_scalar::<_, bool>("select exists (select 1 from conversations where node_id = $1 and acp_session_id = $2)")
+        .bind(node_id)
+        .bind(&session_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|cause| store_failure(&path, cause))?;
+
+    if taken {
+        return Ok(Outcome::Skipped);
+    }
+
+    let mut events = events_of(&items);
+    events.iter_mut().for_each(|(_, payload)| without_nul(payload));
+    let title = items
+        .iter()
+        .find_map(|item| match item {
+            Item::User(text) if !text.trim().is_empty() => Some(text.trim().lines().next().unwrap_or_default().trim().chars().take(TITLE_LIMIT).collect::<String>()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "Untitled conversation".to_string());
+    let title = text_without_nul(&title);
+    let turns = turns_of(&items);
+    drop(items);
+
+    let cwd = text_without_nul(&cwd);
+    let created_at = first_at.unwrap_or_else(Utc::now);
+    let updated_at = last_at.unwrap_or(created_at);
+
+    let mut tx = state.pool.begin().await.map_err(|cause| store_failure(&path, cause))?;
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "insert into conversations (owner, node_id, agent, cwd, title, status, acp_session_id, imported_from, created_at, updated_at, archived_at, project_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, (select id from projects where owner = $1 and node_id = $2 and ($4 = path or left($4, length(path) + 1) = path || '/') order by length(path) desc limit 1))
+         on conflict (node_id, imported_from) where imported_from is not null do nothing
+         returning {CONVERSATION_COLUMNS}"
+    )))
+    .bind(owner)
+    .bind(node_id)
+    .bind(enum_text(&agent))
+    .bind(&cwd)
+    .bind(title)
+    .bind(enum_text(&ConversationStatus::Done))
+    .bind(&session_id)
+    .bind(&path)
+    .bind(created_at)
+    .bind(updated_at)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|cause| store_failure(&path, cause))?;
+
+    let Some(row) = row else {
+        return Ok(Outcome::Skipped);
+    };
+
+    insert_events(&mut tx, row.id, &events).await.map_err(|cause| store_failure(&path, cause))?;
+    record_imported_turns(&mut tx, row.id, &turns).await.map_err(|cause| store_failure(&path, cause.message()))?;
+    tx.commit().await.map_err(|cause| store_failure(&path, cause))?;
+
+    let conversation = row.to_proto().map_err(|cause| store_failure(&path, cause.message()))?;
+
+    Ok(Outcome::Imported(conversation))
 }
 
 #[cfg(test)]
@@ -566,7 +791,7 @@ mod tests {
         ]
         .join("\n");
 
-        let parsed = parse_claude(&text).unwrap();
+        let parsed = parse_claude(text.lines()).unwrap();
         let events = events_of(&parsed.items);
         let kinds: Vec<EventKind> = events.iter().map(|(kind, _)| *kind).collect();
 
@@ -592,7 +817,7 @@ mod tests {
         ]
         .join("\n");
 
-        let parsed = parse_codex(&text).unwrap();
+        let parsed = parse_codex(text.lines()).unwrap();
         let events = events_of(&parsed.items);
 
         assert_eq!((parsed.session_id.as_str(), parsed.cwd.as_str()), ("abc", "/work/app"));
@@ -628,7 +853,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(&text).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
         let expected = (20.0 * 5.0 + 100.0 * 25.0 + 4000.0 * 0.5 + 200.0 * 6.25 + 400.0 * 10.0) / 1_000_000.0;
 
         assert_eq!(turns.len(), 1);
@@ -642,7 +867,7 @@ mod tests {
     fn a_turn_with_an_unpriced_model_keeps_its_tokens_and_has_no_cost() {
         let text = [user_entry("2026-10-01T10:00:00Z", "Go"), usage_entry("m1", "2026-10-01T10:00:05Z", "some-local-model", 5), usage_entry("m2", "2026-10-01T10:00:06Z", "<synthetic>", 0)].join("\n");
 
-        let turns = turns_of(&parse_claude(&text).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
 
         assert_eq!(turns[0].tokens.output, 5);
         assert_eq!(turns[0].cost_usd, None);
@@ -658,7 +883,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(&text).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
 
         assert_eq!(turns.iter().map(|turn| turn.tokens.output).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(turns.iter().map(|turn| turn.ended_at.unwrap().to_rfc3339()).collect::<Vec<_>>(), ["2026-10-01T10:00:05+00:00", "2026-10-02T09:00:05+00:00"]);
@@ -676,7 +901,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(&text).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
 
         assert_eq!(turns[0].working_ms, Some(40_000));
         assert_eq!(turns[1].working_ms, Some(WORKING_CAP_MS));
@@ -697,7 +922,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_codex(&text).unwrap().items);
+        let turns = turns_of(&parse_codex(text.lines()).unwrap().items);
 
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].tokens, Tokens { input: 600, output: 80, cache_read: 900, ..Tokens::default() });

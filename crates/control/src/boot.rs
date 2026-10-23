@@ -69,6 +69,10 @@ pub async fn migrate_until_ready(state: AppState) {
                     tracing::error!("could not fill in the usage of imported conversations: {cause:#}");
                 }
 
+                if let Err(cause) = crate::imports::end_interrupted(&state).await {
+                    tracing::error!("could not end the imports that were running when the control plane stopped: {cause:#}");
+                }
+
                 if let Err(cause) = crate::chats::end_interrupted(&state).await {
                     tracing::error!("could not end the chats that were replying when the control plane stopped: {cause:?}");
                 }

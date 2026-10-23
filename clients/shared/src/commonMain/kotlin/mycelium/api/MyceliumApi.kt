@@ -368,7 +368,9 @@ class MyceliumApi(
 
     suspend fun imports(): List<ImportStatus> = call("/imports") { client.get(it) { authorise() } }.body()
 
-    suspend fun startImport(request: ImportRequest): ImportResult =
+    suspend fun importJobs(): List<ImportJob> = call("/imports/jobs") { client.get(it) { authorise() } }.body()
+
+    suspend fun startImport(request: ImportRequest): ImportJob =
         call("/imports") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun indexing(): Indexing = call("/indexing") { client.get(it) { authorise() } }.body()

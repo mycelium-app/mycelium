@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 const CHUNK_BYTES: u64 = 256 * 1024;
 const CHUNKS_PER_FILE_PER_POLL: usize = 4;
+const CHUNKS_PER_POLL: usize = 16;
 
 pub struct TranscriptFollower {
     home: PathBuf,
@@ -21,6 +22,7 @@ pub struct TranscriptFollower {
     workflow_positions: HashMap<String, u64>,
     workflows_scanned: bool,
     dirty: bool,
+    chunks_left: usize,
 }
 
 struct WorkflowJournal {
@@ -110,7 +112,7 @@ impl TranscriptFollower {
     pub fn new(home: PathBuf, roots: Vec<PathBuf>, state_file: PathBuf, out: mpsc::UnboundedSender<NodeToControl>) -> TranscriptFollower {
         let acked = std::fs::read_to_string(&state_file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
 
-        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, dirty: false }
+        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, dirty: false, chunks_left: CHUNKS_PER_POLL }
     }
 
     pub fn on_connect(&mut self) {
@@ -126,6 +128,7 @@ impl TranscriptFollower {
 
     pub fn poll(&mut self, connected: bool, conversation_for_session: impl Fn(&str) -> Option<Uuid>) {
         let roots = self.roots.clone();
+        self.chunks_left = CHUNKS_PER_POLL;
         let mut known_workflows = HashSet::new();
 
         for root in &roots {
@@ -167,7 +170,7 @@ impl TranscriptFollower {
         }
 
         for _ in 0..CHUNKS_PER_FILE_PER_POLL {
-            if position >= length {
+            if position >= length || self.chunks_left == 0 {
                 break;
             }
 
@@ -177,6 +180,7 @@ impl TranscriptFollower {
 
             let _ = self.out.send(NodeToControl::Transcript { path: key.clone(), offset: position, data: STANDARD.encode(&chunk) });
             position += chunk.len() as i64;
+            self.chunks_left -= 1;
         }
 
         self.sent.insert(key, position);
@@ -373,6 +377,29 @@ mod tests {
         second.poll(true, |_| None);
 
         assert_eq!(transcript_data(&drain(&mut messages)[0]), (4, "two\n".to_string()));
+    }
+
+    #[test]
+    fn a_backlog_of_many_files_is_sent_over_several_polls_and_all_of_it_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut follower, mut messages) = follower(dir.path(), &dir.path().join("projects"), &dir.path().join("state.json"));
+
+        for index in 0..40 {
+            append(&dir.path().join("projects").join("p").join(format!("{index:02}.jsonl")), "line\n");
+        }
+
+        follower.poll(true, |_| None);
+        let first = drain(&mut messages).len();
+        assert_eq!(first, CHUNKS_PER_POLL);
+
+        let mut total = first;
+
+        for _ in 0..4 {
+            follower.poll(true, |_| None);
+            total += drain(&mut messages).len();
+        }
+
+        assert_eq!(total, 40);
     }
 
     #[test]

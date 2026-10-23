@@ -451,15 +451,15 @@ class ApiTest {
     @Test
     fun importStatusesDecodeAndTheImportPostsTheNodeAndAgent() = runTest {
         val (api, seen) = apiWith { request ->
-            if (request.method == HttpMethod.Post) ok("""{"imported":3,"skipped":1}""") else ok("""[{"node_id":"n1","agent":"claude","found":5,"imported":2}]""")
+            if (request.method == HttpMethod.Post) ok("""{"id":"j1","node_id":"n1","agent":"claude","state":"running","total":5,"done":2}""") else ok("""[{"node_id":"n1","agent":"claude","found":5,"imported":2}]""")
         }
 
         val status = api.imports().single()
         val result = api.startImport(mycelium.api.ImportRequest("n1", "claude"))
 
         assertEquals(3, mycelium.ui.pendingImports(status))
-        assertEquals(3, result.imported)
-        assertEquals(1, result.skipped)
+        assertEquals(5, result.total)
+        assertEquals(true, result.running)
         assertEquals("""{"node_id":"n1","agent":"claude"}""", String(seen.last().body.toByteArray()))
     }
 

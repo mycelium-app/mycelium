@@ -51,3 +51,25 @@ fun IndeterminateProgress(description: String, modifier: Modifier = Modifier) {
         drawRoundRect(colors.accent, Offset(start * size.width, 0f), Size(SegmentFraction * size.width, size.height), radius)
     }
 }
+
+@Composable
+fun DeterminateProgress(description: String, fraction: Float, modifier: Modifier = Modifier) {
+    val colors = MyTheme.colors
+    val shown = fraction.coerceIn(0f, 1f)
+
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(Tokens.Size.ProgressBar)
+            .clipToBounds()
+            .semantics {
+                contentDescription = description
+                progressBarRangeInfo = ProgressBarRangeInfo(shown, 0f..1f)
+            },
+    ) {
+        val radius = CornerRadius(size.height / 2f)
+
+        drawRoundRect(colors.border, cornerRadius = radius)
+        drawRoundRect(colors.accent, Offset.Zero, Size(shown * size.width, size.height), radius)
+    }
+}

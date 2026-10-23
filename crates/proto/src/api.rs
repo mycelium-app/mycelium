@@ -297,6 +297,33 @@ pub struct ImportResult {
     pub skipped: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportJobState {
+    Running,
+    Finished,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportProblem {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImportJob {
+    pub id: Uuid,
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    pub state: ImportJobState,
+    pub total: i64,
+    pub done: i64,
+    pub imported: i64,
+    pub skipped: i64,
+    pub waiting: i64,
+    pub failed: Vec<ImportProblem>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeIndexing {
     pub node_id: Uuid,

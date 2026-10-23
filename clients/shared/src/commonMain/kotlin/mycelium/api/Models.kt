@@ -647,6 +647,25 @@ data class ImportRequest(@SerialName("node_id") val nodeId: String, val agent: S
 data class ImportResult(val imported: Int, val skipped: Int = 0)
 
 @Serializable
+data class ImportProblem(val path: String, val reason: String)
+
+@Serializable
+data class ImportJob(
+    val id: String,
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val state: String,
+    val total: Int,
+    val done: Int = 0,
+    val imported: Int = 0,
+    val skipped: Int = 0,
+    val waiting: Int = 0,
+    val failed: List<ImportProblem> = emptyList(),
+) {
+    val running: Boolean get() = state == "running"
+}
+
+@Serializable
 data class NodeIndexing(
     @SerialName("node_id") val nodeId: String,
     val transcripts: Int,

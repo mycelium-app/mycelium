@@ -459,6 +459,9 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
     publish_node(state, node_id).await
 }
 
+const FULL_TRANSCRIPT_CHUNK_BYTES: i64 = 256 * 1024;
+const TRANSCRIPT_ROW_REFRESH_SECONDS: f64 = 3.0;
+
 async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset: i64, data: String) -> ApiResult<()> {
     let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
         tracing::warn!("node {node_id} sent a transcript chunk that is not base64");
@@ -466,6 +469,7 @@ async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset:
         return Ok(());
     };
 
+    let chunk_bytes = bytes.len() as i64;
     let stored = match write_chunk(&state.config.data_dir, node_id, &path, offset, &bytes).await {
         Ok(stored) => stored,
         Err(WriteError::UnsafePath) => {
@@ -478,11 +482,15 @@ async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset:
 
     sqlx::query(
         "insert into transcripts (node_id, path, bytes) values ($1, $2, $3)
-         on conflict (node_id, path) do update set bytes = excluded.bytes, updated_at = now()",
+         on conflict (node_id, path) do update set bytes = excluded.bytes, updated_at = now()
+         where $4 < $5 or transcripts.updated_at < now() - make_interval(secs => $6)",
     )
     .bind(node_id)
     .bind(&path)
     .bind(stored)
+    .bind(chunk_bytes)
+    .bind(FULL_TRANSCRIPT_CHUNK_BYTES)
+    .bind(TRANSCRIPT_ROW_REFRESH_SECONDS)
     .execute(&state.pool)
     .await?;
 

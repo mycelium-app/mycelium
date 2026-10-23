@@ -204,7 +204,9 @@ Activity:
 
 History:
 - `GET /api/v1/imports` → `[{node_id, agent, found, imported}]` per node and agent; `POST /api/v1/imports`
-  `{node_id, agent}` → `{imported}`. `GET /api/v1/indexing` → `{conversations, entries, nodes: [{node_id, transcripts, imported, conversations}]}`.
+  `{node_id, agent}` → 202 `{id, node_id, agent, state, total, done, imported, skipped, waiting, failed: [{path, reason}]}`
+  at once, the import running as a background job (one running job per node and agent: a second start returns it).
+  `GET /api/v1/imports/jobs` → the latest job per node and agent. `GET /api/v1/indexing` → `{conversations, entries, nodes: [{node_id, transcripts, imported, conversations}]}`.
 - `GET /api/v1/search?q=&limit=20` → `[{conversation_id, title, node_id, updated_at, snippet}]`; an empty `q` is 400.
 
 Live:
@@ -380,6 +382,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Memory deleted (`DELETE /memories/{id}`) | `memory_removed` (`{memory_id}`) | everyone |
 | An instruction edit proposed by an agent, approved, declined or superseded, or its layer saved while it waits | `instruction_proposal` (the proposal) | the owner |
 | History imported (`POST /imports`) | `conversation` per new conversation | owner |
+| Import job progress, at most once a second, and when it finishes | `import_job` (the job) | owner |
 | `session_started` (session id, mode, model) | `conversation` | owner |
 | Mode or model changed | `conversation` | owner |
 | Prompt sent from the queue | `event` user_message, `conversation` working, `queue` | owner |
@@ -553,6 +556,15 @@ transcript whose session id already belongs to a conversation on that node is co
 Every user message and every assistant turn, live or imported, is stored in `search_entries` and searched with
 Postgres full-text search (`websearch_to_tsquery`, English) for now, not ctx. Search is scoped to the caller's own
 conversations and returns the best matching message per conversation with `**` around the matched words.
+
+An import is a background job that handles one transcript at a time: the file is read line by line, each conversation
+is committed in its own transaction with its events inserted in batches, and a file that fails is recorded in the job
+with a reason and skipped. `done`, `imported`, `skipped` (session already imported), `waiting` and `failed` are counted
+as it goes and kept in `import_jobs`; a running job found at boot is ended. A mirrored file written to in the last five
+minutes is not imported (`waiting`: still being sent by the node, or in use) and stays pending for a later import. A
+NUL in any stored string is stored as U+FFFD. The node sends at most sixteen 256 KiB transcript chunks per two-second
+poll, and the control plane rewrites a file's `transcripts` row on a chunk shorter than 256 KiB or at most every three
+seconds.
 
 An import records one `usage_turns` row per turn from the transcript: the turn's day is the day of its last assistant or
 tool entry, time working runs from the user message that starts the turn to that entry (capped at two hours so an idle

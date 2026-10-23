@@ -257,6 +257,16 @@ fn stream_memory_messages_round_trip_under_their_tags() {
 }
 
 #[test]
+fn stream_import_job_messages_carry_progress_and_the_files_that_failed() {
+    let job = ImportJob { id: id(), node_id: id(), agent: AgentId::Claude, state: ImportJobState::Running, total: 149, done: 40, imported: 38, skipped: 1, waiting: 0, failed: vec![ImportProblem { path: "p.jsonl".into(), reason: "There is no conversation in this file.".into() }] };
+
+    let message = round_trip(&StreamMessage::ImportJob(job));
+
+    assert_eq!((message["type"].as_str(), message["state"].as_str(), message["done"].as_i64()), (Some("import_job"), Some("running"), Some(40)));
+    assert_eq!(message["failed"][0]["path"], "p.jsonl");
+}
+
+#[test]
 fn stream_login_and_queue_messages_round_trip() {
     let output = round_trip(&StreamMessage::LoginOutput { login_id: id(), data: "x".into() });
     assert_eq!(output["type"], "login_output");

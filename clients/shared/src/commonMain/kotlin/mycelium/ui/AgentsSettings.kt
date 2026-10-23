@@ -15,11 +15,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import mycelium.api.ImportJob
 import mycelium.api.ImportRequest
 import mycelium.api.ImportStatus
 import mycelium.api.UsageLimitSetting
@@ -28,7 +30,24 @@ import mycelium.state.agentName
 
 private val ImportableAgents = listOf("claude", "codex")
 
+private const val ImportPollMillis = 1000L
+
 private val UsageLimitChoices = listOf("Ask me" to "ask", "Wait and resume automatically" to "resume")
+
+fun importOutcome(job: ImportJob): String {
+    val parts = mutableListOf<String>()
+    parts += if (job.imported > 0) "Imported ${job.imported}" else "Nothing new was imported"
+
+    if (job.failed.isNotEmpty()) {
+        parts += "${job.failed.size} could not be read"
+    }
+
+    if (job.waiting > 0) {
+        parts += "${job.waiting} in use, try again later"
+    }
+
+    return parts.joinToString(", ")
+}
 
 fun pendingImports(status: ImportStatus?): Int = ((status?.found ?: 0) - (status?.imported ?: 0)).coerceAtLeast(0)
 
@@ -37,14 +56,30 @@ fun AgentsSettings(store: Store) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var statuses by remember { mutableStateOf<List<ImportStatus>>(emptyList()) }
-    var skipped by remember { mutableStateOf<Map<Pair<String, String>, Int>>(emptyMap()) }
-    var importing by remember { mutableStateOf<Set<Pair<String, String>>>(emptySet()) }
+    var jobs by remember { mutableStateOf<Map<Pair<String, String>, ImportJob>>(emptyMap()) }
+    var showingProblems by remember { mutableStateOf<Set<Pair<String, String>>>(emptySet()) }
+    val anyRunning = jobs.values.any { it.running }
 
     var onUsageLimit by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { statuses = store.api.imports() }
+        store.act { jobs = store.api.importJobs().associateBy { it.nodeId to it.agent } }
         store.act { onUsageLimit = store.api.usageLimitSetting().onUsageLimit }
+    }
+
+    LaunchedEffect(anyRunning) {
+        while (anyRunning) {
+            delay(ImportPollMillis)
+            store.act {
+                jobs = store.api.importJobs().associateBy { it.nodeId to it.agent }
+
+                if (jobs.values.none { it.running }) {
+                    statuses = store.api.imports()
+                    store.refresh()
+                }
+            }
+        }
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
@@ -81,7 +116,7 @@ fun AgentsSettings(store: Store) {
                     for (node in state.nodes.values.sortedBy { it.name }) {
                         val status = statuses.firstOrNull { it.nodeId == node.id && it.agent == agent }
                         val pending = pendingImports(status)
-                        val unreadable = skipped[node.id to agent] ?: 0
+                        val job = jobs[node.id to agent]
 
                         ContentRow {
                             Label(node.name, maxLines = 1)
@@ -89,23 +124,12 @@ fun AgentsSettings(store: Store) {
                             Label((status?.imported ?: 0).toString(), color = colors.textMuted)
 
                             Column(horizontalAlignment = Alignment.End) {
-                                if (node.id to agent in importing) {
-                                    IndeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}")
+                                if (job?.running == true) {
+                                    Label("Importing ${job.done} of ${job.total}", color = colors.textMuted)
+                                    DeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}", if (job.total == 0) 0f else job.done.toFloat() / job.total)
                                 } else if (pending > 0) {
                                     MyButton(
-                                        onClick = {
-                                            importing = importing + (node.id to agent)
-                                            store.act {
-                                                try {
-                                                    val result = store.api.startImport(ImportRequest(node.id, agent))
-                                                    skipped = skipped + ((node.id to agent) to result.skipped)
-                                                    statuses = store.api.imports()
-                                                    store.refresh()
-                                                } finally {
-                                                    importing = importing - (node.id to agent)
-                                                }
-                                            }
-                                        },
+                                        onClick = { store.act { jobs = jobs + ((node.id to agent) to store.api.startImport(ImportRequest(node.id, agent))) } },
                                         text = "Import $pending",
                                         size = ButtonSize.Sm,
                                         description = "Import $pending ${agentName(agent)} conversations from ${node.name}",
@@ -114,8 +138,25 @@ fun AgentsSettings(store: Store) {
                                     Label("Up to date", color = colors.textMuted)
                                 }
 
-                                if (unreadable > 0) {
-                                    Label("$unreadable could not be read", color = colors.textMuted)
+                                if (job != null && !job.running) {
+                                    Label(importOutcome(job), color = colors.textMuted)
+
+                                    if (job.failed.isNotEmpty()) {
+                                        MyButton(
+                                            onClick = { showingProblems = if (node.id to agent in showingProblems) showingProblems - (node.id to agent) else showingProblems + (node.id to agent) },
+                                            text = if (node.id to agent in showingProblems) "Hide which" else "Show which",
+                                            size = ButtonSize.Sm,
+                                            description = "Show which ${agentName(agent)} conversations from ${node.name} could not be read",
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (job != null && !job.running && node.id to agent in showingProblems) {
+                            Column(Modifier.padding(vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                                for (problem in job.failed) {
+                                    Label("${problem.path.substringAfterLast('/')}: ${problem.reason}", color = colors.textMuted)
                                 }
                             }
                         }

@@ -41,6 +41,11 @@ private const val ArchivedJson = """[{"id":"c1","owner":"u","node_id":"$NodeId",
 
 private const val UsageJson = """[{"key":"c1","name":"","turns":3,"reported_turns":3,"input_tokens":1000,"output_tokens":500,"cost_usd":0.5,"cost_estimated":true}]"""
 
+private const val FailedJson = """[{"path":".claude/projects/-work/bad.jsonl","reason":"There is no conversation in this file."}]"""
+
+private fun importJob(state: String, done: Int, imported: Int = 0, failed: String = "[]") =
+    """{"id":"j1","node_id":"$NodeId","agent":"claude","state":"$state","total":3,"done":$done,"imported":$imported,"skipped":0,"waiting":0,"failed":$failed}"""
+
 private object NoPlatform : Platform {
     override val originUrl: String? = null
     override val signsInThroughTheBrowser = false
@@ -60,6 +65,7 @@ class PastConversationsTest {
 
     private val importFinishes = CompletableDeferred<Unit>()
     private val deleted = mutableListOf<String>()
+    private var importStarted = false
 
     private fun store(usage: String = UsageJson, current: String = "[]"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -75,9 +81,10 @@ class PastConversationsTest {
             val body = when {
                 path.endsWith("/activity/conversations") -> usage
                 path.endsWith("/imports") && request.method == HttpMethod.Post -> {
-                    importFinishes.await()
-                    """{"imported":3,"skipped":0}"""
+                    importStarted = true
+                    importJob("running", done = 1)
                 }
+                path.endsWith("/imports/jobs") -> if (!importStarted) "[]" else if (importFinishes.isCompleted) "[" + importJob("finished", done = 3, imported = 2, failed = FailedJson) + "]" else "[" + importJob("running", done = 2) + "]"
                 path.endsWith("/imports") -> """[{"node_id":"$NodeId","agent":"claude","found":3,"imported":0}]"""
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> ArchivedJson
@@ -167,14 +174,21 @@ class PastConversationsTest {
     }
 
     @Test
-    fun anImportShowsProgressUntilItFinishes() {
+    fun anImportShowsHowFarItHasGotAndThenWhatItDid() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
         rule.onNodeWithText("Import 3").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Importing 1 of 3").fetchSemanticsNodes().isNotEmpty() || rule.onAllNodesWithText("Importing 2 of 3").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Importing Claude Code conversations from laptop").assertExists()
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Importing 2 of 3").fetchSemanticsNodes().isNotEmpty() }
+
         importFinishes.complete(Unit)
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Importing Claude Code conversations from laptop").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 2, 1 could not be read").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithContentDescription("Importing Claude Code conversations from laptop").assertCountEquals(0)
+
+        rule.onNodeWithContentDescription("Show which Claude Code conversations from laptop could not be read").performClick()
+        rule.onNodeWithText("bad.jsonl: There is no conversation in this file.").assertExists()
     }
 }

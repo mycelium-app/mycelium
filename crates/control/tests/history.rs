@@ -21,19 +21,49 @@ fn claude_transcript(session: &str, prompt: &str, answer: &str) -> String {
     .join("\n")
 }
 
-async fn mirror(server: &Server, node_id: Uuid, path: &str, content: &str) {
+async fn mirror_aged(server: &Server, node_id: Uuid, path: &str, content: &str, age_seconds: u64) {
     let full = server.data_dir.join("transcripts").join(node_id.to_string()).join(path);
     std::fs::create_dir_all(full.parent().unwrap()).unwrap();
     std::fs::write(&full, content).unwrap();
+    age(&full, age_seconds);
 
     sqlx::query("insert into transcripts (node_id, path, bytes) values ($1, $2, $3)").bind(node_id).bind(path).bind(content.len() as i64).execute(&server.pool).await.unwrap();
 }
 
-async fn import(server: &Server, node_id: Uuid, agent: &str) -> Value {
-    let (status, body) = server.user.json(server.user.post("/api/v1/imports").json(&json!({"node_id": node_id, "agent": agent}))).await;
-    assert_eq!(status, 200, "{body}");
+fn age(full: &std::path::Path, seconds: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(full).unwrap();
+    file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(seconds)).unwrap();
+}
 
-    body
+async fn mirror(server: &Server, node_id: Uuid, path: &str, content: &str) {
+    mirror_aged(server, node_id, path, content, 3600).await;
+}
+
+async fn start_import(server: &Server, node_id: Uuid, agent: &str) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/imports").json(&json!({"node_id": node_id, "agent": agent}))).await
+}
+
+async fn finished_job(server: &Server, node_id: Uuid, agent: &str) -> Value {
+    eventually("the import to finish", || async {
+        let (_, jobs) = server.user.json(server.user.get("/api/v1/imports/jobs")).await;
+        let job = jobs.as_array().unwrap().iter().find(|job| job["node_id"] == json!(node_id) && job["agent"] == agent)?.clone();
+
+        (job["state"] == "finished").then_some(job)
+    })
+    .await
+}
+
+async fn import(server: &Server, node_id: Uuid, agent: &str) -> Value {
+    let (status, body) = start_import(server, node_id, agent).await;
+    assert_eq!(status, 202, "{body}");
+
+    finished_job(server, node_id, agent).await
+}
+
+async fn imported_conversation(server: &Server, session: &str) -> Value {
+    let id = sqlx::query_scalar::<_, Uuid>("select id from conversations where acp_session_id = $1").bind(session).fetch_one(&server.pool).await.unwrap();
+
+    server.conversation(id).await
 }
 
 async fn search(server: &Server, query: &str) -> Vec<Value> {
@@ -400,14 +430,15 @@ async fn a_restart_puts_back_the_last_activity_dates_that_archiving_overwrote() 
 }
 
 #[tokio::test]
-async fn unreadable_transcripts_are_counted_as_skipped() {
+async fn a_transcript_the_control_plane_no_longer_has_is_recorded_as_failed() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
     sqlx::query("insert into transcripts (node_id, path, bytes) values ($1, $2, 10)").bind(link.id).bind(".claude/projects/-work-app/gone.jsonl").execute(&server.pool).await.unwrap();
 
     let result = import(&server, link.id, "claude").await;
 
-    assert_eq!((result["imported"].as_i64(), result["skipped"].as_i64()), (Some(0), Some(1)));
+    assert_eq!(result["imported"], 0);
+    assert_eq!(result["failed"], json!([{"path": ".claude/projects/-work-app/gone.jsonl", "reason": "The control plane no longer has this file."}]));
 }
 
 #[tokio::test]
@@ -431,4 +462,154 @@ async fn an_imported_conversation_joins_the_project_whose_folder_holds_its_direc
     let (_, listed) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
     let imported = listed.as_array().unwrap().iter().find(|conversation| conversation["title"] == "Fix the build").unwrap_or_else(|| panic!("{listed}"));
     assert_eq!(imported["project_id"], project["id"]);
+}
+
+#[tokio::test]
+async fn starting_an_import_answers_at_once_with_the_job_and_the_number_of_files() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("aaaa", "One", "Reply one.")).await;
+    mirror(&server, link.id, ".claude/projects/-work-app/bbbb.jsonl", &claude_transcript("bbbb", "Two", "Reply two.")).await;
+
+    let (status, started) = start_import(&server, link.id, "claude").await;
+    assert_eq!(status, 202, "{started}");
+    assert_eq!((started["total"].as_i64(), started["agent"].as_str()), (Some(2), Some("claude")));
+    assert!(started["id"].is_string());
+
+    let finished = finished_job(&server, link.id, "claude").await;
+    assert_eq!(finished["id"], started["id"]);
+    assert_eq!((finished["done"].as_i64(), finished["imported"].as_i64(), finished["failed"].as_array().unwrap().len()), (Some(2), Some(2), 0));
+}
+
+#[tokio::test]
+async fn a_second_start_while_a_job_runs_returns_the_running_job() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let running = sqlx::query_scalar::<_, Uuid>("insert into import_jobs (owner, node_id, agent, total) values ($1, $2, 'claude', 7) returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+
+    let (status, again) = start_import(&server, link.id, "claude").await;
+
+    assert_eq!(status, 202, "{again}");
+    assert_eq!((again["id"].as_str(), again["total"].as_i64(), again["state"].as_str()), (Some(running.to_string().as_str()), Some(7), Some("running")));
+}
+
+#[tokio::test]
+async fn a_file_that_fails_is_recorded_with_a_reason_and_the_job_carries_on() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", "this is not a transcript\n").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/bbbb.jsonl", &claude_transcript("bbbb", "Two", "Reply two.")).await;
+    mirror(&server, link.id, ".claude/projects/-work-app/cccc.jsonl", &claude_transcript("cccc", "Three", "Reply three.")).await;
+
+    let job = import(&server, link.id, "claude").await;
+
+    assert_eq!((job["done"].as_i64(), job["imported"].as_i64()), (Some(3), Some(2)));
+    assert_eq!(job["failed"], json!([{"path": ".claude/projects/-work-app/aaaa.jsonl", "reason": "There is no conversation in this file."}]));
+}
+
+#[tokio::test]
+async fn a_file_still_being_written_waits_and_a_later_import_picks_it_up() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let path = ".claude/projects/-work-app/live.jsonl";
+    mirror_aged(&server, link.id, path, &claude_transcript("live", "Still going", "Working."), 5).await;
+
+    let job = import(&server, link.id, "claude").await;
+    assert_eq!((job["waiting"].as_i64(), job["imported"].as_i64()), (Some(1), Some(0)));
+
+    let (_, statuses) = server.user.json(server.user.get("/api/v1/imports")).await;
+    assert_eq!(status_of(&statuses, link.id, "claude"), (1, 0));
+
+    age(&server.data_dir.join("transcripts").join(link.id.to_string()).join(path), 3600);
+
+    let later = import(&server, link.id, "claude").await;
+    assert_eq!((later["waiting"].as_i64(), later["imported"].as_i64()), (Some(0), Some(1)));
+}
+
+#[tokio::test]
+async fn a_file_that_shares_the_session_of_an_imported_one_is_skipped_not_failed() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, ".claude/projects/-work-app/aaaa.jsonl", &claude_transcript("shared", "One", "Reply one.")).await;
+    mirror(&server, link.id, ".claude/projects/-work-app/bbbb.jsonl", &claude_transcript("shared", "One", "Reply one.")).await;
+
+    let job = import(&server, link.id, "claude").await;
+
+    assert_eq!((job["imported"].as_i64(), job["skipped"].as_i64(), job["failed"].as_array().unwrap().len()), (Some(1), Some(1), 0));
+}
+
+#[tokio::test]
+async fn nul_characters_and_unreadable_lines_do_not_stop_a_transcript_importing() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let lines = [
+        json!({"type": "user", "sessionId": "nul", "cwd": "/work/a\u{0}pp", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "Run it"}}).to_string(),
+        "{ not json".to_string(),
+        json!({"type": "assistant", "sessionId": "nul", "timestamp": "2026-10-01T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]}}).to_string(),
+        json!({"type": "user", "sessionId": "nul", "timestamp": "2026-10-01T10:00:09Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "a\u{0}b"}]}}).to_string(),
+    ];
+    mirror(&server, link.id, ".claude/projects/-work-app/nul.jsonl", &lines.join("\n")).await;
+
+    let job = import(&server, link.id, "claude").await;
+    assert_eq!((job["imported"].as_i64(), job["failed"].as_array().unwrap().len()), (Some(1), 0), "{job}");
+
+    let imported = &imported_conversation(&server, "nul").await;
+    assert_eq!(imported["cwd"], "/work/a\u{FFFD}pp");
+
+    let events = server.events(imported["id"].as_str().unwrap().parse().unwrap()).await;
+    assert_eq!(events[2]["payload"]["update"]["content"][0]["content"]["text"], "a\u{FFFD}b");
+}
+
+#[tokio::test]
+async fn a_long_transcript_imports_with_contiguous_events_and_searchable_text() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let mut lines = Vec::new();
+
+    for turn in 0..400 {
+        lines.push(json!({"type": "user", "sessionId": "long", "cwd": "/work/app", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": format!("question {turn} about zebracrossing")}}).to_string());
+        lines.push(json!({"type": "assistant", "sessionId": "long", "timestamp": "2026-10-01T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": format!("answer {turn} mentions aardvarks")}]}}).to_string());
+    }
+
+    mirror(&server, link.id, ".claude/projects/-work-app/long.jsonl", &lines.join("\n")).await;
+    import(&server, link.id, "claude").await;
+
+    let conversation = imported_conversation(&server, "long").await;
+    let id: Uuid = conversation["id"].as_str().unwrap().parse().unwrap();
+    let rows = sqlx::query_as::<_, (i64, String, Value)>("select seq, kind, payload from events where conversation_id = $1 order by seq").bind(id).fetch_all(&server.pool).await.unwrap();
+
+    assert_eq!(rows.iter().map(|row| row.0).collect::<Vec<i64>>(), (1..=1200).collect::<Vec<i64>>());
+    assert_eq!(rows[0].2["text"], "question 0 about zebracrossing");
+    assert_eq!(rows[2].1, "turn_end");
+    assert_eq!(search(&server, "zebracrossing").await.len(), 1);
+    assert_eq!(search(&server, "aardvarks").await.len(), 1);
+}
+
+#[tokio::test]
+#[ignore]
+async fn measure_a_fifty_megabyte_transcript_and_a_hundred_small_ones() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let output = "x".repeat(10_000);
+    let mut big = Vec::new();
+
+    for turn in 0..5000 {
+        big.push(json!({"type": "user", "sessionId": "big", "cwd": "/work/app", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": format!("prompt {turn}")}}).to_string());
+        big.push(json!({"type": "assistant", "sessionId": "big", "timestamp": "2026-10-01T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {}}]}}).to_string());
+        big.push(json!({"type": "user", "sessionId": "big", "timestamp": "2026-10-01T10:00:09Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": output}]}}).to_string());
+    }
+
+    mirror(&server, link.id, ".claude/projects/-work-app/big.jsonl", &big.join("\n")).await;
+
+    for index in 0..100 {
+        let session = format!("small-{index}");
+        mirror(&server, link.id, &format!(".claude/projects/-work-app/{session}.jsonl"), &claude_transcript(&session, "Hi", "Hello.")).await;
+    }
+
+    let started = std::time::Instant::now();
+    let job = import(&server, link.id, "claude").await;
+
+    println!("imported {} of {} in {:?}", job["imported"], job["total"], started.elapsed());
+    assert_eq!(job["imported"], 101);
 }
