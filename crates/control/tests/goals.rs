@@ -247,7 +247,7 @@ async fn a_goal_met_on_the_turn_that_used_the_last_of_the_budget_is_met_not_over
 }
 
 #[tokio::test]
-async fn a_message_from_the_user_pauses_an_active_goal_and_a_check_answering_later_changes_nothing() {
+async fn a_message_from_the_user_is_delivered_without_pausing_the_goal_and_the_check_after_that_turn_carries_on() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
@@ -257,15 +257,176 @@ async fn a_message_from_the_user_pauses_an_active_goal_and_a_check_answering_lat
 
     let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Actually, skip the e2e tests"}))).await;
     assert_eq!(status, 204);
-    let goal = goal_of(&server, id).await;
-    assert_eq!(goal["state"], "paused");
-    assert!(goal["reason"].as_str().unwrap().contains("you sent a message"), "{goal}");
+    assert_eq!(goal_of(&server, id).await["state"], "active");
     assert_eq!(link.expect_prompt().await.1, "Actually, skip the e2e tests");
 
-    answer_check(&mut link, check, "{\"verdict\": \"met\", \"reason\": \"Done.\"}").await;
+    answer_check(&mut link, check, "{\"verdict\": \"met\", \"reason\": \"Judged before the message.\"}").await;
+    settled(&mut link, check).await;
+    assert_eq!(goal_of(&server, id).await["state"], "active");
+
+    end_turn(&mut link, id, 4, 0).await;
+    let (check, prompt) = expect_check(&mut link).await;
+    assert!(prompt.contains("Goal: Every test passes"), "{prompt}");
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"Skipped e2e, unit tests remain.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nSkipped e2e, unit tests remain.");
+    assert_eq!(goal_of(&server, id).await["state"], "active");
+}
+
+async fn set_goal_with(server: &Server, id: Uuid, limits: Value) -> (u16, Value) {
+    let mut body = json!({"text": "Every test passes"});
+    body.as_object_mut().unwrap().extend(limits.as_object().unwrap().clone());
+
+    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&body)).await
+}
+
+async fn report_windows(link: &mut NodeLink, windows: &[(&str, f64)]) {
+    let windows = windows.iter().map(|(name, used)| mycelium_proto::conversation::UsageWindow { name: (*name).into(), used_percent: *used, resets_at: None, rate_per_hour: None, runs_out_at: None }).collect();
+    let login = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Claude, account: None, method: "token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()) };
+    link.send(NodeToControl::Logins { logins: vec![login] }).await;
+}
+
+async fn goal_reports_window(server: &Server, id: Uuid, five_hour: Value) {
+    let user = server.user.clone();
+
+    common::eventually("the window on the goal", || async { (goal_of_with(&user, id).await["five_hour_used"] == five_hour).then_some(()) }).await;
+}
+
+async fn goal_of_with(user: &common::Client, id: Uuid) -> Value {
+    user.json(user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1
+}
+
+#[tokio::test]
+async fn only_the_goal_text_is_required_and_a_goal_without_limits_never_runs_out() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    let (status, goal) = set_goal_with(&server, id, json!({})).await;
+    assert_eq!(status, 200, "{goal}");
+    assert!(goal["token_budget"].is_null() && goal["time_limit_seconds"].is_null() && goal["five_hour_limit"].is_null() && goal["weekly_limit"].is_null(), "{goal}");
+
+    end_turn(&mut link, id, 2, 900_000_000).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nMore to do.");
+    assert_eq!(goal_of(&server, id).await["state"], "active");
+}
+
+#[tokio::test]
+async fn limits_are_validated_with_a_message_that_says_what_to_enter() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    for (limits, error, message) in [
+        (json!({"time_limit_seconds": 0}), "time_limit_invalid", "Enter a time limit greater than zero."),
+        (json!({"five_hour_limit": 0}), "five_hour_limit_invalid", "Enter a 5-hour window limit between 1 and 100 percent."),
+        (json!({"five_hour_limit": 101}), "five_hour_limit_invalid", "Enter a 5-hour window limit between 1 and 100 percent."),
+        (json!({"weekly_limit": 150}), "weekly_limit_invalid", "Enter a weekly window limit between 1 and 100 percent."),
+        (json!({"token_budget": -5}), "budget_invalid", "Enter a token budget greater than zero."),
+    ] {
+        let (status, body) = set_goal_with(&server, id, limits).await;
+
+        assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (400, Some(error), Some(message)), "{body}");
+    }
+
+    assert_eq!(goal_of(&server, id).await, Value::Null);
+}
+
+#[tokio::test]
+async fn a_goal_not_met_after_its_time_limit_ends_with_that_reason_instead_of_continuing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"time_limit_seconds": 7200})).await;
+    sqlx::query("update goals set started_at = now() - interval '3 hours' where conversation_id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
     settled(&mut link, check).await;
 
-    assert_eq!(goal_of(&server, id).await["state"], "paused");
+    let goal = goal_of(&server, id).await;
+    assert_eq!(goal["state"], "limit_reached");
+    assert!(goal["reason"].as_str().unwrap().starts_with("Time limit reached after 2h"), "{goal}");
+}
+
+#[tokio::test]
+async fn a_goal_within_its_time_limit_keeps_going() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"time_limit_seconds": 7200})).await;
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nMore to do.");
+}
+
+#[tokio::test]
+async fn a_goal_stops_when_the_five_hour_window_of_its_account_reaches_the_limit() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"five_hour_limit": 80})).await;
+    report_windows(&mut link, &[("five_hour", 82.4), ("seven_day", 10.0)]).await;
+    goal_reports_window(&server, id, json!(82.4)).await;
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
+    settled(&mut link, check).await;
+
+    let goal = goal_of(&server, id).await;
+    assert_eq!(goal["state"], "limit_reached");
+    assert_eq!(goal["reason"], "5-hour window at 82%, over your limit of 80%. Set the goal again to carry on.");
+}
+
+#[tokio::test]
+async fn a_goal_stops_when_the_weekly_window_reaches_its_limit_but_not_while_it_is_below() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"weekly_limit": 50, "five_hour_limit": 90})).await;
+    report_windows(&mut link, &[("five_hour", 89.0), ("seven_day", 49.0)]).await;
+    goal_reports_window(&server, id, json!(89.0)).await;
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"One.\"}").await;
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nOne.");
+    settled(&mut link, check).await;
+
+    report_windows(&mut link, &[("five_hour", 89.0), ("seven_day", 50.0)]).await;
+    let user = server.user.clone();
+    common::eventually("the new weekly reading", || async { (goal_of_with(&user, id).await["weekly_used"] == json!(50.0)).then_some(()) }).await;
+    end_turn(&mut link, id, 4, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"Two.\"}").await;
+    settled(&mut link, check).await;
+
+    let goal = goal_of(&server, id).await;
+    assert_eq!((goal["state"].as_str(), goal["reason"].as_str()), (Some("limit_reached"), Some("Weekly window at 50%, over your limit of 50%. Set the goal again to carry on.")));
+}
+
+#[tokio::test]
+async fn unknown_usage_never_stops_a_goal_with_a_window_limit() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"five_hour_limit": 10})).await;
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nMore to do.");
+    let goal = goal_of(&server, id).await;
+    assert_eq!((goal["state"].as_str(), goal["five_hour_limit"].as_i64(), goal["five_hour_used"].is_null()), (Some("active"), Some(10), true));
 }
 
 #[tokio::test]

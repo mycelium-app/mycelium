@@ -164,8 +164,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         mutableState.update { held -> held.moves[conversationId]?.let { held.copy(moves = held.moves + (conversationId to it.copy(state = MoveState.Cancelled))) } ?: held }
     }
 
-    suspend fun setGoal(conversationId: String, text: String, tokenBudget: Long) {
-        val goal = api.setGoal(conversationId, SetGoalRequest(text, tokenBudget))
+    suspend fun setGoal(conversationId: String, text: String, limits: GoalLimits) {
+        val goal = api.setGoal(conversationId, SetGoalRequest(text, limits.tokenBudget, limits.timeLimitSeconds, limits.fiveHourPercent, limits.weeklyPercent))
 
         mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
     }

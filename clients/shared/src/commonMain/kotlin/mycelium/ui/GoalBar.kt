@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -18,16 +19,22 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
+import kotlin.time.Clock
 import mycelium.api.Goal
 import mycelium.api.GoalState
-import mycelium.state.DefaultGoalBudget
+import mycelium.state.GoalLimits
+import mycelium.state.formatTimeLeft
+import mycelium.state.formatTokens
 import mycelium.state.goalMessage
 import mycelium.state.goalProgress
+import mycelium.state.parseTimeLimit
 import mycelium.state.parseTokenBudget
+import mycelium.state.parseWindowLimit
 
 data class GoalControls(
     val goal: Goal?,
-    val onSet: (text: String, tokenBudget: Long) -> Unit,
+    val onSet: (text: String, limits: GoalLimits) -> Unit,
     val onPause: () -> Unit,
     val onResume: () -> Unit,
     val onClear: () -> Unit,
@@ -40,7 +47,7 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
         GoalState.Active -> colors.statusWorking
         GoalState.Paused -> colors.textMuted
         GoalState.Met -> colors.accent
-        GoalState.Stuck, GoalState.OverBudget -> colors.statusFailed
+        GoalState.Stuck, GoalState.OverBudget, GoalState.LimitReached -> colors.statusFailed
     }
     val actions: @Composable () -> Unit = {
         when (goal.state) {
@@ -50,6 +57,13 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
         }
     }
     val message = goalMessage(goal)
+    val now by produceState(Clock.System.now(), goal.timeLimitSeconds) {
+        while (goal.timeLimitSeconds != null) {
+            delay(ClockTickMillis)
+            value = Clock.System.now()
+        }
+    }
+    val progress = goalProgress(goal, now)
 
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Goal" }) {
         Row(
@@ -61,7 +75,7 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
             Label("Goal: ${goal.text}", Modifier.weight(1f), maxLines = 1)
 
             if (!LocalTouch.current) {
-                Label(goalProgress(goal), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(progress, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 actions()
             }
 
@@ -74,7 +88,7 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Label(goalProgress(goal), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                Label(progress, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
                 actions()
             }
         }
@@ -94,33 +108,50 @@ fun GoalButton(controls: GoalControls) {
     MyButton({ open = true }, icon = MyIcon.Target, description = if (controls.goal == null) "Set a goal" else "Edit the goal", selected = controls.goal != null, muted = controls.goal == null)
 
     if (open) {
-        GoalDialog(controls.goal, onSet = { text, budget -> controls.onSet(text, budget); open = false }, onDismiss = { open = false })
+        GoalDialog(controls.goal, onSet = { text, limits -> controls.onSet(text, limits); open = false }, onDismiss = { open = false })
     }
 }
 
+private const val ClockTickMillis = 30_000L
+
 @Composable
-private fun GoalDialog(held: Goal?, onSet: (String, Long) -> Unit, onDismiss: () -> Unit) {
+private fun GoalDialog(held: Goal?, onSet: (String, GoalLimits) -> Unit, onDismiss: () -> Unit) {
     val colors = MyTheme.colors
     var text by remember { mutableStateOf(held?.text.orEmpty()) }
-    var budget by remember { mutableStateOf(held?.tokenBudget?.toString() ?: DefaultGoalBudget) }
+    var budget by remember { mutableStateOf(held?.tokenBudget?.let { formatTokens(it) }.orEmpty()) }
+    var timeLimit by remember { mutableStateOf(held?.timeLimitSeconds?.let { formatTimeLeft(it) }.orEmpty()) }
+    var fiveHour by remember { mutableStateOf(held?.fiveHourLimit?.let { "$it%" }.orEmpty()) }
+    var weekly by remember { mutableStateOf(held?.weeklyLimit?.let { "$it%" }.orEmpty()) }
     var textError by remember { mutableStateOf<String?>(null) }
     var budgetError by remember { mutableStateOf<String?>(null) }
+    var timeError by remember { mutableStateOf<String?>(null) }
+    var fiveHourError by remember { mutableStateOf<String?>(null) }
+    var weeklyError by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
         val tokens = parseTokenBudget(budget)
+        val seconds = parseTimeLimit(timeLimit)
+        val fiveHourPercent = parseWindowLimit(fiveHour)
+        val weeklyPercent = parseWindowLimit(weekly)
         textError = if (text.isBlank()) "Enter the goal the agent should work towards." else null
-        budgetError = if (tokens == null) "Enter a token budget as a number, like 500k or 5M." else null
+        budgetError = if (budget.isNotBlank() && tokens == null) "Enter a token budget as a number, like 500k or 5M, or leave it empty." else null
+        timeError = if (timeLimit.isNotBlank() && seconds == null) "Enter a time limit like 2h, 45m or 1h 30m, or leave it empty." else null
+        fiveHourError = if (fiveHour.isNotBlank() && fiveHourPercent == null) "Enter a 5-hour window limit between 1 and 100 percent, like 80%, or leave it empty." else null
+        weeklyError = if (weekly.isNotBlank() && weeklyPercent == null) "Enter a weekly window limit between 1 and 100 percent, like 80%, or leave it empty." else null
 
-        if (textError == null && tokens != null) {
-            onSet(text.trim(), tokens)
+        if (listOf(textError, budgetError, timeError, fiveHourError, weeklyError).all { it == null }) {
+            onSet(text.trim(), GoalLimits(tokens, seconds, fiveHourPercent, weeklyPercent))
         }
     }
 
     Dialog(onDismiss) {
         Label("Set a goal", Modifier.semantics { heading() }, Tokens.Type.Title)
-        Label("The agent keeps taking turns until a separate check says the goal is met or stuck, or the budget is used up. Sending a message pauses it.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("The agent keeps going until the goal is met, it is stuck, or a limit is reached.", style = Tokens.Type.Meta, color = colors.textMuted)
         TextInput(text, { text = it }, label = "Goal", placeholder = "Every test passes on main, including e2e", error = textError, onSubmit = ::submit)
-        TextInput(budget, { budget = it }, label = "Token budget", error = budgetError, onSubmit = ::submit)
+        TextInput(budget, { budget = it }, label = "Token budget", placeholder = "5M", error = budgetError, onSubmit = ::submit)
+        TextInput(timeLimit, { timeLimit = it }, label = "Time limit", placeholder = "2h or 45m", error = timeError, onSubmit = ::submit)
+        TextInput(fiveHour, { fiveHour = it }, label = "Stop when the account's 5-hour window reaches", placeholder = "80%", error = fiveHourError, onSubmit = ::submit)
+        TextInput(weekly, { weekly = it }, label = "Stop when the account's weekly window reaches", placeholder = "80%", error = weeklyError, onSubmit = ::submit)
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

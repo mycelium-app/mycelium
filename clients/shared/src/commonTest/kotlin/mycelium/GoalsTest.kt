@@ -19,7 +19,9 @@ import mycelium.state.AppState
 import mycelium.state.DiffLine
 import mycelium.state.goalMessage
 import mycelium.state.goalProgress
+import mycelium.state.parseTimeLimit
 import mycelium.state.parseTokenBudget
+import mycelium.state.parseWindowLimit
 import mycelium.state.reduce
 import mycelium.state.stepPosition
 import mycelium.state.walkthroughDiff
@@ -27,12 +29,18 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.time.Instant
 
 private fun goal(state: GoalState, reason: String? = null) = Goal("c1", "Every test passes", 5_000_000, 2_100_000, 7, state, reason)
 
 private const val GoalJson = """{"type":"goal","conversation_id":"c1","text":"Every test passes","token_budget":5000000,"tokens_used":2100000,"turns":7,"state":"active"}"""
 
 private const val WalkthroughJson = """{"type":"walkthrough","id":"w1","conversation_id":"c1","created_at":"2026-10-23T10:00:00Z","steps":[{"title":"Add strings","key":false,"explanation":"New file.","files":[{"path":"a.ts","diff":"+a"}]},{"title":"Use strings","key":true,"explanation":"","files":[]}]}"""
+
+private val Now = Instant.parse("2026-10-23T14:00:00Z")
+
+private fun limited(timeLimitSeconds: Long? = null, fiveHourLimit: Int? = null, fiveHourUsed: Double? = null, weeklyLimit: Int? = null, weeklyUsed: Double? = null, tokenBudget: Long? = 5_000_000) =
+    Goal("c1", "Every test passes", tokenBudget, 2_100_000, 7, GoalState.Active, null, timeLimitSeconds, fiveHourLimit, weeklyLimit, "2026-10-23T12:40:00Z", fiveHourUsed, weeklyUsed)
 
 class GoalsTest {
     @Test
@@ -59,12 +67,69 @@ class GoalsTest {
     }
 
     @Test
+    fun theProgressShowsTheTimeLeftAndTheWindowsThatHaveALimit() {
+        val goal = limited(timeLimitSeconds = 9_600, fiveHourLimit = 80, fiveHourUsed = 63.6, weeklyLimit = 90, weeklyUsed = 40.0)
+
+        assertEquals("Turn 7  ·  2.1M of 5M tokens  ·  1h 20m left  ·  5-hour 64%  ·  weekly 40%", goalProgress(goal, Now))
+    }
+
+    @Test
+    fun theProgressWithoutABudgetShowsTheTokensUsedAndNoLimitsThatWereNotSet() {
+        assertEquals("Turn 7  ·  2.1M tokens", goalProgress(limited(tokenBudget = null, fiveHourUsed = 70.0), Now))
+    }
+
+    @Test
+    fun aTimeLimitThatHasPassedIsSaidSoAndAWindowWithNoReadingIsUnknown() {
+        val goal = limited(timeLimitSeconds = 3_600, fiveHourLimit = 80)
+
+        assertEquals("Turn 7  ·  2.1M of 5M tokens  ·  time limit reached  ·  5-hour usage unknown", goalProgress(goal, Now))
+    }
+
+    @Test
+    fun aTimeLimitIsReadAsHoursMinutesAndSeconds() {
+        assertEquals(7_200L, parseTimeLimit("2h"))
+        assertEquals(2_700L, parseTimeLimit(" 45m "))
+        assertEquals(5_400L, parseTimeLimit("1h 30m"))
+        assertEquals(5_400L, parseTimeLimit("1.5H"))
+        assertEquals(90L, parseTimeLimit("90s"))
+    }
+
+    @Test
+    fun aTimeLimitThatIsNotAPositiveDurationIsRefused() {
+        assertNull(parseTimeLimit(""))
+        assertNull(parseTimeLimit("2"))
+        assertNull(parseTimeLimit("soon"))
+        assertNull(parseTimeLimit("0m"))
+        assertNull(parseTimeLimit("2h later"))
+    }
+
+    @Test
+    fun aWindowLimitIsAPercentFromOneToOneHundredWithOrWithoutTheSign() {
+        assertEquals(80, parseWindowLimit("80%"))
+        assertEquals(80, parseWindowLimit(" 80 "))
+        assertEquals(100, parseWindowLimit("100"))
+        assertNull(parseWindowLimit("0"))
+        assertNull(parseWindowLimit("101%"))
+        assertNull(parseWindowLimit("most"))
+    }
+
+    @Test
+    fun aGoalThatReachedALimitSaysWhyAndGoalsWithoutLimitsStillDecode() {
+        assertEquals("5-hour window at 82%, over your limit of 80%.", goalMessage(limited().copy(state = GoalState.LimitReached, reason = "5-hour window at 82%, over your limit of 80%.")))
+
+        val decoded = parseStreamMessage("""{"type":"goal","conversation_id":"c1","text":"T","tokens_used":0,"turns":0,"started_at":"2026-10-23T12:40:00Z","five_hour_limit":80,"five_hour_used":64.5,"state":"limit_reached"}""")
+
+        assertIs<StreamMessage.GoalChanged>(decoded)
+        assertEquals(listOf(null, 80, 64.5, GoalState.LimitReached), decoded.goal.let { listOf(it.tokenBudget, it.fiveHourLimit, it.fiveHourUsed, it.state) })
+    }
+
+    @Test
     fun anActiveGoalSaysNothingAndAnEndedOneSaysHowItEnded() {
         assertNull(goalMessage(goal(GoalState.Active)))
         assertEquals("Goal met. All 214 tests pass.", goalMessage(goal(GoalState.Met, "All 214 tests pass.")))
         assertEquals("Goal stuck. The CI secret is missing.", goalMessage(goal(GoalState.Stuck, "The CI secret is missing.")))
         assertEquals("The goal is not met and the budget is used up.", goalMessage(goal(GoalState.OverBudget, "The goal is not met and the budget is used up.")))
-        assertEquals("Paused because you sent a message.", goalMessage(goal(GoalState.Paused, "Paused because you sent a message.")))
+        assertEquals("Paused because you stopped the turn.", goalMessage(goal(GoalState.Paused, "Paused because you stopped the turn.")))
         assertEquals("Paused", goalMessage(goal(GoalState.Paused)))
     }
 

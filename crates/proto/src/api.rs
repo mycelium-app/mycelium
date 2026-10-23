@@ -823,15 +823,28 @@ pub enum GoalState {
     Met,
     Stuck,
     OverBudget,
+    LimitReached,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     pub conversation_id: Uuid,
     pub text: String,
-    pub token_budget: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_budget: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_limit_seconds: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub five_hour_limit: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly_limit: Option<u8>,
     pub tokens_used: i64,
     pub turns: i64,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub five_hour_used: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekly_used: Option<f64>,
     pub state: GoalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -840,7 +853,14 @@ pub struct Goal {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetGoalRequest {
     pub text: String,
-    pub token_budget: i64,
+    #[serde(default)]
+    pub token_budget: Option<i64>,
+    #[serde(default)]
+    pub time_limit_seconds: Option<i64>,
+    #[serde(default)]
+    pub five_hour_limit: Option<i64>,
+    #[serde(default)]
+    pub weekly_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

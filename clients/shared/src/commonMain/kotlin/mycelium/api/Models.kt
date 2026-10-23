@@ -774,21 +774,36 @@ enum class GoalState {
 
     @SerialName("over_budget")
     OverBudget,
+
+    @SerialName("limit_reached")
+    LimitReached,
 }
 
 @Serializable
 data class Goal(
     @SerialName("conversation_id") val conversationId: String,
     val text: String,
-    @SerialName("token_budget") val tokenBudget: Long,
+    @SerialName("token_budget") val tokenBudget: Long? = null,
     @SerialName("tokens_used") val tokensUsed: Long = 0,
     val turns: Long = 0,
     val state: GoalState,
     val reason: String? = null,
+    @SerialName("time_limit_seconds") val timeLimitSeconds: Long? = null,
+    @SerialName("five_hour_limit") val fiveHourLimit: Int? = null,
+    @SerialName("weekly_limit") val weeklyLimit: Int? = null,
+    @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("five_hour_used") val fiveHourUsed: Double? = null,
+    @SerialName("weekly_used") val weeklyUsed: Double? = null,
 )
 
 @Serializable
-data class SetGoalRequest(val text: String, @SerialName("token_budget") val tokenBudget: Long)
+data class SetGoalRequest(
+    val text: String,
+    @SerialName("token_budget") val tokenBudget: Long? = null,
+    @SerialName("time_limit_seconds") val timeLimitSeconds: Long? = null,
+    @SerialName("five_hour_limit") val fiveHourLimit: Int? = null,
+    @SerialName("weekly_limit") val weeklyLimit: Int? = null,
+)
 
 @Serializable
 data class PatchGoalRequest(val paused: Boolean)
@@ -913,6 +928,9 @@ data class GitStatus(
     val files: List<GitFile>,
     @SerialName("squash_message") val squashMessage: String? = null,
 )
+
+@Serializable
+data class GitUndone(val message: String = "")
 
 @Serializable
 data class GitCommit(val hash: String, val author: String, val date: String, val subject: String)

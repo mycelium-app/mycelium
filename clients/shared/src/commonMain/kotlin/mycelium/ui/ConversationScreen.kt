@@ -251,7 +251,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                     goal = if (chat) null else GoalControls(
                         goal = state.goals[id],
-                        onSet = { text, budget -> store.act { store.setGoal(id, text, budget) } },
+                        onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
                         onPause = { store.act { store.pauseGoal(id, true) } },
                         onResume = { store.act { store.pauseGoal(id, false) } },
                         onClear = { store.act { store.clearGoal(id) } },

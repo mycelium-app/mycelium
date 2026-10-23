@@ -120,7 +120,6 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         .await?;
     tx.commit().await?;
 
-    crate::goals::paused_by_message(&state, user.id, id).await?;
     pump(&state, id, false).await?;
     publish_queue(&state, user.id, id).await?;
 

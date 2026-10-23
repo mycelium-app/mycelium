@@ -1,3 +1,4 @@
+use crate::account_usage;
 use crate::auth::AuthUser;
 use crate::conversations;
 use crate::error::{ApiError, ApiResult};
@@ -5,6 +6,7 @@ use crate::prompts::pump;
 use crate::state::AppState;
 use crate::store::{enum_text, find_owned, parse_enum, publish_queue};
 use axum::Json;
+use chrono::{DateTime, Utc};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{Goal, GoalState, PatchGoalRequest, SetGoalRequest};
@@ -14,11 +16,12 @@ use serde_json::Value;
 use uuid::Uuid;
 
 const LAST_MESSAGE_LIMIT: usize = 4000;
-const PAUSED_BY_MESSAGE: &str = "Paused because you sent a message. Resume to let the agent carry on.";
 const PAUSED_BY_STOP: &str = "Paused because you stopped the turn. Resume to let the agent carry on.";
 const CHECK_UNREADABLE: &str = "The check did not answer in the form it was asked to, so the goal was stopped. Resume to check again.";
 const CHECK_COULD_NOT_RUN: &str = "The check could not run, so the goal was stopped. Resume to try again.";
 const AGENT_STOPPED: &str = "The agent stopped before the turn ended, so the goal was stopped.";
+const FIVE_HOUR_WINDOW: &str = "five_hour";
+const WEEKLY_WINDOW: &str = "seven_day";
 const OVER_BUDGET: &str = "The goal is not met and the token budget is used up. Set the goal again with a larger budget to carry on.";
 const CHECK_INSTRUCTIONS: &str = "You are checking whether a goal has been met. Do not change any files or run anything that changes state. Look at the work in this folder if you need to.\n\nAnswer with one JSON object and nothing else, in this form: {\"verdict\": \"met\" | \"continue\" | \"stuck\", \"reason\": \"one sentence\"}.\nmet: the goal is fully achieved.\ncontinue: more work remains and the agent can do it.\nstuck: no further progress is possible without the person's help.";
 
@@ -55,10 +58,18 @@ async fn latest_agent_text(state: &AppState, conversation_id: Uuid) -> ApiResult
     Ok(text)
 }
 
-async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>> {
-    let row = sqlx::query_as::<_, (String, i64, String, Option<String>)>("select text, token_budget, state, reason from goals where conversation_id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+type GoalRow = (String, Option<i64>, Option<i64>, Option<i16>, Option<i16>, String, Option<String>, DateTime<Utc>, Uuid, String, Option<String>);
 
-    let Some((text, token_budget, goal_state, reason)) = row else {
+async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>> {
+    let row = sqlx::query_as::<_, GoalRow>(
+        "select g.text, g.token_budget, g.time_limit_seconds, g.five_hour_limit, g.weekly_limit, g.state, g.reason, g.started_at, c.node_id, c.agent, c.account
+         from goals g join conversations c on c.id = g.conversation_id where g.conversation_id = $1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some((text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, goal_state, reason, started_at, node_id, agent, account)) = row else {
         return Ok(None);
     };
 
@@ -73,7 +84,59 @@ async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
     .fetch_one(&state.pool)
     .await?;
 
-    Ok(Some(Goal { conversation_id, text, token_budget, tokens_used, turns, state: parse_enum(&goal_state)?, reason }))
+    let windows = account_usage::windows_of(state, node_id, parse_enum(&agent)?, account.as_deref()).await?;
+    let used = |name: &str| windows.iter().find(|window| window.name == name).map(|window| window.used_percent);
+
+    Ok(Some(Goal {
+        conversation_id,
+        text,
+        token_budget,
+        time_limit_seconds,
+        five_hour_limit: five_hour_limit.and_then(|limit| u8::try_from(limit).ok()),
+        weekly_limit: weekly_limit.and_then(|limit| u8::try_from(limit).ok()),
+        tokens_used,
+        turns,
+        started_at,
+        five_hour_used: used(FIVE_HOUR_WINDOW),
+        weekly_used: used(WEEKLY_WINDOW),
+        state: parse_enum(&goal_state)?,
+        reason,
+    }))
+}
+
+fn reached_limit(goal: &Goal) -> Option<(GoalState, String)> {
+    if goal.token_budget.is_some_and(|budget| goal.tokens_used >= budget) {
+        return Some((GoalState::OverBudget, OVER_BUDGET.to_string()));
+    }
+
+    if let Some(limit) = goal.time_limit_seconds {
+        let elapsed = (Utc::now() - goal.started_at).num_seconds();
+
+        if elapsed >= limit {
+            return Some((GoalState::LimitReached, format!("Time limit reached after {}. Set the goal again with a longer limit to carry on.", duration_text(limit))));
+        }
+    }
+
+    let windows = [("5-hour", goal.five_hour_limit, goal.five_hour_used), ("Weekly", goal.weekly_limit, goal.weekly_used)];
+
+    for (name, limit, used) in windows {
+        if let (Some(limit), Some(used)) = (limit, used)
+            && used >= f64::from(limit)
+        {
+            return Some((GoalState::LimitReached, format!("{name} window at {}%, over your limit of {limit}%. Set the goal again to carry on.", used.round())));
+        }
+    }
+
+    None
+}
+
+fn duration_text(seconds: i64) -> String {
+    match (seconds / 3600, seconds % 3600 / 60) {
+        (0, 0) => format!("{seconds}s"),
+        (0, minutes) => format!("{minutes}m"),
+        (hours, 0) => format!("{hours}h"),
+        (hours, minutes) => format!("{hours}h {minutes}m"),
+    }
 }
 
 async fn announce(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
@@ -137,6 +200,12 @@ async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid,
         return Ok(());
     }
 
+    let row = find_owned(&state.pool, goal_conversation_id, owner).await?;
+
+    if !row.is_idle() {
+        return Ok(());
+    }
+
     match parse_verdict(&answer) {
         Some((Verdict::Met, reason)) => end(state, owner, goal_conversation_id, GoalState::Met, &reason).await,
         Some((Verdict::Stuck, reason)) => end(state, owner, goal_conversation_id, GoalState::Stuck, &reason).await,
@@ -148,8 +217,8 @@ async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid,
                 return Ok(());
             };
 
-            if goal.tokens_used >= goal.token_budget {
-                return end(state, owner, goal_conversation_id, GoalState::OverBudget, OVER_BUDGET).await;
+            if let Some((limit_state, limit_reason)) = reached_limit(&goal) {
+                return end(state, owner, goal_conversation_id, limit_state, &limit_reason).await;
             }
 
             sqlx::query("update goals set reason = $2 where conversation_id = $1").bind(goal_conversation_id).bind(&reason).execute(&state.pool).await?;
@@ -216,16 +285,6 @@ pub async fn session_failed(state: &AppState, conversation_id: Uuid) -> ApiResul
     Ok(())
 }
 
-pub async fn paused_by_message(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
-    let paused = sqlx::query("update goals set state = 'paused', reason = $2 where conversation_id = $1 and state = 'active'").bind(conversation_id).bind(PAUSED_BY_MESSAGE).execute(&state.pool).await?;
-
-    if paused.rows_affected() > 0 {
-        announce(state, owner, conversation_id).await?;
-    }
-
-    Ok(())
-}
-
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Goal>>> {
     find_owned(&state.pool, id, user.id).await?;
 
@@ -240,8 +299,20 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
         return Err(ApiError::bad_request("text_required", "Enter the goal the agent should work towards."));
     }
 
-    if request.token_budget <= 0 {
+    if request.token_budget.is_some_and(|budget| budget <= 0) {
         return Err(ApiError::bad_request("budget_invalid", "Enter a token budget greater than zero."));
+    }
+
+    if request.time_limit_seconds.is_some_and(|seconds| seconds <= 0) {
+        return Err(ApiError::bad_request("time_limit_invalid", "Enter a time limit greater than zero."));
+    }
+
+    if request.five_hour_limit.is_some_and(|percent| !(1..=100).contains(&percent)) {
+        return Err(ApiError::bad_request("five_hour_limit_invalid", "Enter a 5-hour window limit between 1 and 100 percent."));
+    }
+
+    if request.weekly_limit.is_some_and(|percent| !(1..=100).contains(&percent)) {
+        return Err(ApiError::bad_request("weekly_limit_invalid", "Enter a weekly window limit between 1 and 100 percent."));
     }
 
     if row.side_kind.is_some() {
@@ -249,12 +320,15 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     }
 
     sqlx::query(
-        "insert into goals (conversation_id, text, token_budget) values ($1, $2, $3)
-         on conflict (conversation_id) do update set text = $2, token_budget = $3, state = 'active', reason = null, check_id = null, started_at = now()",
+        "insert into goals (conversation_id, text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit) values ($1, $2, $3, $4, $5, $6)
+         on conflict (conversation_id) do update set text = $2, token_budget = $3, time_limit_seconds = $4, five_hour_limit = $5, weekly_limit = $6, state = 'active', reason = null, check_id = null, started_at = now()",
     )
     .bind(id)
     .bind(text)
     .bind(request.token_budget)
+    .bind(request.time_limit_seconds)
+    .bind(request.five_hour_limit.map(|percent| percent as i16))
+    .bind(request.weekly_limit.map(|percent| percent as i16))
     .execute(&state.pool)
     .await?;
 

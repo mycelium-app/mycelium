@@ -33,8 +33,8 @@ import kotlin.test.assertEquals
 
 private const val Chat = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/backups","title":"Backups","status":"working","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
-private fun goalJson(state: String, reason: String? = null) =
-    """{"conversation_id":"c1","text":"Every test passes on main","token_budget":5000000,"tokens_used":2100000,"turns":7,"state":"$state"${reason?.let { ""","reason":"$it"""" } ?: ""}}"""
+private fun goalJson(state: String, reason: String? = null, extra: String = "") =
+    """{"conversation_id":"c1","text":"Every test passes on main","token_budget":5000000,"tokens_used":2100000,"turns":7,"state":"$state"${reason?.let { ""","reason":"$it"""" } ?: ""}$extra}"""
 
 internal object HandsOffPlatform : Platform {
     override val originUrl: String? = null
@@ -110,10 +110,10 @@ class GoalTest {
 
     @Test
     fun aPausedGoalCanBeResumedAndSaysWhyItPaused() {
-        show(goalJson("paused", "Paused because you sent a message. Resume to let the agent carry on."), afterChange = goalJson("active"))
+        show(goalJson("paused", "Paused because you stopped the turn. Resume to let the agent carry on."), afterChange = goalJson("active"))
         waitForText("Resume")
 
-        rule.onNodeWithText("Paused because you sent a message. Resume to let the agent carry on.").assertIsDisplayed()
+        rule.onNodeWithText("Paused because you stopped the turn. Resume to let the agent carry on.").assertIsDisplayed()
         rule.onNodeWithText("Resume").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/conversations/c1/goal" } }
@@ -142,7 +142,7 @@ class GoalTest {
     }
 
     @Test
-    fun theGoalButtonSetsAGoalWithABudget() {
+    fun theGoalButtonSetsAGoalWithOnlyItsText() {
         show("null", afterChange = goalJson("active"))
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
 
@@ -151,7 +151,7 @@ class GoalTest {
         rule.onNodeWithText("Set goal").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/conversations/c1/goal" } }
-        assertEquals("""{"text":"Every test passes on main","token_budget":5000000}""", requests.last { it.first == "PUT /api/v1/conversations/c1/goal" }.second)
+        assertEquals("""{"text":"Every test passes on main"}""", requests.last { it.first == "PUT /api/v1/conversations/c1/goal" }.second)
     }
 
     @Test
@@ -164,5 +164,71 @@ class GoalTest {
 
         rule.onNodeWithText("Enter the goal the agent should work towards.").assertIsDisplayed()
         assertEquals(false, requests.any { it.first.startsWith("PUT") })
+    }
+
+    @Test
+    fun theGoalBarShowsTheLimitsThatAreSetAndSaysWhenAWindowIsUnknown() {
+        val started = kotlin.time.Clock.System.now() - kotlin.time.Duration.parse("40m 30s")
+        show(goalJson("active", extra = ""","time_limit_seconds":7200,"started_at":"$started","five_hour_limit":80,"five_hour_used":64.2,"weekly_limit":90"""))
+        waitForText("Goal: Every test passes on main")
+
+        rule.onNodeWithText("Turn 7  ·  2.1M of 5M tokens  ·  1h 19m left  ·  5-hour 64%  ·  weekly usage unknown").assertIsDisplayed()
+    }
+
+    @Test
+    fun theDialogExplainsInOneLineAndAsksForEachLimitAsAnOptionalField() {
+        show("null")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Set a goal").performClick()
+
+        rule.onNodeWithText("The agent keeps going until the goal is met, it is stuck, or a limit is reached.").assertIsDisplayed()
+        for (field in listOf("Token budget", "Time limit", "Stop when the account's 5-hour window reaches", "Stop when the account's weekly window reaches")) {
+            rule.onNodeWithContentDescription(field).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun everyLimitTheDialogIsGivenIsSentWithTheGoal() {
+        show("null", afterChange = goalJson("active"))
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Set a goal").performClick()
+        rule.onNodeWithContentDescription("Goal").performTextInput("Every test passes on main")
+        rule.onNodeWithContentDescription("Token budget").performTextInput("5M")
+        rule.onNodeWithContentDescription("Time limit").performTextInput("1h 30m")
+        rule.onNodeWithContentDescription("Stop when the account's 5-hour window reaches").performTextInput("80%")
+        rule.onNodeWithContentDescription("Stop when the account's weekly window reaches").performTextInput("90")
+        rule.onNodeWithText("Set goal").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/conversations/c1/goal" } }
+        assertEquals(
+            """{"text":"Every test passes on main","token_budget":5000000,"time_limit_seconds":5400,"five_hour_limit":80,"weekly_limit":90}""",
+            requests.last { it.first == "PUT /api/v1/conversations/c1/goal" }.second,
+        )
+    }
+
+    @Test
+    fun aLimitThatIsNotReadableSaysHowToFixItAndSendsNothing() {
+        show("null")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Set a goal").performClick()
+        rule.onNodeWithContentDescription("Goal").performTextInput("Every test passes on main")
+        rule.onNodeWithContentDescription("Time limit").performTextInput("soon")
+        rule.onNodeWithContentDescription("Stop when the account's 5-hour window reaches").performTextInput("150%")
+        rule.onNodeWithText("Set goal").performClick()
+
+        rule.onNodeWithText("Enter a time limit like 2h, 45m or 1h 30m, or leave it empty.").assertIsDisplayed()
+        rule.onNodeWithText("Enter a 5-hour window limit between 1 and 100 percent, like 80%, or leave it empty.").assertIsDisplayed()
+        assertEquals(false, requests.any { it.first.startsWith("PUT") })
+    }
+
+    @Test
+    fun aGoalThatReachedALimitSaysWhyAndOffersNoPause() {
+        show(goalJson("limit_reached", "5-hour window at 82%, over your limit of 80%."))
+        waitForText("5-hour window at 82%, over your limit of 80%.")
+
+        assertEquals(0, rule.onAllNodesWithText("Pause").fetchSemanticsNodes().size)
     }
 }
