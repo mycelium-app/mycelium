@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -28,14 +30,12 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
@@ -62,9 +62,9 @@ private enum class GitTab { Changes, History, Graph }
 
 private const val ShortHashLength = 7
 
-private const val DiskPollMillis = 2_000L
-
 private const val GraphPage = 200
+
+private const val DiskPollMillis = 2_000L
 
 @Composable
 fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier) {
@@ -116,6 +116,8 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 
     LaunchedEffect(id, conversation.status) {
         run { refresh() }
+    }
+
     LaunchedEffect(id) {
         while (true) {
             delay(DiskPollMillis)
@@ -140,8 +142,6 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         if (squash != null && message.isBlank()) {
             message = squash
         }
-    }
-
     }
 
     LaunchedEffect(id, tab) {
@@ -284,7 +284,17 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                         run { store.api.gitCommit(id, message.trim()); message = ""; refresh() }
                     }
                 },
-                onUndo = { run { store.api.gitUndo(id); refresh() } },
+                onUndo = {
+                    run {
+                        val undone = store.api.gitUndo(id)
+
+                        if (message.isBlank()) {
+                            message = undone.message
+                        }
+
+                        refresh()
+                    }
+                },
                 branches = branches,
                 onOpenBranches = {
                     branches = null
@@ -352,6 +362,7 @@ private fun ChangeItem(row: ChangeRow.Change, onOpen: () -> Unit, onToggle: () -
     val colors = MyTheme.colors
     val file = row.file
     val staged = fullyStaged(file)
+    val partly = file.staged && !staged
 
     Row(
         Modifier.fillMaxWidth().padding(start = if (row.indented) Tokens.Space.S6 else Tokens.Space.S3, end = Tokens.Space.S1),
@@ -379,30 +390,53 @@ private fun ChangeItem(row: ChangeRow.Change, onOpen: () -> Unit, onToggle: () -
             }
         }
 
-        Checkbox(checked = staged, description = if (staged) "Unstage ${file.path}" else "Stage ${file.path}", onToggle = onToggle)
+        Checkbox(
+            checked = staged,
+            description = when {
+                staged -> "Unstage ${file.path}"
+                partly -> "Stage the rest of ${file.path}"
+                else -> "Stage ${file.path}"
+            },
+            onToggle = onToggle,
+            partly = partly,
+        )
     }
 }
 
 @Composable
-fun Checkbox(checked: Boolean, description: String, onToggle: () -> Unit, checkedState: String = "Staged", uncheckedState: String = "Not staged") {
+fun Checkbox(
+    checked: Boolean,
+    description: String,
+    onToggle: () -> Unit,
+    checkedState: String = "Staged",
+    uncheckedState: String = "Not staged",
+    partly: Boolean = false,
+) {
     val colors = MyTheme.colors
     val target = touchMin(Tokens.Size.ControlMd)
+    val filled = checked || partly
 
     Box(
         Modifier
             .size(target)
-            .pressable(onClick = onToggle, role = Role.Checkbox, description = description, stateDescription = if (checked) checkedState else uncheckedState, shape = ControlShape),
+            .pressable(onClick = onToggle, role = Role.Checkbox, description = description, stateDescription = when {
+                checked -> checkedState
+                partly -> "Partly staged"
+                else -> uncheckedState
+            }, shape = ControlShape),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
                 .size(Tokens.Size.IconMd)
-                .background(if (checked) colors.accent else colors.bgContent, ControlShape)
-                .border(Tokens.Size.Hairline, if (checked) colors.accent else colors.borderControl, ControlShape),
+                .background(if (filled) colors.accent else colors.bgContent, ControlShape)
+                .border(Tokens.Size.Hairline, if (filled) colors.accent else colors.borderControl, ControlShape),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {
                 Icon(MyIcon.Check, colors.onAccent, Tokens.Size.IconSm)
+            } else if (partly) {
+                Icon(MyIcon.Minus, colors.onAccent, Tokens.Size.IconSm)
             }
         }
     }
@@ -497,6 +531,8 @@ fun CommitArea(
                 .fillMaxWidth()
                 .heightIn(min = 72.dp)
                 .focusRing(focused, ControlShape, always = true)
+                .background(colors.bgContent, ControlShape)
+                .border(Tokens.Size.Hairline, colors.borderControl, ControlShape)
                 .onPreviewKeyEvent { event ->
                     val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
 
@@ -506,8 +542,6 @@ fun CommitArea(
 
                     commit
                 }
-                .background(colors.bgContent, ControlShape)
-                .border(Tokens.Size.Hairline, colors.borderControl, ControlShape)
                 .semantics { contentDescription = "Commit message" },
             decorationBox = { inner ->
                 Box(Modifier.padding(Tokens.Space.S2)) {

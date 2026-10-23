@@ -442,9 +442,7 @@ class MyceliumApi(
         call("/conversations/$id/git/fetch") { client.post(it) { authorise() } }
     }
 
-    suspend fun gitUndo(id: String) {
-        call("/conversations/$id/git/undo") { client.post(it) { authorise() } }
-    }
+    suspend fun gitUndo(id: String): GitUndone = call("/conversations/$id/git/undo") { client.post(it) { authorise() } }.body()
 
     suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =
         call("/conversations/$id/events") {

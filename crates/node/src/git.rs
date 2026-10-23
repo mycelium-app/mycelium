@@ -38,7 +38,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
         GitCommand::Commit { message } => changed(cwd, &["commit", "-m", &message], &[]),
         GitCommand::Fetch => changed(cwd, &["fetch"], &[]),
-        GitCommand::UndoLastCommit => changed(cwd, &["reset", "--soft", "HEAD~1"], &[]),
+        GitCommand::UndoLastCommit => undo_last_commit(cwd),
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
         GitCommand::Apply { branch, head, patch, bundle, credentials } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref()),
@@ -153,6 +153,13 @@ fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Value, String>
     git(cwd, &all, &[])?;
 
     Ok(json!({}))
+}
+
+fn undo_last_commit(cwd: &Path) -> Result<Value, String> {
+    let message = String::from_utf8_lossy(&git(cwd, &["log", "-1", "--format=%B"], &[])?).trim_end().to_string();
+    git(cwd, &["reset", "--soft", "HEAD~1"], &[])?;
+
+    Ok(json!({"message": message}))
 }
 
 fn status(cwd: &Path) -> Result<Value, String> {
@@ -695,8 +702,9 @@ mod tests {
         assert!(commits[0]["date"].as_str().unwrap().contains('T'));
         assert_eq!(run(dir.path(), GitCommand::Log { limit: 1 }).unwrap().as_array().unwrap().len(), 1);
 
-        run(dir.path(), GitCommand::UndoLastCommit).unwrap();
+        let undone = run(dir.path(), GitCommand::UndoLastCommit).unwrap();
 
+        assert_eq!(undone["message"], "Second change");
         assert_eq!(run(dir.path(), GitCommand::Log { limit: 10 }).unwrap().as_array().unwrap().len(), 1);
         assert_eq!(file(&run(dir.path(), GitCommand::Status).unwrap(), "a.txt")["staged"], true);
     }

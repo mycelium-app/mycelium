@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -78,7 +79,8 @@ private class GitFake(val status: String = """{"branch":"main","ahead":0,"behind
                 path.endsWith("/git/graph") -> if (request.url.parameters["skip"] == "0") HistoryJson else "[]"
                 path.endsWith("/git/show") -> ShowJson
                 path.endsWith("/git/branches") -> BranchesJson
-                path.endsWith("/git/log") -> "[]"
+                path.endsWith("/git/log") -> """[{"hash":"aaaaaaa1","author":"Sam","date":"$Now","subject":"Add the importer"}]"""
+                path.endsWith("/git/undo") -> """{"message":"Add the importer\n\nWith a body."}"""
                 else -> "{}"
             }
 
@@ -113,6 +115,24 @@ class GitGraphTest {
         open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[],"squash_message":"Squashed commit of the following:\n\n    Add the importer"}"""))
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Squashed commit of the following:", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aFileWithMoreChangesOnDiskThanStagedIsPartlyStaged() {
+        open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":true,"untracked":false,"additions":2,"deletions":0}]}"""))
+
+        awaitText("Stage the rest of a.kt")
+        rule.onNode(hasContentDescription("Stage the rest of a.kt") and hasStateDescription("Partly staged")).assertIsDisplayed()
+    }
+
+    @Test
+    fun undoingTheLastCommitPutsItsMessageBackInTheBox() {
+        open(GitFake())
+
+        awaitText("Undo the last commit")
+        rule.onNodeWithContentDescription("Undo the last commit").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("With a body.", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
