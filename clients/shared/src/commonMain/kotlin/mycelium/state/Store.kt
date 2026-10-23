@@ -287,20 +287,24 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         var after = if (conversationId in state.value.openedConversations) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
         mutableState.update { it.copy(openedConversations = it.openedConversations + conversationId) }
 
+        val fetched = mutableListOf<mycelium.api.Event>()
+
         while (true) {
             val page = api.events(conversationId, after, EventPageSize)
-            mutableState.update {
-                val delivered = page.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
-                val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
-
-                it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), page)), sending = sending)
-            }
+            fetched += page
 
             if (page.size < EventPageSize) {
                 break
             }
 
             after = page.maxOf { it.seq }
+        }
+
+        mutableState.update {
+            val delivered = fetched.filter { event -> event.kind == EventKinds.UserMessage }.mapNotNull { event -> (event.payload as? JsonObject)?.string("text") }
+            val sending = delivered.fold(it.sending) { waiting, text -> waiting.withoutFirst(conversationId, text) }
+
+            it.copy(events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), fetched)), sending = sending)
         }
 
         val queue = api.queue(conversationId)

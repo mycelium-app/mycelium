@@ -79,6 +79,30 @@ class StoreTest {
     }
 
     @Test
+    fun aLongHistoryAppearsInOneStepRatherThanPageByPage() = runTest {
+        val shownWhenLastPageWasAsked = MutableStateFlow<Int?>(null)
+        lateinit var store: Store
+        val engine = MockEngine { request ->
+            val body = if (request.url.encodedPath.endsWith("/events") && request.url.parameters["after"] == "0") {
+                (1..500).joinToString(",", "[", "]") { """{"conversation_id":"c1","seq":$it,"kind":"turn_end","payload":{}}""" }
+            } else if (request.url.encodedPath.endsWith("/events")) {
+                shownWhenLastPageWasAsked.value = store.state.value.events["c1"].orEmpty().size
+                """[{"conversation_id":"c1","seq":501,"kind":"turn_end","payload":{}}]"""
+            } else {
+                "[]"
+            }
+
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.open("c1")
+
+        assertEquals(0, shownWhenLastPageWasAsked.value)
+        assertEquals(501, store.state.value.events.getValue("c1").size)
+    }
+
+    @Test
     fun reconnectingFetchesTheOpenConversationsEventsAfterTheLastSeqItHolds() = runTest {
         val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
