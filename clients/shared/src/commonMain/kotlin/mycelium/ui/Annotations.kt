@@ -84,9 +84,7 @@ fun Annotatable(content: @Composable () -> Unit) {
                 }
             }
 
-            override fun hide() {
-                offered = null
-            }
+            override fun hide() {}
         }
     }
 
@@ -113,7 +111,7 @@ fun Annotatable(content: @Composable () -> Unit) {
         val quote = offered
 
         if (quote != null && composing == null) {
-            Popup(popupPositionProvider = remember { AboveAnchor() }, properties = PopupProperties(focusable = false)) {
+            Popup(popupPositionProvider = remember { AboveAnchor() }, onDismissRequest = { offered = null }, properties = PopupProperties(focusable = false)) {
                 Row(
                     Modifier
                         .background(colors.bgRaised, FloatShape)

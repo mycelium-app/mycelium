@@ -29,7 +29,7 @@ import kotlin.test.assertEquals
 private const val IdleJson = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"done",
 "acp_session_id":"s","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
-private object QuietPlatform : Platform {
+internal object QuietPlatform : Platform {
     override val originUrl: String? = null
     override val signsInThroughTheBrowser = false
     override fun loadConnection(): Connection? = null
