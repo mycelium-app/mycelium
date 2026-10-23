@@ -142,6 +142,8 @@ pub enum ControlToNode {
         cwd: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resume: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
     },
     Prompt {
         conversation_id: Uuid,
@@ -172,6 +174,8 @@ pub enum ControlToNode {
         login_id: Uuid,
         agent: AgentId,
         method: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
     },
     LoginInput {
         login_id: Uuid,

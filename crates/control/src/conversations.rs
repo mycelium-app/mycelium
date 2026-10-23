@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{CreateConversationRequest, EventsQuery, PatchConversationRequest};
-use mycelium_proto::conversation::{Conversation, ConversationStatus, Event};
+use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
@@ -92,6 +92,12 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
         return Err(ApiError::conflict("agent_unavailable", format!("{} is not installed on this node. Install it or choose another agent.", enum_text(&request.agent))));
     }
 
+    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+
+    if let Some(account) = account {
+        require_signed_in_account(state, request.node_id, request.agent, account).await?;
+    }
+
     if let (Some(project), Some(branch)) = (&project, &request.branch) {
         cwd = worktrees::create(state, project, branch, None).await?.path;
     }
@@ -107,7 +113,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status) values ($1, $2, $3, $4, $5, $6)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account) values ($1, $2, $3, $4, $5, $6, $7)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -117,6 +123,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     .bind(&cwd)
     .bind(&title)
     .bind(enum_text(&status))
+    .bind(account)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -126,7 +133,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
 
     tx.commit().await?;
 
-    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None });
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None, account: account.map(str::to_string) });
 
     if !started {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
@@ -139,6 +146,21 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     publish_queue(state, user.id, row.id).await?;
 
     Ok(conversation)
+}
+
+async fn require_signed_in_account(state: &AppState, node_id: Uuid, agent: AgentId, account: &str) -> ApiResult<()> {
+    let signed_in = sqlx::query_scalar::<_, bool>("select exists (select 1 from logins where node_id = $1 and agent = $2 and account = $3 and state = 'signed_in')")
+        .bind(node_id)
+        .bind(enum_text(&agent))
+        .bind(account)
+        .fetch_one(&state.pool)
+        .await?;
+
+    if !signed_in {
+        return Err(ApiError::conflict("account_not_signed_in", format!("{account} is not signed in on this node. Sign in to it there, or choose another account.")));
+    }
+
+    Ok(())
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Conversation>> {
@@ -156,9 +178,19 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, user.id).await?;
+    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+
+    if let Some(account) = account {
+        if before.acp_session_id.is_some() && before.account.as_deref() != Some(account) {
+            return Err(ApiError::conflict("account_locked", "This conversation has already started with its account. Start a new conversation to use another one."));
+        }
+
+        require_signed_in_account(&state, before.node_id, parse_enum(&before.agent)?, account).await?;
+    }
+
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "update conversations set title = coalesce($2, title),
+        "update conversations set title = coalesce($2, title), account = coalesce($4, account),
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
@@ -167,6 +199,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(id)
     .bind(title)
     .bind(request.archived)
+    .bind(account)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;

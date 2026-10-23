@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, status, acp_session_id, mode, model, options, created_at, updated_at, archived_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, status, acp_session_id, mode, model, account, options, created_at, updated_at, archived_at";
 
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
@@ -37,6 +37,7 @@ pub struct ConversationRow {
     pub acp_session_id: Option<String>,
     pub mode: Option<String>,
     pub model: Option<String>,
+    pub account: Option<String>,
     pub options: Option<Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -56,6 +57,7 @@ impl ConversationRow {
             acp_session_id: self.acp_session_id.clone(),
             mode: self.mode.clone(),
             model: self.model.clone(),
+            account: self.account.clone(),
             options: self.options.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -183,6 +185,7 @@ struct NodeRow {
     os: String,
     arch: String,
     version: String,
+    address: String,
     draining: bool,
     last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
     icon: Option<String>,
@@ -190,7 +193,7 @@ struct NodeRow {
 
 pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<Vec<NodeSummary>> {
     let nodes = sqlx::query_as::<_, NodeRow>(
-        "select id, name, hostname, os, arch, version, draining, last_seen_at, icon from nodes
+        "select id, name, hostname, os, arch, version, address, draining, last_seen_at, icon from nodes
          where revoked_at is null and ($1::uuid is null or id = $1) order by name",
     )
     .bind(only)
@@ -234,6 +237,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             os: node.os,
             arch: node.arch,
             update_available: newer(&node.version, state.latest.get("mycelium")),
+            address: node.address,
             version: node.version,
             online: state.hub.is_online(node.id),
             draining: node.draining,

@@ -224,7 +224,7 @@ async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clien
     assert_eq!(status, 200);
     let login_id: Uuid = started["login_id"].as_str().unwrap().parse().unwrap();
 
-    assert_eq!(link.next().await, ControlToNode::StartLogin { login_id, agent: AgentId::Claude, method: "token".into() });
+    assert_eq!(link.next().await, ControlToNode::StartLogin { login_id, agent: AgentId::Claude, method: "token".into(), account: None });
 
     link.send(NodeToControl::LoginOutput { login_id, data: "Open https://example.com/login".into() }).await;
     let data = stream.until(|message| match message {

@@ -15,15 +15,15 @@ use uuid::Uuid;
 
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>)>(
+    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(
         "select owner, node_id, archived_at is not null,
-                acp_session_id is not null and status in ('review', 'done'), agent, cwd, acp_session_id from conversations where id = $1 for update",
+                acp_session_id is not null and status in ('review', 'done'), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
     )
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some((owner, node_id, archived, idle, agent, cwd, acp_session_id)) = locked else {
+    let Some((owner, node_id, archived, idle, agent, cwd, acp_session_id, account)) = locked else {
         return Ok(());
     };
 
@@ -46,7 +46,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 
     if !state.hub.has_session(node_id, conversation_id) {
         state.add_session(node_id, conversation_id).await?;
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id });
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, account });
     }
 
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone() });

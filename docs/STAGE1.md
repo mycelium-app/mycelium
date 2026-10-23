@@ -81,18 +81,18 @@ release binaries are static musl.
 
 ```
 users            id uuid pk, subject text unique, email text, name text, created_at
-web_sessions     id uuid pk, user_id, token_hash bytea unique, expires_at, created_at
+web_sessions     id uuid pk, user_id, token_hash bytea unique, expires_at, created_at, user_agent, address, last_used_at null
 device_codes     id uuid pk, kind text ('node'|'client'), device_code_hash bytea unique, user_code text unique,
                  label text, hostname text, os text, arch text, ip text, expires_at,
                  approved_by uuid null, approved_at null, result_id uuid null, consumed_at null
 nodes            id uuid pk, name text unique, hostname, os, arch, version text, token_hash bytea unique,
                  created_by uuid, created_at, last_seen_at, revoked_at null, draining bool default false
-client_tokens    id uuid pk, user_id, label text, token_hash bytea unique, created_at, last_used_at, revoked_at null
+client_tokens    id uuid pk, user_id, label text, hostname, address, token_hash bytea unique, created_at, last_used_at, revoked_at null
 agents           node_id, agent text ('claude'|'codex'), version text, available bool, pk(node_id, agent)
 logins           id uuid pk, node_id, agent, account text null, method text, state text
-                 ('signed_in'|'signed_out'|'expired'|'unknown'), updated_at
+                 ('signed_in'|'signed_out'|'expired'|'unknown'), updated_at, unique(node_id, agent, coalesce(account, ''))
 conversations    id uuid pk, owner uuid, node_id, agent, cwd text, title text, status text, acp_session_id text null,
-                 mode text null, model text null, created_at, updated_at, archived_at null
+                 mode text null, model text null, account text null, created_at, updated_at, archived_at null
 events           id bigserial pk, conversation_id, seq bigint, kind text, payload jsonb, created_at,
                  unique(conversation_id, seq)
 queued_prompts   id uuid pk, conversation_id, position int, text text, created_at
@@ -158,11 +158,14 @@ Terminals:
   `POST /api/v1/terminals/{terminal_id}/input` `{data}` (base64 bytes), `POST /api/v1/terminals/{terminal_id}/resize`
   `{cols, rows}` and `DELETE /api/v1/terminals/{terminal_id}` (detaches; the tmux session keeps running).
 
+Sessions:
+- `GET /api/v1/sessions` → the caller's browser sessions and client tokens `[{id, kind: "browser"|"client", label, hostname, address, last_used_at, current}]`, the current one first. `DELETE /api/v1/sessions/{id}` ends one at once (404 for another person's); ending the current one is 409 `current_session` unless `?confirm_current=true`. Nodes carry `address` in `GET /api/v1/nodes`.
+
 Conversations:
 - `GET /api/v1/conversations?archived=false`.
-- `POST /api/v1/conversations` `{node_id, agent, cwd, title?, prompt?}` → the conversation; the node
+- `POST /api/v1/conversations` `{node_id, agent, account?, cwd, title?, prompt?}` → the conversation (409 `account_not_signed_in` unless the node reports that account signed in for the agent); the node
   starts the ACP session, and `prompt`, if given, is the first message.
-- `GET /api/v1/conversations/{id}`, `PATCH` `{title?, archived?}`, `POST /{id}/opened` marks review as done.
+- `GET /api/v1/conversations/{id}`, `PATCH` `{title?, archived?, account?}` (409 `account_locked` once the conversation has a session), `POST /{id}/opened` marks review as done.
 - `GET /api/v1/conversations/{id}/events?after=<seq>&limit=500`.
 - `POST /{id}/prompt` `{text}`: sent now if idle, otherwise appended to the queue.
 - `GET /{id}/queue`, `PATCH /{id}/queue/{qid}` `{text}`, `DELETE /{id}/queue/{qid}`, `POST /{id}/queue/{qid}/send-now`
@@ -323,13 +326,13 @@ Control plane to node:
 | type | fields |
 |---|---|
 | `ack` | `conversation_id, seq` |
-| `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id` |
+| `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?` |
 | `prompt` | `conversation_id, prompt_id, text` |
 | `cancel` | `conversation_id` |
 | `permission_response` | `conversation_id, request_id, outcome` (ACP `RequestPermissionOutcome`) |
 | `set_config` | `conversation_id, mode?, model?, config?` |
 | `close_session` | `conversation_id` |
-| `start_login` | `login_id, agent, method` |
+| `start_login` | `login_id, agent, method, account?` |
 | `login_input` | `login_id, text` |
 | `stop_login` | `login_id` |
 | `start_terminal` | `terminal_id, conversation_id, cwd, cols, rows` |
@@ -343,6 +346,8 @@ Control plane to node:
 The control plane keeps every sent `prompt` as unacknowledged until `prompt_received` arrives with its `prompt_id` (or the turn ends or the session fails). After a `hello`, it sends again the unacknowledged prompts of sessions the node reports live, and forgets those of sessions it does not. A `session_started` for the `acp_session_id` the conversation already holds sets mode and model only where they are empty. The node ignores a `prompt_id` it has already received (the ids it has written are persisted in the session directory) and answers a repeat with `prompt_received` again. Failures the node emits itself (a refused start, an unreachable keeper) take the next free `seq` for the conversation, tracked in the session directory, never a fixed value.
 
 An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
+
+A node reports one `logins` entry per account: the agent's default home plus one per folder under `<state_dir>/accounts/<agent>/<name>`, each named by the email found in that folder's own config (`.claude.json` for Claude Code, the `auth.json` identity token for Codex), else by the folder name. The node runs an agent as an account by setting `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to that folder, for both `start_session` and `start_login`; `account` on `start_login` signs in to (and creates, if new) that account's folder. Each `logins` report replaces the node's previous list. Usage left per account is not reported: neither agent exposes it through a documented interface.
 
 `start_login` carries the method the node reported in `logins`: `claude` supports `oauth_token`, `codex` supports `device_auth`. Any other method is answered with `login_output` explaining it and `login_finished` with `ok` false.
 

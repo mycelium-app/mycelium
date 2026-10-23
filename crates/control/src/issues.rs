@@ -83,7 +83,7 @@ pub async fn start_workspace(State(state): State<AppState>, user: AuthUser, Path
     let body = issue.body.trim();
     let details = if body.is_empty() { String::new() } else { format!("\n\n{body}") };
     let prompt = format!("Work on issue #{number}: {}\n{}{details}", issue.title, issue.url);
-    let start = CreateConversationRequest { node_id: project.node_id, agent: request.agent, cwd, project_id: None, branch: None, title: Some(format!("#{number} {}", issue.title)), prompt: Some(prompt) };
+    let start = CreateConversationRequest { account: None, node_id: project.node_id, agent: request.agent, cwd, project_id: None, branch: None, title: Some(format!("#{number} {}", issue.title)), prompt: Some(prompt) };
     let conversation = conversations::start(&state, &user, start).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))

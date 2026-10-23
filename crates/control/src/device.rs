@@ -50,7 +50,7 @@ fn normalise(user_code: &str) -> String {
     user_code.trim().to_uppercase()
 }
 
-fn client_address(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+pub fn client_address(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
     let trusted = |address: IpAddr| state.config.trusted_proxies.iter().any(|range| range.contains(address));
 
     if !trusted(peer.ip()) {
@@ -199,10 +199,11 @@ async fn token_allowed(state: AppState, request: DeviceTokenRequest) -> ApiResul
             }
         }
         DeviceKind::Client => {
-            sqlx::query("insert into client_tokens (id, user_id, label, token_hash) values ($1, $2, $3, $4)")
+            sqlx::query("insert into client_tokens (id, user_id, label, hostname, token_hash) values ($1, $2, $3, $4, $5)")
                 .bind(id)
                 .bind(approver)
                 .bind(&row.identity.label)
+                .bind(&row.identity.hostname)
                 .bind(hash_token(&secret))
                 .execute(&mut *tx)
                 .await?;

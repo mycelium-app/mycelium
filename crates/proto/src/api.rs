@@ -70,6 +70,8 @@ pub struct NodeSummary {
     pub os: String,
     pub arch: String,
     pub version: String,
+    #[serde(default)]
+    pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_available: Option<String>,
     pub online: bool,
@@ -100,6 +102,8 @@ pub const NODE_ICONS: &[&str] = &["server", "laptop", "desktop", "cloud", "termi
 pub struct StartLoginRequest {
     pub agent: AgentId,
     pub method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,6 +142,8 @@ pub struct ResizeTerminalRequest {
 pub struct CreateConversationRequest {
     pub node_id: Uuid,
     pub agent: AgentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     #[serde(default)]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,6 +162,26 @@ pub struct PatchConversationRequest {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    Browser,
+    Client,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionSummary {
+    pub id: Uuid,
+    pub kind: SessionKind,
+    pub label: String,
+    pub hostname: String,
+    pub address: String,
+    pub last_used_at: chrono::DateTime<chrono::Utc>,
+    pub current: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

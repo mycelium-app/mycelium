@@ -1,5 +1,5 @@
 use crate::acp::Command;
-use crate::agents::{detect_agents, login_command, login_state};
+use crate::agents::{account_env, accounts_dir, detect_agents, find_account, login_command, login_state, new_account};
 use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
@@ -84,7 +84,8 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let (out, out_rx) = mpsc::unbounded_channel();
     let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
     let logins_home = options.home.clone();
-    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &agents) });
+    let logins_accounts = accounts_dir(&config.state_dir);
+    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents) });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
@@ -178,14 +179,14 @@ impl Daemon {
     pub fn handle(&self, message: ControlToNode) {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
-            ControlToNode::StartSession { conversation_id, agent, cwd, resume } => self.start_session(conversation_id, agent, &cwd, resume),
+            ControlToNode::StartSession { conversation_id, agent, cwd, resume, account } => self.start_session(conversation_id, agent, &cwd, resume, account),
             ControlToNode::Prompt { conversation_id, prompt_id, text } => self.prompt(conversation_id, prompt_id, text),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
             ControlToNode::CloseSession { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Close)),
-            ControlToNode::StartLogin { login_id, agent, method } => match (self.options.login_commands)(agent, &method) {
-                Some(command) => self.logins.start(login_id, command),
+            ControlToNode::StartLogin { login_id, agent, method, account } => match (self.options.login_commands)(agent, &method) {
+                Some(command) => self.start_login(login_id, agent, command, account),
                 None => self.logins.refuse(login_id, format!("{} cannot sign in with {method} from here. Use the method this node lists for it, or sign in on the node itself.", agent.as_str())),
             },
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
@@ -231,7 +232,7 @@ impl Daemon {
     }
 
     fn logins_for(&self, agents: &[AgentInfo]) -> Vec<LoginInfo> {
-        login_state(&self.options.home, agents)
+        login_state(&self.options.home, &accounts_dir(&self.config.state_dir), agents)
     }
 
     fn session_handles(&self) -> Vec<(Uuid, SessionHandle)> {
@@ -290,7 +291,23 @@ impl Daemon {
         }
     }
 
-    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>) {
+    fn start_login(&self, login_id: Uuid, agent: AgentId, command: Vec<String>, account: Option<String>) {
+        let Some(label) = account else {
+            self.logins.start(login_id, command, Vec::new());
+
+            return;
+        };
+
+        let accounts = accounts_dir(&self.config.state_dir);
+        let found = find_account(&self.options.home, &accounts, agent, &label);
+
+        match found.map(Ok).unwrap_or_else(|| new_account(&accounts, agent, &label)) {
+            Ok(account) => self.logins.start(login_id, command, account_env(agent, &account)),
+            Err(error) => self.logins.refuse(login_id, format!("Could not create a place for {label} on this node: {error}.")),
+        }
+    }
+
+    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, account: Option<String>) {
         let existing = self.session_handles();
         if existing.iter().any(|(id, handle)| *id == conversation_id && !handle.ended()) {
             return;
@@ -309,6 +326,18 @@ impl Daemon {
             self.refuse(conversation_id, format!("{} is not installed on this node.", agent.as_str()));
 
             return;
+        }
+
+        let mut env = agent_env(agent);
+
+        if let Some(label) = account {
+            let Some(found) = find_account(&self.options.home, &accounts_dir(&self.config.state_dir), agent, &label) else {
+                self.refuse(conversation_id, format!("{label} is not signed in on this node. Sign in to it there, or start the conversation with another account."));
+
+                return;
+            };
+
+            env.extend(account_env(agent, &found));
         }
 
         let requested = self.config.projects_root.join(cwd);
@@ -333,7 +362,7 @@ impl Daemon {
         let launch = Launch {
             keeper_binary: self.options.keeper_binary.clone(),
             agent_command,
-            agent_env: agent_env(agent),
+            agent_env: env,
             mcp_server: self.config.mcp_server(conversation_id),
             cwd: folder,
             resume,

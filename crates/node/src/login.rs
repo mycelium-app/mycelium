@@ -26,8 +26,8 @@ impl LoginManager {
         LoginManager { out, report_state, running: Arc::new(Mutex::new(HashMap::new())) }
     }
 
-    pub fn start(&self, login_id: Uuid, command: Vec<String>) {
-        if let Err(error) = self.try_start(login_id, &command) {
+    pub fn start(&self, login_id: Uuid, command: Vec<String>, env: Vec<(String, String)>) {
+        if let Err(error) = self.try_start(login_id, &command, &env) {
             self.refuse(login_id, format!("{error:#}"));
         }
     }
@@ -58,7 +58,7 @@ impl LoginManager {
         }
     }
 
-    fn try_start(&self, login_id: Uuid, command: &[String]) -> Result<()> {
+    fn try_start(&self, login_id: Uuid, command: &[String], env: &[(String, String)]) -> Result<()> {
         let Some((program, args)) = command.split_first() else {
             anyhow::bail!("This agent has no sign-in command.");
         };
@@ -66,6 +66,11 @@ impl LoginManager {
         let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 100, pixel_width: 0, pixel_height: 0 }).context("open a terminal for the sign-in")?;
         let mut builder = CommandBuilder::new(program);
         builder.args(args);
+
+        for (name, value) in env {
+            builder.env(name, value);
+        }
+
         let mut child = pair.slave.spawn_command(builder).with_context(|| format!("Could not start {program}. Check that it is installed on this node."))?;
         drop(pair.slave);
 
@@ -157,7 +162,7 @@ mod tests {
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(1);
 
-        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo visit-the-link; read answer; echo got-$answer".into()]);
+        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo visit-the-link; read answer; echo got-$answer".into()], vec![]);
 
         let mut seen = String::new();
         while !seen.contains("visit-the-link") {
@@ -189,7 +194,7 @@ mod tests {
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(2);
 
-        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo ready; sleep 30".into()]);
+        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo ready; sleep 30".into()], vec![]);
         while !matches!(next_message(&mut messages).await, NodeToControl::LoginOutput { .. }) {}
 
         manager.stop(login_id);
@@ -208,7 +213,7 @@ mod tests {
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(3);
 
-        manager.start(login_id, vec!["/nonexistent/agent".into(), "login".into()]);
+        manager.start(login_id, vec!["/nonexistent/agent".into(), "login".into()], vec![]);
 
         let NodeToControl::LoginOutput { data, .. } = next_message(&mut messages).await else {
             panic!("expected an explanation first");

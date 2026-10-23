@@ -36,6 +36,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
 
 const SILENT_ROUTES: &[&str] = &[
     "POST /auth/logout",
+    "DELETE /api/v1/sessions/{id}",
     "POST /api/v1/nodes/{id}/logins",
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",

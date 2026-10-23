@@ -34,6 +34,7 @@ fn conversation() -> Conversation {
         acp_session_id: Some("s".into()),
         mode: None,
         model: Some("m".into()),
+        account: None,
         options: None,
         created_at: now(),
         updated_at: now(),
@@ -89,13 +90,13 @@ fn every_control_message_round_trips_under_its_tag() {
     config.insert("effort".to_string(), json!("high"));
     let cases = vec![
         (ControlToNode::Ack { conversation_id: id(), seq: 9 }, "ack"),
-        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()) }, "start_session"),
+        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), account: None }, "start_session"),
         (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into() }, "prompt"),
         (ControlToNode::Cancel { conversation_id: id() }, "cancel"),
         (ControlToNode::PermissionResponse { conversation_id: id(), request_id: "r".into(), outcome: json!({"outcome": "selected", "optionId": "allow"}) }, "permission_response"),
         (ControlToNode::SetConfig { conversation_id: id(), mode: Some("plan".into()), model: None, config: Some(config) }, "set_config"),
         (ControlToNode::CloseSession { conversation_id: id() }, "close_session"),
-        (ControlToNode::StartLogin { login_id: id(), agent: AgentId::Codex, method: "device".into() }, "start_login"),
+        (ControlToNode::StartLogin { login_id: id(), agent: AgentId::Codex, method: "device".into(), account: None }, "start_login"),
         (ControlToNode::LoginInput { login_id: id(), text: "x".into() }, "login_input"),
         (ControlToNode::StopLogin { login_id: id() }, "stop_login"),
         (ControlToNode::StartTerminal { terminal_id: id(), conversation_id: id(), cwd: "/work".into(), cols: 80, rows: 24 }, "start_terminal"),
@@ -129,7 +130,7 @@ fn git_commands_are_tagged_snake_case() {
 
 #[test]
 fn start_session_omits_resume_when_absent_and_accepts_it_missing() {
-    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None };
+    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, account: None };
     let json = round_trip(&message);
 
     assert!(json.get("resume").is_none());
@@ -286,6 +287,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         os: "linux".into(),
         arch: "x86_64".into(),
         version: "0.1.0".into(),
+        address: "100.64.0.2".into(),
         update_available: None,
         online: true,
         draining: false,
@@ -305,7 +307,7 @@ fn permission_answer_and_login_bodies_round_trip() {
     let answer = round_trip(&PermissionAnswer { request_id: "r".into(), option_id: "allow".into() });
     assert_eq!(answer, json!({"request_id": "r", "option_id": "allow"}));
 
-    let login = round_trip(&StartLoginRequest { agent: AgentId::Claude, method: "token".into() });
+    let login = round_trip(&StartLoginRequest { agent: AgentId::Claude, method: "token".into(), account: None });
     assert_eq!(login["agent"], "claude");
 
     round_trip(&StartLoginResponse { login_id: id() });

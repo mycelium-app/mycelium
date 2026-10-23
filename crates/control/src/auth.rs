@@ -1,9 +1,10 @@
 use crate::config::{OidcConfig, is_localhost};
 use crate::error::{ApiError, ApiResult};
+use crate::device::client_address;
 use crate::state::{AppState, hash_token, new_token};
 use axum::Json;
-use axum::extract::{FromRequestParts, Query, State};
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use axum::extract::{ConnectInfo, FromRequestParts, Query, State};
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE, USER_AGENT};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -12,6 +13,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mycelium_proto::api::Me;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::net::SocketAddr;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -23,6 +25,7 @@ pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
     pub name: String,
+    pub session: Option<Uuid>,
 }
 
 pub struct AuthNode {
@@ -43,29 +46,45 @@ impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<AuthUser, ApiError> {
+        let address = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(peer)| client_address(state, &parts.headers, *peer).to_string()).unwrap_or_default();
+
         if let Some(token) = bearer(&parts.headers).and_then(|value| value.strip_prefix("myc_client_")) {
-            let row = sqlx::query_as::<_, (Uuid, String, String)>(
-                "update client_tokens set last_used_at = now() from users
+            let row = sqlx::query_as::<_, (Uuid, String, String, Uuid)>(
+                "update client_tokens set last_used_at = now(), address = $2 from users
                  where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and users.id = client_tokens.user_id
-                 returning users.id, users.email, users.name",
+                 returning users.id, users.email, users.name, client_tokens.id",
             )
             .bind(hash_token(token))
+            .bind(&address)
             .fetch_optional(&state.pool)
             .await?;
 
-            return row.map(|(id, email, name)| AuthUser { id, email, name }).ok_or_else(ApiError::unauthorised);
+            return row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session) }).ok_or_else(ApiError::unauthorised);
         }
 
         let token = cookie(&parts.headers, SESSION_COOKIE).ok_or_else(ApiError::unauthorised)?;
-        let row = sqlx::query_as::<_, (Uuid, String, String)>(
-            "select users.id, users.email, users.name from web_sessions join users on users.id = web_sessions.user_id
+        let row = sqlx::query_as::<_, (Uuid, String, String, Uuid)>(
+            "select users.id, users.email, users.name, web_sessions.id from web_sessions join users on users.id = web_sessions.user_id
              where web_sessions.token_hash = $1 and web_sessions.expires_at > now()",
         )
         .bind(hash_token(token))
         .fetch_optional(&state.pool)
         .await?;
+        let user_agent = parts.headers.get(USER_AGENT).and_then(|value| value.to_str().ok()).unwrap_or_default();
 
-        row.map(|(id, email, name)| AuthUser { id, email, name }).ok_or_else(ApiError::unauthorised)
+        if let Some((_, _, _, session)) = &row {
+            sqlx::query(
+                "update web_sessions set last_used_at = now(), address = $2, user_agent = $3
+                 where id = $1 and (last_used_at is null or last_used_at < now() - interval '1 minute')",
+            )
+            .bind(session)
+            .bind(&address)
+            .bind(user_agent)
+            .execute(&state.pool)
+            .await?;
+        }
+
+        row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session) }).ok_or_else(ApiError::unauthorised)
     }
 }
 

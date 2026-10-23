@@ -1,10 +1,13 @@
 use crate::auth::AuthNode;
+use crate::device::client_address;
 use crate::error::ApiResult;
 use crate::prompts::pump;
 use crate::state::{AppState, GitAnswer};
 use crate::store::{append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
 use crate::transcripts::{WriteError, write_chunk};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
+use axum::http::HeaderMap;
+use std::net::SocketAddr;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use base64::Engine;
@@ -22,7 +25,10 @@ use uuid::Uuid;
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
 
-pub async fn connect(State(state): State<AppState>, node: AuthNode, upgrade: WebSocketUpgrade) -> Response {
+pub async fn connect(State(state): State<AppState>, node: AuthNode, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
+    let address = client_address(&state, &headers, peer).to_string();
+    let _ = sqlx::query("update nodes set address = $2 where id = $1").bind(node.id).bind(address).execute(&state.pool).await;
+
     let (sender, outgoing) = mpsc::unbounded_channel::<ControlToNode>();
     state.finish_logins_of_node(node.id);
     let connection_id = state.hub.register(node.id, sender);
@@ -352,19 +358,24 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 }
 
 async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("delete from logins where node_id = $1").bind(node_id).execute(&mut *tx).await?;
+
     for login in logins {
         sqlx::query(
             "insert into logins (node_id, agent, account, method, state) values ($1, $2, $3, $4, $5)
-             on conflict (node_id, agent) do update set account = excluded.account, method = excluded.method, state = excluded.state, updated_at = now()",
+             on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, updated_at = now()",
         )
         .bind(node_id)
         .bind(enum_text(&login.agent))
         .bind(login.account)
         .bind(login.method)
         .bind(enum_text(&login.state))
-        .execute(&state.pool)
+        .execute(&mut *tx)
         .await?;
     }
+
+    tx.commit().await?;
 
     publish_node(state, node_id).await
 }

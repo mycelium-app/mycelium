@@ -83,7 +83,7 @@ pub async fn start_login(State(state): State<AppState>, user: AuthUser, Path(id)
     let login_id = Uuid::new_v4();
     state.hub.track_login(login_id, id, user.id);
 
-    let sent = state.hub.send(id, ControlToNode::StartLogin { login_id, agent: request.agent, method: request.method });
+    let sent = state.hub.send(id, ControlToNode::StartLogin { login_id, agent: request.agent, method: request.method, account: request.account.map(|account| account.trim().to_string()).filter(|account| !account.is_empty()) });
 
     if !sent {
         state.hub.finish_login(login_id);
