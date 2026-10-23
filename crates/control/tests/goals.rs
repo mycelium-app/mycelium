@@ -281,8 +281,12 @@ async fn set_goal_with(server: &Server, id: Uuid, limits: Value) -> (u16, Value)
 }
 
 async fn report_windows(link: &mut NodeLink, windows: &[(&str, f64)]) {
+    report_windows_for(link, None, windows).await;
+}
+
+async fn report_windows_for(link: &mut NodeLink, account: Option<&str>, windows: &[(&str, f64)]) {
     let windows = windows.iter().map(|(name, used)| mycelium_proto::conversation::UsageWindow { name: (*name).into(), used_percent: *used, resets_at: None, rate_per_hour: None, runs_out_at: None }).collect();
-    let login = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Claude, account: None, method: "token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()) };
+    let login = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Claude, account: account.map(str::to_string), method: "token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()) };
     link.send(NodeToControl::Logins { logins: vec![login] }).await;
 }
 
@@ -384,6 +388,19 @@ async fn a_goal_stops_when_the_five_hour_window_of_its_account_reaches_the_limit
     let goal = goal_of(&server, id).await;
     assert_eq!(goal["state"], "limit_reached");
     assert_eq!(goal["reason"], "5-hour window at 82%, over your limit of 80%. Set the goal again to carry on.");
+}
+
+#[tokio::test]
+async fn a_conversation_without_a_recorded_account_reads_the_usage_of_its_nodes_signed_in_login() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"weekly_limit": 85})).await;
+
+    report_windows_for(&mut link, Some("work@example.com"), &[("five_hour", 27.0), ("seven_day", 65.0)]).await;
+
+    let user = server.user.clone();
+    common::eventually("the weekly reading from the node's login", || async { (goal_of_with(&user, id).await["weekly_used"] == json!(65.0)).then_some(()) }).await;
 }
 
 #[tokio::test]

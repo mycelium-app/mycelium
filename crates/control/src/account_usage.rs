@@ -90,12 +90,15 @@ fn project(window: &UsageWindow, history: &[Point]) -> (Option<f64>, Option<Date
 }
 
 pub async fn windows_of(state: &AppState, node_id: Uuid, agent: AgentId, account: Option<&str>) -> ApiResult<Vec<UsageWindow>> {
-    let windows = sqlx::query_scalar::<_, Json<Vec<UsageWindow>>>("select usage_windows from logins where node_id = $1 and agent = $2 and coalesce(account, '') = $3")
-        .bind(node_id)
-        .bind(enum_text(&agent))
-        .bind(account.unwrap_or_default())
-        .fetch_optional(&state.pool)
-        .await?;
+    let windows = sqlx::query_scalar::<_, Json<Vec<UsageWindow>>>(
+        "select usage_windows from logins where node_id = $1 and agent = $2 and ($3::text is null or coalesce(account, '') = $3)
+         order by jsonb_array_length(usage_windows) > 0 desc limit 1",
+    )
+    .bind(node_id)
+    .bind(enum_text(&agent))
+    .bind(account)
+    .fetch_optional(&state.pool)
+    .await?;
 
     Ok(windows.map(|windows| windows.0).unwrap_or_default())
 }
