@@ -149,6 +149,29 @@ async fn a_met_verdict_ends_the_goal_with_the_checks_reason_and_sends_nothing_mo
 }
 
 #[tokio::test]
+async fn a_waiting_verdict_keeps_the_goal_active_without_prompting_until_the_next_turn_ends() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal(&server, id, "Every test passes", 100_000).await;
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"waiting\", \"reason\": \"The test run is still going in the background.\"}").await;
+    settled(&mut link, check).await;
+
+    let goal = goal_of(&server, id).await;
+    assert_eq!((goal["state"].as_str(), goal["reason"].as_str()), (Some("active"), Some("The test run is still going in the background.")));
+    assert_eq!(user_messages(&server, id).await, ["Build it"]);
+
+    end_turn(&mut link, id, 4, 0).await;
+    let (next_check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, next_check, "{\"verdict\": \"continue\", \"reason\": \"Two tests fail.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nTwo tests fail.");
+}
+
+#[tokio::test]
 async fn a_stuck_verdict_ends_the_goal_with_the_checks_reason() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

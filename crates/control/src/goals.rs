@@ -23,11 +23,12 @@ const AGENT_STOPPED: &str = "The agent stopped before the turn ended, so the goa
 const FIVE_HOUR_WINDOW: &str = "five_hour";
 const WEEKLY_WINDOW: &str = "seven_day";
 const OVER_BUDGET: &str = "The goal is not met and the token budget is used up. Set the goal again with a larger budget to carry on.";
-const CHECK_INSTRUCTIONS: &str = "You are checking whether a goal has been met. Do not change any files or run anything that changes state. Look at the work in this folder if you need to.\n\nAnswer with one JSON object and nothing else, in this form: {\"verdict\": \"met\" | \"continue\" | \"stuck\", \"reason\": \"one sentence\"}.\nmet: the goal is fully achieved.\ncontinue: more work remains and the agent can do it.\nstuck: no further progress is possible without the person's help.";
+const CHECK_INSTRUCTIONS: &str = "You are checking whether a goal has been met. Do not change any files or run anything that changes state. Look at the work in this folder if you need to.\n\nAnswer with one JSON object and nothing else, in this form: {\"verdict\": \"met\" | \"continue\" | \"waiting\" | \"stuck\", \"reason\": \"one sentence\"}.\nmet: the goal is fully achieved.\ncontinue: more work remains and the agent can do it now.\nwaiting: the agent has started work that will resume it on its own, such as background commands, subagents, a workflow or a pipeline it is watching, and has nothing to do until that reports back.\nstuck: no further progress is possible without the person's help.";
 
 enum Verdict {
     Met,
     Continue,
+    Waiting,
     Stuck,
 }
 
@@ -40,6 +41,7 @@ fn parse_verdict(answer: &str) -> Option<(Verdict, String)> {
     match parsed.get("verdict").and_then(Value::as_str)?.trim().to_lowercase().as_str() {
         "met" => Some((Verdict::Met, reason)),
         "continue" => Some((Verdict::Continue, reason)),
+        "waiting" => Some((Verdict::Waiting, reason)),
         "stuck" => Some((Verdict::Stuck, reason)),
         _ => None,
     }
@@ -210,6 +212,10 @@ async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid,
         Some((Verdict::Met, reason)) => end(state, owner, goal_conversation_id, GoalState::Met, &reason).await,
         Some((Verdict::Stuck, reason)) => end(state, owner, goal_conversation_id, GoalState::Stuck, &reason).await,
         None => end(state, owner, goal_conversation_id, GoalState::Stuck, CHECK_UNREADABLE).await,
+        Some((Verdict::Waiting, reason)) => {
+            sqlx::query("update goals set reason = $2 where conversation_id = $1").bind(goal_conversation_id).bind(&reason).execute(&state.pool).await?;
+            announce(state, owner, goal_conversation_id).await
+        }
         Some((Verdict::Continue, reason)) => {
             let goal = load(state, goal_conversation_id).await?;
 
