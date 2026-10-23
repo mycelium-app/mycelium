@@ -222,6 +222,21 @@ class MyceliumApi(
         call("/model-providers/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun chatToolServers(): List<ChatToolServer> = call("/chat-tool-servers") { client.get(it) { authorise() } }.body()
+
+    suspend fun createChatToolServer(request: CreateChatToolServerRequest): ChatToolServer =
+        call("/chat-tool-servers") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun patchChatToolServer(id: String, request: PatchChatToolServerRequest): ChatToolServer =
+        call("/chat-tool-servers/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun refreshChatToolServer(id: String): ChatToolServer =
+        call("/chat-tool-servers/$id/refresh") { client.post(it) { authorise() } }.body()
+
+    suspend fun deleteChatToolServer(id: String) {
+        call("/chat-tool-servers/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = ""): Repositories =
         call("/repositories") {
             client.get(it) {

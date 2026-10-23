@@ -337,6 +337,27 @@ data class CreateModelProviderRequest(
 )
 
 @Serializable
+data class ChatToolInfo(val name: String, val description: String = "")
+
+@Serializable
+data class ChatToolServer(
+    val id: String,
+    val name: String,
+    val url: String,
+    @SerialName("token_hint") val tokenHint: String? = null,
+    val enabled: Boolean = true,
+    @SerialName("always_allow") val alwaysAllow: Boolean = false,
+    val tools: List<ChatToolInfo> = emptyList(),
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null)
+
+@Serializable
+data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null)
+
+@Serializable
 data class CreateChatRequest(
     @SerialName("provider_id") val providerId: String,
     val model: String,

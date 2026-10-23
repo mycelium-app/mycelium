@@ -45,6 +45,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
     ChatModels("Chat models", MyIcon.Chip),
+    ChatTools("Chat tools", MyIcon.Sliders, "MCP servers chats may call, each call asked first"),
     Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
     Account("Account", MyIcon.Settings, "Sign out and version"),
@@ -159,6 +160,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
             SettingsSection.ChatModels -> ModelProvidersSettings(store)
+            SettingsSection.ChatTools -> ChatToolsSettings(store)
             SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
             SettingsSection.Account -> AccountSettings(store, me, controlPlane, onSignOut)
