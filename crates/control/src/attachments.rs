@@ -46,6 +46,37 @@ fn clean_media_type(media_type: Option<&HeaderValue>) -> String {
     if text.contains('/') && !text.contains(char::is_whitespace) { text } else { FALLBACK_MEDIA_TYPE.to_string() }
 }
 
+pub async fn store(state: &AppState, owner: Uuid, body: &[u8], media_type: &str) -> ApiResult<(String, String, i64)> {
+    let sha256 = hex_digest(body);
+    let path = path_of(state, &sha256);
+
+    if !path.exists() {
+        let directory = state.config.data_dir.join("attachments");
+        tokio::fs::create_dir_all(&directory).await.map_err(ApiError::internal)?;
+        let partial = directory.join(format!("{sha256}.{}.partial", Uuid::new_v4()));
+        tokio::fs::write(&partial, body).await.map_err(ApiError::internal)?;
+        tokio::fs::rename(&partial, &path).await.map_err(ApiError::internal)?;
+    }
+
+    let size = body.len() as i64;
+    let stored = sqlx::query_as::<_, (String, i64)>(
+        "insert into attachments (owner, sha256, media_type, size) values ($1, $2, $3, $4)
+         on conflict (owner, sha256) do update set media_type = attachments.media_type returning media_type, size",
+    )
+    .bind(owner)
+    .bind(&sha256)
+    .bind(media_type)
+    .bind(size)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok((sha256, stored.0, stored.1))
+}
+
+pub fn media_type_of(headers: &HeaderMap) -> String {
+    clean_media_type(headers.get(header::CONTENT_TYPE))
+}
+
 pub async fn upload(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<UploadQuery>, headers: HeaderMap, body: Bytes) -> ApiResult<(StatusCode, Json<Attachment>)> {
     find_owned(&state.pool, id, user.id).await?;
 
@@ -57,33 +88,10 @@ pub async fn upload(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(too_large());
     }
 
-    let sha256 = hex_digest(&body);
-    let media_type = clean_media_type(headers.get(header::CONTENT_TYPE));
-    let path = path_of(&state, &sha256);
-
-    if !path.exists() {
-        let directory = state.config.data_dir.join("attachments");
-        tokio::fs::create_dir_all(&directory).await.map_err(ApiError::internal)?;
-        let partial = directory.join(format!("{sha256}.{}.partial", Uuid::new_v4()));
-        tokio::fs::write(&partial, &body).await.map_err(ApiError::internal)?;
-        tokio::fs::rename(&partial, &path).await.map_err(ApiError::internal)?;
-    }
-
-    let size = body.len() as i64;
-    let stored = sqlx::query_as::<_, (String, i64)>(
-        "insert into attachments (owner, sha256, media_type, size) values ($1, $2, $3, $4)
-         on conflict (owner, sha256) do update set media_type = attachments.media_type returning media_type, size",
-    )
-    .bind(user.id)
-    .bind(&sha256)
-    .bind(&media_type)
-    .bind(size)
-    .fetch_one(&state.pool)
-    .await?;
-
+    let (sha256, media_type, size) = store(&state, user.id, &body, &media_type_of(&headers)).await?;
     let name = clean_name(query.name.as_deref().unwrap_or_default());
 
-    Ok((StatusCode::CREATED, Json(Attachment { sha256, name, media_type: stored.0, size: stored.1 })))
+    Ok((StatusCode::CREATED, Json(Attachment { sha256, name, media_type, size })))
 }
 
 fn too_large() -> ApiError {

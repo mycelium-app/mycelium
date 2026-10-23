@@ -1,3 +1,4 @@
+use crate::attachments;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges;
@@ -8,14 +9,18 @@ use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::body::Bytes;
+use axum::http::{HeaderMap, StatusCode};
 use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use uuid::Uuid;
 
-pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, created_at";
+pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, icon, avatar_sha256, created_at";
+pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
+const MAX_ICON_CHARACTERS: usize = 40;
+const AVATAR_MEDIA_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
 const PROJECTS_FOLDER: &str = "projects";
 
 #[derive(Clone, sqlx::FromRow)]
@@ -27,12 +32,14 @@ pub struct ProjectRow {
     pub forge_id: Option<Uuid>,
     pub repository: Option<String>,
     pub group_id: Option<Uuid>,
+    pub icon: Option<String>,
+    pub avatar_sha256: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl ProjectRow {
     pub fn to_proto(self) -> Project {
-        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, created_at: self.created_at }
+        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, icon: self.icon, avatar_sha256: self.avatar_sha256, created_at: self.created_at }
     }
 }
 
@@ -97,6 +104,10 @@ async fn link_conversations(state: &AppState, owner: Uuid, project: &ProjectRow)
     }
 
     Ok(())
+}
+
+fn valid_icon(icon: &str) -> bool {
+    icon.len() <= MAX_ICON_CHARACTERS && icon.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
 }
 
 pub fn valid_repository(repository: &str) -> bool {
@@ -190,30 +201,83 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {
+    let changes_icon = request.icon.is_some() || request.clear_icon;
+
     if let Some(group_id) = request.group_id {
         groups::find_owned(&state, group_id, user.id).await?;
     }
 
-    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set group_id = $3 where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
-        .bind(id)
-        .bind(user.id)
-        .bind(request.group_id)
-        .fetch_optional(&state.pool)
-        .await?;
+    let icon = request.icon.as_deref().map(str::trim).filter(|icon| !request.clear_icon && !icon.is_empty());
+
+    if icon.is_some_and(|icon| !valid_icon(icon)) {
+        return Err(ApiError::bad_request("icon_invalid", "Choose an icon from the list."));
+    }
+
+    let row = if changes_icon {
+        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set icon = $3, avatar_sha256 = null where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+            .bind(id)
+            .bind(user.id)
+            .bind(icon)
+            .fetch_optional(&state.pool)
+            .await?
+    } else {
+        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set group_id = $3 where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+            .bind(id)
+            .bind(user.id)
+            .bind(request.group_id)
+            .fetch_optional(&state.pool)
+            .await?
+    };
 
     let Some(row) = row else {
         return Err(ApiError::not_found("That project"));
     };
 
-    let regrouped = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where project_id = $1 and owner = $2")))
+    publish_conversations(&state, user.id, id).await?;
+
+    Ok(Json(row.to_proto()))
+}
+
+pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, headers: HeaderMap, body: Bytes) -> ApiResult<Json<Project>> {
+    find_owned(&state, id, user.id).await?;
+
+    let media_type = attachments::media_type_of(&headers);
+
+    if !AVATAR_MEDIA_TYPES.contains(&media_type.as_str()) {
+        return Err(ApiError::bad_request("avatar_not_image", "The logo must be a PNG, JPEG, WebP or SVG image. Choose another file."));
+    }
+
+    if body.is_empty() {
+        return Err(ApiError::bad_request("avatar_empty", "The file is empty. Choose an image that has content."));
+    }
+
+    if body.len() > MAX_AVATAR_BYTES {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "avatar_too_large", "The logo is larger than 256 KB. Choose a smaller image."));
+    }
+
+    let (sha256, _, _) = attachments::store(&state, user.id, &body, &media_type).await?;
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set avatar_sha256 = $3, icon = null where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
         .bind(id)
         .bind(user.id)
+        .bind(&sha256)
+        .fetch_one(&state.pool)
+        .await?;
+
+    publish_conversations(&state, user.id, id).await?;
+
+    Ok(Json(row.to_proto()))
+}
+
+async fn publish_conversations(state: &AppState, owner: Uuid, project_id: Uuid) -> ApiResult<()> {
+    let conversations = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where project_id = $1 and owner = $2")))
+        .bind(project_id)
+        .bind(owner)
         .fetch_all(&state.pool)
         .await?;
 
-    for conversation in regrouped {
-        state.publish(Some(user.id), StreamMessage::Conversation(conversation.to_proto()?));
+    for conversation in conversations {
+        state.publish(Some(owner), StreamMessage::Conversation(conversation.to_proto()?));
     }
 
-    Ok(Json(row.to_proto()))
+    Ok(())
 }

@@ -174,6 +174,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))
+        .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-providers/{id}", delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))

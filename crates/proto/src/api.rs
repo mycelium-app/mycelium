@@ -522,6 +522,10 @@ pub struct Project {
     pub repository: Option<String>,
     #[serde(default)]
     pub group_id: Option<Uuid>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub avatar_sha256: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -529,6 +533,10 @@ pub struct Project {
 pub struct PatchProjectRequest {
     #[serde(default)]
     pub group_id: Option<Uuid>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub clear_icon: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
