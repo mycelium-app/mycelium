@@ -95,7 +95,7 @@ class WorktreesTest {
 
         rule.onNodeWithContentDescription("New worktree").performClick()
         rule.onNodeWithContentDescription("Branch name").performTextInput("  feature/restore ")
-        rule.onNodeWithText("Start conversation").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil { created }
         assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","branch":"feature/restore"}""", bodies.single())
@@ -106,7 +106,7 @@ class WorktreesTest {
         show(store())
 
         rule.onNodeWithContentDescription("New worktree").performClick()
-        rule.onNodeWithText("Start conversation").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
 
         rule.onNodeWithText("Enter a name for the new branch.").assertExists()
         assertEquals(0, bodies.size)
@@ -120,7 +120,7 @@ class WorktreesTest {
 
         rule.onNodeWithContentDescription("New worktree").performClick()
         rule.onNodeWithContentDescription("Branch name").performTextInput("x")
-        rule.onNodeWithText("Start conversation").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil { store.problem.value != null }
         assertEquals("a branch named 'x' already exists", store.problem.value)

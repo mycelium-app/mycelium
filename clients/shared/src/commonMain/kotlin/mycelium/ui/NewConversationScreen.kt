@@ -3,6 +3,8 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,10 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import mycelium.api.Conversation
 import mycelium.api.CreateConversationRequest
 import mycelium.api.LoginState
 import mycelium.state.AppState
+import mycelium.state.Choice
 import mycelium.state.Store
 import mycelium.state.SignInPrefix
 import mycelium.state.accountChoiceId
@@ -32,6 +36,7 @@ import mycelium.state.isLaptop
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit, projectId: String? = null) {
     val colors = MyTheme.colors
@@ -39,7 +44,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var nodeId by remember { mutableStateOf<String?>(null) }
     var agent by remember { mutableStateOf<String?>(null) }
     var cwd by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf(TextFieldValue("")) }
+    val attached = rememberAttachmentDrafts()
     var cwdError by remember { mutableStateOf<String?>(null) }
     var nodeMenu by remember { mutableStateOf(false) }
     var chosenProject by remember { mutableStateOf(projectId) }
@@ -80,6 +86,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
         cwdError = null
         branchError = null
+        val files = attached.drafts.map { it.file }
+        val text = prompt.text.trim()
+
         store.act {
             val created = store.api.createConversation(
                 CreateConversationRequest(
@@ -89,9 +98,14 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     cwd = if (project == null) cwd.trim() else null,
                     projectId = project?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
-                    prompt = prompt.trim().ifEmpty { null },
+                    prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
                 ),
             )
+
+            if (files.isNotEmpty()) {
+                store.send(created.id, text, files)
+            }
+
             onCreated(created)
         }
     }
@@ -107,136 +121,127 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             return@Column
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Column(
-                Modifier.widthIn(max = Tokens.Size.Page).fillMaxWidth().padding(Tokens.Space.S4),
-                verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
+                Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().padding(Tokens.Space.S4),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
             ) {
-                if (projects.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Project", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("What are we working on?", style = Tokens.Type.Display)
 
-                        Box {
-                            MyButton(
-                                { projectMenu = true },
-                                text = project?.name ?: "A folder",
-                                icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
-                                description = "Project: ${project?.name ?: "A folder"}",
-                                variant = ButtonVariant.Outline,
-                                trailingIcon = MyIcon.ChevronDown,
-                            )
-
-                            if (projectMenu) {
-                                MenuPopup(onDismiss = { projectMenu = false }) {
-                                    MenuLabel("Start in")
-
-                                    for (option in projects) {
-                                        MenuItem(
-                                            option.name,
-                                            onClick = { chosenProject = option.id; projectMenu = false },
-                                            checked = option.id == project?.id,
-                                            leading = state.nodes[option.nodeId]?.let(::nodeIcon),
-                                            hint = state.nodes[option.nodeId]?.name,
-                                        )
-                                    }
-
-                                    MenuItem("A folder", onClick = { chosenProject = null; projectMenu = false }, checked = project == null, leading = MyIcon.Folder)
-                                }
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                    ComposerCard(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        placeholder = "Ask, plan or build",
+                        onSubmit = ::create,
+                        attachments = attached.controls(),
+                        trailing = {
+                            if (agents.isNotEmpty()) {
+                                OptionMenu("Agent", agents.map { Choice(it.agent, agentName(it.agent)) }, chosenAgent, { agent = it })
                             }
-                        }
-                    }
-                }
 
-                if (project == null) {
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-
-                        Box {
-                            MyButton(
-                                { nodeMenu = true },
-                                text = node.name,
-                                icon = nodeIcon(node),
-                                description = "Node: ${node.name}",
-                                variant = ButtonVariant.Outline,
-                                trailingIcon = MyIcon.ChevronDown,
-                            )
-
-                            if (nodeMenu) {
-                                MenuPopup(onDismiss = { nodeMenu = false }) {
-                                    MenuLabel("Run on")
-
-                                    for (option in nodes) {
-                                        MenuItem(
-                                            option.name,
-                                            onClick = { nodeId = option.id; nodeMenu = false },
-                                            checked = option.id == node.id,
-                                            leading = nodeIcon(option),
-                                        )
-                                    }
-                                }
+                            if (accounts.isNotEmpty()) {
+                                OptionMenu(
+                                    "Account",
+                                    accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()),
+                                    chosenAccount?.let(::accountChoiceId),
+                                    title = accountMenuTitle(chosenAgent.orEmpty()),
+                                    icon = MyIcon.Person,
+                                    onSelect = { picked ->
+                                        if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
+                                            store.act {
+                                                val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), picked.removePrefix(SignInPrefix))
+                                                signIn = LoginSession(started.loginId, chosenAgent)
+                                            }
+                                        } else {
+                                            account = picked
+                                        }
+                                    },
+                                )
                             }
-                        }
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Label("Agent", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        },
+                    )
 
                     if (agents.isEmpty()) {
                         Label("No agent is installed on ${node.name}. Install Claude Code or Codex there, then try again.", color = colors.statusFailed)
-                    } else {
-                        Segmented(
-                            options = agents.map { agentName(it.agent) },
-                            selected = agentName(chosenAgent.orEmpty()),
-                            onSelect = { picked -> agent = agents.first { agentName(it.agent) == picked }.agent },
-                            groupLabel = "Agent",
-                        )
                     }
-                }
 
-                if (accounts.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
+                        if (projects.isNotEmpty()) {
+                            Box {
+                                MyButton(
+                                    { projectMenu = true },
+                                    text = project?.name ?: "A folder",
+                                    icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
+                                    description = "Project: ${project?.name ?: "A folder"}",
+                                    variant = ButtonVariant.Outline,
+                                    trailingIcon = MyIcon.ChevronDown,
+                                )
 
-                        OptionMenu(
-                            "Account",
-                            accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()),
-                            chosenAccount?.let(::accountChoiceId),
-                            title = accountMenuTitle(chosenAgent.orEmpty()),
-                            icon = MyIcon.Person,
-                            onSelect = { picked ->
-                                if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
-                                    store.act {
-                                        val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), picked.removePrefix(SignInPrefix))
-                                        signIn = LoginSession(started.loginId, chosenAgent)
+                                if (projectMenu) {
+                                    MenuPopup(onDismiss = { projectMenu = false }) {
+                                        MenuLabel("Start in")
+
+                                        for (option in projects) {
+                                            MenuItem(
+                                                option.name,
+                                                onClick = { chosenProject = option.id; projectMenu = false },
+                                                checked = option.id == project?.id,
+                                                leading = state.nodes[option.nodeId]?.let(::nodeIcon),
+                                                hint = state.nodes[option.nodeId]?.name,
+                                            )
+                                        }
+
+                                        MenuItem("A folder", onClick = { chosenProject = null; projectMenu = false }, checked = project == null, leading = MyIcon.Folder)
                                     }
-                                } else {
-                                    account = picked
                                 }
-                            },
-                        )
+                            }
+                        }
+
+                        if (project == null) {
+                            Box {
+                                MyButton(
+                                    { nodeMenu = true },
+                                    text = node.name,
+                                    icon = nodeIcon(node),
+                                    description = "Node: ${node.name}",
+                                    variant = ButtonVariant.Outline,
+                                    trailingIcon = MyIcon.ChevronDown,
+                                )
+
+                                if (nodeMenu) {
+                                    MenuPopup(onDismiss = { nodeMenu = false }) {
+                                        MenuLabel("Run on")
+
+                                        for (option in nodes) {
+                                            MenuItem(
+                                                option.name,
+                                                onClick = { nodeId = option.id; nodeMenu = false },
+                                                checked = option.id == node.id,
+                                                leading = nodeIcon(option),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (project != null) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(worktree, "New worktree", { worktree = !worktree }, checkedState = "On", uncheckedState = "Off")
+                                Label("New worktree")
+                            }
+                        }
                     }
-                }
 
-                if (project == null) {
-                    TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
-                }
-
-                if (project != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(worktree, "New worktree", { worktree = !worktree }, checkedState = "On", uncheckedState = "Off")
-                        Label("New worktree")
+                    if (project == null) {
+                        TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
                     }
 
-                    if (worktree) {
+                    if (project != null && worktree) {
                         TextInput(branch, { branch = it }, label = "Branch name", placeholder = "feature/restore-copy", mono = true, error = branchError, onSubmit = ::create)
                     }
-                }
-
-                TextInput(prompt, { prompt = it }, label = "First message (optional)", placeholder = "Ask, plan or build", onSubmit = ::create)
-
-                Row {
-                    MyButton(::create, text = "Start conversation", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
                 }
             }
         }

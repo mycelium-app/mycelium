@@ -2,6 +2,10 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -304,7 +308,7 @@ class ProjectsTest {
 
         rule.waitUntil { store.state.value.projects.isNotEmpty() }
         rule.waitForIdle()
-        rule.onNodeWithText("Start conversation").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil { created != null }
         assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1"}""", posts.single().second)
@@ -317,9 +321,35 @@ class ProjectsTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
-        rule.onNodeWithText("Start conversation").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil { created != null }
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
+    }
+
+    @Test
+    fun theNewConversationScreenIsAHeadingOverOneComposerWithAttachAndTheAgentInsideIt() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalPlatform provides QuietPlatform) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } } }
+
+        rule.onNodeWithText("What are we working on?").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Message").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Attach files").assertExists()
+        rule.onNodeWithContentDescription("Agent: Claude Code").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Send").assertIsDisplayed()
+    }
+
+    @Test
+    fun enterInTheComposerStartsTheConversationWithTheFirstMessage() {
+        val store = store()
+        var created: Conversation? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
+
+        rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
+        rule.onNodeWithContentDescription("Message").performTextInput("Fix the build")
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil { created != null }
+        assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden","prompt":"Fix the build"}""", posts.single().second)
     }
 }
