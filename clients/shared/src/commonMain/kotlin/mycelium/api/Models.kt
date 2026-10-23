@@ -839,7 +839,7 @@ data class SetGoalRequest(
 data class PatchGoalRequest(val paused: Boolean)
 
 @Serializable
-data class WalkthroughFile(val path: String, val diff: String)
+data class WalkthroughFile(val path: String, val diff: String, val unchanged: Boolean = false)
 
 @Serializable
 data class WalkthroughStep(val title: String, val key: Boolean = false, val section: String? = null, val icon: String? = null, val explanation: String = "", val files: List<WalkthroughFile> = emptyList())
@@ -851,6 +851,8 @@ data class Walkthrough(
     val steps: List<WalkthroughStep>,
     @SerialName("created_at") val createdAt: String,
     val dismissed: Boolean = false,
+    val scope: String = "branch",
+    val note: String? = null,
 )
 
 @Serializable

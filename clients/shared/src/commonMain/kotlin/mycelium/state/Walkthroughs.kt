@@ -15,14 +15,14 @@ fun walkthroughDiff(file: WalkthroughFile): FileDiff {
 
 fun stepPosition(index: Int, total: Int): String = "Step ${index + 1} of $total"
 
-enum class WalkthroughScope(val label: String, val subject: String) {
-    Branch("This branch", "this branch against its base branch"),
-    Uncommitted("Uncommitted changes", "the uncommitted changes in the working tree"),
-    LastCommit("Last commit", "the last commit"),
+enum class WalkthroughScope(val label: String, val subject: String, val key: String) {
+    Branch("This branch", "this branch against its base branch", "branch"),
+    Uncommitted("Uncommitted changes", "the uncommitted changes in the working tree", "uncommitted"),
+    LastCommit("Last commit", "the last commit", "last_commit"),
 }
 
 fun regenerateWalkthroughPrompt(scope: WalkthroughScope): String =
-    "Write a new walkthrough of ${scope.subject} with the walkthrough tool. Group the steps into named sections in reading order, and mark exactly one step as the key change."
+    "Write a new walkthrough of ${scope.subject} with the walkthrough tool, passing scope \"${scope.key}\". Group the steps into named sections in reading order, and mark exactly one step as the key change."
 
 data class WalkthroughSection(val name: String?, val icon: String?, val steps: List<IndexedValue<WalkthroughStep>>)
 

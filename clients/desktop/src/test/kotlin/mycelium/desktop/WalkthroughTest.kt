@@ -268,4 +268,24 @@ class WalkthroughTest {
         rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/walkthroughs/w1/dismissal" } }
         rule.onNodeWithText("Walkthrough").assertIsDisplayed()
     }
+
+    @Test
+    fun aFileWithNoChangeInTheScopeSaysSoInsteadOfShowingZeroCounts() {
+        show(Walkthrough.replace("\"files\":[]},\n{\"title\":\"Loose end\"", "\"files\":[{\"path\":\"src/untouched.ts\",\"diff\":\"\",\"unchanged\":true}]},\n{\"title\":\"Loose end\""))
+        openWalkthrough()
+
+        rule.onNodeWithContentDescription("Step 3: Tests", substring = true).performClick()
+
+        rule.onNodeWithText("src/untouched.ts").assertIsDisplayed()
+        rule.onNodeWithText("No changes to this file in this scope").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("+0", substring = true).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aNoteAboutTheDiffsIsShownAboveTheStep() {
+        show(Walkthrough.replace("\"steps\"", "\"note\":\"The changes in this scope could not be read from the node, so the diffs are as the agent wrote them.\",\"steps\""))
+        openWalkthrough()
+
+        rule.onNodeWithText("could not be read from the node", substring = true).assertIsDisplayed()
+    }
 }

@@ -33,6 +33,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Branches => branches(cwd),
         GitCommand::Switch { branch, create, track } => switch(cwd, &branch, create, track.as_deref()),
         GitCommand::Diff { path, staged } => diff(cwd, &path, staged),
+        GitCommand::ScopeDiff { scope } => scope_diff(cwd, &scope),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
         GitCommand::Unstage { paths } => changed(cwd, &["restore", "--staged", "--"], &paths),
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
@@ -443,6 +444,33 @@ fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value, String> {
 
     let truncated = output.len() > MOST_DIFF_BYTES;
     let kept = if truncated { &output[..MOST_DIFF_BYTES] } else { &output[..] };
+
+    Ok(json!({"diff": String::from_utf8_lossy(kept), "truncated": truncated}))
+}
+
+fn scope_diff(cwd: &Path, scope: &str) -> Result<Value, String> {
+    let output = match scope {
+        "uncommitted" => working_tree_changes(cwd, &["--no-color"])?,
+        "last_commit" => git(cwd, &["show", "--format=", "--no-color", "--no-renames", "--patch", "HEAD", "--"], &[])?,
+        "branch" => {
+            let head = String::from_utf8_lossy(&git(cwd, &["rev-parse", "HEAD"], &[])?).trim().to_string();
+            let mut base = head.clone();
+
+            for candidate in ["origin/main", "origin/master", "main", "master"] {
+                let merged = git(cwd, &["merge-base", candidate, "HEAD"], &[1, 128]).map(|found| String::from_utf8_lossy(&found).trim().to_string()).unwrap_or_default();
+
+                if !merged.is_empty() && merged != head {
+                    base = merged;
+                    break;
+                }
+            }
+
+            git(cwd, &["diff", "--no-color", "--no-renames", "--no-ext-diff", &base, "HEAD", "--"], &[])?
+        }
+        other => return Err(format!("{other} is not a walkthrough scope. Use branch, uncommitted or last_commit.")),
+    };
+    let truncated = output.len() > MOST_MOVE_BYTES;
+    let kept = if truncated { &output[..MOST_MOVE_BYTES] } else { &output[..] };
 
     Ok(json!({"diff": String::from_utf8_lossy(kept), "truncated": truncated}))
 }
@@ -1027,6 +1055,27 @@ mod tests {
 
         let untracked = run(dir.path(), GitCommand::Diff { path: "fresh.txt".into(), staged: false }).unwrap();
         assert!(untracked["diff"].as_str().unwrap().contains("+brand new"));
+    }
+
+    #[test]
+    fn a_scope_diff_covers_the_working_tree_the_last_commit_or_the_branch_against_main() {
+        let dir = repository();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "base");
+        git(dir.path(), &["switch", "-c", "topic"], &[]).unwrap();
+        write(&dir, "a.txt", "one\ntwo\n");
+        commit_all(&dir, "second");
+        write(&dir, "b.txt", "fresh\n");
+        let scoped = |scope: &str| run(dir.path(), GitCommand::ScopeDiff { scope: scope.into() }).unwrap()["diff"].as_str().unwrap().to_string();
+
+        let uncommitted = scoped("uncommitted");
+        let last = scoped("last_commit");
+        let branch = scoped("branch");
+
+        assert!(uncommitted.contains("+fresh") && !uncommitted.contains("+two"), "{uncommitted}");
+        assert!(last.contains("+two") && !last.contains("+fresh"), "{last}");
+        assert!(branch.contains("+two") && !branch.contains("+fresh"), "{branch}");
+        assert!(run(dir.path(), GitCommand::ScopeDiff { scope: "everything".into() }).is_err());
     }
 
     #[test]

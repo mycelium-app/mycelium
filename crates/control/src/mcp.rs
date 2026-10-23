@@ -107,6 +107,7 @@ fn tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "scope": {"type": "string", "enum": ["branch", "uncommitted", "last_commit"], "description": "The changes the walkthrough is about: this branch against its base branch (default), the uncommitted changes in the working tree, or the last commit."},
                     "steps": {
                         "type": "array",
                         "description": "The steps in reading order.",
@@ -125,7 +126,7 @@ fn tool_definitions() -> Value {
                                         "type": "object",
                                         "properties": {
                                             "path": {"type": "string", "description": "The file's path."},
-                                            "diff": {"type": "string", "description": "The unified diff for this file in this step, one line per diff line with + and - prefixes."},
+                                            "diff": {"type": "string", "description": "Optional. The part of this file's diff this step is about, used to pick its hunks when a file is split across steps. Omit it to show every change in the file."},
                                             "hunks": {"type": "array", "items": {"type": "string"}, "description": "The diff as hunks, used when diff is not given."},
                                         },
                                         "required": ["path"],

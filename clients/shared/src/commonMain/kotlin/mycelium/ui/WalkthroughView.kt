@@ -104,6 +104,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     }
     val detail: @Composable () -> Unit = {
         if (walkthrough.steps.isNotEmpty()) {
+            walkthrough.note?.let { Label(it, color = MyTheme.colors.textMuted) }
             StepDetail(walkthrough.steps[index], index)
         }
     }
@@ -269,6 +270,13 @@ private fun StepDetail(step: WalkthroughStep, index: Int) {
     }
 
     for (file in step.files) {
-        DiffCard(walkthroughDiff(file), ToolStatus.Done)
+        if (file.unchanged) {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                Label(file.path, style = Tokens.Type.UiStrong)
+                Label("No changes to this file in this scope", color = colors.textMuted)
+            }
+        } else {
+            DiffCard(walkthroughDiff(file), ToolStatus.Done)
+        }
     }
 }

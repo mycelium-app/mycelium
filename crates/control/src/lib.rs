@@ -38,6 +38,7 @@ mod tasks;
 mod terminals;
 mod transcripts;
 mod versions;
+mod walkthrough_diff;
 mod walkthroughs;
 mod web;
 mod worktrees;

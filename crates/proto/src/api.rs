@@ -921,6 +921,8 @@ pub struct PatchGoalRequest {
 pub struct WalkthroughFile {
     pub path: String,
     pub diff: String,
+    #[serde(default)]
+    pub unchanged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -943,4 +945,12 @@ pub struct Walkthrough {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
     pub dismissed: bool,
+    #[serde(default = "default_walkthrough_scope")]
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+fn default_walkthrough_scope() -> String {
+    "branch".to_string()
 }

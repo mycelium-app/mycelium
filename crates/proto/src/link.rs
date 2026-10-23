@@ -220,6 +220,7 @@ pub enum GitCommand {
         track: Option<String>,
     },
     Diff { path: String, staged: bool },
+    ScopeDiff { scope: String },
     Stage { paths: Vec<String> },
     Unstage { paths: Vec<String> },
     StageAll,
