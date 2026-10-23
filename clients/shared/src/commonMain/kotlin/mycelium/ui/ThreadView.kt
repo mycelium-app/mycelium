@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.setValue
@@ -136,7 +135,7 @@ fun ThreadView(
         val side = maxOf(Tokens.Space.S4, (maxWidth - Tokens.Size.Measure) / 2 + Tokens.Space.S4)
 
         LazyColumn(
-            Modifier.fillMaxSize().semantics { contentDescription = "Conversation" },
+            Modifier.fillMaxSize().scrollbar(state, reverse = true).semantics { contentDescription = "Conversation" },
             state = state,
             reverseLayout = true,
             contentPadding = PaddingValues(
@@ -752,7 +751,7 @@ private fun CommandCard(call: ThreadItem.ToolCall) {
 
         if (output.isNotEmpty()) {
             Hairline()
-            Box(Modifier.fillMaxWidth().heightIn(max = Tokens.Size.CommandOutput).verticalScroll(rememberScrollState()).padding(Tokens.Space.S2)) {
+            Box(Modifier.fillMaxWidth().heightIn(max = Tokens.Size.CommandOutput).verticalScrollWithBar().padding(Tokens.Space.S2)) {
                 Annotatable {
                     Label(output, style = Tokens.Type.CodeSm, color = colors.textMuted)
                 }

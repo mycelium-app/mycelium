@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
@@ -281,7 +282,9 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
 
         Hairline()
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
+        val list = rememberLazyListState()
+
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
             if (mode == ChatsMode) {
                 for (section in chats) {
                     item(key = "chats-${section.name}") {

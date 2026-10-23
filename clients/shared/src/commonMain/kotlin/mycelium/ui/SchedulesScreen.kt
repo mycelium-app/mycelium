@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,7 +61,7 @@ fun SchedulesScreen(store: Store, state: AppState) {
             MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
                 ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 280.dp))) {
                     ContentRow(header = true) {

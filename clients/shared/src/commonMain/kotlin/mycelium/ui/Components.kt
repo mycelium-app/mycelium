@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -343,6 +342,24 @@ fun StatusMark(text: String, tone: Tone, icon: MyIcon, modifier: Modifier = Modi
 }
 
 @Composable
+fun UpdateBadge(version: String, modifier: Modifier = Modifier) {
+    val colors = MyTheme.colors
+    val shape = RoundedCornerShape(Tokens.Radius.Full)
+
+    Row(
+        modifier
+            .background(colors.statusWorking.copy(alpha = 0.14f), shape)
+            .border(Tokens.Size.Hairline, colors.statusWorking.copy(alpha = 0.5f), shape)
+            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S0_5),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(MyIcon.Refresh, colors.statusWorking, Tokens.Size.IconSm)
+        Label("$version available", style = Tokens.Type.Meta, color = colors.text, maxLines = 1)
+    }
+}
+
+@Composable
 fun Dot(color: Color, hollow: Boolean = false) {
     val shape = RoundedCornerShape(Tokens.Radius.Full)
     val base = Modifier.size(Tokens.Size.Dot)
@@ -575,7 +592,7 @@ fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
                     .pointerInput(Unit) { detectTapGestures { } }
                     .background(colors.bgRaised, RoundedCornerShape(topStart = Tokens.Radius.Card, topEnd = Tokens.Radius.Card))
                     .navigationBarsPadding()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScrollWithBar()
                     .padding(vertical = Tokens.Space.S2),
                 content = content,
             )

@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -472,7 +470,7 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
             BarTitle("Details")
         }
 
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
+        Column(Modifier.weight(1f).verticalScrollWithBar().padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
             InspectorContent(conversation, node, groupName)
         }
     }

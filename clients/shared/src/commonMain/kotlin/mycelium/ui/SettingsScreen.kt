@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -97,7 +96,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> 
 @Composable
 private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, modifier: Modifier) {
     Column(
-        modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4),
+        modifier.fillMaxHeight().verticalScrollWithBar().padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
     ) {
         when (section) {

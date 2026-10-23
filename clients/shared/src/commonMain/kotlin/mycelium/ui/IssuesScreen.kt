@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -128,7 +126,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
 
         Hairline()
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
             ContentTable(listOf(ColumnSpec(max = 64.dp), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
                 if (state.projects.values.none { it.forgeId != null }) {
                     Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import mycelium.state.projectName
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -180,7 +181,9 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         val found = hits
 
         if (query.isNotBlank() && found != null) {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            val list = rememberLazyListState()
+
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list) {
                 if (found.isEmpty()) {
                     item(key = "empty") {
                         Label("No conversations match that search.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
@@ -217,7 +220,9 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         }
 
         FixedWidthColumns(if (touch) TouchColumns else PastColumns, naturalWidths, Modifier.weight(1f)) {
-            LazyColumn(Modifier.fillMaxWidth()) {
+            val list = rememberLazyListState()
+
+            LazyColumn(Modifier.fillMaxWidth().scrollbar(list), list) {
                 if (!touch) {
                     item(key = "columns") {
                         ContentRow(Modifier.fillMaxWidth().semantics { contentDescription = "Columns" }) {

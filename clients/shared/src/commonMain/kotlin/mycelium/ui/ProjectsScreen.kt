@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -148,7 +146,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
         Hairline()
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
             ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 160.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
                 if (forges != null && connected.isEmpty() && folders.isEmpty()) {
                     Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)

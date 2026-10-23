@@ -42,7 +42,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -406,7 +405,7 @@ fun OptionMenu(
                     TextInput(search, { search = it }, label = "Search ${name.lowercase()}", placeholder = "Select an option", showLabel = false, modifier = Modifier.padding(Tokens.Space.S1))
                 }
 
-                Column(Modifier.heightIn(max = Tokens.Size.MenuList).verticalScroll(rememberScrollState())) {
+                Column(Modifier.heightIn(max = Tokens.Size.MenuList).verticalScrollWithBar()) {
                     for (choice in shown) {
                         MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description, meter = choice.usedPercent)
                     }
@@ -451,6 +450,7 @@ private fun CompletionPopup(title: String, completions: List<Completion>, highli
                     .background(colors.bgRaised, FloatShape)
                     .border(Tokens.Size.Hairline, colors.border, FloatShape)
                     .padding(Tokens.Space.S1)
+                    .scrollbar(list)
                     .semantics { contentDescription = title },
                 state = list,
             ) {

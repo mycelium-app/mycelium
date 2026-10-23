@@ -111,6 +111,7 @@ fun GitGraphTab(commits: List<GraphCommit>, selected: String?, onSelect: (String
         state = state,
         modifier = modifier
             .fillMaxWidth()
+            .scrollbar(state)
             .focusRing(focused, inside = true)
             .focusable(interactionSource = source)
             .semantics { contentDescription = "Commit graph. Use the up and down arrow keys to choose a commit and Enter to open it." }
@@ -290,7 +291,9 @@ fun BranchPicker(branches: GitBranches?, onSwitch: (BranchEntry) -> Unit, onDism
                     true
                 },
         ) {
-            LazyColumn(Modifier.heightIn(max = PickerHeight).semantics { contentDescription = "Branches" }) {
+            val list = rememberLazyListState()
+
+            LazyColumn(Modifier.heightIn(max = PickerHeight).scrollbar(list).semantics { contentDescription = "Branches" }, list) {
                 if (branches == null) {
                     item { Label("Loading branches", Modifier.padding(Tokens.Space.S2), color = colors.textMuted) }
                 }

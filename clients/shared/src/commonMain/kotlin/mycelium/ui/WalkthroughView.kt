@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -137,7 +135,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     }
 
     if (LocalTouch.current) {
-        Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+        Column(modifier.fillMaxSize().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             header()
             Column(stepKeys.semantics { contentDescription = "Walkthrough steps" }) { steps() }
             Hairline()
@@ -152,13 +150,13 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         Hairline()
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScroll(rememberScrollState()).padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
+            Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
                 steps()
             }
 
             VerticalHairline()
 
-            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+            Column(Modifier.weight(1f).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 detail()
             }
         }

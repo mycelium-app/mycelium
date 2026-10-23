@@ -67,8 +67,10 @@ class NodeVersionsTest {
     fun aNodeAndAnAgentBehindTheLatestReleaseShowTheNewerVersionNextToTheirOwn() {
         showNodes(BehindJson)
 
-        rule.onNodeWithText("v0.1.13 · v0.1.16 available", substring = true).assertExists()
-        rule.onNodeWithText("0.94.0 · 0.95.1 available").assertExists()
+        rule.onNodeWithText("v0.1.13", substring = true).assertExists()
+        rule.onNodeWithText("v0.1.16 available").assertExists()
+        rule.onNodeWithText("0.94.0").assertExists()
+        rule.onNodeWithText("0.95.1 available").assertExists()
     }
 
     @Test

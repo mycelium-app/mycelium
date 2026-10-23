@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -177,7 +175,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         val shownCommit = commitDiff
 
         if (commit != null) {
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
                 Label("${commit.hash.take(ShortHashLength)} · ${commit.author} · ${ago(commit.date)}", Modifier.padding(Tokens.Space.S3), Tokens.Type.Meta, colors.textMuted)
 
                 if (shownCommit == null) {
@@ -195,7 +193,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 }
             }
         } else if (open != null) {
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
                 if (shown == null) {
                     Label("Loading the diff", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
                 } else if (shown.diff.isBlank()) {
@@ -247,7 +245,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     },
                     modifier = Modifier.weight(1f),
                 )
-            } else Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            } else Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
                 if (tab == GitTab.Changes) {
                     ChangesList(
                         files = files,

@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -272,7 +271,7 @@ private fun LaneColumn(lane: Lane, cards: List<BoardCard>, width: androidx.compo
             MyButton(onCollapse, icon = MyIcon.ChevronDown, description = "Collapse ${lane.title}", size = ButtonSize.Sm, muted = true)
         }
 
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Column(Modifier.weight(1f).verticalScrollWithBar(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             for (item in cards) {
                 card(item)
             }

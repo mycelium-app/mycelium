@@ -9,8 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,7 +63,7 @@ fun MemoriesSettings(store: Store) {
             )
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
             if (loaded && memories.isEmpty()) {
                 Label(
                     if (query.isBlank()) "Nothing remembered yet. Agents add memories with the remember tool." else "No memories match.",

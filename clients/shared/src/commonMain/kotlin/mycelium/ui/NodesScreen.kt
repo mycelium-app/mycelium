@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -36,7 +34,6 @@ import mycelium.state.agentName
 import mycelium.state.agentVersion
 import mycelium.state.isLaptop
 import mycelium.state.loginMethodName
-import mycelium.state.versionWithUpdate
 
 data class LoginSession(val loginId: String, val agent: String)
 
@@ -81,7 +78,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
             }
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
             if (nodes.isEmpty()) {
                 Label("No node has joined yet. Select Join a node to connect the first one.", Modifier.padding(Tokens.Space.S4), color = MyTheme.colors.textMuted)
             }
@@ -206,7 +203,10 @@ private fun NodeGroup(
             if (touch) {
                 Box(Modifier.weight(1f))
             } else {
-                Label("${node.os} ${node.arch}  ·  ${versionWithUpdate(node.version, node.updateAvailable)}", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                    Label("${node.os} ${node.arch}  ·  ${node.version}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                    node.updateAvailable?.let { UpdateBadge(it) }
+                }
             }
 
             if (signedOut.isNotEmpty()) {
@@ -312,9 +312,10 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
     ) {
         if (touch) {
             Column(Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                     Label(agentName(agent.agent), maxLines = 1)
-                    Label(versionWithUpdate(agentVersion(agent.version), agent.updateAvailable), color = colors.textMuted, maxLines = 1)
+                    Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
+                    agent.updateAvailable?.let { UpdateBadge(it) }
                 }
 
                 val detail = listOfNotNull(login?.account?.ifEmpty { null }, login?.let { loginMethodName(it.method) }).joinToString("  ·  ")
@@ -324,9 +325,10 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
                 }
             }
         } else {
-            Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                 Label(agentName(agent.agent), maxLines = 1)
-                Label(versionWithUpdate(agentVersion(agent.version), agent.updateAvailable), color = colors.textMuted, maxLines = 1)
+                Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
+                agent.updateAvailable?.let { UpdateBadge(it) }
             }
 
             Label(login?.account.orEmpty(), Modifier.weight(1.2f), color = colors.text, maxLines = 1)
@@ -373,7 +375,7 @@ fun LoginPanel(
                     .fillMaxWidth()
                     .heightIn(min = rowHeight(), max = Tokens.Size.Popover / 2)
                     .background(colors.bgPanel, ControlShape)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScrollWithBar()
                     .padding(Tokens.Space.S2),
             ) {
                 Label(output.ifEmpty { "Waiting for the node to start the sign-in." }, style = Tokens.Type.Code)
