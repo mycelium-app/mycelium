@@ -7,22 +7,34 @@ sealed interface MarkdownBlock {
 
     data class Code(val language: String, val text: String) : MarkdownBlock
 
-    data class Bullets(val items: List<String>) : MarkdownBlock
+    data class Bullets(val items: List<MarkdownListItem>) : MarkdownBlock
 
-    data class Numbered(val start: Int, val items: List<String>) : MarkdownBlock
+    data class Numbered(val start: Int, val items: List<MarkdownListItem>) : MarkdownBlock
 
-    data class Quote(val text: String) : MarkdownBlock
+    data class Quote(val blocks: List<MarkdownBlock>) : MarkdownBlock
 
-    data class Table(val header: List<String>, val rows: List<List<String>>) : MarkdownBlock
+    data class Table(val header: List<String>, val rows: List<List<String>>, val aligns: List<ColumnAlign> = emptyList()) : MarkdownBlock
 
     data object Rule : MarkdownBlock
 }
 
+data class MarkdownListItem(val text: String, val checked: Boolean? = null, val children: List<MarkdownBlock> = emptyList())
+
+enum class ColumnAlign { Start, Center, End }
+
 private val HeadingLine = Regex("^(#{1,6})\\s+(.*)$")
-private val BulletLine = Regex("^\\s*[-*+]\\s+(.*)$")
-private val NumberedLine = Regex("^\\s*(\\d+)[.)]\\s+(.*)$")
+private val ListLine = Regex("^(\\s*)([-*+]|\\d+[.)])\\s+(.*)$")
+private val TaskText = Regex("^\\[([ xX])](?:\\s+(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val RuleLine = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
 private val TableDivider = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
+private fun alignOf(cell: String): ColumnAlign = when {
+    cell.startsWith(":") && cell.endsWith(":") -> ColumnAlign.Center
+    cell.endsWith(":") -> ColumnAlign.End
+    else -> ColumnAlign.Start
+}
+
+private fun indentOf(line: String): Int = line.takeWhile { it == ' ' || it == '\t' }.sumOf { if (it == '\t') 4 else 1 }
 
 private fun cells(line: String): List<String> = line.trim().removePrefix("|").removeSuffix("|").split("|").map { it.trim() }
 
@@ -62,6 +74,7 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
 
             startsTable(lines, index) -> {
                 val header = cells(line)
+                val aligns = cells(lines[index + 1]).map { alignOf(it) }
                 val rows = mutableListOf<List<String>>()
                 index += 2
 
@@ -70,7 +83,7 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                     index++
                 }
 
-                blocks += MarkdownBlock.Table(header, rows)
+                blocks += MarkdownBlock.Table(header, rows, List(header.size) { aligns.getOrElse(it) { ColumnAlign.Start } })
             }
 
             HeadingLine.matches(trimmed) -> {
@@ -79,27 +92,53 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                 index++
             }
 
-            BulletLine.matches(line) -> {
-                val items = mutableListOf<String>()
+            ListLine.matches(line) -> {
+                val base = indentOf(line)
+                val ordered = ListLine.find(line)!!.groupValues[2].last().let { it == '.' || it == ')' }
+                val starts = mutableListOf<Int>()
+                val region = mutableListOf<String>()
+                val start = if (ordered) ListLine.find(line)!!.groupValues[2].dropLast(1).toInt() else 1
 
-                while (index < lines.size && BulletLine.matches(lines[index])) {
-                    items += BulletLine.find(lines[index])!!.groupValues[1]
+                fun siblingOf(candidate: String): Boolean {
+                    val match = ListLine.find(candidate) ?: return false
+
+                    return indentOf(candidate) == base && match.groupValues[2].last().let { it == '.' || it == ')' } == ordered
+                }
+
+                while (index < lines.size) {
+                    val current = lines[index]
+
+                    if (current.isBlank()) {
+                        val next = (index + 1 until lines.size).firstOrNull { lines[it].isNotBlank() }?.let { lines[it] }
+
+                        if (next == null || (indentOf(next) <= base && !siblingOf(next))) {
+                            break
+                        }
+                    } else if (siblingOf(current)) {
+                        starts += region.size
+                    } else if (indentOf(current) <= base) {
+                        break
+                    }
+
+                    region += current
                     index++
                 }
 
-                blocks += MarkdownBlock.Bullets(items)
-            }
+                val items = starts.mapIndexed { position, from ->
+                    val to = starts.getOrElse(position + 1) { region.size }
+                    val first = ListLine.find(region[from])!!.groupValues[3]
+                    val rest = region.subList(from + 1, to)
+                    val margin = rest.filter { it.isNotBlank() }.minOfOrNull { indentOf(it) } ?: 0
+                    val nested = markdownBlocks(rest.joinToString("\n") { it.drop(minOf(margin, it.length - it.trimStart().length)) })
+                    val continues = rest.firstOrNull()?.isNotBlank() == true && nested.firstOrNull() is MarkdownBlock.Paragraph
+                    val body = if (continues) first + "\n" + (nested.first() as MarkdownBlock.Paragraph).text else first
+                    val children = if (continues) nested.drop(1) else nested
+                    val task = TaskText.find(body)
 
-            NumberedLine.matches(line) -> {
-                val start = NumberedLine.find(line)!!.groupValues[1].toInt()
-                val items = mutableListOf<String>()
-
-                while (index < lines.size && NumberedLine.matches(lines[index])) {
-                    items += NumberedLine.find(lines[index])!!.groupValues[2]
-                    index++
+                    MarkdownListItem(task?.groupValues?.get(2) ?: body, task?.let { it.groupValues[1] != " " }, children)
                 }
 
-                blocks += MarkdownBlock.Numbered(start, items)
+                blocks += if (ordered) MarkdownBlock.Numbered(start, items) else MarkdownBlock.Bullets(items)
             }
 
             trimmed.startsWith(">") -> {
@@ -110,7 +149,7 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                     index++
                 }
 
-                blocks += MarkdownBlock.Quote(quoted.joinToString("\n"))
+                blocks += MarkdownBlock.Quote(markdownBlocks(quoted.joinToString("\n")))
             }
 
             else -> {
@@ -132,5 +171,5 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
 private fun startsBlock(line: String): Boolean {
     val trimmed = line.trimStart()
 
-    return trimmed.startsWith("```") || trimmed.startsWith(">") || HeadingLine.matches(trimmed) || BulletLine.matches(line) || NumberedLine.matches(line) || RuleLine.matches(line)
+    return trimmed.startsWith("```") || trimmed.startsWith(">") || HeadingLine.matches(trimmed) || ListLine.matches(line) || RuleLine.matches(line)
 }

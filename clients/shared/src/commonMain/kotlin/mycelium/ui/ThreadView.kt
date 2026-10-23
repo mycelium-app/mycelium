@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
@@ -59,7 +61,9 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import mycelium.state.GeneratedUiLanguage
+import mycelium.state.ColumnAlign
 import mycelium.state.MarkdownBlock
+import mycelium.state.MarkdownListItem
 import mycelium.state.parseGeneratedUi
 import mycelium.state.markdownBlocks
 import mycelium.state.DiffLine
@@ -199,81 +203,99 @@ private fun UserMessage(text: String) {
 
 @Composable
 private fun AgentMessage(text: String) {
-    val colors = MyTheme.colors
-    val codeFont = LocalFonts.current.mono
-
     Annotatable {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            for (block in markdownBlocks(text)) {
-                when (block) {
-                    is MarkdownBlock.Paragraph -> Prose(block.text)
-                    is MarkdownBlock.Heading -> BasicText(
-                        inlineMarkup(block.text, colors.text, colors.accent, codeFont),
-                        Modifier.semantics { heading() },
-                        style = (if (block.level <= 2) Tokens.Type.Display else Tokens.Type.Title).themed(),
-                    )
-                    is MarkdownBlock.Code -> {
-                        val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseGeneratedUi(block.text) else null }
+        MarkdownBlocks(markdownBlocks(text))
+    }
+}
 
-                        if (generated != null) {
-                            Box(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3)) {
-                                GeneratedUi(generated)
-                            }
-                        } else {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(colors.bgPanel, BlockShape)
-                                    .border(Tokens.Size.Hairline, colors.border, BlockShape)
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+@Composable
+private fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
+    val colors = MyTheme.colors
+    val clipboard = LocalClipboardManager.current
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+        for (block in blocks) {
+            when (block) {
+                is MarkdownBlock.Paragraph -> Prose(block.text)
+                is MarkdownBlock.Heading -> BasicText(
+                    inlineText(block.text, colors.text),
+                    Modifier.semantics { heading() },
+                    style = when {
+                        block.level <= 2 -> Tokens.Type.Display
+                        block.level <= 4 -> Tokens.Type.Title
+                        else -> Tokens.Type.UiStrong
+                    }.themed(),
+                )
+                is MarkdownBlock.Code -> {
+                    val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseGeneratedUi(block.text) else null }
+
+                    if (generated != null) {
+                        Box(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3)) {
+                            GeneratedUi(generated)
+                        }
+                    } else {
+                        Column(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape)) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = Tokens.Space.S3, end = Tokens.Space.S1),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                Label(block.language, style = Tokens.Type.Meta, color = colors.textMuted)
+                                MyButton(
+                                    { clipboard.setText(AnnotatedString(block.text)) },
+                                    icon = MyIcon.Copy,
+                                    description = if (block.language.isBlank()) "Copy code" else "Copy ${block.language} code",
+                                    size = ButtonSize.Sm,
+                                    muted = true,
+                                )
+                            }
+
+                            Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = Tokens.Space.S3, end = Tokens.Space.S3, bottom = Tokens.Space.S2)) {
                                 Label(block.text, style = Tokens.Type.Code)
                             }
+                        }
 
-                            if (block.language == GeneratedUiLanguage) {
-                                Label("This block could not be shown as an interface.", style = Tokens.Type.Meta, color = colors.textMuted)
-                            }
+                        if (block.language == GeneratedUiLanguage) {
+                            Label("This block could not be shown as an interface.", style = Tokens.Type.Meta, color = colors.textMuted)
                         }
                     }
-                    is MarkdownBlock.Bullets -> ListBlock(block.items) {
-                        Box(Modifier.height(Tokens.Type.Prose.lineHeight.value.dp), contentAlignment = Alignment.Center) {
-                            Dot(colors.textMuted)
-                        }
-                    }
-                    is MarkdownBlock.Numbered -> ListBlock(block.items) { index ->
-                        Label("${block.start + index}.", style = Tokens.Type.Prose, color = colors.textMuted)
-                    }
-                    is MarkdownBlock.Quote -> Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                        Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
-                        Box(Modifier.padding(start = Tokens.Space.S3)) {
-                            BasicText(inlineMarkup(block.text, colors.textMuted, colors.accent, codeFont), style = Tokens.Type.Prose.themed())
-                        }
-                    }
-                    MarkdownBlock.Rule -> Hairline()
-                    is MarkdownBlock.Table -> TableBlock(block)
                 }
+                is MarkdownBlock.Bullets -> ListBlock(block.items, null)
+                is MarkdownBlock.Numbered -> ListBlock(block.items) { index -> "${block.start + index}." }
+                is MarkdownBlock.Quote -> Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
+                    Box(Modifier.weight(1f).padding(start = Tokens.Space.S3)) {
+                        MarkdownBlocks(block.blocks)
+                    }
+                }
+                MarkdownBlock.Rule -> Hairline()
+                is MarkdownBlock.Table -> TableBlock(block)
             }
         }
     }
 }
 
 @Composable
-private fun Prose(text: String) {
+private fun inlineText(text: String, color: Color): AnnotatedString {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
 
-    BasicText(inlineMarkup(text, colors.text, colors.accent, LocalFonts.current.mono), style = Tokens.Type.Prose.themed())
+    return inlineMarkup(text, color, colors.accent, LocalFonts.current.mono, platform?.let { { url -> it.openUrl(url) } })
+}
+
+@Composable
+private fun Prose(text: String) {
+    BasicText(inlineText(text, MyTheme.colors.text), style = Tokens.Type.Prose.themed())
 }
 
 @Composable
 internal fun TableBlock(table: MarkdownBlock.Table) {
     val colors = MyTheme.colors
-    val codeFont = LocalFonts.current.mono
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val rows = listOf(table.header) + table.rows
     val styles = listOf(Tokens.Type.UiStrong.themed()) + List(table.rows.size) { Tokens.Type.Prose.themed() }
-    val marked = rows.mapIndexed { index, row -> row.map { inlineMarkup(it, colors.text, colors.accent, codeFont) to styles[index] } }
+    val marked = rows.mapIndexed { index, row -> row.map { inlineText(it, colors.text) to styles[index] } }
     val widths = table.header.indices.map { column ->
         val widest = marked.maxOf { row -> measurer.measure(row[column].first, row[column].second).size.width }
 
@@ -289,8 +311,24 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
 
                 Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
                     row.forEachIndexed { column, (text, style) ->
-                        Box(Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)) {
-                            BasicText(text, style = style)
+                        val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
+
+                        Box(
+                            Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                            contentAlignment = when (align) {
+                                ColumnAlign.Start -> Alignment.TopStart
+                                ColumnAlign.Center -> Alignment.TopCenter
+                                ColumnAlign.End -> Alignment.TopEnd
+                            },
+                        ) {
+                            BasicText(
+                                text,
+                                style = style.copy(textAlign = when (align) {
+                                    ColumnAlign.Start -> TextAlign.Start
+                                    ColumnAlign.Center -> TextAlign.Center
+                                    ColumnAlign.End -> TextAlign.End
+                                }),
+                            )
                         }
                     }
                 }
@@ -300,61 +338,156 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
 }
 
 @Composable
-private fun ListBlock(items: List<String>, marker: @Composable (Int) -> Unit) {
+private fun ListBlock(items: List<MarkdownListItem>, numbering: ((Int) -> String)?) {
+    val colors = MyTheme.colors
+
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         items.forEachIndexed { index, item ->
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                Box(Modifier.widthIn(min = Tokens.Space.S4)) {
-                    marker(index)
+                Box(Modifier.widthIn(min = Tokens.Space.S4).height(Tokens.Type.Prose.lineHeight.value.dp), contentAlignment = Alignment.Center) {
+                    val checked = item.checked
+
+                    when {
+                        checked != null -> Box(
+                            Modifier
+                                .size(Tokens.Size.IconMd)
+                                .semantics { contentDescription = if (checked) "Done" else "Not done" }
+                                .background(if (checked) colors.accent else Color.Transparent, BlockShape)
+                                .border(Tokens.Size.Hairline, if (checked) colors.accent else colors.textMuted, BlockShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (checked) {
+                                Icon(MyIcon.Check, colors.onAccent, Tokens.Size.IconSm)
+                            }
+                        }
+                        numbering != null -> Label(numbering(index), style = Tokens.Type.Prose, color = colors.textMuted)
+                        else -> Dot(colors.textMuted)
+                    }
                 }
 
-                Prose(item)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Prose(item.text)
+
+                    if (item.children.isNotEmpty()) {
+                        MarkdownBlocks(item.children)
+                    }
+                }
             }
         }
     }
 }
 
-private val InlineLink = Regex("\\[([^\\]]+)]\\((https?://[^)\\s]+)\\)")
+private val InlineLink = Regex("\\[([^\\]]+)]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)")
+private val InlineImage = Regex("!\\[([^\\]]*)]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)")
+private val BareUrl = Regex("<(https?://[^>\\s]+)>|https?://[^\\s<>]+")
+private const val UrlTrailing = ".,;:!?)]}'\""
 
-fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily): AnnotatedString =
+fun inlineMarkup(text: String, color: Color, codeColor: Color, codeFont: FontFamily? = Tokens.Type.Code.fontFamily, open: ((String) -> Unit)? = null): AnnotatedString =
     buildAnnotatedString {
         withStyle(SpanStyle(color = color)) {
-            var index = 0
-
-            while (index < text.length) {
-                val link = InlineLink.matchAt(text, index)
-
-                if (link != null) {
-                    withLink(LinkAnnotation.Url(link.groupValues[2], TextLinkStyles(SpanStyle(color = codeColor, textDecoration = TextDecoration.Underline)))) {
-                        append(link.groupValues[1])
-                    }
-                    index += link.value.length
-                    continue
-                }
-
-                val code = text.startsWith("`", index)
-                val bold = text.startsWith("**", index)
-                val marker = if (code) "`" else if (bold) "**" else null
-                val close = if (marker != null) text.indexOf(marker, index + marker.length) else -1
-
-                if (marker == null || close < 0) {
-                    append(text[index])
-                    index++
-                    continue
-                }
-
-                val inner = text.substring(index + marker.length, close)
-
-                if (code) {
-                    withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
-                } else {
-                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(inner) }
-                }
-
-                index = close + marker.length
-            }
+            appendInline(text, codeColor, codeFont, open)
         }
     }
+
+private fun AnnotatedString.Builder.appendLink(url: String, codeColor: Color, open: ((String) -> Unit)?, label: AnnotatedString.Builder.() -> Unit) {
+    val styles = TextLinkStyles(SpanStyle(color = codeColor, textDecoration = TextDecoration.Underline))
+    val annotation = if (open == null) LinkAnnotation.Url(url, styles) else LinkAnnotation.Clickable(url, styles) { open(url) }
+
+    withLink(annotation) { label() }
+}
+
+private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color, codeFont: FontFamily?, open: ((String) -> Unit)?) {
+    var index = 0
+
+    while (index < text.length) {
+        val previous = if (index == 0) ' ' else text[index - 1]
+        val image = InlineImage.matchAt(text, index)
+        val link = InlineLink.matchAt(text, index)
+        val bare = if (previous.isLetterOrDigit()) null else BareUrl.matchAt(text, index)
+
+        if (text[index] == '\\' && index + 1 < text.length && !text[index + 1].isLetterOrDigit()) {
+            append(text[index + 1])
+            index += 2
+            continue
+        }
+
+        if (image != null) {
+            val url = image.groupValues[2]
+
+            if (image.groupValues[1].isNotBlank()) {
+                append(image.groupValues[1] + " ")
+            }
+
+            appendLink(url, codeColor, open) { append(url) }
+            index += image.value.length
+            continue
+        }
+
+        if (link != null) {
+            appendLink(link.groupValues[2], codeColor, open) { appendInline(link.groupValues[1], codeColor, codeFont, null) }
+            index += link.value.length
+            continue
+        }
+
+        if (bare != null) {
+            val wrapped = bare.groupValues[1].isNotEmpty()
+            val url = if (wrapped) bare.groupValues[1] else bare.value.trimEnd { it in UrlTrailing }
+
+            appendLink(url, codeColor, open) { append(url) }
+            index += if (wrapped) bare.value.length else url.length
+            continue
+        }
+
+        val marker = listOf("***", "**", "__", "~~", "`", "*", "_").firstOrNull { text.startsWith(it, index) }
+        val close = if (marker == null) -1 else closingMarker(text, marker, index, previous)
+
+        if (marker == null || close < 0) {
+            append(text[index])
+            index++
+            continue
+        }
+
+        val inner = text.substring(index + marker.length, close)
+
+        when (marker) {
+            "`" -> withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
+            "~~" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(inner, codeColor, codeFont, open) }
+            "*", "_" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
+            "***" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
+            else -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { appendInline(inner, codeColor, codeFont, open) }
+        }
+
+        index = close + marker.length
+    }
+}
+
+private fun closingMarker(text: String, marker: String, index: Int, previous: Char): Int {
+    val opens = index + marker.length
+
+    if (marker == "`") {
+        return text.indexOf(marker, opens)
+    }
+
+    if (opens >= text.length || text[opens].isWhitespace() || (marker.startsWith("_") && previous.isLetterOrDigit())) {
+        return -1
+    }
+
+    var close = text.indexOf(marker, opens)
+
+    while (close >= 0) {
+        val after = text.getOrElse(close + marker.length) { ' ' }
+        val single = marker.length == 1
+        val clean = !text[close - 1].isWhitespace() && !(single && after == marker[0]) && !(marker.startsWith("_") && after.isLetterOrDigit())
+
+        if (clean && close > opens) {
+            return close
+        }
+
+        close = text.indexOf(marker, close + (if (single && after == marker[0]) 2 else 1))
+    }
+
+    return -1
+}
 
 fun toolLabel(kind: String, title: String): String = when (kind) {
     "execute" -> "bash"
