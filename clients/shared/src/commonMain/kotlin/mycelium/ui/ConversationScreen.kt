@@ -84,12 +84,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
     }
 
-    var walkthroughWidth by remember(workspace) {
-        val saved = workspace?.let { platform?.loadPreference("$WalkthroughWidthPreference:$it") }
-
-        mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.Walkthrough)
-    }
-
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
 
@@ -104,14 +98,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         if (workspace != null) {
             platform?.savePreference("$SidePanelWidthPreference:$workspace", panelWidth.value.toString())
-        }
-    }
-
-    fun resizeWalkthrough(width: Dp) {
-        walkthroughWidth = width.coerceIn(Tokens.Size.WalkthroughMin, Tokens.Size.WalkthroughMax)
-
-        if (workspace != null) {
-            platform?.savePreference("$WalkthroughWidthPreference:$workspace", walkthroughWidth.value.toString())
         }
     }
 
@@ -190,14 +176,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         Row(Modifier.fillMaxSize()) {
-            if (walkthrough != null && !compact) {
-                Box(Modifier.width(walkthroughWidth).fillMaxHeight()) {
-                    WalkthroughView(store, id, walkthrough, Modifier.fillMaxSize())
-                }
-
-                ResizeHandle("Resize the walkthrough") { moved -> resizeWalkthrough(walkthroughWidth + moved) }
-            }
-
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 ConversationHeader(
                     conversation = conversation,
@@ -231,12 +209,22 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 val diffs = store.diffTabs.collectAsState().value[id] ?: DiffTabs()
                 val activeDiff = diffs.tabs.firstOrNull { it.key == diffs.active }
 
-                if (!compact && !chat && diffs.tabs.isNotEmpty()) {
+                if (!compact && !chat && (diffs.tabs.isNotEmpty() || walkthrough != null)) {
+                    val shown = if (tab == WalkthroughTab && walkthrough == null) ConversationTab else tab
+
                     MainTabStrip(
-                        tabs = listOf(MainTab(ConversationTab, ConversationTab)) + diffs.tabs.map { MainTab(it.key, it.title, it.closeLabel) },
-                        selected = activeDiff?.key ?: ConversationTab,
-                        onSelect = { key -> store.focusDiffTab(id, key.takeIf { it != ConversationTab }) },
-                        onClose = { key -> store.closeDiffTab(id, key) },
+                        tabs = listOf(MainTab(ConversationTab, ConversationTab)) +
+                            listOfNotNull(walkthrough?.let { MainTab(WalkthroughTab, WalkthroughTab, "Dismiss walkthrough") }) +
+                            diffs.tabs.map { MainTab(it.key, it.title, it.closeLabel) },
+                        selected = activeDiff?.key ?: shown,
+                        onSelect = { key ->
+                            store.focusDiffTab(id, key.takeIf { it != ConversationTab && it != WalkthroughTab })
+
+                            if (key == ConversationTab || key == WalkthroughTab) {
+                                tab = key
+                            }
+                        },
+                        onClose = { key -> if (key == WalkthroughTab) store.setWalkthroughDismissed(id, true) else store.closeDiffTab(id, key) },
                         groupLabel = "Main view tabs",
                         modifier = Modifier.padding(horizontal = Tokens.Space.S3),
                     )
@@ -244,6 +232,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                     if (activeDiff != null) {
                         key(activeDiff.key) { DiffTabView(store, conversation, activeDiff, Modifier.weight(1f)) }
+
+                        return@Column
+                    }
+
+                    if (shown == WalkthroughTab && walkthrough != null) {
+                        WalkthroughView(store, id, walkthrough, Modifier.weight(1f))
 
                         return@Column
                     }
@@ -609,4 +603,3 @@ private fun InspectorSection(name: String, rows: List<Pair<String, String>>) {
 private const val SidePanelPreference = "side-panel"
 
 private const val SidePanelWidthPreference = "side-panel-width"
-private const val WalkthroughWidthPreference = "walkthrough-width"

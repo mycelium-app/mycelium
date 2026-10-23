@@ -2,12 +2,9 @@ package mycelium.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.width
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -21,6 +18,10 @@ import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.api.Walkthrough
 import mycelium.state.Store
+import mycelium.state.fileDiffTab
+import mycelium.api.Me
+import mycelium.ui.Route
+import mycelium.ui.Shell
 import mycelium.ui.MyTheme
 import mycelium.ui.WalkthroughView
 import org.junit.Test
@@ -58,7 +59,7 @@ class WalkthroughRenderTest {
         val walkthrough = MyceliumJson.decodeFromString(Walkthrough.serializer(), RenderWalkthrough)
 
         val file = renderAt(name, true, false, interact = interact) {
-            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { Box(Modifier.width(560.dp).fillMaxHeight()) { WalkthroughView(store, "c1", walkthrough) } }
+            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { WalkthroughView(store, "c1", walkthrough) }
         }
 
         assertTrue(file.length() > 1_000)
@@ -80,4 +81,62 @@ class WalkthroughRenderTest {
             scene.render(132_000_000L)
         }
     }
+
+    private fun renderConversation(name: String, diffOpen: Boolean, click: androidx.compose.ui.geometry.Offset?) {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val chat = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/backups","title":"Backups","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val body = when {
+                path.endsWith("/notes") -> RenderNotes
+                path.endsWith("/uncovered") -> "[]"
+                path.endsWith("/reads") -> "[]"
+                path.endsWith("/walkthrough") -> RenderWalkthrough
+                path.endsWith("/git/diff") -> """{"diff":"$RenderDiff","truncated":false}"""
+                path.endsWith("/conversations") -> "[$chat]"
+                path.endsWith("/conversations/c1") -> chat
+                path.endsWith("/nodes") || path.endsWith("/events") || path.endsWith("/queue") -> "[]"
+                path.endsWith("/goal") -> "null"
+                else -> "{}"
+            }
+
+            respond(body, HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+
+        runBlocking { store.refresh() }
+
+        if (diffOpen) {
+            store.openDiffTab("c1", fileDiffTab("src/restore/Screen.tsx", false))
+        }
+
+        val file = renderAt(name, true, false, interact = { scene ->
+            scene.render(100_000_000L)
+
+            if (click != null) {
+                scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, click)
+                scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Press, click)
+                scene.render(116_000_000L)
+                scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Release, click)
+                scene.render(132_000_000L)
+            }
+        }) {
+            Shell(store, HandsOffPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1"))
+        }
+
+        assertTrue(file.length() > 1_000)
+    }
+
+    @Test
+    fun theWalkthroughTabSelectedInTheDesktopConversation() {
+        renderConversation("conversation-walkthrough-tab", false, androidx.compose.ui.geometry.Offset(TabX, TabY))
+    }
+
+    @Test
+    fun aDiffTabOpenBesideTheWalkthroughTab() {
+        renderConversation("conversation-diff-tab", true, null)
+    }
 }
+
+private const val TabX = 435f
+private const val TabY = 113f

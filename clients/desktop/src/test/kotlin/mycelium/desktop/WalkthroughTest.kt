@@ -1,25 +1,25 @@
 package mycelium.desktop
 
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.getBoundsInRoot
-import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onChildren
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.geometry.Offset
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -27,22 +27,19 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
-import mycelium.ui.LocalTouch
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val Chat = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/backups","title":"Backups","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
@@ -52,6 +49,7 @@ private const val Walkthrough = """{"id":"w1","conversation_id":"c1","created_at
 {"title":"Tests","key":false,"section":"Checks","icon":"tests","explanation":"","files":[]},
 {"title":"Loose end","key":false,"explanation":"","files":[]}]}"""
 
+@OptIn(ExperimentalTestApi::class)
 class WalkthroughTest {
     @get:Rule
     val rule = createComposeRule()
@@ -61,7 +59,7 @@ class WalkthroughTest {
     private var uncovered = "[]"
     private var notes = "[]"
 
-    private fun show(walkthrough: String, platform: Platform = RememberingPlatform("360"), phone: Boolean = false) {
+    private fun show(walkthrough: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -72,6 +70,8 @@ class WalkthroughTest {
                 path.endsWith("/notes") && request.method == HttpMethod.Get -> notes
                 path.endsWith("/notes") -> String(request.body.toByteArray()).replaceFirst("{", "{\"id\":\"n1\",\"sent\":false,")
                 path.endsWith("/walkthrough") -> walkthrough
+                path.endsWith("/git/status") -> """{"branch":"main","ahead":0,"behind":0,"files":[{"path":"src/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"additions":1,"deletions":1}]}"""
+                path.endsWith("/git/diff") -> """{"diff":"@@ -1 +1 @@\n-const title = 1\n+const title = 2\n","truncated":false}"""
                 path.endsWith("/goal") -> "null"
                 path.endsWith("/nodes") -> "[]"
                 path.endsWith("/conversations") -> "[$Chat]"
@@ -85,25 +85,29 @@ class WalkthroughTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
         runBlocking { store.refresh() }
 
-        rule.setContent {
-            MyceliumTheme(true) {
-                CompositionLocalProvider(LocalTouch provides phone) {
-                    Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1"))
-                }
-            }
-        }
+        rule.setContent { MyceliumTheme(true) { Shell(store, HandsOffPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
     }
 
     private fun openWalkthrough() {
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Walkthrough").performClick()
     }
 
     @Test
-    fun aConversationWithoutAWalkthroughHasNoPane() {
+    fun aConversationWithoutAWalkthroughHasNoTabs() {
         show("null")
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
 
-        assertEquals(0, rule.onAllNodesWithContentDescription("Walkthrough steps").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun onceAWalkthroughExistsTheHeaderOffersConversationAndWalkthroughTabs() {
+        show(Walkthrough)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Conversation").assertIsDisplayed()
+        rule.onNodeWithText("Walkthrough").assertIsDisplayed()
     }
 
     @Test
@@ -149,8 +153,8 @@ class WalkthroughTest {
 
         rule.onNodeWithText("Step 2 of 4").assertIsDisplayed()
         rule.onNodeWithText("Key change").assertIsDisplayed()
-        rule.onNodeWithText("const title = strings.title").assertExists()
-        rule.onNodeWithText("const title = \"Restore\"").assertExists()
+        rule.onNodeWithText("const title = strings.title").assertIsDisplayed()
+        rule.onNodeWithText("const title = \"Restore\"").assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Previous step").performClick()
         rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
@@ -235,6 +239,30 @@ class WalkthroughTest {
     }
 
     @Test
+    fun thePickerShowsTheScopeLastChosenForTheConversationAfterLeavingTheTab() {
+        show(Walkthrough)
+        openWalkthrough()
+        rule.onNodeWithContentDescription("Walkthrough scope: This branch").performClick()
+        rule.onNodeWithText("Uncommitted changes").performClick()
+
+        rule.onNodeWithText("Conversation").performClick()
+        rule.onNodeWithText("Walkthrough").performClick()
+
+        rule.onNodeWithContentDescription("Walkthrough scope: Uncommitted changes").assertIsDisplayed()
+    }
+
+    @Test
+    fun theConversationTabBringsTheConversationBack() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithText("Conversation").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().size)
+    }
+
+    @Test
     fun dismissingTheWalkthroughHidesItsTabAndSavesTheDismissal() {
         show(Walkthrough)
         openWalkthrough()
@@ -242,21 +270,55 @@ class WalkthroughTest {
         rule.onNodeWithContentDescription("Dismiss walkthrough").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/dismissal" } }
-        assertEquals(0, rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().size)
-        rule.onNodeWithContentDescription("Message").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aMiddleClickOnTheWalkthroughTabDismissesIt() {
+        show(Walkthrough)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Dismiss walkthrough").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNode(hasText("Walkthrough") and hasAnyAncestor(hasContentDescription("Main view tabs"))).performMouseInput { moveTo(center); press(MouseButton.Tertiary); release(MouseButton.Tertiary) }
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/dismissal" } }
+    }
+
+    @Test
+    fun theWalkthroughIsDismissedOnlyFromItsTabNotFromInsideIt() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        assertEquals(1, rule.onAllNodesWithContentDescription("Dismiss walkthrough").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Dismiss").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aDiffTabOpenedFromGitSitsAfterTheWalkthroughTab() {
+        show(Walkthrough)
+        openWalkthrough()
+        rule.onNodeWithContentDescription("Open git").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show the changes to src/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Show the changes to src/Screen.tsx").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("const title = 2").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Dismiss walkthrough").assertIsDisplayed()
+        rule.onNodeWithText("Walkthrough").performClick()
+        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
     }
 
     @Test
     fun aDismissedWalkthroughIsReopenedFromTheMoreMenu() {
         show(Walkthrough.replace("\"steps\"", "\"dismissed\":true,\"steps\""))
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(0, rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("More").performClick()
         rule.onNodeWithText("Show walkthrough").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/walkthroughs/w1/dismissal" } }
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        rule.onNodeWithText("Walkthrough").assertIsDisplayed()
     }
 
     @Test
@@ -283,6 +345,8 @@ class WalkthroughTest {
     fun changesNoStepCoversAreListedInAFinalNotCoveredYetStepThatCountsInTheTotal() {
         uncovered = """[{"path":"src/new.ts","diff":"@@ -0,0 +1 @@\n+added later","unchanged":false}]"""
         show(Walkthrough)
+        openWalkthrough()
+
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Step 1 of 5").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Step 5: Not covered yet").performClick()
 
@@ -332,10 +396,10 @@ class WalkthroughTest {
         openWalkthrough()
 
         rule.onNodeWithText("new title line").performMouseInput {
-            moveTo(Offset(1f, centerY))
+            moveTo(Offset(width * 0.1f, centerY))
             press()
             moveTo(Offset(width * 0.5f, centerY))
-            moveTo(Offset(width - 1f, centerY))
+            moveTo(Offset(width * 0.9f, centerY))
             release()
         }
         rule.onNodeWithText("Add to message").performClick()
@@ -343,8 +407,8 @@ class WalkthroughTest {
         rule.onNodeWithText("Add").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/walkthroughs/w1/notes" } }
-        assertTrue(noteBody().contains("\"file\":\"src/strings.ts\"") && noteBody().contains("\"line_start\":") && noteBody().contains("Keep the old copy"), noteBody())
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file', src/strings.ts line", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(noteBody().contains("\"file\":\"src/strings.ts\"") && noteBody().contains("\"line_start\":2") && noteBody().contains("Keep the old copy"), noteBody())
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file', src/strings.ts line 2: Keep the old copy").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -352,9 +416,10 @@ class WalkthroughTest {
         notes = """[{"id":"n1","step":1,"file":"src/Screen.tsx","line_start":12,"line_end":18,"quote":"const title","comment":"Keep the old copy","sent":false},{"id":"n2","step":0,"comment":"Is this file needed?","sent":false}]"""
         show(Walkthrough)
         openWalkthrough()
+        rule.onNodeWithText("Conversation").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Message").performTextInput("Looks good otherwise")
+        rule.onNode(hasSetTextAction()).performTextInput("Looks good otherwise")
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
@@ -370,76 +435,13 @@ class WalkthroughTest {
         notes = """[{"id":"n2","step":0,"comment":"Is this file needed?","sent":true}]"""
         show(Walkthrough)
         openWalkthrough()
+        rule.onNodeWithText("Conversation").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Message").performTextInput("Thanks")
+        rule.onNode(hasSetTextAction()).performTextInput("Thanks")
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
         assertEquals(0, requests.count { it.second.contains("Notes on the walkthrough:") })
-    }
-
-    @Test
-    fun onDesktopTheWalkthroughOpensBesideTheConversationAndNeedsNoTabs() {
-        show(Walkthrough)
-        openWalkthrough()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
-        val steps = rule.onNodeWithContentDescription("Walkthrough steps").getBoundsInRoot()
-        val handle = rule.onNodeWithContentDescription("Resize the walkthrough").getBoundsInRoot()
-        val goal = rule.onNodeWithContentDescription("Set a goal").getBoundsInRoot()
-        assertTrue(steps.right <= handle.left && handle.right <= goal.left, "$steps $handle $goal")
-        assertEquals(0, rule.onAllNodesWithContentDescription("Conversation sections").fetchSemanticsNodes().size)
-    }
-
-    @Test
-    fun theStepListCollapsesToGiveTheDiffTheWidthAndComesBack() {
-        show(Walkthrough)
-        openWalkthrough()
-
-        rule.onNodeWithContentDescription("Hide steps").performClick()
-
-        assertEquals(0, rule.onAllNodesWithContentDescription("Walkthrough steps").fetchSemanticsNodes().size)
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
-        rule.onNodeWithText("The change itself.").assertDoesNotExist()
-        rule.onNodeWithContentDescription("Show steps").performClick()
-        rule.onNodeWithContentDescription("Walkthrough steps").assertIsDisplayed()
-    }
-
-    @Test
-    fun aResizedWalkthroughKeepsItsWidthForTheWorkspace() {
-        val platform = RememberingPlatform()
-        show(Walkthrough, platform)
-        openWalkthrough()
-        val handle = rule.onNodeWithContentDescription("Resize the walkthrough")
-        val before = handle.getBoundsInRoot().left
-
-        handle.onChildren().onFirst().requestFocus()
-        handle.onChildren().onFirst().performKeyInput { pressKey(Key.DirectionRight) }
-        rule.waitForIdle()
-
-        assertNotEquals(before, handle.getBoundsInRoot().left)
-        assertTrue(platform.saved.keys.any { it.startsWith("walkthrough-width:n1:/work/backups") }, "${platform.saved}")
-    }
-
-    @Test
-    fun onThePhoneTheWalkthroughStaysATabBesideTheConversation() {
-        show(Walkthrough, phone = true)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithText("Walkthrough").performClick()
-
-        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
-        assertEquals(0, rule.onAllNodesWithContentDescription("Resize the walkthrough").fetchSemanticsNodes().size)
-    }
-}
-
-private class RememberingPlatform(walkthroughWidth: String? = null) : Platform by HandsOffPlatform {
-    val saved = mutableMapOf<String, String>().also { saved -> walkthroughWidth?.let { saved["walkthrough-width:n1:/work/backups"] = it } }
-
-    override fun loadPreference(key: String): String? = saved[key]
-
-    override fun savePreference(key: String, value: String) {
-        saved[key] = value
     }
 }
