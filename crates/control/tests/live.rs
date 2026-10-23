@@ -50,6 +50,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",
     "POST /api/v1/conversations/{id}/terminal",
+    "POST /api/v1/conversations/{id}/attachments",
     "POST /api/v1/conversations/{id}/git/stage",
     "POST /api/v1/conversations/{id}/git/unstage",
     "POST /api/v1/conversations/{id}/git/stage-all",
