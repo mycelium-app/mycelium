@@ -108,6 +108,8 @@ groups           id uuid pk, owner uuid, name text, created_at, unique(owner, na
 instruction_versions  id text pk (commit SHA with a source, else 40 hex characters), seq bigserial, layer text ('global' or a group id), group_id uuid null,
                  text text, author uuid null, created_at
 instruction_source    singleton row: forge_id uuid, repository text, path text
+usage_turns      id bigserial pk, conversation_id uuid, owner uuid, node_id uuid, agent text, project_id uuid null, model text null, ended_at, day date (UTC),
+                 working_ms bigint null, reported bool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens bigint, cost_usd double null, cost_total double null
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
 ```
@@ -178,6 +180,9 @@ Conversations:
 - `POST /{id}/permission` `{request_id, option_id}`.
 - `POST /{id}/config` `{mode?, model?, config?: {id: value}}` → ACP `session/set_mode`, `session/set_model`
   or `session/set_config_option`, whichever the agent advertises.
+
+Activity:
+- `GET /api/v1/activity?range=today|7d|30d&node_id=` → `{range, totals, days, conversations, nodes, agents, projects, models, unreported_agents}` for the caller's own conversations, `range` defaulting to `7d` (400 `range_invalid` otherwise) and `node_id` narrowing to one node. Every row is `{key, name, turns, reported_turns, working_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd}`; `days` has one row per UTC day of the range, empty days included, `cost_usd` is null until an agent reports a cost, and the breakdowns hold the top 50 by tokens. A turn is recorded when its `turn_end` arrives: tokens from the turn's `usage`, cost as the change in the agent's running total from its latest `usage_update` (`cost.amount`), the model from that update's `_meta["_claude/model"]` else the conversation's, and time working from the last user message to the turn end. A turn with neither tokens nor cost is counted as a turn only (`reported_turns` does not include it), and `unreported_agents` names the agents in the range with no reported turn. Imported conversations count their turns on the day they were last active, with no usage.
 
 History:
 - `GET /api/v1/imports` → `[{node_id, agent, found, imported}]` per node and agent; `POST /api/v1/imports`
@@ -318,6 +323,8 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Opened | `conversation` done | owner |
 | Message queued, edited, removed, sent now | `queue` | owner |
 
+The Activity page is not pushed: it asks again whenever a `conversation` message changes any conversation, since a turn ending always changes one.
+
 Silent on purpose, because no client shows them: user, web session and client token rows (sign-in,
 `last_used_at`), `nodes.last_seen_at` refreshed by `pong` (clients show `online`, which is published),
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
@@ -350,7 +357,7 @@ Node to control plane:
 | `session_started` | `conversation_id, acp_session_id, modes?, models?, config_options?` |
 | `acp_update` | `conversation_id, seq, update` |
 | `permission_request` | `conversation_id, seq, request_id, request` |
-| `turn_end` | `conversation_id, seq, stop_reason` |
+| `turn_end` | `conversation_id, seq, stop_reason, usage?` (`usage` is the ACP prompt response's `usage` object when the agent sends one: `inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`) |
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
 | `logins` | `logins: [{agent, account?, method, state}]` |

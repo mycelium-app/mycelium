@@ -50,6 +50,20 @@ fn status_of(statuses: &Value, node_id: Uuid, agent: &str) -> (i64, i64) {
 }
 
 #[tokio::test]
+async fn importing_a_transcript_counts_its_turns_in_activity_without_usage() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl"), &claude_transcript(CLAUDE_SESSION, "Fix the build", "Looking at it.")).await;
+
+    import(&server, link.id, "claude").await;
+
+    let (_, body) = server.user.json(server.user.get("/api/v1/activity?range=30d")).await;
+    assert_eq!(body["totals"]["turns"], 1);
+    assert_eq!(body["totals"]["reported_turns"], 0);
+    assert_eq!(body["unreported_agents"], json!(["claude"]));
+}
+
+#[tokio::test]
 async fn importing_a_claude_transcript_creates_a_done_conversation_with_events_and_streams_it() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;

@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::activity::record_imported_turns;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text};
 use axum::Json;
 use axum::extract::State;
@@ -389,6 +390,8 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         for (kind, payload) in &events {
             append_event(&mut tx, row.id, *kind, payload, None).await?;
         }
+
+        record_imported_turns(&mut tx, row.id).await?;
 
         tx.commit().await?;
         imported += 1;

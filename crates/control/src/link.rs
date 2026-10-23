@@ -1,3 +1,4 @@
+use crate::activity::record_turn;
 use crate::auth::AuthNode;
 use crate::device::client_address;
 use crate::error::ApiResult;
@@ -146,7 +147,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
         }
-        NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage: _ } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
+        NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage } => turn_end(state, node_id, conversation_id, seq, stop_reason, usage).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
             state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
@@ -367,13 +368,14 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     Ok(inserted)
 }
 
-async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String) -> ApiResult<()> {
+async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String, usage: Option<Value>) -> ApiResult<()> {
     let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
 
     if !inserted {
         return Ok(());
     }
 
+    record_turn(state, conversation_id, usage.as_ref()).await?;
     state.hub.forget_prompts_of(conversation_id);
 
     let send_now = state.hub.take_send_now(conversation_id);
