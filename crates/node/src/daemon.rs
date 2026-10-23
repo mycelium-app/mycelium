@@ -227,7 +227,7 @@ impl Daemon {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
             ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions),
-            ControlToNode::Instructions { revision, global } => self.hold_instructions(revision, global),
+            ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
@@ -465,10 +465,10 @@ impl Daemon {
         }
     }
 
-    fn hold_instructions(&self, revision: String, global: Option<String>) {
+    fn hold_instructions(&self, revision: String, global: Option<String>, take_over: bool) {
         let installed: Vec<AgentId> = ALL_AGENTS.into_iter().filter(|agent| (self.options.agent_commands)(*agent).first().and_then(|program| resolve_program(program)).is_some()).collect();
         let unmanaged = match global {
-            Some(global) => deliver(&self.options.home, &accounts_dir(&self.config.state_dir), &installed, &global),
+            Some(global) => deliver(&self.options.home, &accounts_dir(&self.config.state_dir), &installed, &global, take_over),
             None => Vec::new(),
         };
 

@@ -101,6 +101,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/nodes", get(nodes::list))
         .route("/api/v1/nodes/{id}", patch(nodes::update).delete(nodes::revoke))
         .route("/api/v1/nodes/{id}/drain", post(nodes::drain))
+        .route("/api/v1/nodes/{id}/instructions/take-over", post(instructions::take_over))
         .route("/api/v1/nodes/{id}/watch", post(nodes::watch))
         .route("/api/v1/nodes/{id}/processes/{pid}/stop", post(nodes::stop_process))
         .route("/api/v1/nodes/{id}/logins", post(nodes::start_login))

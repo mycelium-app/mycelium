@@ -147,22 +147,38 @@ async fn record(state: &AppState, user: &AuthUser, layer: &Layer, text: &str, fo
     Ok(())
 }
 
-pub async fn push_to(state: &AppState, node_id: Uuid) -> ApiResult<()> {
+pub async fn push_to(state: &AppState, node_id: Uuid, take_over: bool) -> ApiResult<()> {
     let Some(revision) = current_revision(state).await? else {
         return Ok(());
     };
     let global = latest(state, GLOBAL).await?.map(|version| version.text);
 
-    state.hub.send(node_id, ControlToNode::Instructions { revision, global });
+    state.hub.send(node_id, ControlToNode::Instructions { revision, global, take_over });
 
     Ok(())
+}
+
+pub async fn take_over(State(state): State<AppState>, _user: AuthUser, Path(node_id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(node_id).fetch_one(&state.pool).await?;
+
+    if !exists {
+        return Err(ApiError::not_found("That node"));
+    }
+
+    if !state.hub.is_online(node_id) {
+        return Err(ApiError::conflict("node_offline", "This node is offline. Start it, then let Mycelium manage its instruction files again."));
+    }
+
+    push_to(&state, node_id, true).await?;
+
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn push_to_every_node(state: &AppState) -> ApiResult<()> {
     let nodes = sqlx::query_scalar::<_, Uuid>("select id from nodes where revoked_at is null").fetch_all(&state.pool).await?;
 
     for node_id in nodes {
-        push_to(state, node_id).await?;
+        push_to(state, node_id, false).await?;
         publish_node(state, node_id).await?;
     }
 

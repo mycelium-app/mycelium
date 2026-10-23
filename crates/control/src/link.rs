@@ -278,7 +278,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
         state.hub.send(node_id, ControlToNode::Prompt { conversation_id: prompt.conversation_id, prompt_id: prompt.prompt_id, text: prompt.text, attachments });
     }
 
-    crate::instructions::push_to(state, node_id).await?;
+    crate::instructions::push_to(state, node_id, false).await?;
     publish_node(state, node_id).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")

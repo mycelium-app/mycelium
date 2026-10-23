@@ -191,7 +191,7 @@ async fn group_streamed_for(stream: &mut common::StreamClient, conversation: Uui
 
 async fn expect_instructions(link: &mut NodeLink) -> (String, Option<String>) {
     match link.next().await {
-        ControlToNode::Instructions { revision, global } => (revision, global),
+        ControlToNode::Instructions { revision, global, .. } => (revision, global),
         other => panic!("expected instructions, got {other:?}"),
     }
 }
@@ -286,6 +286,24 @@ async fn saving_pushes_the_global_file_to_an_online_node_and_the_node_reports_wh
     })
     .await;
     assert_eq!(node["instructions_unmanaged"], json!(["Codex: /home/sam/.codex/AGENTS.md"]));
+}
+
+#[tokio::test]
+async fn taking_over_sends_the_current_file_with_permission_to_set_the_persons_own_aside() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    save(&server, "global", "# Rules").await;
+    expect_instructions(&mut link).await;
+    let node_id = link.id;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/nodes/{node_id}/instructions/take-over"))).await.0 });
+
+    match link.next().await {
+        ControlToNode::Instructions { global, take_over, .. } => assert_eq!((global.as_deref(), take_over), (Some("# Rules"), true)),
+        other => panic!("expected instructions, got {other:?}"),
+    }
+
+    assert_eq!(asking.await.unwrap(), 202);
 }
 
 #[tokio::test]

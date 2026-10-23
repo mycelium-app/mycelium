@@ -35,7 +35,19 @@ fn write(target: &Path, content: &str) -> std::io::Result<()> {
     std::fs::rename(&staged, target)
 }
 
-pub fn deliver(home: &Path, accounts_dir: &Path, agents: &[AgentId], global: &str) -> Vec<String> {
+fn set_aside(target: &Path) -> std::io::Result<()> {
+    let mut backup = target.with_extension("md.bak");
+    let mut copy = 1;
+
+    while backup.symlink_metadata().is_ok() {
+        copy += 1;
+        backup = target.with_extension(format!("md.bak.{copy}"));
+    }
+
+    std::fs::rename(target, backup)
+}
+
+pub fn deliver(home: &Path, accounts_dir: &Path, agents: &[AgentId], global: &str, take_over: bool) -> Vec<String> {
     let content = managed_content(global);
     let mut unmanaged = Vec::new();
 
@@ -45,7 +57,15 @@ pub fn deliver(home: &Path, accounts_dir: &Path, agents: &[AgentId], global: &st
             let existing = std::fs::read_to_string(&target);
 
             match existing {
-                Ok(text) if !text.starts_with(MARKER) => unmanaged.push(format!("{}: {}", agent_label(*agent), target.display())),
+                Ok(text) if !text.starts_with(MARKER) && !take_over => unmanaged.push(format!("{}: {}", agent_label(*agent), target.display())),
+                Ok(text) if !text.starts_with(MARKER) => {
+                    let moved = set_aside(&target).and_then(|()| write(&target, &content));
+
+                    if let Err(error) = moved {
+                        tracing::warn!("could not take over {}: {error}", target.display());
+                        unmanaged.push(format!("{}: {}", agent_label(*agent), target.display()));
+                    }
+                }
                 Ok(text) if text == content => {}
                 Ok(_) | Err(_) => {
                     if let Err(error) = write(&target, &content) {
@@ -76,7 +96,7 @@ mod tests {
     fn the_global_file_is_written_where_each_agent_reads_its_user_instructions() {
         let (_root, home, accounts) = dirs();
 
-        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules\n");
+        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules\n", false);
 
         assert!(unmanaged.is_empty());
         assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap(), format!("{MARKER}\n\n# Rules\n"));
@@ -89,7 +109,7 @@ mod tests {
         std::fs::create_dir_all(accounts.join("claude").join("work")).unwrap();
         std::fs::create_dir_all(accounts.join("codex").join("work")).unwrap();
 
-        deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules");
+        deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules", false);
 
         assert!(accounts.join("claude/work/CLAUDE.md").exists());
         assert!(accounts.join("codex/work/AGENTS.md").exists());
@@ -98,9 +118,9 @@ mod tests {
     #[test]
     fn a_file_mycelium_wrote_is_replaced_with_the_new_version() {
         let (_root, home, accounts) = dirs();
-        deliver(&home, &accounts, &[AgentId::Claude], "# One");
+        deliver(&home, &accounts, &[AgentId::Claude], "# One", false);
 
-        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude], "# Two");
+        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude], "# Two", false);
 
         assert!(unmanaged.is_empty());
         assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap(), format!("{MARKER}\n\n# Two\n"));
@@ -112,11 +132,42 @@ mod tests {
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::write(home.join(".claude/CLAUDE.md"), "My own rules\n").unwrap();
 
-        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules");
+        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude, AgentId::Codex], "# Rules", false);
 
         assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap(), "My own rules\n");
         assert_eq!(unmanaged, vec![format!("Claude Code: {}", home.join(".claude/CLAUDE.md").display())]);
         assert!(home.join(".codex/AGENTS.md").exists());
+    }
+
+    #[test]
+    fn taking_over_sets_the_persons_file_aside_as_bak_and_writes_the_managed_one() {
+        let (_root, home, accounts) = dirs();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join(".claude/CLAUDE.md"), "My own rules\n").unwrap();
+        std::fs::write(home.join(".claude/CLAUDE.md.bak"), "An older backup\n").unwrap();
+
+        let unmanaged = deliver(&home, &accounts, &[AgentId::Claude], "# Rules", true);
+
+        assert!(unmanaged.is_empty());
+        assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap(), format!("{MARKER}\n\n# Rules\n"));
+        assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md.bak")).unwrap(), "An older backup\n");
+        assert_eq!(std::fs::read_to_string(home.join(".claude/CLAUDE.md.bak.2")).unwrap(), "My own rules\n");
+    }
+
+    #[test]
+    fn taking_over_a_symlinked_file_moves_the_link_and_leaves_what_it_points_at() {
+        let (root, home, accounts) = dirs();
+        let shared = root.path().join("agents-md/AGENTS.md");
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        std::fs::write(&shared, "Shared rules\n").unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(&shared, home.join(".claude/CLAUDE.md")).unwrap();
+
+        deliver(&home, &accounts, &[AgentId::Claude], "# Rules", true);
+
+        assert_eq!(std::fs::read_to_string(&shared).unwrap(), "Shared rules\n");
+        assert!(std::fs::symlink_metadata(home.join(".claude/CLAUDE.md.bak")).unwrap().file_type().is_symlink());
+        assert!(!std::fs::symlink_metadata(home.join(".claude/CLAUDE.md")).unwrap().file_type().is_symlink());
     }
 
     #[test]
@@ -125,7 +176,7 @@ mod tests {
         std::fs::create_dir_all(home.join(".codex")).unwrap();
         std::fs::write(home.join(".codex/AGENTS.md"), "").unwrap();
 
-        let unmanaged = deliver(&home, &accounts, &[AgentId::Codex], "# Rules");
+        let unmanaged = deliver(&home, &accounts, &[AgentId::Codex], "# Rules", false);
 
         assert_eq!(unmanaged.len(), 1);
         assert_eq!(std::fs::read_to_string(home.join(".codex/AGENTS.md")).unwrap(), "");
@@ -134,11 +185,11 @@ mod tests {
     #[test]
     fn an_unchanged_file_is_not_rewritten() {
         let (_root, home, accounts) = dirs();
-        deliver(&home, &accounts, &[AgentId::Claude], "# Rules");
+        deliver(&home, &accounts, &[AgentId::Claude], "# Rules", false);
         let target = home.join(".claude/CLAUDE.md");
         let before = std::fs::metadata(&target).unwrap().modified().unwrap();
 
-        deliver(&home, &accounts, &[AgentId::Claude], "# Rules");
+        deliver(&home, &accounts, &[AgentId::Claude], "# Rules", false);
 
         assert_eq!(std::fs::metadata(&target).unwrap().modified().unwrap(), before);
     }

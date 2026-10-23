@@ -300,6 +300,8 @@ pub enum ControlToNode {
         revision: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         global: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        take_over: bool,
     },
     Prompt {
         conversation_id: Uuid,

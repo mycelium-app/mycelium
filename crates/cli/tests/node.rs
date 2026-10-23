@@ -946,7 +946,7 @@ async fn pushed_instructions_are_written_for_an_installed_agent_and_the_held_ver
     let _daemon = fixture.start_daemon();
     let mut connection = control.accept().await;
 
-    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) });
+    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()), take_over: false });
 
     let held = connection.next_matching(|message| matches!(message, NodeToControl::InstructionsHeld { .. })).await;
     assert_eq!(held, NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec![] });
@@ -965,7 +965,7 @@ async fn pushed_instructions_never_replace_a_file_the_person_wrote() {
     let _daemon = fixture.start_daemon();
     let mut connection = control.accept().await;
 
-    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) });
+    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()), take_over: false });
 
     let held = connection.next_matching(|message| matches!(message, NodeToControl::InstructionsHeld { .. })).await;
     assert_eq!(held, NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec![format!("Claude Code: {}", own.display())] });
