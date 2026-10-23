@@ -38,6 +38,8 @@ private const val DocumentJson = """{"source":{"forge_id":"f1","repository":"slo
 private const val GroupsJson = """[{"id":"g1","name":"slop","folders":[{"id":"f1","node_id":null,"prefix":"/home/claude/projects"},{"id":"f2","node_id":"n1","prefix":"/srv/slop"}],"created_at":"2026-10-22T10:00:00Z"},
 {"id":"g2","name":"work","folders":[],"created_at":"2026-10-22T10:00:00Z"}]"""
 
+private const val ExtensionsJson = """{"generated_ui":true,"rich_markdown":true,"mycelium_tools":true}"""
+
 private const val ProjectsJson = """[{"id":"p1","node_id":"n1","name":"mycelium","path":"/p/mycelium","group_id":null,"created_at":"2026-10-22T10:00:00Z"}]"""
 
 class InstructionsTest {
@@ -61,6 +63,7 @@ class InstructionsTest {
                 path.endsWith("/conversations") -> "[]"
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/instructions") -> DocumentJson
+                path.endsWith("/extensions") -> ExtensionsJson
                 path.endsWith("/groups") && request.method == HttpMethod.Get -> GroupsJson
                 path.endsWith("/projects") -> ProjectsJson
                 path.endsWith("/forges") -> "[]"
@@ -181,5 +184,25 @@ class InstructionsTest {
         rule.onNodeWithContentDescription("Remove folder /srv/slop from slop").performClick()
 
         requestTo(HttpMethod.Delete, "/groups/g1/folders/f2")
+    }
+
+    @Test
+    fun theExtensionsAreOnAndEachSwitchSavesAllThreeWithItselfTurnedOff() {
+        show()
+
+        rule.onNodeWithText("Mycelium extensions").assertExists()
+        rule.onNodeWithContentDescription("Generated UI").assertExists()
+        rule.onNodeWithContentDescription("Rich Markdown").performClick()
+
+        assertEquals("""{"generated_ui":true,"rich_markdown":false,"mycelium_tools":true}""", requestTo(HttpMethod.Put, "/extensions").third)
+    }
+
+    @Test
+    fun theHintsSayWhatEachExtensionAddsAndWhichAgentsGetIt() {
+        show()
+
+        rule.onNodeWithText("Teaches agents to answer", substring = true).assertExists()
+        rule.onNodeWithText("Added to Claude Code and Codex sessions and to chats.", substring = true).assertExists()
+        rule.onNodeWithText("recall, remember, walkthrough", substring = true).assertExists()
     }
 }

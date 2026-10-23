@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
+import mycelium.api.Extensions
 import mycelium.api.Forge
 import mycelium.api.Instructions
 import mycelium.api.SetInstructionSourceRequest
@@ -44,12 +45,25 @@ private const val GlobalLayer = "global"
 private fun forgeLabel(forge: Forge): String = "${if (forge.kind == "github") "GitHub" else "GitLab"} ${forge.account}"
 
 @Composable
+private fun ExtensionSwitch(name: String, hint: String, on: Boolean, onToggle: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(on, name, onToggle, checkedState = "On", uncheckedState = "Off")
+
+        Column(Modifier.weight(1f)) {
+            Label(name)
+            Label(hint, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+        }
+    }
+}
+
+@Composable
 fun InstructionsSettings(store: Store) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
     val state by store.state.collectAsState()
     var document by remember { mutableStateOf<Instructions?>(null) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
+    var extensions by remember { mutableStateOf<Extensions?>(null) }
     var selected by remember { mutableStateOf(GlobalLayer) }
     var draft by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -91,6 +105,7 @@ fun InstructionsSettings(store: Store) {
         store.act {
             document = store.api.instructions()
             forges = store.api.forges()
+            extensions = store.api.extensions()
             store.refreshProjects()
             store.refreshGroups()
         }
@@ -401,6 +416,23 @@ fun InstructionsSettings(store: Store) {
                     }
 
                     Hairline()
+                }
+            }
+        }
+
+        extensions?.let { held ->
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Mycelium extensions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("Built-in additions to the instructions of conversations that start after you change them.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                ExtensionSwitch("Generated UI", "Teaches agents to answer with tables, charts and buttons you can press. Added to Claude Code and Codex sessions.", held.generatedUi) {
+                    attempt { extensions = store.api.saveExtensions(held.copy(generatedUi = !held.generatedUi)) }
+                }
+                ExtensionSwitch("Rich Markdown", "Tells agents which Markdown Mycelium renders: task lists, callouts, footnotes, highlighted code. Added to Claude Code and Codex sessions and to chats.", held.richMarkdown) {
+                    attempt { extensions = store.api.saveExtensions(held.copy(richMarkdown = !held.richMarkdown)) }
+                }
+                ExtensionSwitch("Mycelium tools", "Tells agents they run inside Mycelium and when to use its recall, remember, walkthrough, propose_task and ask_question tools. Added to Claude Code and Codex sessions.", held.myceliumTools) {
+                    attempt { extensions = store.api.saveExtensions(held.copy(myceliumTools = !held.myceliumTools)) }
                 }
             }
         }
