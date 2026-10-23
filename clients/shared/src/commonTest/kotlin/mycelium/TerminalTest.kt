@@ -341,4 +341,31 @@ class TerminalTest {
         assertEquals(Triple(8, 8, 8), xtermRgb(232))
         assertEquals(Triple(238, 238, 238), xtermRgb(255))
     }
+
+    @Test
+    fun aTmuxSessionStartingInTheAlternateScreenShowsItsShellOutput() {
+        val captured = kotlin.io.encoding.Base64.decode(
+            "G1s/MTA0OWgbWzIyOzA7MHQbWz8xaBs9G1tIG1syShtbPzEybBtbPzI1aBtbPzEwMDBsG1s/MTAwMmwbWz8xMDAzbBtbPzEwMDZs" +
+            "G1s/MTAwNWwbWz8yMDA0aBsoQhtbbRtbPzEybBtbPzI1aBtbPzEwMDZsG1s/MTAwMGwbWz8xMDAybBtbPzEwMDNsG1sxOzFIG1sx" +
+            "OzI0chtbYxtbPmMbWz5xG10xMDs/G1wbXTExOz8bXBtbMTsxSBtbPzI1bBtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtb" +
+            "Sw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtb" +
+            "Sw0KG1tLG1szMG0bWzQybQ0KW215Y2VsaXVtLTA6YmFzaCogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAi" +
+            "Y2xhdWRlIiAwOToxNSAyMy1PY3QtMjYbKEIbW20bWz8xMmwbWz8yNWgbWzE7MUgbKEIbW20bWz8xMmwbWz8yNWgbWz8xMDA2bBtb" +
+            "PzEwMDBsG1s/MTAwMmwbWz8xMDAzbBtbMTsxSBtbMTsyNHIbWzE7MUgbWz8yNWwbW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tL" +
+            "DQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tLDQobW0sNChtbSw0KG1tL" +
+            "DQobW0sNChtbSxtbMzBtG1s0Mm0NCltteWNlbGl1bS0wOmJhc2gqICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg" +
+            "ICAgImNsYXVkZSIgMDk6MTUgMjMtT2N0LTI2GyhCG1ttG1s/MTJsG1s/MjVoG1sxOzFIG1szMm0bWzFtY2xhdWRlQGNsYXVkZRso" +
+            "QhtbbTobWzM0bRtbMW0vdG1wL2NsYXVkZS0xMDAwLy1ob21lLWNsYXVkZS0tbG9jYWwtc2hhcmUtc2xvcHZtLXByb2plY3RzLW15" +
+            "Y2VsaXVtLzU2ZDhhYTVhLTZmZjctNGZkZi04ZWE2LThkMDU0OTY3M2FiZi9zY3JhdGNocGFkL2RldnN0YWNrL2hvbWUvcHJvamVj" +
+            "dHMvZGVtbxsoQhtbbSQgZWNobyBoZWxsby1mcm9tLXRtdXgNCmhlbGxvLWZyb20tdG11eA0KG1szMm0bWzFtY2xhdWRlQGNsYXVk" +
+            "ZRsoQhtbbTobWzM0bRtbMW0vdG1wL2NsYXVkZS0xMDAwLy1ob21lLWNsYXVkZS0tbG9jYWwtc2hhcmUtc2xvcHZtLXByb2plY3Rz" +
+            "LW15Y2VsaXVtLzU2ZDhhYTVhLTZmZjctNGZkZi04ZWE2LThkMDU0OTY3M2FiZi9zY3JhdGNocGFkL2RldnN0YWNrL2hvbWUvcHJv" +
+            "amVjdHMvZGVtbxsoQhtbbSQg",
+        )
+        val terminal = Terminal(80, 24)
+
+        terminal.feed(captured)
+
+        assertTrue(terminal.screenText().contains("hello-from-tmux"), terminal.screenText())
+    }
 }
