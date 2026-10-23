@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
+import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 import mycelium.state.NotifyFinishedPreference
 import mycelium.state.NotifySoundPreference
@@ -166,6 +167,18 @@ class AgentFinishedTest {
 
         store.receive(StreamMessage.ConversationChanged(conversation("s1", ConversationStatus.Working, "side")))
         store.receive(StreamMessage.ConversationChanged(conversation("s1", ConversationStatus.Done, "side")))
+
+        assertEquals(emptyList(), platform.calls)
+    }
+
+    @Test
+    fun aTurnFinishingWithAPromptQueuedDoesNotNotify() = runTest {
+        val platform = RecordingPlatform()
+        val store = storeWith(platform, backgroundScope)
+
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Working)))
+        store.receive(StreamMessage.QueueChanged("c1", listOf(QueuedPrompt("q1", "c1", 0, "and the tests", "2026-10-23T10:01:00Z"))))
+        store.receive(StreamMessage.ConversationChanged(conversation("c1", ConversationStatus.Done)))
 
         assertEquals(emptyList(), platform.calls)
     }

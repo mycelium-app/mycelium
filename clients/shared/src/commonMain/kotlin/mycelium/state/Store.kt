@@ -157,7 +157,9 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val previous = before.conversations[updated.id] ?: return
         val outcome = finishedWording(updated.status)
 
-        if (previous.status != ConversationStatus.Working || outcome == null || updated.sideKind != null) {
+        val queued = !before.queues[updated.id].isNullOrEmpty()
+
+        if (previous.status != ConversationStatus.Working || outcome == null || updated.sideKind != null || queued) {
             return
         }
 
