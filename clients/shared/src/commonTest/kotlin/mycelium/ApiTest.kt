@@ -109,6 +109,18 @@ class ApiTest {
     }
 
     @Test
+    fun anOlderControlPlaneWithoutTheRouteAsksForAnUpdateRatherThanACheckOfTheAddress() = runTest {
+        val (api, _) = apiWith {
+            respond("""{"error":"not_found","message":"That address was not found. Check the address and try again."}""", HttpStatusCode.NotFound, JsonHeaders)
+        }
+
+        val failure = assertFailsWith<ApiException> { api.nodes() }
+
+        assertEquals("unknown_route", failure.code)
+        assertEquals("This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again.", failure.message)
+    }
+
+    @Test
     fun errorBodyBecomesAnApiExceptionWithTheServersSentence() = runTest {
         val (api, _) = apiWith {
             respond(

@@ -26,6 +26,9 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
+private const val OlderUnknownRouteMessage = "That address was not found. Check the address and try again."
+private const val UnknownRouteMessage = "This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."
+
 class ApiException(val status: Int, val code: String, override val message: String) : Exception(message)
 
 sealed interface DevicePoll {
@@ -74,10 +77,12 @@ class MyceliumApi(
         }
 
         val parsed = runCatching { body<ErrorBody>() }.getOrNull()
+        val unknownRoute = parsed?.error == "unknown_route" || (parsed?.error == "not_found" && parsed.message == OlderUnknownRouteMessage)
+
         throw ApiException(
             status = status.value,
-            code = parsed?.error ?: "unknown",
-            message = parsed?.message ?: "The server answered with status ${status.value}. Try again in a moment.",
+            code = if (unknownRoute) "unknown_route" else parsed?.error ?: "unknown",
+            message = if (unknownRoute) UnknownRouteMessage else parsed?.message ?: "The server answered with status ${status.value}. Try again in a moment.",
         )
     }
 

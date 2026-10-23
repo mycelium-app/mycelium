@@ -200,7 +200,8 @@ async fn the_web_client_is_served_with_single_page_fallback_but_unknown_api_path
 
     let (status, body) = anonymous.json(anonymous.get("/api/v1/nothing-here")).await;
     assert_eq!(status, 404);
-    assert_eq!(body["error"], json!("not_found"));
+    assert_eq!(body["error"], json!("unknown_route"));
+    assert_eq!(body["message"], json!("This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."));
 }
 
 #[tokio::test]
