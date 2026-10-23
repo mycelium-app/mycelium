@@ -9,6 +9,10 @@ import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.runtime.CompositionLocalProvider
+import mycelium.ui.Accent
+import mycelium.ui.Appearance
+import mycelium.ui.LocalAppearance
 import mycelium.ui.MyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +53,19 @@ class SettingsRenderTest {
             Unit
         }
 
-        assertTrue(renderAt("settings-list", true, true) { Surface { SettingsScreen(store, me, "https://mycelium.test") {} } }.length() > 5_000)
-        assertTrue(renderAt("settings-memories", true, true, interact = open) { Surface { SettingsScreen(store, me, "https://mycelium.test") {} } }.length() > 5_000)
+        assertTrue(renderAt("settings-list", true, true) { Surface { SettingsScreen(store, me, "https://mycelium.test", onSignOut = {}) } }.length() > 5_000)
+        assertTrue(renderAt("settings-memories", true, true, interact = open) { Surface { SettingsScreen(store, me, "https://mycelium.test", onSignOut = {}) } }.length() > 5_000)
+        val appearance = Appearance(true, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {})
+        val openAppearance: (ImageComposeScene) -> Unit = { scene ->
+            scene.sendPointerEvent(PointerEventType.Press, Offset(100f, 75f))
+            scene.sendPointerEvent(PointerEventType.Release, Offset(100f, 75f))
+            scene.render(32_000_000L)
+            scene.render(64_000_000L)
+            Unit
+        }
+
+        assertTrue(renderAt("settings-appearance", true, false) { CompositionLocalProvider(LocalAppearance provides appearance) { Surface { SettingsScreen(store, me, "https://mycelium.test", onSignOut = {}) } } }.length() > 5_000)
+        assertTrue(renderAt("settings-appearance", true, true, interact = openAppearance) { CompositionLocalProvider(LocalAppearance provides appearance) { Surface { SettingsScreen(store, me, "https://mycelium.test", onSignOut = {}) } } }.length() > 5_000)
         assertTrue(renderAt("settings-instructions", true, false) { Surface { InstructionsSettings(store) } }.length() > 5_000)
     }
 }

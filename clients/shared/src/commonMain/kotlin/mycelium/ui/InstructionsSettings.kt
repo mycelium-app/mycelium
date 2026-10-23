@@ -40,7 +40,6 @@ import mycelium.state.Store
 import mycelium.state.heldVersion
 import mycelium.state.layerFile
 import mycelium.state.olderSessions
-import mycelium.state.relativeTime
 import mycelium.state.shortVersion
 
 private const val GlobalLayer = "global"
@@ -429,7 +428,7 @@ fun InstructionsSettings(store: Store) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                    Label(layer.version?.let { "${shortVersion(it.id)} · ${relativeTime(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                    Label(layer.version?.let { "${shortVersion(it.id)} · ${timestamp(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                 }
 
                 Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {

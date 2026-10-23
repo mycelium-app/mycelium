@@ -134,7 +134,7 @@ fun ThreadView(
     }
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-        val side = maxOf(Tokens.Space.S4, (maxWidth - Tokens.Size.Measure) / 2 + Tokens.Space.S4)
+        val side = maxOf(Tokens.Space.S4, (maxWidth - readingMeasure()) / 2 + Tokens.Space.S4)
 
         LazyColumn(
             Modifier.fillMaxSize().scrollbar(state, reverse = true).semantics { contentDescription = "Conversation" },

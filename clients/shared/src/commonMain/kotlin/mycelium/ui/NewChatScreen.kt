@@ -91,7 +91,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
 
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Column(
-                Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().padding(Tokens.Space.S4),
+                Modifier.widthIn(max = readingMeasure()).fillMaxWidth().padding(Tokens.Space.S4),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
             ) {

@@ -38,6 +38,13 @@ import mycelium.ui.MyTheme
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Accent
 import mycelium.ui.Appearance
+import mycelium.ui.ChatWidth
+import mycelium.ui.CodeSize
+import mycelium.ui.Display
+import mycelium.ui.MotionSetting
+import mycelium.ui.RowDensity
+import mycelium.ui.TextSize
+import mycelium.ui.TimestampStyle
 import mycelium.ui.LocalAppearance
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.Color
@@ -61,6 +68,7 @@ fun App(platform: Platform, dark: Boolean? = null) {
     val systemAccent = platform.systemAccent(night)?.let { Color(it.toInt()) }
     val accents = Accent.entries.filter { it != Accent.System || systemAccent != null }
     var accent by remember { mutableStateOf(accents.firstOrNull { it.name == platform.loadPreference(AccentPreference) } ?: accents.first()) }
+    var display by remember { mutableStateOf(loadDisplay(platform)) }
     val appearance = Appearance(
         dark = night,
         accent = accent,
@@ -73,11 +81,34 @@ fun App(platform: Platform, dark: Boolean? = null) {
             chosenDark = !night
             platform.savePreference(ThemePreference, if (night) "light" else "dark")
         },
+        display = display,
+        onDisplay = { chosen ->
+            display = chosen
+            saveDisplay(platform, chosen)
+        },
     )
 
     CompositionLocalProvider(LocalAppearance provides appearance) {
         MyceliumTheme(night, accent, systemAccent) { AppContent(platform) }
     }
+}
+
+private fun loadDisplay(platform: Platform): Display = Display(
+    textSize = TextSize.entries.firstOrNull { it.name == platform.loadPreference("text-size") } ?: TextSize.Default,
+    density = RowDensity.entries.firstOrNull { it.name == platform.loadPreference("density") } ?: RowDensity.Comfortable,
+    chatWidth = ChatWidth.entries.firstOrNull { it.name == platform.loadPreference("chat-width") } ?: ChatWidth.Standard,
+    codeSize = CodeSize.entries.firstOrNull { it.name == platform.loadPreference("code-size") } ?: CodeSize.Regular,
+    reducedMotion = MotionSetting.entries.firstOrNull { it.name == platform.loadPreference("reduced-motion") } ?: MotionSetting.System,
+    timestamps = TimestampStyle.entries.firstOrNull { it.name == platform.loadPreference("timestamps") } ?: TimestampStyle.Relative,
+)
+
+private fun saveDisplay(platform: Platform, display: Display) {
+    platform.savePreference("text-size", display.textSize.name)
+    platform.savePreference("density", display.density.name)
+    platform.savePreference("chat-width", display.chatWidth.name)
+    platform.savePreference("code-size", display.codeSize.name)
+    platform.savePreference("reduced-motion", display.reducedMotion.name)
+    platform.savePreference("timestamps", display.timestamps.name)
 }
 
 private const val AccentPreference = "accent"
@@ -135,7 +166,7 @@ private fun AppContent(platform: Platform) {
     ) {
         val phone = maxWidth < Tokens.Size.Compact
 
-        CompositionLocalProvider(LocalTouch provides phone, LocalReducedMotion provides platform.reducedMotion) {
+        CompositionLocalProvider(LocalTouch provides phone, LocalReducedMotion provides LocalAppearance.current.display.reducedMotion.reduced(platform.reducedMotion)) {
             when (val current = phase) {
                 Phase.Restoring -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Label("Loading", color = MyTheme.colors.textMuted)

@@ -36,6 +36,16 @@ fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
 
 fun ago(iso: String, now: Instant = Clock.System.now()): String = relativeTime(iso, now).let { if (it == "now") it else "$it ago" }
 
+fun absoluteTime(iso: String, localDateTime: (Long) -> String?): String {
+    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val local = localDateTime(moment.toEpochMilliseconds()) ?: iso.substringBefore('Z').take(16)
+    val (year, month, day) = local.substringBefore('T').split('-')
+
+    return "${day.toInt()} ${MonthAbbreviations[month.toInt() - 1]} $year ${local.substringAfter('T').take(5)}"
+}
+
+private val MonthAbbreviations = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
 fun projectName(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').ifEmpty { cwd }
 
 fun isLaptop(os: String): Boolean = os.lowercase().let { it.contains("mac") || it.contains("darwin") || it.contains("windows") }

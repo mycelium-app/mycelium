@@ -71,7 +71,6 @@ import mycelium.api.ConversationStatus
 import mycelium.state.isChat
 import mycelium.state.chatSections
 import mycelium.state.projectName
-import mycelium.state.relativeTime
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -526,7 +525,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
             Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
-            Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+            Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
 
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)

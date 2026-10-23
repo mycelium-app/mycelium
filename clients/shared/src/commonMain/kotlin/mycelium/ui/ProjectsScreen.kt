@@ -28,7 +28,6 @@ import mycelium.api.Repositories
 import kotlin.time.Instant
 import mycelium.api.Repository
 import mycelium.state.AppState
-import mycelium.state.ago
 import mycelium.state.lastActivity
 import mycelium.state.Store
 import mycelium.state.projectsOfRepository
@@ -234,7 +233,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                                     Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
                                     Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
-                                    repository.updatedAt?.let { Label("updated ${ago(it)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
+                                    repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                                 }
 
                                 Label(forge?.let(::forgeName).orEmpty(), color = colors.textMuted, maxLines = 1)
@@ -316,7 +315,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                             ContentRow {
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                                     Label(folder.name, maxLines = 1)
-                                    Label("updated ${ago(row.updatedAt)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                                    Label("updated ${timestamp(row.updatedAt, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                                 }
 
                                 Box(Modifier)

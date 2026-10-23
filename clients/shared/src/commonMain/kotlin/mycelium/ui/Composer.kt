@@ -271,7 +271,7 @@ fun Composer(
     }
 
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        val measured = Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth()
+        val measured = Modifier.widthIn(max = readingMeasure()).fillMaxWidth()
 
         goal?.goal?.let { held ->
             Box(measured) {

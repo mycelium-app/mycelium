@@ -36,7 +36,7 @@ class SettingsPhoneTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalTouch provides touch, LocalOpenList provides {}) {
-                    SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test") {}
+                    SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test", onSignOut = {})
                 }
             }
         }

@@ -86,13 +86,13 @@ val FloatShape = RoundedCornerShape(Tokens.Radius.Float)
 val SegmentShape = RoundedCornerShape(Tokens.Radius.Control - Tokens.Space.S0_5)
 
 @Composable
-fun touchMin(base: Dp): Dp = if (LocalTouch.current) maxOf(base, Tokens.Size.Touch) else base
+fun touchMin(base: Dp): Dp = if (LocalTouch.current) maxOf(base, Tokens.Size.Touch) else densed(base)
 
 @Composable
 fun rowHeight(): Dp = touchMin(Tokens.Size.Row)
 
 @Composable
-fun barHeight(): Dp = if (LocalTouch.current) Tokens.Size.BarTouch else Tokens.Size.Bar
+fun barHeight(): Dp = if (LocalTouch.current) Tokens.Size.BarTouch else densed(Tokens.Size.Bar)
 
 @Composable
 fun Label(

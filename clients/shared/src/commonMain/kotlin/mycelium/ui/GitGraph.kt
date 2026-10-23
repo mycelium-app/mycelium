@@ -58,7 +58,6 @@ import mycelium.api.GitRef
 import mycelium.api.GraphCommit
 import mycelium.state.BranchEntry
 import mycelium.state.GraphRow
-import mycelium.state.ago
 import mycelium.state.branchEntries
 import mycelium.state.graphDescription
 import mycelium.state.graphRows
@@ -174,7 +173,7 @@ private fun GraphItem(row: GraphRow, gutter: Int, head: Int?, selected: Boolean,
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                 Label(commit.hash.take(ShortHash), style = Tokens.Type.CodeSm, color = colors.textFaint, maxLines = 1)
                 Label(commit.author, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-                Label(ago(commit.date), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(timestamp(commit.date, ago = true), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
         }
     }
@@ -352,8 +351,8 @@ private fun BranchRow(entry: BranchEntry, active: Boolean, onClick: () -> Unit) 
         is BranchEntry.Create -> "Create branch ${entry.name}"
     }
     val detail = when (entry) {
-        is BranchEntry.Local -> "${entry.branch.author} · ${ago(entry.branch.date)} · ${entry.branch.subject}"
-        is BranchEntry.Remote -> "${entry.branch.author} · ${ago(entry.branch.date)} · ${entry.branch.subject}"
+        is BranchEntry.Local -> "${entry.branch.author} · ${timestamp(entry.branch.date, ago = true)} · ${entry.branch.subject}"
+        is BranchEntry.Remote -> "${entry.branch.author} · ${timestamp(entry.branch.date, ago = true)} · ${entry.branch.subject}"
         is BranchEntry.Create -> null
     }
     val current = entry is BranchEntry.Local && entry.current

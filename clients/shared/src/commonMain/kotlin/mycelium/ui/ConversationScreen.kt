@@ -43,7 +43,6 @@ import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
 import mycelium.state.Store
 import mycelium.state.ThreadItem
-import mycelium.state.ago
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
@@ -58,7 +57,6 @@ import mycelium.state.slashCommands
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
 import mycelium.state.projectName
-import mycelium.state.relativeTime
 import mycelium.state.statusSectionName
 
 @Composable
@@ -508,7 +506,7 @@ private fun InspectorContent(conversation: Conversation, node: NodeSummary?, gro
             "Status" to statusSectionName(conversation.status),
             "Mode" to (conversation.mode ?: "Default"),
             "Model" to (conversation.model ?: "Not set"),
-            "Started" to ago(conversation.createdAt),
+            "Started" to timestamp(conversation.createdAt, ago = true),
         ),
     )
 }

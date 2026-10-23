@@ -3,6 +3,8 @@ package mycelium.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density as UnitDensity
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -128,6 +130,7 @@ object Tokens {
         val ControlMd: Dp = 28.dp
         val ControlLg: Dp = 32.dp
         val Row: Dp = 32.dp
+        val DensityFloor: Dp = 20.dp
         val Bar: Dp = 40.dp
         val DiffFile: Dp = 30.dp
         val CommandOutput: Dp = 240.dp
@@ -212,7 +215,7 @@ fun TextStyle.themed(): TextStyle {
 
     return when (fontFamily) {
         FontFamily.SansSerif -> copy(fontFamily = fonts.sans)
-        FontFamily.Monospace -> copy(fontFamily = fonts.mono)
+        FontFamily.Monospace -> copy(fontFamily = fonts.mono).scaledForCode()
         else -> this
     }
 }
@@ -228,7 +231,7 @@ object MyTheme {
         @Composable get() = LocalPalette.current
 }
 
-data class Appearance(val dark: Boolean, val accent: Accent, val accents: List<Accent>, val onAccent: (Accent) -> Unit, val onToggleDark: () -> Unit = {})
+data class Appearance(val dark: Boolean, val accent: Accent, val accents: List<Accent>, val onAccent: (Accent) -> Unit, val onToggleDark: () -> Unit = {}, val display: Display = Display(), val onDisplay: (Display) -> Unit = {})
 
 val LocalAppearance = staticCompositionLocalOf { Appearance(true, Accent.Neutral, emptyList(), {}) }
 
@@ -246,7 +249,14 @@ fun MyceliumTheme(dark: Boolean = isSystemInDarkTheme(), accent: Accent = Accent
         ),
     )
 
-    CompositionLocalProvider(LocalPalette provides palette(dark, accent, systemAccent), LocalFonts provides fonts) {
+    val density = LocalDensity.current
+    val textScale = LocalAppearance.current.display.textSize.scale
+
+    CompositionLocalProvider(
+        LocalPalette provides palette(dark, accent, systemAccent),
+        LocalFonts provides fonts,
+        LocalDensity provides UnitDensity(density.density, density.fontScale * textScale),
+    ) {
         ThemedContextMenus(content)
     }
 }

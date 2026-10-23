@@ -20,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import mycelium.api.Memory
 import mycelium.state.Store
-import mycelium.state.relativeTime
 
 @Composable
 fun MemoriesSettings(store: Store) {
@@ -115,7 +114,7 @@ fun MemoriesSettings(store: Store) {
                             Tag(scope)
                         }
 
-                        Label("${memory.createdBy}  ·  ${relativeTime(memory.createdAt)}", Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                        Label("${memory.createdBy}  ·  ${timestamp(memory.createdAt)}", Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
                     }
 
                     if (deleting == memory.id) {

@@ -42,7 +42,6 @@ import mycelium.state.Store
 import mycelium.state.agentName
 import mycelium.state.formatCost
 import mycelium.state.formatTokens
-import mycelium.state.relativeTime
 
 private const val SearchDebounceMillis = 250L
 
@@ -126,7 +125,8 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     val density = LocalDensity.current
     val bodyStyle = Tokens.Type.Ui.themed()
     val headerStyle = Tokens.Type.MetaStrong.themed()
-    val pastCells = { row: Conversation -> listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)) + usageCells(usage[row.id]) }
+    val stamp = timestamper()
+    val pastCells = { row: Conversation -> listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), stamp(row.updatedAt, false)) + usageCells(usage[row.id]) }
     val naturalWidths = remember(rows, state.nodes, usage, touch, bodyStyle, headerStyle) {
         if (touch) {
             listOf(0.dp, ActionWidth)
@@ -200,7 +200,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                     ) {
                         Label(hit.title, maxLines = 1)
                         Label(
-                            listOf(state.nodes[hit.nodeId]?.name.orEmpty(), relativeTime(hit.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                            listOf(state.nodes[hit.nodeId]?.name.orEmpty(), stamp(hit.updatedAt, false)).filter { it.isNotEmpty() }.joinToString("  ·  "),
                             style = Tokens.Type.Meta,
                             color = colors.textMuted,
                             maxLines = 1,
@@ -261,7 +261,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
                             if (touch) {
                                 Label(
-                                    (listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)) + usageCells(usage[row.id]).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
+                                    (listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), stamp(row.updatedAt, false)) + usageCells(usage[row.id]).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
                                     style = Tokens.Type.Meta,
                                     color = colors.textMuted,
                                     maxLines = 1,

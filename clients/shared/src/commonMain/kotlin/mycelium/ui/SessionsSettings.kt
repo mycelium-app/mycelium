@@ -23,7 +23,6 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.NodeSummary
 import mycelium.api.SessionSummary
 import mycelium.state.Store
-import mycelium.state.ago
 
 @Composable
 fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
@@ -65,7 +64,7 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                         }
 
                         Label(session.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(if (session.current) "now" else ago(session.lastUsedAt), color = colors.textMuted)
+                        Label(if (session.current) "now" else timestamp(session.lastUsedAt, ago = true), color = colors.textMuted)
 
                         Row(horizontalArrangement = Arrangement.End) {
                             MyButton(
@@ -113,7 +112,7 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                         }
 
                         Label(node.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(if (node.online) "online" else node.lastSeenAt?.let(::ago) ?: "never", color = colors.textMuted)
+                        Label(if (node.online) "online" else node.lastSeenAt?.let { timestamp(it, ago = true) } ?: "never", color = colors.textMuted)
 
                         Row(horizontalArrangement = Arrangement.End) {
                             MyButton({ revoking = node }, text = "Revoke", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Revoke ${node.name}")

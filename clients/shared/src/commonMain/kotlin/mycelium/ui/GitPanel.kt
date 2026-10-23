@@ -51,7 +51,6 @@ import mycelium.state.splitCommitDiff
 import mycelium.state.ChangeRow
 import mycelium.state.Store
 import mycelium.state.ToolStatus
-import mycelium.state.ago
 import mycelium.state.changeRows
 import mycelium.state.commitProblem
 import mycelium.state.diffIsStaged
@@ -171,7 +170,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 
         if (commit != null) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-                Label("${commit.hash.take(ShortHashLength)} · ${commit.author} · ${ago(commit.date)}", Modifier.padding(Tokens.Space.S3), Tokens.Type.Meta, colors.textMuted)
+                Label("${commit.hash.take(ShortHashLength)} · ${commit.author} · ${timestamp(commit.date, ago = true)}", Modifier.padding(Tokens.Space.S3), Tokens.Type.Meta, colors.textMuted)
 
                 if (shownCommit == null) {
                     Label("Loading the commit", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
@@ -454,11 +453,13 @@ private fun History(log: List<GitCommit>) {
     }
 
     for (commit in log) {
+        val committed = timestamp(commit.date, ago = true)
+
         Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5)
-                .semantics(mergeDescendants = true) { contentDescription = "${commit.subject}, ${commit.author}, ${ago(commit.date)}" },
+                .semantics(mergeDescendants = true) { contentDescription = "${commit.subject}, ${commit.author}, $committed" },
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
         ) {
             Label(commit.subject, maxLines = 2)
@@ -466,7 +467,7 @@ private fun History(log: List<GitCommit>) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                 Icon(MyIcon.Person, colors.textMuted, Tokens.Size.IconSm)
                 Label(commit.author, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-                Label(ago(commit.date), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(timestamp(commit.date, ago = true), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 Label(commit.hash.take(ShortHashLength), style = Tokens.Type.CodeSm, color = colors.textFaint, maxLines = 1)
             }
         }

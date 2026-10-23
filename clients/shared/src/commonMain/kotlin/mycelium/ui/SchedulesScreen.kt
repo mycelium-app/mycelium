@@ -29,7 +29,6 @@ import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
-import mycelium.state.ago
 import mycelium.state.cronFor
 import mycelium.state.describeCron
 import mycelium.state.eachRunName
@@ -154,7 +153,7 @@ private fun RunRow(run: ScheduleRun, state: AppState) {
     val conversation = state.conversations[run.conversationId]
 
     ContentRow {
-        Label(ago(run.ranAt), color = colors.textMuted, maxLines = 1)
+        Label(timestamp(run.ranAt, ago = true), color = colors.textMuted, maxLines = 1)
         Label(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty(), maxLines = 1)
 
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
