@@ -337,6 +337,80 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     Ok(Json(conversation))
 }
 
+pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, user.id).await?;
+
+    if row.archived_at.is_none() {
+        return Err(ApiError::conflict("not_archived", "Archive this conversation before deleting it."));
+    }
+
+    let removed = sqlx::query_as::<_, (Uuid, Uuid)>(
+        "with recursive family as (
+             select id, node_id from conversations where id = $1
+             union all
+             select c.id, c.node_id from conversations c join family f on c.parent_id = f.id
+         ) select id, node_id from family",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let ids: Vec<Uuid> = removed.iter().map(|(removed_id, _)| *removed_id).collect();
+    let attachments = sqlx::query_scalar::<_, String>(
+        "select distinct sha from (
+             select a->>'sha256' as sha from events e, jsonb_array_elements(case when jsonb_typeof(e.payload->'attachments') = 'array' then e.payload->'attachments' else '[]'::jsonb end) a where e.conversation_id = any($1)
+             union all
+             select a->>'sha256' from queued_prompts q, jsonb_array_elements(q.attachments) a where q.conversation_id = any($1)
+         ) found where sha is not null",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    sqlx::query("delete from conversations where id = $1").bind(id).execute(&mut *tx).await?;
+
+    let mut unreferenced = Vec::new();
+
+    for sha256 in attachments {
+        let still_used = sqlx::query_scalar::<_, bool>(
+            "select exists (select 1 from events e join conversations c on c.id = e.conversation_id where c.owner = $1 and jsonb_typeof(e.payload->'attachments') = 'array' and e.payload->'attachments' @> jsonb_build_array(jsonb_build_object('sha256', $2::text)))
+                 or exists (select 1 from queued_prompts q join conversations c on c.id = q.conversation_id where c.owner = $1 and q.attachments @> jsonb_build_array(jsonb_build_object('sha256', $2::text)))",
+        )
+        .bind(user.id)
+        .bind(&sha256)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if still_used {
+            continue;
+        }
+
+        sqlx::query("delete from attachments where owner = $1 and sha256 = $2").bind(user.id).bind(&sha256).execute(&mut *tx).await?;
+
+        let held_by_another_owner = sqlx::query_scalar::<_, bool>("select exists (select 1 from attachments where sha256 = $1)").bind(&sha256).fetch_one(&mut *tx).await?;
+
+        if !held_by_another_owner {
+            unreferenced.push(sha256);
+        }
+    }
+
+    tx.commit().await?;
+
+    for sha256 in unreferenced {
+        let _ = std::fs::remove_file(state.config.data_dir.join("attachments").join(sha256));
+    }
+
+    for (removed_id, node_id) in removed {
+        state.hub.send(node_id, ControlToNode::CloseSession { conversation_id: removed_id });
+        state.remove_session(node_id, removed_id).await?;
+        state.hub.forget_prompts_of(removed_id);
+        state.hub.take_send_now(removed_id);
+        state.publish(Some(user.id), StreamMessage::ConversationRemoved { conversation_id: removed_id });
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn opened(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;

@@ -60,6 +60,20 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ConversationChanged ->
         if (message.conversation.sideKind == GoalCheckKind) state else state.copy(conversations = state.conversations + (message.conversation.id to message.conversation))
 
+    is StreamMessage.ConversationRemoved -> {
+        val id = message.conversationId
+
+        state.copy(
+            conversations = state.conversations - id,
+            events = state.events - id,
+            openedConversations = state.openedConversations - id,
+            queues = state.queues - id,
+            goals = state.goals - id,
+            walkthroughs = state.walkthroughs - id,
+            moves = state.moves - id,
+        )
+    }
+
     is StreamMessage.EventAppended -> {
         val id = message.event.conversationId
 

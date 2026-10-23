@@ -183,6 +183,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onArchived()
                         }
                     },
+                    onDelete = {
+                        store.act {
+                            api.deleteConversation(id)
+                            onArchived()
+                        }
+                    },
                 )
 
                 val walkthrough = state.walkthroughs[id]
@@ -306,8 +312,10 @@ private fun ConversationHeader(
     onArchive: () -> Unit,
 ) {
     val colors = MyTheme.colors
+    onDelete: () -> Unit,
     var renaming by remember(conversation.id) { mutableStateOf(false) }
     var draft by remember(conversation.title) { mutableStateOf(conversation.title) }
+    var confirmingDelete by remember(conversation.id) { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var nodeMenuOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
@@ -395,10 +403,18 @@ private fun ConversationHeader(
                     MenuItem(if (archived) "Restore" else "Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
                 }
             }
+
+                    if (archived) {
+                        MenuItem("Delete", onClick = { menuOpen = false; confirmingDelete = true })
+                    }
         }
     }
 }
 
+
+    if (confirmingDelete) {
+        DeleteConversationDialog(conversation.title, onDismiss = { confirmingDelete = false }, onConfirm = { confirmingDelete = false; onDelete() })
+    }
 fun toneOf(status: ConversationStatus): Tone = when (status) {
     ConversationStatus.Working -> Tone.Working
     ConversationStatus.Input, ConversationStatus.Review -> Tone.Attention

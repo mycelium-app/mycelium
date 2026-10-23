@@ -185,6 +185,21 @@ class StateTest {
     }
 
     @Test
+    fun aRemovedConversationFrameDropsTheConversationAndWhatWasLoadedForIt() {
+        val row = assertIs<StreamMessage.ConversationChanged>(
+            parseStreamMessage(
+                """{"type":"conversation","id":"a","owner":"u","node_id":"n","agent":"codex","cwd":"/x","title":"T","status":"done",
+                "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":"2026-10-22T10:00:00Z"}""",
+            ),
+        )
+        val state = reduce(AppState(), row).copy(openedConversations = setOf("a"), events = mapOf("a" to emptyList()))
+
+        val after = reduce(state, assertIs<StreamMessage.ConversationRemoved>(parseStreamMessage("""{"type":"conversation_removed","conversation_id":"a"}""")))
+
+        assertEquals(Triple(emptyMap(), emptyMap(), emptySet()), Triple(after.conversations, after.events, after.openedConversations))
+    }
+
+    @Test
     fun aRevokedNodeFrameRemovesTheNodeFromState() {
         val node = mycelium.api.NodeSummary(
             id = "n1", name = "box", hostname = "box", os = "linux", arch = "x86_64", version = "0.1.0", online = true, draining = false,

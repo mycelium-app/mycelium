@@ -32,6 +32,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PATCH /api/v1/conversations/{id}",
     "POST /api/v1/conversations/{id}/opened",
     "POST /api/v1/conversations/{id}/prompt",
+    "DELETE /api/v1/conversations/{id}",
     "PATCH /api/v1/conversations/{id}/queue/{queue_id}",
     "DELETE /api/v1/conversations/{id}/queue/{queue_id}",
     "POST /api/v1/conversations/{id}/queue/{queue_id}/send-now",
@@ -706,6 +707,25 @@ async fn renaming_and_archiving_a_conversation_are_streamed() {
     server.user.json(server.user.patch(&url).json(&json!({"archived": false}))).await;
     conversation_where(&mut stream, id, |conversation| conversation.archived_at.is_none()).await;
 }
+#[tokio::test]
+async fn deleting_an_archived_conversation_is_streamed_as_its_removal() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let mut stream = server.user.stream().await;
+    let url = format!("/api/v1/conversations/{id}");
+    server.user.json(server.user.patch(&url).json(&json!({"archived": true}))).await;
+
+    server.user.json(server.user.delete(&url)).await;
+
+    let removed = stream.until(|message| match message {
+        StreamMessage::ConversationRemoved { conversation_id } => Some(conversation_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(removed, id);
+}
+
 
 async fn announce_title(link: &mut NodeLink, id: Uuid, seq: i64, title: &str) {
     link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "session_info_update", "title": title}}) }).await;

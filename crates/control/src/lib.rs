@@ -102,7 +102,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/logins/{login_id}/input", post(nodes::login_input))
         .route("/api/v1/logins/{login_id}", delete(nodes::stop_login))
         .route("/api/v1/conversations", get(conversations::list).post(conversations::create))
-        .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch))
+        .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch).delete(conversations::delete))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))

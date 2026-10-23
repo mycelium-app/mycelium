@@ -10,6 +10,9 @@ use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPr
 pub enum StreamMessage {
     Conversation(Conversation),
     Event(Event),
+    ConversationRemoved {
+        conversation_id: Uuid,
+    },
     Queue {
         conversation_id: Uuid,
         queue: Vec<QueuedPrompt>,

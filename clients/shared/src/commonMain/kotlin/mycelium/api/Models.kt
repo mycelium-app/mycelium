@@ -811,6 +811,8 @@ sealed interface StreamMessage {
 
     data class NodeRemoved(val nodeId: String) : StreamMessage
 
+    data class ConversationRemoved(val conversationId: String) : StreamMessage
+
     data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
 
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
@@ -846,6 +848,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
             element.requireString("node_id"),
             MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),
         )
+        "conversation_removed" -> StreamMessage.ConversationRemoved(element.requireString("conversation_id"))
         "login_output" -> StreamMessage.LoginOutput(element.requireString("login_id"), element.requireString("data"))
         "login_finished" -> StreamMessage.LoginFinished(
             loginId = element.requireString("login_id"),

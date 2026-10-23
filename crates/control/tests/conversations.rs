@@ -930,6 +930,116 @@ async fn a_side_chat_belongs_to_its_owner_and_its_node() {
     let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": other.id, "agent": "claude", "cwd": "/work/app", "parent_id": parent, "side_kind": "side"}))).await;
     assert_eq!((status, body["error"].as_str()), (400, Some("parent_invalid")));
 }
+
+async fn archived_conversation(server: &Server, link: &mut NodeLink, prompt_text: Option<&str>) -> Uuid {
+    let id = started_conversation(server, link, prompt_text).await;
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"archived": true}))).await;
+
+    id
+}
+
+async fn count_rows(server: &Server, table: &str, id: Uuid) -> i64 {
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!("select count(*) from {table} where conversation_id = $1"))).bind(id).fetch_one(&server.pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_conversation_that_is_not_archived_is_not_deleted() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+
+    let (status, body) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{id}"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("not_archived")));
+    assert_eq!(server.conversation(id).await["id"], json!(id));
+}
+
+#[tokio::test]
+async fn another_person_cannot_delete_a_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = archived_conversation(&server, &mut link, None).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.delete(&format!("/api/v1/conversations/{id}"))).await;
+
+    assert_eq!(status, 404);
+    assert_eq!(server.conversation(id).await["id"], json!(id));
+}
+
+#[tokio::test]
+async fn deleting_an_archived_conversation_removes_its_messages_usage_and_side_chats_and_closes_its_session() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let id = started_conversation(&server, &mut link, Some("Fix the flaky restore test")).await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 10, "outputTokens": 5})) }).await;
+    let (_, side) = start_side(&server, id, json!({"kind": "btw", "text": "why?"})).await;
+    let side_id: Uuid = side["id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+    link.start_session(side_id, "acp-2").await;
+    link.expect_prompt().await;
+    let kept = started_conversation(&server, &mut link, Some("Keep me")).await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::TurnEnd { conversation_id: kept, seq: 1, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 1, "outputTokens": 1})) }).await;
+    common::eventually("both turns recorded", || async { (count_rows(&server, "usage_turns", id).await == 1 && count_rows(&server, "usage_turns", kept).await == 1).then_some(()) }).await;
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"archived": true}))).await;
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{id}"))).await;
+
+    assert_eq!(status, 204);
+    assert_eq!(server.user.get(&format!("/api/v1/conversations/{id}")).send().await.unwrap().status(), 404);
+    assert_eq!(server.user.get(&format!("/api/v1/conversations/{side_id}")).send().await.unwrap().status(), 404);
+    for table in ["events", "usage_turns", "queued_prompts", "search_entries"] {
+        assert_eq!((table, count_rows(&server, table, id).await), (table, 0));
+    }
+    assert_eq!(count_rows(&server, "usage_turns", kept).await, 1);
+    let closed: Vec<Uuid> = vec![link.next().await, link.next().await].into_iter().filter_map(|message| match message {
+        ControlToNode::CloseSession { conversation_id } => Some(conversation_id),
+        _ => None,
+    }).collect();
+    assert_eq!(closed.len(), 2);
+    assert!(closed.contains(&id) && closed.contains(&side_id));
+    let removed = stream.until(|message| match message {
+        StreamMessage::ConversationRemoved { conversation_id } if conversation_id == id => Some(conversation_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(removed, id);
+    let (_, past) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
+    assert!(past.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn deleting_a_conversation_removes_the_attachments_nothing_else_uses_and_keeps_shared_ones() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let doomed = started_conversation(&server, &mut link, None).await;
+    let kept = started_conversation(&server, &mut link, None).await;
+    let upload = |conversation: Uuid, bytes: Vec<u8>| {
+        let request = server.user.post(&format!("/api/v1/conversations/{conversation}/attachments")).query(&[("name", "a.txt")]).header("content-type", "text/plain").body(bytes);
+
+        async { server.user.json(request).await.1 }
+    };
+    let only_here = upload(doomed, b"only here".to_vec()).await;
+    let shared = upload(doomed, b"shared".to_vec()).await;
+    for (conversation, attachments) in [(doomed, json!([only_here, shared])), (kept, json!([shared]))] {
+        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{conversation}/prompt")).json(&json!({"text": "see", "attachments": attachments}))).await;
+        assert_eq!(status, 204, "{body}");
+    }
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{doomed}")).json(&json!({"archived": true}))).await;
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{doomed}"))).await;
+
+    let file = |attachment: &serde_json::Value| server.data_dir.join("attachments").join(attachment["sha256"].as_str().unwrap());
+    assert_eq!(status, 204);
+    assert!(!file(&only_here).exists());
+    assert!(file(&shared).exists());
+    assert_eq!(server.user.get(&format!("/api/v1/attachments/{}", only_here["sha256"].as_str().unwrap())).send().await.unwrap().status(), 404);
+}
+
 #[tokio::test]
 async fn migration_0033_gives_back_the_predicted_title_only_to_titles_the_user_never_set() {
     let server = Server::start().await;

@@ -27,6 +27,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 private const val NodeId = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -54,11 +55,19 @@ class PastConversationsTest {
     val rule = createComposeRule()
 
     private val importFinishes = CompletableDeferred<Unit>()
+    private val deleted = mutableListOf<String>()
 
-    private fun store(): Store {
+    private fun store(current: String = "[]"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
+
+            if (request.method == HttpMethod.Delete) {
+                deleted += path
+
+                return@MockEngine respond("", HttpStatusCode.NoContent)
+            }
+
             val body = when {
                 path.endsWith("/imports") && request.method == HttpMethod.Post -> {
                     importFinishes.await()
@@ -67,7 +76,7 @@ class PastConversationsTest {
                 path.endsWith("/imports") -> """[{"node_id":"$NodeId","agent":"claude","found":3,"imported":0}]"""
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> ArchivedJson
-                path.endsWith("/conversations") -> "[]"
+                path.endsWith("/conversations") -> current
                 else -> "{}"
             }
 
@@ -87,6 +96,20 @@ class PastConversationsTest {
 
         rule.onNodeWithText("Project").assertExists()
         rule.onNodeWithText("okapi").assertExists()
+    }
+
+    @Test
+    fun anArchivedConversationCanBeDeletedFromItsHeaderMenuAfterConfirming() {
+        val store = store(current = ArchivedJson)
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
+
+        rule.onNodeWithContentDescription("More").performClick()
+        rule.onNodeWithText("Delete").performClick()
+        rule.onNodeWithText("Delete Plan the rollout?").assertExists()
+        rule.onNodeWithText("Delete conversation").performClick()
+
+        rule.waitUntil { deleted.isNotEmpty() }
+        assertEquals(listOf("/api/v1/conversations/c1"), deleted)
     }
 
     @Test

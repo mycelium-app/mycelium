@@ -257,6 +257,9 @@ fn stream_login_and_queue_messages_round_trip() {
     let resources = round_trip(&StreamMessage::NodeResources { node_id: id(), sample: sample() });
     assert_eq!(resources["type"], "node_resources");
 
+    let gone = round_trip(&StreamMessage::ConversationRemoved { conversation_id: id() });
+    assert_eq!(gone["type"], "conversation_removed");
+
     let removed = round_trip(&StreamMessage::NodeRemoved { node_id: id() });
     assert_eq!(removed["type"], "node_removed");
 

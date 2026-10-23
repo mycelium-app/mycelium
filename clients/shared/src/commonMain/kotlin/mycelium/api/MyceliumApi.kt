@@ -356,6 +356,10 @@ class MyceliumApi(
         call("/conversations/$id/move") { client.delete(it) { authorise() } }
     }
 
+    suspend fun deleteConversation(id: String) {
+        call("/conversations/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun goal(id: String): Goal? = call("/conversations/$id/goal") { client.get(it) { authorise() } }.body()
 
     suspend fun setGoal(id: String, request: SetGoalRequest): Goal = call("/conversations/$id/goal") { client.put(it) { authorise(); json(request) } }.body()
