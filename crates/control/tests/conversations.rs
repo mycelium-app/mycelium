@@ -930,3 +930,22 @@ async fn a_side_chat_belongs_to_its_owner_and_its_node() {
     let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": other.id, "agent": "claude", "cwd": "/work/app", "parent_id": parent, "side_kind": "side"}))).await;
     assert_eq!((status, body["error"].as_str()), (400, Some("parent_invalid")));
 }
+#[tokio::test]
+async fn migration_0033_gives_back_the_predicted_title_only_to_titles_the_user_never_set() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let untouched = started_conversation(&server, &mut link, Some("Fix the flaky restore test\nit fails on CI")).await;
+    link.expect_prompt().await;
+    let renamed = started_conversation(&server, &mut link, Some("Fix the flaky restore test")).await;
+    link.expect_prompt().await;
+    let untitled = started_conversation(&server, &mut link, None).await;
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{renamed}")).json(&json!({"title": "Restore work"}))).await;
+    sqlx::query("update conversations set title = 'Untitled conversation', title_user_set = true where id = $1").bind(untitled).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set title_user_set = true where id = $1").bind(untouched).execute(&server.pool).await.unwrap();
+
+    sqlx::query(sqlx::AssertSqlSafe(include_str!("../migrations/0033_restore_predicted_titles.sql"))).execute(&server.pool).await.unwrap();
+
+    let flags = (server.conversation(untouched).await["title_user_set"].as_bool(), server.conversation(renamed).await["title_user_set"].as_bool(), server.conversation(untitled).await["title_user_set"].as_bool());
+    assert_eq!(flags, (Some(false), Some(true), Some(false)));
+}
+

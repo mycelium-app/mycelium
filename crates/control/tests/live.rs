@@ -707,6 +707,27 @@ async fn renaming_and_archiving_a_conversation_are_streamed() {
     conversation_where(&mut stream, id, |conversation| conversation.archived_at.is_none()).await;
 }
 
+async fn announce_title(link: &mut NodeLink, id: Uuid, seq: i64, title: &str) {
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "session_info_update", "title": title}}) }).await;
+}
+
+#[tokio::test]
+async fn a_title_the_agent_predicts_is_streamed_for_an_unrenamed_conversation_and_not_for_a_renamed_one() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let mut stream = server.user.stream().await;
+
+    announce_title(&mut link, id, 1, "Fix the restore backoff").await;
+    conversation_where(&mut stream, id, |conversation| conversation.title == "Fix the restore backoff" && !conversation.title_user_set).await;
+
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"title": "Restore work"}))).await;
+    conversation_where(&mut stream, id, |conversation| conversation.title == "Restore work" && conversation.title_user_set).await;
+    announce_title(&mut link, id, 2, "Share the restore strings").await;
+    let streamed = conversation_where(&mut stream, id, |conversation| conversation.title_user_set).await;
+    assert_eq!(streamed.title, "Restore work");
+}
+
 #[tokio::test]
 async fn changing_mode_and_model_is_streamed() {
     let server = Server::start().await;
