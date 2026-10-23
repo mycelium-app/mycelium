@@ -61,6 +61,7 @@ import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
+import mycelium.state.turnIsOpen
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
 import mycelium.state.projectName
@@ -306,7 +307,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 } else {
                     Composer(
                         conversation = conversation,
-                        working = conversation.status == ConversationStatus.Working,
+                        working = conversation.status == ConversationStatus.Working && turnIsOpen(state.events[id].orEmpty()),
                         queue = state.queues[id].orEmpty(),
                         sending = sending.drop(delivering.size),
                         onSend = ::send,

@@ -10,8 +10,10 @@ import mycelium.state.ToolStatus
 import mycelium.state.buildThread
 import mycelium.state.diffLines
 import mycelium.state.suggestedReplies
+import mycelium.state.turnIsOpen
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -261,5 +263,16 @@ class SuggestedRepliesTest {
     @Test
     fun anOpenQuestionSuggestsNothing() {
         assertEquals(emptyList(), suggestedReplies("What colour should the button be?"))
+    }
+
+    @Test
+    fun aTurnIsOpenFromTheMessageUntilItsTurnEnds() {
+        val asked = listOf(event(1, EventKinds.UserMessage, """{"text":"go"}"""), chunk(2, "working"))
+        val answered = asked + event(3, EventKinds.TurnEnd, """{"stop_reason":"end_turn"}""")
+        val backgroundChatter = answered + chunk(4, "a subagent finished")
+
+        assertTrue(turnIsOpen(asked))
+        assertFalse(turnIsOpen(answered))
+        assertFalse(turnIsOpen(backgroundChatter))
     }
 }

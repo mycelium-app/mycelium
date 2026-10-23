@@ -141,6 +141,8 @@ private const val MaxDiffSide = 400
 
 fun buildThread(events: List<Event>): List<ThreadItem> = ThreadBuilder().build(events)
 
+fun turnIsOpen(events: List<Event>): Boolean = events.lastOrNull { it.kind == EventKinds.UserMessage || it.kind == EventKinds.TurnEnd }?.kind == EventKinds.UserMessage
+
 class ThreadBuilder {
     private val items = mutableListOf<ThreadItem>()
     private var folded = 0
