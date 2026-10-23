@@ -41,6 +41,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon) {
     Instructions("Instructions", MyIcon.File),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key),
+    ChatModels("Chat models", MyIcon.Chip),
     Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
     Account("Account", MyIcon.Settings),
@@ -105,6 +106,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Instructions -> InstructionsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
+            SettingsSection.ChatModels -> ModelProvidersSettings(store)
             SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
             SettingsSection.Account -> AccountSettings(me, controlPlane, onSignOut)

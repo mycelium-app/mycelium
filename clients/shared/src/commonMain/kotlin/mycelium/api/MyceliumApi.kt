@@ -191,6 +191,18 @@ class MyceliumApi(
         call("/forges/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun modelProviders(): List<ModelProvider> = call("/model-providers") { client.get(it) { authorise() } }.body()
+
+    suspend fun createModelProvider(request: CreateModelProviderRequest): ModelProvider =
+        call("/model-providers") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun refreshModelProvider(id: String): ModelProvider =
+        call("/model-providers/$id/refresh") { client.post(it) { authorise() } }.body()
+
+    suspend fun deleteModelProvider(id: String) {
+        call("/model-providers/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = ""): Repositories =
         call("/repositories") {
             client.get(it) {
@@ -287,6 +299,9 @@ class MyceliumApi(
 
     suspend fun createConversation(request: CreateConversationRequest): Conversation =
         call("/conversations") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun createChat(request: CreateChatRequest): Conversation =
+        call("/chats") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun conversation(id: String): Conversation = call("/conversations/$id") { client.get(it) { authorise() } }.body()
 

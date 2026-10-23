@@ -263,6 +263,34 @@ data class Forge(
 data class ConnectForgeRequest(val kind: String, @SerialName("base_url") val baseUrl: String? = null, val token: String)
 
 @Serializable
+data class ModelProvider(
+    val id: String,
+    val kind: String,
+    val name: String,
+    @SerialName("base_url") val baseUrl: String? = null,
+    @SerialName("key_hint") val keyHint: String? = null,
+    val models: List<String> = emptyList(),
+    @SerialName("default_model") val defaultModel: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateModelProviderRequest(
+    val kind: String,
+    val name: String,
+    @SerialName("base_url") val baseUrl: String? = null,
+    @SerialName("api_key") val apiKey: String? = null,
+)
+
+@Serializable
+data class CreateChatRequest(
+    @SerialName("provider_id") val providerId: String,
+    val model: String,
+    val prompt: String? = null,
+    @SerialName("parent_id") val parentId: String? = null,
+)
+
+@Serializable
 data class Project(
     val id: String,
     @SerialName("node_id") val nodeId: String,
@@ -574,6 +602,7 @@ data class Conversation(
     @SerialName("title_user_set") val titleUserSet: Boolean = false,
     @SerialName("parent_id") val parentId: String? = null,
     @SerialName("side_kind") val sideKind: String? = null,
+    @SerialName("provider_id") val providerId: String? = null,
 )
 
 @Serializable
