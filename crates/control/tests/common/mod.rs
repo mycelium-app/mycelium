@@ -39,13 +39,25 @@ where
     }
 }
 
+const STALE_DATABASE_SECONDS: u64 = 600;
+
 pub async fn create_database() -> String {
     let Ok(admin) = std::env::var("MYCELIUM_TEST_DATABASE_URL") else {
         eprintln!("SKIPPED: set MYCELIUM_TEST_DATABASE_URL to a Postgres admin URL, for example postgres://postgres:pw@127.0.0.1:5432/postgres, to run these tests.");
         std::process::exit(0);
     };
-    let name = format!("test_{}", Uuid::new_v4().simple());
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let name = format!("test_{now}_{}", Uuid::new_v4().simple());
     let mut connection = PgConnection::connect(&admin).await.unwrap();
+    let finished: Vec<String> = sqlx::query_scalar("select datname from pg_database where datname ~ '^test_[0-9]+_' and split_part(datname, '_', 2)::bigint < $1")
+        .bind((now - STALE_DATABASE_SECONDS) as i64)
+        .fetch_all(&mut connection)
+        .await
+        .unwrap();
+
+    for stale in finished {
+        sqlx::query(sqlx::AssertSqlSafe(format!("drop database if exists {stale} with (force)"))).execute(&mut connection).await.ok();
+    }
 
     sqlx::query(sqlx::AssertSqlSafe(format!("create database {name}"))).execute(&mut connection).await.unwrap();
 

@@ -202,3 +202,19 @@ async fn the_web_client_is_served_with_single_page_fallback_but_unknown_api_path
     assert_eq!(status, 404);
     assert_eq!(body["error"], json!("not_found"));
 }
+
+#[tokio::test]
+async fn creating_a_test_database_drops_the_ones_left_by_finished_runs() {
+    let admin = std::env::var("MYCELIUM_TEST_DATABASE_URL").unwrap_or_default();
+    if admin.is_empty() {
+        return;
+    }
+
+    let mut connection = sqlx::PgConnection::connect(&admin).await.unwrap();
+    sqlx::query("create database test_1_leftover").execute(&mut connection).await.unwrap();
+
+    let fresh = create_database().await;
+
+    let left: Vec<String> = sqlx::query_scalar("select datname from pg_database where datname in ('test_1_leftover', $1)").bind(fresh.rsplit('/').next().unwrap()).fetch_all(&mut connection).await.unwrap();
+    assert_eq!(left, vec![fresh.rsplit('/').next().unwrap().to_string()]);
+}
