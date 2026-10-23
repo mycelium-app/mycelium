@@ -1,3 +1,5 @@
+use crate::api_access;
+use crate::artifacts;
 use crate::auth::AuthNode;
 use crate::error::ApiResult;
 use crate::instruction_proposals;
@@ -189,6 +191,102 @@ pub fn tool_definitions() -> Value {
                     "reason": {"type": "string", "description": "A short reason the person should approve it."},
                 },
                 "required": ["conversation", "message", "reason"],
+            },
+        },
+        {
+            "name": "request_api_access",
+            "description": "Ask the person for temporary access to the Mycelium API, for work such as debugging that needs more than these tools. It never grants anything itself: it waits for the person to approve it in a card in this conversation, where they can untick scopes and see the duration. On approval you are told in a message the path of a file holding a token and the API address; read the token from that file when you need it and never copy it into a message, a file or a commit. It expires and the person can revoke it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scopes": {"type": "array", "items": {"type": "string", "enum": ["conversations:read", "conversations:write", "nodes:read", "settings:read"]}, "description": "The access you need. Ask for the least that works."},
+                    "hours": {"type": "number", "description": "How long the access lasts, 1 to 24. Defaults to 4."},
+                    "reason": {"type": "string", "description": "A short reason the person should approve it."},
+                },
+                "required": ["scopes", "reason"],
+            },
+        },
+        {
+            "name": "create_artifact",
+            "description": "Save something the person should look at and come back to as an artifact: a design (artboards on a canvas), a page (one HTML file, which may keep state in the artifact's data store), a markdown document, or any other file such as a PDF. Give the content as text, or the path of a file in this conversation's folder. A design without content starts with one empty page. The person opens it in Mycelium, comments on it and edits it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["design", "page", "markdown", "file"], "description": "design, page (HTML), markdown, or file (anything else)."},
+                    "title": {"type": "string", "description": "A short title."},
+                    "content": {"type": "string", "description": "The content as text. A design is JSON, {\"pages\": [{\"id\", \"name\", \"items\": [...]}]}."},
+                    "path": {"type": "string", "description": "A file in this conversation's folder to store instead of content. Use it for binary files."},
+                    "media_type": {"type": "string", "description": "The media type of a file. Defaults to one guessed from the path."},
+                },
+                "required": ["kind", "title"],
+            },
+        },
+        {
+            "name": "update_artifact",
+            "description": "Save a new version of an artifact with the complete new content, as text or from a file in this conversation's folder. Earlier versions are kept. To change one artboard of a design use design_set_artboard instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact": {"type": "string", "description": "The artifact's id or slug."},
+                    "content": {"type": "string", "description": "The complete new content as text."},
+                    "path": {"type": "string", "description": "A file in this conversation's folder to store instead of content."},
+                    "note": {"type": "string", "description": "A short note saying what changed."},
+                },
+                "required": ["artifact"],
+            },
+        },
+        {
+            "name": "design_set_artboard",
+            "description": "Replace or add one artboard in the latest version of a design, and save a new version. Everything else in the design stays as it is, including what the person drew. Give artboard to replace an existing one, or leave it out to add a new one beside the others. The html is a complete document, shown in a sandboxed frame.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact": {"type": "string", "description": "The design's id or slug."},
+                    "page": {"type": "string", "description": "The id of the page. Defaults to the first page."},
+                    "artboard": {"type": "string", "description": "The id of the artboard to replace. A new artboard is added when it is left out."},
+                    "name": {"type": "string", "description": "The artboard's name."},
+                    "x": {"type": "number", "description": "Left edge on the canvas."},
+                    "y": {"type": "number", "description": "Top edge on the canvas."},
+                    "w": {"type": "number", "description": "Width. Defaults to 1440 for a new artboard."},
+                    "h": {"type": "number", "description": "Height. Defaults to 900 for a new artboard."},
+                    "html": {"type": "string", "description": "The artboard's complete HTML document."},
+                },
+                "required": ["artifact", "html"],
+            },
+        },
+        {
+            "name": "design_remove_item",
+            "description": "Remove one item (an artboard, shape, text, note or drawing) from a design by its id, and save a new version.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact": {"type": "string", "description": "The design's id or slug."},
+                    "item": {"type": "string", "description": "The id of the item to remove. read_artifact lists them."},
+                },
+                "required": ["artifact", "item"],
+            },
+        },
+        {
+            "name": "read_artifact",
+            "description": "Read the latest version of an artifact: the text of a page or document, a summary of a file, or for a design its pages and items with ids, names and sizes. Give artboard to read the full HTML of one artboard of a design.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact": {"type": "string", "description": "The artifact's id or slug."},
+                    "artboard": {"type": "string", "description": "The id or name of an artboard of a design."},
+                },
+                "required": ["artifact"],
+            },
+        },
+        {
+            "name": "read_artifact_feedback",
+            "description": "Read what people left on an artifact: its unresolved comments with where they point, and the keys and values its data store holds. Use it to read back the choices a person made on an interactive page.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact": {"type": "string", "description": "The artifact's id or slug."},
+                },
+                "required": ["artifact"],
             },
         },
     ])
@@ -501,7 +599,36 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions, propose_instructions_edit, find_conversations or send_to_conversation."),
+                Some("request_api_access") => {
+                    let scopes: Vec<String> = arguments.get("scopes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+                    let reason = arguments.get("reason").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+
+                    if reason.is_empty() {
+                        return Ok(reply(&id, tool_text("Nothing was requested. Give the reason.", true)));
+                    }
+
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was requested. API access belongs to a conversation, and this call did not come from one.", true)));
+                    };
+                    let hours = arguments.get("hours").and_then(Value::as_i64);
+
+                    match api_access::request(&state, conversation_id, &scopes, hours, reason).await? {
+                        Ok(request) => reply(&id, tool_text(&format!("Waiting for the person to approve API access (request {}).", request.id), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some(tool @ ("create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback")) => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("An artifact belongs to a conversation, and this call did not come from one.", true)));
+                    };
+                    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+
+                    match artifacts::tool(&state, owner, conversation_id, tool, &arguments).await {
+                        Ok(text) => reply(&id, tool_text(&text, false)),
+                        Err(error) => reply(&id, tool_text(error.message(), true)),
+                    }
+                }
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

@@ -509,9 +509,12 @@ async fn start_in_folder(server: &Server, link: &mut NodeLink, cwd: &str) -> (Uu
     let (status, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": cwd}))).await;
     assert_eq!(status, 201, "{conversation}");
 
-    match link.next().await {
-        ControlToNode::StartSession { conversation_id, instructions, .. } => (conversation_id, instructions),
-        other => panic!("expected start_session, got {other:?}"),
+    loop {
+        match link.next().await {
+            ControlToNode::StartSession { conversation_id, instructions, .. } => return (conversation_id, instructions),
+            ControlToNode::Instructions { .. } => continue,
+            other => panic!("expected start_session, got {other:?}"),
+        }
     }
 }
 

@@ -54,6 +54,7 @@ pub enum SideKind {
     Side,
     Fork,
     Check,
+    Subagent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -103,6 +103,26 @@ fn session_id_of_path(agent: AgentId, path: &str) -> String {
     }
 }
 
+fn subagent_session(path: &str) -> Option<&str> {
+    let file = path.rsplit('/').next()?;
+
+    if !file.starts_with("agent-") || !file.ends_with(".jsonl") {
+        return None;
+    }
+
+    let folders: Vec<&str> = path.split('/').collect();
+    let position = folders.iter().position(|folder| *folder == "subagents")?;
+
+    position.checked_sub(1).map(|before| folders[before])
+}
+
+fn parent_transcript_path(path: &str) -> Option<String> {
+    let session = subagent_session(path)?;
+    let end = path.find(&format!("/{session}/subagents/"))?;
+
+    Some(format!("{}/{session}.jsonl", &path[..end]))
+}
+
 fn claude_tool(id: &str, name: &str, input: &Value) -> Item {
     let kind = match name {
         "Bash" => "execute",
@@ -166,7 +186,7 @@ fn codex_output(payload: &Value) -> Item {
     Item::ToolResult { id: payload["call_id"].as_str().unwrap_or_default().to_string(), output, failed: false }
 }
 
-fn parse_claude(lines: impl Iterator<Item = impl AsRef<str>>) -> Option<Parsed> {
+fn parse_claude(lines: impl Iterator<Item = impl AsRef<str>>, sidechain: bool) -> Option<Parsed> {
     let mut parsed = Parsed { session_id: String::new(), cwd: String::new(), first_at: None, last_at: None, items: Vec::new() };
     let mut usage_positions: HashMap<String, usize> = HashMap::new();
 
@@ -175,7 +195,7 @@ fn parse_claude(lines: impl Iterator<Item = impl AsRef<str>>) -> Option<Parsed> 
             continue;
         };
 
-        if entry["isSidechain"].as_bool() == Some(true) {
+        if !sidechain && entry["isSidechain"].as_bool() == Some(true) {
             continue;
         }
 
@@ -421,7 +441,7 @@ fn turns_of(items: &[Item]) -> Vec<ImportedTurn> {
 }
 
 async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> ApiResult<(i64, Vec<String>)> {
-    let paths = sqlx::query_scalar::<_, String>("select path from transcripts where node_id = $1 and starts_with(path, $2) and position('/subagents/' in path) = 0 order by path")
+    let paths = sqlx::query_scalar::<_, String>("select path from transcripts where node_id = $1 and starts_with(path, $2) order by path")
         .bind(node_id)
         .bind(root_of(agent))
         .fetch_all(&state.pool)
@@ -432,8 +452,16 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
         .await?;
     let imported_paths: HashSet<&str> = known.iter().filter_map(|(path, _)| path.as_deref()).collect();
     let session_ids: HashSet<&str> = known.iter().filter_map(|(_, session)| session.as_deref()).collect();
-    let found = paths.len() as i64;
-    let pending = paths.into_iter().filter(|path| !imported_paths.contains(path.as_str()) && !session_ids.contains(session_id_of_path(agent, path).as_str())).collect();
+    let (subagents, sessions): (Vec<String>, Vec<String>) = paths.into_iter().filter(|path| !path.contains("/subagents/") || subagent_session(path).is_some()).partition(|path| subagent_session(path).is_some());
+    let parent_sessions: HashSet<String> = sessions.iter().map(|path| session_id_of_path(agent, path)).chain(session_ids.iter().map(|session| session.to_string())).collect();
+    let subagents: Vec<String> = subagents.into_iter().filter(|path| subagent_session(path).is_some_and(|session| parent_sessions.contains(session))).collect();
+    let found = (sessions.len() + subagents.len()) as i64;
+    let mut pending: Vec<String> = sessions
+        .into_iter()
+        .filter(|path| !imported_paths.contains(path.as_str()) && !session_ids.contains(session_id_of_path(agent, path).as_str()))
+        .chain(subagents.into_iter().filter(|path| !imported_paths.contains(path.as_str())))
+        .collect();
+    pending.sort();
 
     Ok((found, pending))
 }
@@ -441,7 +469,7 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
 async fn parsed_pure_imports(state: &AppState) -> anyhow::Result<Vec<(Uuid, Parsed)>> {
     let imports = sqlx::query_as::<_, (Uuid, Uuid, String, String)>(
         "select c.id, c.node_id, c.agent, c.imported_from from conversations c
-         where c.imported_from is not null
+         where c.imported_from is not null and c.side_kind is null
            and not exists (select 1 from events e where e.conversation_id = c.id and (e.node_seq is not null or (e.kind = 'user_message' and e.payload ? 'prompt_id')))",
     )
     .fetch_all(&state.pool)
@@ -451,7 +479,7 @@ async fn parsed_pure_imports(state: &AppState) -> anyhow::Result<Vec<(Uuid, Pars
     for (id, node_id, agent, path) in imports {
         let full = state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path);
         let codex = agent == enum_text(&AgentId::Codex);
-        let Ok(parsed) = tokio::task::spawn_blocking(move || parse_file(&full, if codex { AgentId::Codex } else { AgentId::Claude })).await else {
+        let Ok(parsed) = tokio::task::spawn_blocking(move || parse_file(&full, if codex { AgentId::Codex } else { AgentId::Claude }, false)).await else {
             continue;
         };
         let Ok(parsed) = parsed else {
@@ -624,12 +652,12 @@ fn store_failure(path: &str, cause: impl std::fmt::Display) -> String {
     "The database could not store it. Try again.".to_string()
 }
 
-fn parse_file(path: &Path, agent: AgentId) -> std::io::Result<Option<Parsed>> {
+fn parse_file(path: &Path, agent: AgentId, sidechain: bool) -> std::io::Result<Option<Parsed>> {
     let file = std::fs::File::open(path)?;
     let lines = BufReader::new(file).split(b'\n').map_while(Result::ok).map(|line| String::from_utf8_lossy(&line).into_owned());
 
     Ok(match agent {
-        AgentId::Claude => parse_claude(lines),
+        AgentId::Claude => parse_claude(lines, sidechain),
         AgentId::Codex => parse_codex(lines),
     })
 }
@@ -703,7 +731,22 @@ async fn import_file(state: AppState, owner: Uuid, node_id: Uuid, agent: AgentId
         return Ok(Outcome::Waiting);
     }
 
-    let parsed = tokio::task::spawn_blocking(move || parse_file(&full, agent)).await.map_err(|_| "The file could not be read.".to_string())?;
+    let still_uploading = sqlx::query_scalar::<_, bool>("select coalesce(bytes < size_bytes, false) from transcripts where node_id = $1 and path = $2")
+        .bind(node_id)
+        .bind(&path)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|cause| store_failure(&path, cause))?;
+
+    if still_uploading == Some(true) {
+        return Err("Still uploading.".to_string());
+    }
+
+    if subagent_session(&path).is_some() {
+        return store_subagent(&state, node_id, &path).await;
+    }
+
+    let parsed = tokio::task::spawn_blocking(move || parse_file(&full, agent, false)).await.map_err(|_| "The file could not be read.".to_string())?;
     let parsed = parsed.map_err(|_| "The file could not be read.".to_string())?;
     let Some(parsed) = parsed else {
         return Err("There is no conversation in this file.".to_string());
@@ -773,6 +816,141 @@ async fn import_file(state: AppState, owner: Uuid, node_id: Uuid, agent: AgentId
     Ok(Outcome::Imported(conversation))
 }
 
+async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<Outcome, String> {
+    let Some(session) = subagent_session(path) else {
+        return Ok(Outcome::Skipped);
+    };
+    let parent = sqlx::query_as::<_, (Uuid, Uuid, String, Option<Uuid>, Option<DateTime<Utc>>)>(
+        "select id, owner, cwd, project_id, archived_at from conversations where node_id = $1 and acp_session_id = $2 and parent_id is null limit 1",
+    )
+    .bind(node_id)
+    .bind(session)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|cause| store_failure(path, cause))?;
+
+    let Some((parent_id, owner, cwd, project_id, archived_at)) = parent else {
+        return Ok(Outcome::Waiting);
+    };
+
+    let existing = sqlx::query_as::<_, (Uuid, i64)>("select id, (select count(*) from events where conversation_id = conversations.id) from conversations where node_id = $1 and imported_from = $2")
+        .bind(node_id)
+        .bind(path)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|cause| store_failure(path, cause))?;
+    let transcripts = state.config.data_dir.join("transcripts").join(node_id.to_string());
+    let full = transcripts.join(path);
+    let parent_full = parent_transcript_path(path).map(|parent_path| transcripts.join(parent_path));
+    let needs_description = existing.is_none();
+    let read = tokio::task::spawn_blocking(move || {
+        let parsed = parse_file(&full, AgentId::Claude, true)?;
+        let prompt = parsed.as_ref().and_then(|parsed| {
+            parsed.items.iter().find_map(|item| match item {
+                Item::User(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+                _ => None,
+            })
+        });
+        let description = parent_full.filter(|_| needs_description).zip(prompt).and_then(|(parent_full, prompt)| {
+            let parent = parse_file(&parent_full, AgentId::Claude, false).ok().flatten()?;
+
+            parent.items.iter().find_map(|item| match item {
+                Item::Tool { input, .. } if input["prompt"].as_str().is_some_and(|candidate| candidate.trim() == prompt) => input["description"].as_str().map(|description| description.trim().to_string()),
+                _ => None,
+            })
+        });
+
+        Ok::<_, std::io::Error>((parsed, description))
+    })
+    .await
+    .map_err(|_| "The file could not be read.".to_string())?;
+    let (parsed, description) = read.map_err(|_| "The file could not be read.".to_string())?;
+    let Some(parsed) = parsed else {
+        return Err("There is no conversation in this file.".to_string());
+    };
+
+    let mut events = events_of(&parsed.items);
+    events.iter_mut().for_each(|(_, payload)| without_nul(payload));
+
+    if let Some((id, stored)) = existing {
+        if stored as usize == events.len() {
+            return Ok(Outcome::Skipped);
+        }
+
+        let mut tx = state.pool.begin().await.map_err(|cause| store_failure(path, cause))?;
+        sqlx::query("delete from events where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
+        sqlx::query("delete from search_entries where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
+        insert_events(&mut tx, id, &events).await.map_err(|cause| store_failure(path, cause))?;
+        let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set updated_at = $2 where id = $1 returning {CONVERSATION_COLUMNS}")))
+            .bind(id)
+            .bind(parsed.last_at.unwrap_or_else(Utc::now))
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|cause| store_failure(path, cause))?;
+        tx.commit().await.map_err(|cause| store_failure(path, cause))?;
+        state.publish(Some(owner), StreamMessage::Conversation(row.to_proto().map_err(|cause| store_failure(path, cause.message()))?));
+
+        return Ok(Outcome::Skipped);
+    }
+
+    let title = description
+        .filter(|description| !description.is_empty())
+        .or_else(|| {
+            parsed.items.iter().find_map(|item| match item {
+                Item::User(text) if !text.trim().is_empty() => Some(text.trim().lines().next().unwrap_or_default().trim().to_string()),
+                _ => None,
+            })
+        })
+        .map(|title| text_without_nul(&title.chars().take(TITLE_LIMIT).collect::<String>()))
+        .unwrap_or_else(|| "Subagent".to_string());
+    let created_at = parsed.first_at.unwrap_or_else(Utc::now);
+    let updated_at = parsed.last_at.unwrap_or(created_at);
+
+    let mut tx = state.pool.begin().await.map_err(|cause| store_failure(path, cause))?;
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "insert into conversations (owner, node_id, agent, cwd, title, status, imported_from, parent_id, side_kind, project_id, created_at, updated_at, archived_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'subagent', $9, $10, $11, $12)
+         on conflict (node_id, imported_from) where imported_from is not null do nothing
+         returning {CONVERSATION_COLUMNS}"
+    )))
+    .bind(owner)
+    .bind(node_id)
+    .bind(enum_text(&AgentId::Claude))
+    .bind(&cwd)
+    .bind(title)
+    .bind(enum_text(&ConversationStatus::Done))
+    .bind(path)
+    .bind(parent_id)
+    .bind(project_id)
+    .bind(created_at)
+    .bind(updated_at)
+    .bind(archived_at)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|cause| store_failure(path, cause))?;
+
+    let Some(row) = row else {
+        return Ok(Outcome::Skipped);
+    };
+
+    insert_events(&mut tx, row.id, &events).await.map_err(|cause| store_failure(path, cause))?;
+    tx.commit().await.map_err(|cause| store_failure(path, cause))?;
+
+    Ok(Outcome::Imported(row.to_proto().map_err(|cause| store_failure(path, cause.message()))?))
+}
+
+pub async fn sync_subagent(state: &AppState, node_id: Uuid, path: &str) {
+    if subagent_session(path).is_none() {
+        return;
+    }
+
+    match store_subagent(state, node_id, path).await {
+        Ok(Outcome::Imported(conversation)) => state.publish(Some(conversation.owner), StreamMessage::Conversation(conversation)),
+        Ok(_) => {}
+        Err(reason) => tracing::warn!("could not follow subagent {path}: {reason}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,7 +969,7 @@ mod tests {
         ]
         .join("\n");
 
-        let parsed = parse_claude(text.lines()).unwrap();
+        let parsed = parse_claude(text.lines(), false).unwrap();
         let events = events_of(&parsed.items);
         let kinds: Vec<EventKind> = events.iter().map(|(kind, _)| *kind).collect();
 
@@ -853,7 +1031,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines(), false).unwrap().items);
         let expected = (20.0 * 5.0 + 100.0 * 25.0 + 4000.0 * 0.5 + 200.0 * 6.25 + 400.0 * 10.0) / 1_000_000.0;
 
         assert_eq!(turns.len(), 1);
@@ -867,7 +1045,7 @@ mod tests {
     fn a_turn_with_an_unpriced_model_keeps_its_tokens_and_has_no_cost() {
         let text = [user_entry("2026-10-01T10:00:00Z", "Go"), usage_entry("m1", "2026-10-01T10:00:05Z", "some-local-model", 5), usage_entry("m2", "2026-10-01T10:00:06Z", "<synthetic>", 0)].join("\n");
 
-        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines(), false).unwrap().items);
 
         assert_eq!(turns[0].tokens.output, 5);
         assert_eq!(turns[0].cost_usd, None);
@@ -883,7 +1061,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines(), false).unwrap().items);
 
         assert_eq!(turns.iter().map(|turn| turn.tokens.output).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(turns.iter().map(|turn| turn.ended_at.unwrap().to_rfc3339()).collect::<Vec<_>>(), ["2026-10-01T10:00:05+00:00", "2026-10-02T09:00:05+00:00"]);
@@ -901,7 +1079,7 @@ mod tests {
         ]
         .join("\n");
 
-        let turns = turns_of(&parse_claude(text.lines()).unwrap().items);
+        let turns = turns_of(&parse_claude(text.lines(), false).unwrap().items);
 
         assert_eq!(turns[0].working_ms, Some(40_000));
         assert_eq!(turns[1].working_ms, Some(WORKING_CAP_MS));

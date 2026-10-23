@@ -29,7 +29,7 @@ fn hex_digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn path_of(state: &AppState, sha256: &str) -> std::path::PathBuf {
+pub(crate) fn path_of(state: &AppState, sha256: &str) -> std::path::PathBuf {
     state.config.data_dir.join("attachments").join(sha256)
 }
 

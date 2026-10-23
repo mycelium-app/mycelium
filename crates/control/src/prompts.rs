@@ -90,6 +90,10 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     let mut tx = state.pool.begin().await?;
     let mut row = lock_owned(&mut tx, id, user.id).await?;
 
+    if row.side_kind.as_deref() == Some("subagent") {
+        return Err(ApiError::bad_request("read_only", "A subagent chat is read-only. Message the conversation it belongs to instead."));
+    }
+
     if row.status == "failed" && !chats::is_chat(&row) {
         tx.commit().await?;
         retry_failed(&state, user.id, id).await?;

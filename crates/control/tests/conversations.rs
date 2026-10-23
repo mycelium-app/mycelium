@@ -1334,3 +1334,42 @@ async fn a_conversation_whose_idle_session_the_node_closed_resumes_it_on_the_nex
         other => panic!("expected start_session, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn the_latest_commands_settings_and_mode_are_kept_for_a_conversation_whose_early_events_are_not_loaded() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let updates = [
+        json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "old", "description": "gone"}]}),
+        json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "review", "description": "Review the diff"}]}),
+        json!({"sessionUpdate": "current_mode_update", "currentModeId": "plan"}),
+        json!({"sessionUpdate": "config_option_update", "configOptions": [{"id": "effort", "currentValue": "high"}]}),
+        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hello"}}),
+    ];
+
+    for (index, update) in updates.into_iter().enumerate() {
+        link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: index as i64 + 1, update: json!({"update": update}) }).await;
+    }
+
+    link.barrier(id, 6).await;
+
+    let (status, kept) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/session"))).await;
+    let kinds: Vec<&str> = kept.as_array().unwrap().iter().map(|update| update["sessionUpdate"].as_str().unwrap()).collect();
+
+    assert_eq!(status, 200, "{kept}");
+    assert_eq!(kinds, ["available_commands_update", "config_option_update", "current_mode_update"]);
+    assert_eq!(kept[0]["availableCommands"][0]["name"], "review");
+    assert_eq!(kept[2]["currentModeId"], "plan");
+}
+
+#[tokio::test]
+async fn a_conversation_that_has_had_no_session_updates_has_no_kept_state() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+
+    let (status, kept) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/session"))).await;
+
+    assert_eq!((status, kept), (200, json!([])));
+}

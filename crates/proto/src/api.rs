@@ -205,6 +205,7 @@ pub struct PatchConversationRequest {
 pub enum SessionKind {
     Browser,
     Client,
+    Agent,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,6 +217,14 @@ pub struct SessionSummary {
     pub address: String,
     pub last_used_at: chrono::DateTime<chrono::Utc>,
     pub current: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -687,6 +696,32 @@ pub struct MessageProposal {
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiAccessState {
+    Requested,
+    Approved,
+    Declined,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApiAccessRequest {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub scopes: Vec<String>,
+    pub hours: i32,
+    pub reason: String,
+    pub state: ApiAccessState,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApproveApiAccessRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetInstructionSourceRequest {
     pub forge_id: Uuid,
@@ -1096,4 +1131,124 @@ pub struct Walkthrough {
 
 fn default_walkthrough_scope() -> String {
     "branch".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Design,
+    Page,
+    Markdown,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactAuthor {
+    Agent,
+    Person,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactVersion {
+    pub version: i32,
+    pub author: ArtifactAuthor,
+    pub media_type: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: Uuid,
+    pub owner: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    pub kind: ArtifactKind,
+    pub title: String,
+    pub slug: String,
+    pub public: bool,
+    pub latest_version: i32,
+    pub url: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<ArtifactVersion>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostedArtifact {
+    #[serde(flatten)]
+    pub artifact: Artifact,
+    pub media_type: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactComment {
+    pub id: Uuid,
+    pub artifact_id: Uuid,
+    pub author_name: String,
+    pub body: String,
+    #[serde(default)]
+    pub anchor: Option<Value>,
+    pub resolved: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactDataEntry {
+    pub key: String,
+    pub value: Value,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateArtifactRequest {
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    #[serde(default)]
+    pub media_type: Option<String>,
+    #[serde(default)]
+    pub conversation_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AddArtifactVersionRequest {
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchArtifactRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub public: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateArtifactCommentRequest {
+    pub body: String,
+    #[serde(default)]
+    pub anchor: Option<Value>,
+    #[serde(default)]
+    pub author_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchArtifactCommentRequest {
+    pub resolved: bool,
 }

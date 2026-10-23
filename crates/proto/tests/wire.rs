@@ -100,9 +100,10 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::TerminalOutput { terminal_id: id(), data: "aGk=".into() }, "terminal_output"),
         (NodeToControl::TerminalExited { terminal_id: id() }, "terminal_exited"),
         (NodeToControl::GitResult { request_id: id(), ok: false, output: Value::Null, error: Some("fatal".into()) }, "git_result"),
-        (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
+        (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into(), size: None }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec!["Claude Code: /h/.claude/CLAUDE.md".into()] }, "instructions_held"),
+        (NodeToControl::ApiTokenSaved { conversation_id: id(), path: Some("/state/sessions/c/api-token".into()) }, "api_token_saved"),
         (NodeToControl::Resources { sample: sample() }, "resources"),
         (NodeToControl::Pong, "pong"),
     ];
@@ -136,6 +137,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::Watch { seconds: 30 }, "watch"),
         (ControlToNode::Git { request_id: id(), cwd: "/work".into(), command: GitCommand::Diff { path: "a".into(), staged: true } }, "git"),
         (ControlToNode::TranscriptAck { path: "p".into(), bytes: 10 }, "transcript_ack"),
+        (ControlToNode::ApiToken { conversation_id: id(), token: "myc_client_x".into() }, "api_token"),
         (ControlToNode::Ping, "ping"),
         (ControlToNode::Revoked, "revoked"),
     ];

@@ -1,10 +1,12 @@
 use crate::activity::record_turn;
+use crate::api_access;
 use crate::auth::AuthNode;
 use crate::device::client_address;
 use crate::error::ApiResult;
+use crate::imports;
 use crate::prompts::pump;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -24,6 +26,7 @@ use tokio::time::{Instant, interval_at};
 use uuid::Uuid;
 
 const PREDICTED_TITLE_LIMIT: usize = 100;
+const SESSION_STATE_UPDATES: [&str; 3] = ["available_commands_update", "config_option_update", "current_mode_update"];
 
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
@@ -114,7 +117,18 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::AcpUpdate { conversation_id, seq, update } => {
             let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
+            let mut session_update = update["update"].clone();
+            without_nul(&mut session_update);
             let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await?;
+
+            if inserted && SESSION_STATE_UPDATES.contains(&session_update["sessionUpdate"].as_str().unwrap_or_default()) {
+                sqlx::query("insert into conversation_session_state (conversation_id, update_kind, update) values ($1, $2, $3) on conflict (conversation_id, update_kind) do update set update = excluded.update")
+                    .bind(conversation_id)
+                    .bind(session_update["sessionUpdate"].as_str())
+                    .bind(&session_update)
+                    .execute(&state.pool)
+                    .await?;
+            }
 
             let (true, Some(title)) = (inserted, predicted) else {
                 return Ok(());
@@ -178,7 +192,20 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
-            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await.map(|_| ())
+            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await?;
+
+            let idle = sqlx::query_scalar::<_, bool>(
+                "select coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)",
+            )
+            .bind(conversation_id)
+            .fetch_one(&state.pool)
+            .await?;
+
+            if idle && !has_agents_out(state, conversation_id).await? {
+                settle_background_work(state, conversation_id, ConversationStatus::Working, ConversationStatus::Review).await?;
+            }
+
+            Ok(())
         }
         NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
         NodeToControl::LoginOutput { login_id, data } => {
@@ -211,7 +238,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
-        NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
+        NodeToControl::Transcript { path, offset, data, size } => store_transcript(state, node_id, path, offset, data, size).await,
         NodeToControl::Resources { sample } => {
             state.hub.record_resources(node_id, sample.clone());
             state.publish(None, StreamMessage::NodeResources { node_id, sample });
@@ -238,6 +265,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             publish_node(state, node_id).await
         }
+        NodeToControl::ApiTokenSaved { conversation_id, path } => api_access::token_saved(state, node_id, conversation_id, path).await,
         NodeToControl::Pong => {
             sqlx::query("update nodes set last_seen_at = now() where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '30 seconds')").bind(node_id).execute(&state.pool).await?;
 
@@ -397,6 +425,32 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     Ok(inserted)
 }
 
+async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+    let out = sqlx::query_scalar::<_, i64>(
+        "select count(*) filter (where payload->'line'->>'type' = 'started') - count(*) filter (where payload->'line'->>'type' in ('result', 'failed')) from events where conversation_id = $1 and kind = 'workflow'",
+    )
+    .bind(conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(out > 0)
+}
+
+async fn settle_background_work(state: &AppState, conversation_id: Uuid, from: ConversationStatus, to: ConversationStatus) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let current = sqlx::query_scalar::<_, String>("select status from conversations where id = $1 for update").bind(conversation_id).fetch_one(&mut *tx).await?;
+
+    if current != enum_text(&from) {
+        return Ok(());
+    }
+
+    let updated = set_status(&mut tx, conversation_id, to).await?;
+    tx.commit().await?;
+    state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
+
+    Ok(())
+}
+
 async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String, usage: Option<Value>) -> ApiResult<()> {
     let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
 
@@ -405,6 +459,11 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     }
 
     record_turn(state, conversation_id, usage.as_ref()).await?;
+
+    if has_agents_out(state, conversation_id).await? {
+        settle_background_work(state, conversation_id, ConversationStatus::Review, ConversationStatus::Working).await?;
+    }
+
     sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await?;
     state.hub.forget_prompts_of(conversation_id);
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
@@ -462,7 +521,7 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
 const FULL_TRANSCRIPT_CHUNK_BYTES: i64 = 256 * 1024;
 const TRANSCRIPT_ROW_REFRESH_SECONDS: f64 = 3.0;
 
-async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset: i64, data: String) -> ApiResult<()> {
+async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset: i64, data: String, size: Option<i64>) -> ApiResult<()> {
     let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
         tracing::warn!("node {node_id} sent a transcript chunk that is not base64");
 
@@ -481,8 +540,8 @@ async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset:
     };
 
     sqlx::query(
-        "insert into transcripts (node_id, path, bytes) values ($1, $2, $3)
-         on conflict (node_id, path) do update set bytes = excluded.bytes, updated_at = now()
+        "insert into transcripts (node_id, path, bytes, size_bytes) values ($1, $2, $3, $7)
+         on conflict (node_id, path) do update set bytes = excluded.bytes, size_bytes = excluded.size_bytes, updated_at = now()
          where $4 < $5 or transcripts.updated_at < now() - make_interval(secs => $6)",
     )
     .bind(node_id)
@@ -491,10 +550,15 @@ async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset:
     .bind(chunk_bytes)
     .bind(FULL_TRANSCRIPT_CHUNK_BYTES)
     .bind(TRANSCRIPT_ROW_REFRESH_SECONDS)
+    .bind(size)
     .execute(&state.pool)
     .await?;
 
-    state.hub.send(node_id, ControlToNode::TranscriptAck { path, bytes: stored });
+    state.hub.send(node_id, ControlToNode::TranscriptAck { path: path.clone(), bytes: stored });
+
+    if size.is_none_or(|size| stored >= size) {
+        imports::sync_subagent(state, node_id, &path).await;
+    }
 
     Ok(())
 }

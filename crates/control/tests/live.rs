@@ -36,6 +36,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/instruction-proposals/{id}/decline",
     "POST /api/v1/message-proposals/{id}/approve",
     "POST /api/v1/message-proposals/{id}/decline",
+    "POST /api/v1/api-access-requests/{id}/approve",
+    "POST /api/v1/api-access-requests/{id}/decline",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
     "PATCH /api/v1/conversations/{id}",
     "DELETE /api/v1/conversations/{id}",
@@ -60,6 +62,12 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/walkthroughs/{id}/notes",
     "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
     "POST /api/v1/walkthroughs/{id}/notes/sent",
+    "POST /api/v1/artifacts",
+    "POST /api/v1/artifacts/{id}/versions",
+    "PATCH /api/v1/artifacts/{id}",
+    "DELETE /api/v1/artifacts/{id}",
+    "POST /api/v1/artifacts/{id}/comments",
+    "PATCH /api/v1/artifacts/{id}/comments/{comment_id}",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -120,6 +128,8 @@ const SILENT_ROUTES: &[&str] = &[
     "PUT /api/v1/instruction-source",
     "DELETE /api/v1/instruction-source",
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
+    "PUT /api/v1/artifacts/{id}/data/{key}",
+    "PUT /internal/artifacts/by-slug/{slug}/data/{key}",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
@@ -670,6 +680,8 @@ async fn a_conversation_streams_every_step_of_a_turn() {
 
     link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started"}) }).await;
     event_of(&mut stream, id, EventKind::Workflow).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "result"}) }).await;
+    event_of(&mut stream, id, EventKind::Workflow).await;
 
     link.send(NodeToControl::PermissionRequest { conversation_id: id, seq: 2, request_id: "req-1".into(), request: json!({"options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]}) }).await;
     event_of(&mut stream, id, EventKind::PermissionRequest).await;
@@ -791,6 +803,26 @@ async fn retrying_a_failed_conversation_streams_it_as_no_longer_failed() {
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
 
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
+}
+
+#[tokio::test]
+async fn a_turn_that_ends_with_workflow_agents_still_out_stays_working_until_the_last_one_reports() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    let id = started_conversation(&server, &mut link, Some("run it")).await;
+    link.expect_prompt().await;
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "agentId": "a"}) }).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "agentId": "b"}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+    event_of(&mut stream, id, EventKind::TurnEnd).await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "result", "agentId": "a"}) }).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "failed", "agentId": "b"}) }).await;
+
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Review).await;
 }
 
 #[tokio::test]
@@ -1101,4 +1133,53 @@ async fn a_remembered_memory_and_its_edit_and_deletion_reach_every_stream_client
     })
     .await;
     assert_eq!((status, removed), (204, remembered.id));
+}
+
+#[tokio::test]
+async fn an_artifact_and_its_comments_are_streamed_to_its_owner_as_they_change() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let user = &server.user;
+
+    let (_, artifact) = user.json(user.post("/api/v1/artifacts").json(&json!({"kind": "page", "title": "Board", "content": "a"}))).await;
+    let id = artifact["id"].as_str().unwrap().to_string();
+    let created = stream.until(|message| match message {
+        StreamMessage::Artifact(artifact) if artifact.id.to_string() == id => Some(artifact),
+        _ => None,
+    })
+    .await;
+
+    user.json(user.post(&format!("/api/v1/artifacts/{id}/versions")).json(&json!({"content": "b"}))).await;
+    let versioned = stream.until(|message| match message {
+        StreamMessage::Artifact(artifact) if artifact.latest_version == 2 => Some(artifact),
+        _ => None,
+    })
+    .await;
+
+    user.json(user.patch(&format!("/api/v1/artifacts/{id}")).json(&json!({"title": "Roadmap", "public": true}))).await;
+    let renamed = stream.until(|message| match message {
+        StreamMessage::Artifact(artifact) if artifact.title == "Roadmap" => Some(artifact),
+        _ => None,
+    })
+    .await;
+
+    let (_, comment) = user.json(user.post(&format!("/api/v1/artifacts/{id}/comments")).json(&json!({"body": "Looks good"}))).await;
+    let commented = stream.until(|message| match message {
+        StreamMessage::ArtifactComment(comment) => Some(comment),
+        _ => None,
+    })
+    .await;
+
+    user.delete(&format!("/api/v1/artifacts/{id}")).send().await.unwrap();
+    let removed = stream.until(|message| match message {
+        StreamMessage::Artifact(artifact) if artifact.deleted => Some(artifact),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!((created.latest_version, created.deleted), (1, false));
+    assert_eq!(versioned.versions.len(), 2);
+    assert!(renamed.public);
+    assert_eq!((commented.body.as_str(), commented.id.to_string()), ("Looks good", comment["id"].as_str().unwrap().to_string()));
+    assert_eq!(removed.id.to_string(), id);
 }

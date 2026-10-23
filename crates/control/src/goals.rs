@@ -168,7 +168,7 @@ async fn start_check(state: &AppState, owner: Uuid, conversation_id: Uuid) -> Ap
     let text = sqlx::query_scalar::<_, String>("select text from goals where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let last: String = latest_agent_text(state, conversation_id).await?.chars().take(LAST_MESSAGE_LIMIT).collect();
     let prompt = format!("{CHECK_INSTRUCTIONS}\n\nGoal: {text}\n\nThe agent's latest message:\n{last}");
-    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None };
+    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
     let request = mycelium_proto::api::CreateConversationRequest {
         node_id: row.node_id,
         agent: parse_enum(&row.agent)?,

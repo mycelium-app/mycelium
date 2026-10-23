@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 const MOST_DIFF_BYTES: usize = 200 * 1024;
 const MOST_MOVE_BYTES: usize = 8 * 1024 * 1024;
+const MOST_READ_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const GIT_TOWN: &str = "git-town";
 const MOST_INFERRED_BRANCHES: usize = 50;
 
@@ -54,6 +55,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Snapshot { .. } => snapshot(cwd),
         GitCommand::Apply { branch, head, patch, bundle, credentials } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref()),
         GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
+        GitCommand::ReadFile { path } => read_file(cwd, &path),
         GitCommand::Clone { .. } | GitCommand::Register | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
     }
 }
@@ -642,6 +644,30 @@ fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value, String> {
     Ok(json!({"diff": String::from_utf8_lossy(kept), "truncated": truncated}))
 }
 
+fn read_file(cwd: &Path, path: &str) -> Result<Value, String> {
+    let root = cwd.canonicalize().map_err(|cause| format!("The conversation's folder could not be read: {cause}."))?;
+    let outside = || format!("{path} is outside the conversation's folder. Give a path inside it.");
+    let file = root.join(path).canonicalize().map_err(|_| format!("{path} was not found in the conversation's folder."))?;
+
+    if !file.starts_with(&root) {
+        return Err(outside());
+    }
+
+    let size = std::fs::metadata(&file).map_err(|cause| format!("{path} could not be read: {cause}."))?.len();
+
+    if !file.is_file() {
+        return Err(format!("{path} is not a file."));
+    }
+
+    if size > MOST_READ_FILE_BYTES {
+        return Err(format!("{path} is larger than 20 MB. Use a smaller file."));
+    }
+
+    let bytes = std::fs::read(&file).map_err(|cause| format!("{path} could not be read: {cause}."))?;
+
+    Ok(json!({"data": base64::engine::general_purpose::STANDARD.encode(bytes), "size": size}))
+}
+
 fn scope_diff(cwd: &Path, scope: &str) -> Result<Value, String> {
     let output = match scope {
         "uncommitted" => working_tree_changes(cwd, &["--no-color"])?,
@@ -867,6 +893,23 @@ mod tests {
 
     fn file<'a>(status: &'a Value, path: &str) -> &'a Value {
         status["files"].as_array().unwrap().iter().find(|file| file["path"] == path).unwrap_or_else(|| panic!("{path} missing from {status}"))
+    }
+
+    #[test]
+    fn read_file_returns_the_bytes_of_a_file_inside_the_folder_and_refuses_one_outside_it() {
+        let dir = repository();
+        write(&dir, "docs/brief.txt", "hello");
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "no").unwrap();
+
+        let read = run(dir.path(), GitCommand::ReadFile { path: "docs/brief.txt".into() }).unwrap();
+        let escaped = run(dir.path(), GitCommand::ReadFile { path: outside.path().join("secret.txt").to_string_lossy().into_owned() }).unwrap_err();
+        let missing = run(dir.path(), GitCommand::ReadFile { path: "nothing.txt".into() }).unwrap_err();
+
+        assert_eq!(read["data"], base64::engine::general_purpose::STANDARD.encode("hello"));
+        assert_eq!(read["size"], 5);
+        assert!(escaped.contains("outside the conversation's folder"));
+        assert!(missing.contains("was not found"));
     }
 
     #[test]

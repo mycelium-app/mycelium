@@ -178,7 +178,7 @@ impl TranscriptFollower {
                 break;
             };
 
-            let _ = self.out.send(NodeToControl::Transcript { path: key.clone(), offset: position, data: STANDARD.encode(&chunk) });
+            let _ = self.out.send(NodeToControl::Transcript { path: key.clone(), offset: position, data: STANDARD.encode(&chunk), size: Some(length) });
             position += chunk.len() as i64;
             self.chunks_left -= 1;
         }
@@ -218,7 +218,39 @@ impl TranscriptFollower {
         };
 
         for line in String::from_utf8_lossy(&bytes[..complete]).lines().filter(|line| !line.trim().is_empty()) {
-            let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line: serde_json::from_str(line).unwrap_or_else(|_| Value::String(line.to_string())) });
+            let mut line: Value = serde_json::from_str(line).unwrap_or_else(|_| Value::String(line.to_string()));
+            let finished_agent = line["agentId"].as_str().filter(|id| line["type"] == "result" && id.chars().all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')).map(str::to_string);
+
+            if let (Some(agent_id), Some(fields)) = (finished_agent, line.as_object_mut()) {
+                let file_name = format!("agent-{agent_id}.jsonl");
+                let transcript = path.parent().into_iter().flat_map(|run| [run.to_path_buf(), run.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default()]).map(|folder| folder.join(&file_name)).find_map(|candidate| std::fs::read_to_string(candidate).ok());
+                let mut tokens_by_message: HashMap<String, u64> = HashMap::new();
+                let mut first: Option<chrono::DateTime<chrono::FixedOffset>> = None;
+                let mut last: Option<chrono::DateTime<chrono::FixedOffset>> = None;
+
+                for row in transcript.as_deref().unwrap_or_default().lines().filter_map(|row| serde_json::from_str::<Value>(row).ok()) {
+                    let stamp = row["timestamp"].as_str().and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok());
+                    first = [first, stamp].into_iter().flatten().min();
+                    last = [last, stamp].into_iter().flatten().max();
+
+                    if let (Some(id), true) = (row["message"]["id"].as_str(), row["type"] == "assistant") {
+                        let usage = &row["message"]["usage"];
+                        let counted: u64 = ["input_tokens", "output_tokens", "cache_creation_input_tokens"].iter().filter_map(|key| usage[*key].as_u64()).sum();
+                        tokens_by_message.insert(id.to_string(), counted);
+                    }
+                }
+
+                if !tokens_by_message.is_empty() {
+                    fields.entry("tokens").or_insert(tokens_by_message.values().sum::<u64>().into());
+                    fields.entry("turns").or_insert(tokens_by_message.len().into());
+                }
+
+                if let (Some(first), Some(last)) = (first, last) {
+                    fields.entry("elapsed_ms").or_insert((last - first).num_milliseconds().into());
+                }
+            }
+
+            let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line });
         }
     }
 
@@ -460,6 +492,83 @@ mod tests {
         let lines: Vec<Value> = workflow.iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line.clone()) } else { None }).collect();
         assert_eq!(lines, [serde_json::json!({"step": 1}), serde_json::json!({"step": 2})]);
         assert!(workflow.iter().all(|message| matches!(message, NodeToControl::Workflow { conversation_id, run_id, .. } if *conversation_id == conversation && run_id == "run-1")));
+    }
+
+    fn finished_agent_lines(root: &Path, run_files: &[(&str, &str)], journal_line: &str) -> Vec<Value> {
+        let dir = root.parent().unwrap();
+        let run = root.join("proj").join("session-9").join("subagents").join("workflows").join("run-1");
+        let conversation = Uuid::from_u128(5);
+        let (mut follower, mut messages) = follower(dir, root, &dir.join("state.json"));
+        append(&run.join("journal.jsonl"), "{\"old\":true}\n");
+        follower.poll(true, |_| Some(conversation));
+        drain(&mut messages);
+
+        for (name, content) in run_files {
+            append(&run.join(name), content);
+        }
+
+        append(&run.join("journal.jsonl"), journal_line);
+        follower.poll(true, |_| Some(conversation));
+
+        drain(&mut messages).into_iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line) } else { None }).collect()
+    }
+
+    fn agent_transcript() -> String {
+        [
+            serde_json::json!({"type": "user", "timestamp": "2026-10-02T10:00:00.000Z", "message": {"role": "user", "content": "go"}}),
+            serde_json::json!({"type": "assistant", "timestamp": "2026-10-02T10:00:05.000Z", "message": {"id": "m1", "usage": {"input_tokens": 2, "output_tokens": 8, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 5000}}}),
+            serde_json::json!({"type": "assistant", "timestamp": "2026-10-02T10:00:06.000Z", "message": {"id": "m1", "usage": {"input_tokens": 2, "output_tokens": 40, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 5000}}}),
+            serde_json::json!({"type": "user", "timestamp": "2026-10-02T10:00:20.000Z", "message": {"role": "user", "content": "tool result"}}),
+            serde_json::json!({"type": "assistant", "timestamp": "2026-10-02T10:01:30.500Z", "message": {"id": "m2", "usage": {"input_tokens": 3, "output_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 9000}}}),
+        ]
+        .iter()
+        .map(|row| format!("{row}\n"))
+        .collect()
+    }
+
+    #[test]
+    fn a_finished_agent_line_carries_the_tokens_turns_and_elapsed_time_of_its_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+
+        let lines = finished_agent_lines(&root, &[("agent-a1.jsonl", &agent_transcript())], "{\"type\":\"result\",\"key\":\"k1\",\"agentId\":\"a1\",\"result\":\"done\"}\n");
+
+        assert_eq!(lines[0]["tokens"], 2 + 40 + 100 + 3 + 10);
+        assert_eq!(lines[0]["turns"], 2);
+        assert_eq!(lines[0]["elapsed_ms"], 90_500);
+        assert_eq!(lines[0]["result"], "done");
+    }
+
+    #[test]
+    fn a_transcript_beside_the_subagents_folder_is_read_when_the_run_folder_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+        let session = root.join("proj").join("session-9").join("subagents");
+        append(&session.join("agent-a1.jsonl"), &agent_transcript());
+
+        let lines = finished_agent_lines(&root, &[], "{\"type\":\"result\",\"key\":\"k1\",\"agentId\":\"a1\"}\n");
+
+        assert_eq!(lines[0]["turns"], 2);
+    }
+
+    #[test]
+    fn a_finished_agent_without_a_transcript_and_other_lines_are_forwarded_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+
+        let lines = finished_agent_lines(&root, &[], "{\"type\":\"result\",\"key\":\"k1\",\"agentId\":\"missing\"}\n{\"type\":\"started\",\"key\":\"k2\",\"agentId\":\"a1\"}\n");
+
+        assert_eq!(lines, [serde_json::json!({"type": "result", "key": "k1", "agentId": "missing"}), serde_json::json!({"type": "started", "key": "k2", "agentId": "a1"})]);
+    }
+
+    #[test]
+    fn an_agent_id_that_climbs_out_of_the_run_folder_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+
+        let lines = finished_agent_lines(&root, &[], "{\"type\":\"result\",\"key\":\"k1\",\"agentId\":\"../../x\"}\n");
+
+        assert!(lines[0].get("turns").is_none());
     }
 
     #[test]

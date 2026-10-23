@@ -79,6 +79,8 @@ pub enum NodeToControl {
         path: String,
         offset: i64,
         data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<i64>,
     },
     Workflow {
         conversation_id: Uuid,
@@ -99,6 +101,11 @@ pub enum NodeToControl {
     InstructionsHeld {
         revision: String,
         unmanaged: Vec<String>,
+    },
+    ApiTokenSaved {
+        conversation_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
     },
     Resources {
         sample: ResourceSample,
@@ -280,6 +287,9 @@ pub enum GitCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branch_before: Option<String>,
     },
+    ReadFile {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -406,6 +416,10 @@ pub enum ControlToNode {
         request_id: Uuid,
         pid: u32,
         name: String,
+    },
+    ApiToken {
+        conversation_id: Uuid,
+        token: String,
     },
     Ping,
     Revoked,

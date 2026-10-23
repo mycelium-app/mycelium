@@ -305,10 +305,10 @@ async fn transcript_chunks_are_copied_under_the_node_and_acknowledged() {
     let mut link = server.online_node("laptop").await;
     let path = "projects/-work-app/session.jsonl";
 
-    link.send(NodeToControl::Transcript { path: path.into(), offset: 0, data: base64_of(b"{\"a\":1}\n") }).await;
+    link.send(NodeToControl::Transcript { path: path.into(), offset: 0, data: base64_of(b"{\"a\":1}\n"), size: None }).await;
     assert_eq!(link.next().await, ControlToNode::TranscriptAck { path: path.into(), bytes: 8 });
 
-    link.send(NodeToControl::Transcript { path: path.into(), offset: 8, data: base64_of(b"{\"b\":2}\n") }).await;
+    link.send(NodeToControl::Transcript { path: path.into(), offset: 8, data: base64_of(b"{\"b\":2}\n"), size: None }).await;
     assert_eq!(link.next().await, ControlToNode::TranscriptAck { path: path.into(), bytes: 16 });
 
     let stored = std::fs::read(server.data_dir.join("transcripts").join(link.id.to_string()).join(path)).unwrap();
@@ -323,13 +323,13 @@ async fn a_transcript_chunk_past_the_end_is_answered_with_what_the_control_plane
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
 
-    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 0, data: base64_of(b"one\n") }).await;
+    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 0, data: base64_of(b"one\n"), size: None }).await;
     link.next().await;
 
-    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 100, data: base64_of(b"gap\n") }).await;
+    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 100, data: base64_of(b"gap\n"), size: None }).await;
     assert_eq!(link.next().await, ControlToNode::TranscriptAck { path: "a.jsonl".into(), bytes: 4 });
 
-    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 0, data: base64_of(b"rewritten\n") }).await;
+    link.send(NodeToControl::Transcript { path: "a.jsonl".into(), offset: 0, data: base64_of(b"rewritten\n"), size: None }).await;
     assert_eq!(link.next().await, ControlToNode::TranscriptAck { path: "a.jsonl".into(), bytes: 10 });
 
     let stored = std::fs::read(server.data_dir.join("transcripts").join(link.id.to_string()).join("a.jsonl")).unwrap();
@@ -343,10 +343,10 @@ async fn transcript_paths_that_escape_the_nodes_folder_are_rejected() {
     let escape = server.data_dir.join("transcripts").join("escape.txt");
 
     for path in ["../escape.txt", "../../escape.txt", "/tmp/absolute-escape.txt", "a/../../escape.txt"] {
-        link.send(NodeToControl::Transcript { path: path.into(), offset: 0, data: base64_of(b"owned") }).await;
+        link.send(NodeToControl::Transcript { path: path.into(), offset: 0, data: base64_of(b"owned"), size: None }).await;
     }
 
-    link.send(NodeToControl::Transcript { path: "ok.jsonl".into(), offset: 0, data: base64_of(b"fine") }).await;
+    link.send(NodeToControl::Transcript { path: "ok.jsonl".into(), offset: 0, data: base64_of(b"fine"), size: None }).await;
 
     assert_eq!(link.next().await, ControlToNode::TranscriptAck { path: "ok.jsonl".into(), bytes: 4 });
     assert!(!escape.exists());

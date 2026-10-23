@@ -27,6 +27,18 @@ pub struct AuthUser {
     pub email: String,
     pub name: String,
     pub session: Option<Uuid>,
+    pub scopes: Option<Vec<String>>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl AuthUser {
+    pub fn require_full_access(&self) -> ApiResult<()> {
+        if self.scopes.is_some() || self.expires_at.is_some() {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token does not cover that. Ask the person for access that does."));
+        }
+
+        Ok(())
+    }
 }
 
 pub struct AuthNode {
@@ -50,14 +62,14 @@ impl FromRequestParts<AppState> for AuthUser {
         let address = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(peer)| client_address(state, &parts.headers, *peer).to_string()).unwrap_or_default();
 
         if let Some(token) = bearer(&parts.headers).and_then(|value| value.strip_prefix("myc_client_")) {
-            let row = sqlx::query_as::<_, (Uuid, String, String, Uuid)>(
-                "select users.id, users.email, users.name, client_tokens.id from client_tokens join users on users.id = client_tokens.user_id
-                 where client_tokens.token_hash = $1 and client_tokens.revoked_at is null",
+            let row = sqlx::query_as::<_, (Uuid, String, String, Uuid, Option<Vec<String>>, Option<chrono::DateTime<chrono::Utc>>)>(
+                "select users.id, users.email, users.name, client_tokens.id, client_tokens.scopes, client_tokens.expires_at from client_tokens join users on users.id = client_tokens.user_id
+                 where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and (client_tokens.expires_at is null or client_tokens.expires_at > now())",
             )
             .bind(hash_token(token))
             .fetch_optional(&state.pool)
             .await?;
-            let (id, email, name, session) = row.ok_or_else(ApiError::unauthorised)?;
+            let (id, email, name, session, scopes, expires_at) = row.ok_or_else(ApiError::unauthorised)?;
 
             sqlx::query(
                 "update client_tokens set last_used_at = now(), address = $2
@@ -68,7 +80,7 @@ impl FromRequestParts<AppState> for AuthUser {
             .execute(&state.pool)
             .await?;
 
-            return Ok(AuthUser { id, email, name, session: Some(session) });
+            return Ok(AuthUser { id, email, name, session: Some(session), scopes, expires_at });
         }
 
         let token = cookie(&parts.headers, SESSION_COOKIE).ok_or_else(ApiError::unauthorised)?;
@@ -93,7 +105,7 @@ impl FromRequestParts<AppState> for AuthUser {
             .await?;
         }
 
-        row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session) }).ok_or_else(ApiError::unauthorised)
+        row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session), scopes: None, expires_at: None }).ok_or_else(ApiError::unauthorised)
     }
 }
 

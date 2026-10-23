@@ -234,6 +234,194 @@ async fn subagent_journals_and_sessions_that_already_have_a_conversation_are_not
     assert_eq!(status_of(&statuses, link.id, "claude"), (1, 1));
 }
 
+const PARENT_SESSION: &str = "99999999-8888-7777-6666-555555555555";
+
+fn parent_transcript_with_two_agents() -> String {
+    [
+        json!({"type": "user", "sessionId": PARENT_SESSION, "cwd": "/work/app", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "Review the change"}}),
+        json!({"type": "assistant", "sessionId": PARENT_SESSION, "timestamp": "2026-10-01T10:00:02Z", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "Task", "input": {"description": "Check the build", "prompt": "Run the build and report"}},
+            {"type": "tool_use", "id": "t2", "name": "Task", "input": {"description": "Check the docs", "prompt": "Read the docs and report"}}
+        ]}}),
+        json!({"type": "user", "sessionId": PARENT_SESSION, "timestamp": "2026-10-01T10:01:00Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "done"}]}}),
+    ]
+    .iter()
+    .map(Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+fn subagent_transcript(agent: &str, prompt: &str, answer: &str, started: &str, finished: &str) -> String {
+    [
+        json!({"type": "user", "isSidechain": true, "agentId": agent, "sessionId": PARENT_SESSION, "cwd": "/work/app", "timestamp": started, "message": {"role": "user", "content": prompt}}),
+        json!({"type": "assistant", "isSidechain": true, "agentId": agent, "sessionId": PARENT_SESSION, "timestamp": finished, "message": {"role": "assistant", "content": [{"type": "text", "text": answer}]}}),
+    ]
+    .iter()
+    .map(Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+fn subagent_path(agent: &str) -> String {
+    format!(".claude/projects/-work-app/{PARENT_SESSION}/subagents/agent-{agent}.jsonl")
+}
+
+async fn side_chats_of(server: &Server, parent: &str) -> Vec<Value> {
+    let mut side_chats = Vec::new();
+
+    for archived in [false, true] {
+        let (_, conversations) = server.user.json(server.user.get(&format!("/api/v1/conversations?archived={archived}"))).await;
+        side_chats.extend(conversations.as_array().unwrap().iter().filter(|conversation| conversation["parent_id"] == parent).cloned());
+    }
+
+    side_chats.sort_by_key(|conversation| conversation["created_at"].as_str().unwrap().to_string());
+
+    side_chats
+}
+
+#[tokio::test]
+async fn importing_a_transcript_with_two_subagents_creates_two_read_only_side_chats_under_it_in_order() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{PARENT_SESSION}.jsonl"), &parent_transcript_with_two_agents()).await;
+    mirror(&server, link.id, &subagent_path("aaa"), &subagent_transcript("aaa", "Read the docs and report", "Docs are current.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z")).await;
+    mirror(&server, link.id, &subagent_path("zzz"), &subagent_transcript("zzz", "Run the build and report", "Build passes.", "2026-10-01T10:00:05Z", "2026-10-01T10:00:15Z")).await;
+
+    let (_, before) = server.user.json(server.user.get("/api/v1/imports")).await;
+    assert_eq!(status_of(&before, link.id, "claude"), (3, 0));
+
+    let job = import(&server, link.id, "claude").await;
+    assert_eq!(job["imported"], 3);
+
+    let parent = imported_conversation(&server, PARENT_SESSION).await;
+    let side_chats = side_chats_of(&server, parent["id"].as_str().unwrap()).await;
+    let titles: Vec<&str> = side_chats.iter().map(|chat| chat["title"].as_str().unwrap()).collect();
+    assert_eq!(titles, ["Check the build", "Check the docs"]);
+    assert!(side_chats.iter().all(|chat| chat["side_kind"] == "subagent" && chat["status"] == "done" && chat["cwd"] == "/work/app"));
+    assert_eq!(side_chats[0]["created_at"], "2026-10-01T10:00:05Z");
+    assert_eq!(side_chats[0]["updated_at"], "2026-10-01T10:00:15Z");
+
+    let id = Uuid::parse_str(side_chats[0]["id"].as_str().unwrap()).unwrap();
+    let events = server.events(id).await;
+    let kinds: Vec<&str> = events.iter().map(|event| event["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["user_message", "acp_update", "turn_end"]);
+    assert_eq!(events[0]["payload"]["text"], "Run the build and report");
+    assert_eq!(events[1]["payload"]["update"]["content"]["text"], "Build passes.");
+
+    let (_, after) = server.user.json(server.user.get("/api/v1/imports")).await;
+    assert_eq!(status_of(&after, link.id, "claude"), (3, 3));
+    assert_eq!(import(&server, link.id, "claude").await["imported"], 0);
+}
+
+#[tokio::test]
+async fn a_subagent_without_a_matching_task_call_is_titled_from_its_first_prompt() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{PARENT_SESSION}.jsonl"), &claude_transcript(PARENT_SESSION, "Start", "Started.")).await;
+    mirror(&server, link.id, &subagent_path("aaa"), &subagent_transcript("aaa", "Count the files\nin the repo", "Forty.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z")).await;
+
+    import(&server, link.id, "claude").await;
+
+    let parent = imported_conversation(&server, PARENT_SESSION).await;
+    let side_chats = side_chats_of(&server, parent["id"].as_str().unwrap()).await;
+    assert_eq!(side_chats[0]["title"], "Count the files");
+}
+
+#[tokio::test]
+async fn a_subagent_whose_parent_is_not_mirrored_is_neither_counted_nor_imported() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &subagent_path("aaa"), &subagent_transcript("aaa", "Orphan", "Alone.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z")).await;
+
+    let (_, statuses) = server.user.json(server.user.get("/api/v1/imports")).await;
+
+    assert_eq!(status_of(&statuses, link.id, "claude"), (0, 0));
+}
+
+#[tokio::test]
+async fn a_file_whose_upload_has_not_reached_its_full_size_is_recorded_as_still_uploading() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let path = format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl");
+    let content = claude_transcript(CLAUDE_SESSION, "Half sent", "Partial.");
+    mirror(&server, link.id, &path, &content).await;
+    sqlx::query("update transcripts set size_bytes = $3 where node_id = $1 and path = $2").bind(link.id).bind(&path).bind(content.len() as i64 + 500).execute(&server.pool).await.unwrap();
+
+    let job = import(&server, link.id, "claude").await;
+
+    assert_eq!((job["imported"].clone(), job["failed"][0]["path"].clone(), job["failed"][0]["reason"].clone()), (json!(0), json!(path), json!("Still uploading.")));
+
+    sqlx::query("update transcripts set size_bytes = bytes where node_id = $1 and path = $2").bind(link.id).bind(&path).execute(&server.pool).await.unwrap();
+
+    assert_eq!(import(&server, link.id, "claude").await["imported"], 1);
+}
+
+#[tokio::test]
+async fn a_subagent_transcript_streamed_live_becomes_a_side_chat_that_grows_with_the_file() {
+    use base64::Engine;
+
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(parent.id, PARENT_SESSION).await;
+    eventually("session id stored", || async { (server.conversation(parent.id).await["acp_session_id"] == PARENT_SESSION).then_some(()) }).await;
+    let mut stream = server.user.stream().await;
+    let path = subagent_path("aaa");
+    let first = subagent_transcript("aaa", "Read the docs and report", "Looking.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z") + "\n";
+    let encode = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
+
+    link.send(NodeToControl::Transcript { path: path.clone(), offset: 0, data: encode(&first), size: Some(first.len() as i64) }).await;
+
+    let created: Conversation = stream
+        .until(|message| match message {
+            StreamMessage::Conversation(conversation) if conversation.parent_id == Some(parent.id) => Some(conversation),
+            _ => None,
+        })
+        .await;
+    assert_eq!((created.title.as_str(), created.archived_at), ("Read the docs and report", None));
+    assert_eq!(server.events(created.id).await.len(), 3);
+
+    let more = json!({"type": "assistant", "isSidechain": true, "agentId": "aaa", "sessionId": PARENT_SESSION, "timestamp": "2026-10-01T10:00:40Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Docs are current."}]}}).to_string() + "\n";
+    link.send(NodeToControl::Transcript { path: path.clone(), offset: first.len() as i64, data: encode(&more), size: Some((first.len() + more.len()) as i64) }).await;
+
+    eventually("the side chat to carry the new answer", || async { (server.events(created.id).await.len() == 4).then_some(()) }).await;
+    assert_eq!(side_chats_of(&server, &parent.id.to_string()).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_live_subagent_chunk_before_the_upload_is_complete_creates_nothing_yet() {
+    use base64::Engine;
+
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(parent.id, PARENT_SESSION).await;
+    eventually("session id stored", || async { (server.conversation(parent.id).await["acp_session_id"] == PARENT_SESSION).then_some(()) }).await;
+    let content = subagent_transcript("aaa", "Read the docs and report", "Looking.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z") + "\n";
+
+    link.send(NodeToControl::Transcript { path: subagent_path("aaa"), offset: 0, data: base64::engine::general_purpose::STANDARD.encode(&content), size: Some(content.len() as i64 + 100) }).await;
+    link.next().await;
+
+    assert!(side_chats_of(&server, &parent.id.to_string()).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_subagent_chat_refuses_prompts() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{PARENT_SESSION}.jsonl"), &parent_transcript_with_two_agents()).await;
+    mirror(&server, link.id, &subagent_path("aaa"), &subagent_transcript("aaa", "Run the build and report", "Build passes.", "2026-10-01T10:00:05Z", "2026-10-01T10:00:15Z")).await;
+    import(&server, link.id, "claude").await;
+    let parent = imported_conversation(&server, PARENT_SESSION).await;
+    let side_chats = side_chats_of(&server, parent["id"].as_str().unwrap()).await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/prompt", side_chats[0]["id"].as_str().unwrap())).json(&json!({"text": "Carry on"}))).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("read_only")));
+}
+
 #[tokio::test]
 async fn importing_a_codex_rollout_reads_the_session_meta_and_response_items() {
     let server = Server::start().await;

@@ -120,6 +120,10 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
         cwd = worktrees::create(state, project, branch, None).await?.path;
     }
 
+    if request.side_kind == Some(SideKind::Subagent) {
+        return Err(ApiError::bad_request("parent_invalid", "A subagent chat is made by the agent that ran it."));
+    }
+
     let parent = match request.parent_id {
         Some(parent_id) => Some(find_owned(&state.pool, parent_id, user.id).await?),
         None => None,
@@ -195,6 +199,10 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
 pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<StartSideChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
     let parent = find_owned(&state.pool, id, user.id).await?;
     let text = request.text.as_deref().map(str::trim).filter(|text| !text.is_empty());
+
+    if request.kind == SideKind::Subagent {
+        return Err(ApiError::bad_request("parent_invalid", "A subagent chat is made by the agent that ran it."));
+    }
 
     if chats::is_chat(&parent) {
         let Some(provider_id) = parent.provider_id else {
@@ -527,6 +535,14 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     }
 
     Ok(Json(events))
+}
+
+pub async fn session(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<Value>>> {
+    find_owned(&state.pool, id, user.id).await?;
+
+    let updates = sqlx::query_scalar::<_, Value>("select update from conversation_session_state where conversation_id = $1 order by update_kind").bind(id).fetch_all(&state.pool).await?;
+
+    Ok(Json(updates))
 }
 
 #[derive(Deserialize)]

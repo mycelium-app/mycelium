@@ -59,6 +59,9 @@ pub struct Config {
     pub dev_login: Option<String>,
     pub allowed_emails: Vec<String>,
     pub web_dir: PathBuf,
+    pub editor_dir: PathBuf,
+    pub artifact_domain: Option<String>,
+    pub artifact_host_token: Option<String>,
     pub skip_migrations: bool,
     pub trusted_proxies: Vec<Cidr>,
     pub device_code_lifetime: Duration,
@@ -119,6 +122,9 @@ impl Config {
             dev_login,
             allowed_emails: optional(lookup, "MYCELIUM_ALLOWED_EMAILS").map(|emails| emails.split(',').map(|email| email.trim().to_lowercase()).filter(|email| !email.is_empty()).collect()).unwrap_or_default(),
             web_dir: optional(lookup, "MYCELIUM_WEB_DIR").unwrap_or_else(|| "/usr/share/mycelium/web".into()).into(),
+            editor_dir: optional(lookup, "MYCELIUM_EDITOR_DIR").unwrap_or_else(|| "/usr/share/mycelium/editor".into()).into(),
+            artifact_domain: optional(lookup, "MYCELIUM_ARTIFACT_DOMAIN").map(|domain| domain.trim().trim_matches('.').to_lowercase()).filter(|domain| !domain.is_empty()),
+            artifact_host_token: optional(lookup, "MYCELIUM_ARTIFACT_HOST_TOKEN"),
             skip_migrations: optional(lookup, "MYCELIUM_SKIP_MIGRATIONS").is_some_and(|value| value == "true" || value == "1"),
             trusted_proxies: optional(lookup, "MYCELIUM_TRUSTED_PROXIES")
                 .map(|ranges| ranges.split(',').map(str::trim).filter(|range| !range.is_empty()).map(Cidr::parse).collect::<Result<Vec<_>>>())
@@ -213,6 +219,19 @@ mod tests {
     }
 
     #[test]
+    fn the_artifact_domain_is_lowercased_and_loses_surrounding_dots() {
+        let config = config_from(&[
+            ("MYCELIUM_DATABASE_URL", "postgres://x"),
+            ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"),
+            ("MYCELIUM_DEV_LOGIN", "me@example.com"),
+            ("MYCELIUM_ARTIFACT_DOMAIN", " .Artifacts.Example.com. "),
+        ])
+        .unwrap();
+
+        assert_eq!(config.artifact_domain.as_deref(), Some("artifacts.example.com"));
+    }
+
+    #[test]
     fn oidc_settings_are_required_without_dev_login() {
         let result = config_from(&[("MYCELIUM_DATABASE_URL", "postgres://x"), ("MYCELIUM_PUBLIC_URL", "https://mycelium.example.com")]);
 
@@ -232,6 +251,9 @@ mod tests {
         assert_eq!(config.public_url, "https://mycelium.example.com");
         assert_eq!(config.listen.to_string(), "0.0.0.0:8080");
         assert_eq!(config.web_dir, PathBuf::from("/usr/share/mycelium/web"));
+        assert_eq!(config.editor_dir, PathBuf::from("/usr/share/mycelium/editor"));
+        assert!(config.artifact_domain.is_none());
+        assert!(config.artifact_host_token.is_none());
         assert!(!config.skip_migrations);
     }
 }

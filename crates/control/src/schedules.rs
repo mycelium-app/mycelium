@@ -441,7 +441,7 @@ async fn run_due(state: &AppState) -> ApiResult<()> {
 
 async fn fire(state: &AppState, connection: &mut PgConnection, row: &ScheduleRow) -> ApiResult<ScheduleRun> {
     let user = sqlx::query_as::<_, (Uuid, String, String)>("select id, email, name from users where id = $1").bind(row.owner).fetch_one(&mut *connection).await?;
-    let user = AuthUser { id: user.0, email: user.1, name: user.2, session: None };
+    let user = AuthUser { id: user.0, email: user.1, name: user.2, session: None, scopes: None, expires_at: None };
     let started = start_run(state, &user, row).await;
     let (outcome, reason, conversation_id) = match started {
         Ok(conversation_id) => (RunOutcome::Started, None, Some(conversation_id)),
@@ -478,7 +478,7 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
     };
 
     if let Some(conversation_id) = reusable {
-        let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await;
+        let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None, scopes: None, expires_at: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await;
 
         if queued.is_ok() {
             return Ok(conversation_id);

@@ -63,7 +63,7 @@ async fn ping_and_tools_list_answer_and_unknown_methods_are_json_rpc_errors() {
 
     let (_, tools) = mcp(&server, &token, None, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
     let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["recall", "remember", "propose_task", "ask_question", "propose_schedule", "walkthrough", "get_instructions", "propose_instructions_edit", "find_conversations", "send_to_conversation"]);
+    assert_eq!(names, ["recall", "remember", "propose_task", "ask_question", "propose_schedule", "walkthrough", "get_instructions", "propose_instructions_edit", "find_conversations", "send_to_conversation", "request_api_access", "create_artifact", "update_artifact", "design_set_artboard", "design_remove_item", "read_artifact", "read_artifact_feedback"]);
 
     let (_, unknown) = mcp(&server, &token, None, json!({"jsonrpc": "2.0", "id": 3, "method": "resources/list"})).await;
     assert_eq!(unknown["error"]["code"], -32601);

@@ -298,6 +298,16 @@ impl Daemon {
                     let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
                 });
             }
+            ControlToNode::ApiToken { conversation_id, token } => {
+                let saved = self.config.save_api_token(conversation_id, &token);
+
+                if let Err(error) = &saved {
+                    tracing::warn!("could not save an API token for a conversation: {error}");
+                }
+
+                let path = saved.ok().map(|path| path.display().to_string());
+                let _ = self.out.send(NodeToControl::ApiTokenSaved { conversation_id, path });
+            }
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }

@@ -275,6 +275,8 @@ pub async fn pending(State(state): State<AppState>, _user: AuthUser, Path(user_c
 const PENDING_FILTER: &str = "user_code = $1 and approved_at is null and denied_at is null and consumed_at is null and expires_at > now()";
 
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(user_code): Path<String>) -> ApiResult<StatusCode> {
+    user.require_full_access()?;
+
     let updated = sqlx::query_as::<_, DeviceIdentity>(sqlx::AssertSqlSafe(format!("update device_codes set approved_by = $2, approved_at = now() where {PENDING_FILTER} returning user_code, kind, label, hostname")))
         .bind(normalise(&user_code))
         .bind(user.id)

@@ -1,5 +1,9 @@
+#![recursion_limit = "512"]
+
 mod account_usage;
 mod activity;
+mod api_access;
+mod artifacts;
 mod attachments;
 mod auth;
 mod boot;
@@ -132,6 +136,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/move-plan", get(moves::plan))
         .route("/api/v1/conversations/{id}/move", get(moves::current).post(moves::request).delete(moves::cancel))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))
+        .route("/api/v1/conversations/{id}/session", get(conversations::session))
         .route("/api/v1/conversations/{id}/files", get(conversations::files))
         .route("/api/v1/conversations/{id}/git/status", get(git::status))
         .route("/api/v1/conversations/{id}/git/log", get(git::log))
@@ -159,6 +164,21 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/terminals/{terminal_id}", delete(terminals::stop))
         .route("/api/v1/conversations/{id}/attachments", post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
         .route("/api/v1/attachments/{sha256}", get(attachments::get))
+        .route("/api/v1/artifacts", get(artifacts::list).post(artifacts::create).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
+        .route("/api/v1/artifacts/{id}", get(artifacts::get).patch(artifacts::patch).delete(artifacts::delete))
+        .route("/api/v1/artifacts/{id}/versions", post(artifacts::create_version).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
+        .route("/api/v1/artifacts/{id}/versions/{version}/content", get(artifacts::content))
+        .route("/api/v1/artifacts/{id}/comments", get(artifacts::comments).post(artifacts::create_comment))
+        .route("/api/v1/artifacts/{id}/comments/{comment_id}", patch(artifacts::patch_comment))
+        .route("/api/v1/artifacts/{id}/data", get(artifacts::data))
+        .route("/api/v1/artifacts/{id}/data/{key}", put(artifacts::replace_data))
+        .route("/internal/artifacts/by-slug/{slug}", get(artifacts::host_artifact))
+        .route("/internal/artifacts/by-slug/{slug}/content", get(artifacts::host_content))
+        .route("/internal/artifacts/by-slug/{slug}/data", get(artifacts::host_data))
+        .route("/internal/artifacts/by-slug/{slug}/data/{key}", put(artifacts::host_replace_data))
+        .route("/design", get(artifacts::editor))
+        .route("/design/", get(artifacts::editor))
+        .route("/design/{*path}", get(artifacts::editor))
         .route("/api/v1/conversations/{id}/prompt", post(prompts::prompt))
         .route("/api/v1/conversations/{id}/queue", get(prompts::queue))
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))
@@ -198,6 +218,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/message-proposals", get(message_proposals::list))
         .route("/api/v1/message-proposals/{id}/approve", post(message_proposals::approve))
         .route("/api/v1/message-proposals/{id}/decline", post(message_proposals::decline))
+        .route("/api/v1/api-access-requests", get(api_access::list))
+        .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
+        .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
@@ -225,6 +248,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), api_access::gate_scoped_tokens))
         .fallback_service(web::single_page_app(&web_dir))
         .with_state(state)
 }

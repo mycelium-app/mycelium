@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 const NODE_TOKEN_PREFIX: &str = "myc_node_";
+pub const API_TOKEN_FILE: &str = "api-token";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -42,6 +43,18 @@ impl NodeConfig {
         std::io::Write::write_all(&mut file, text.as_bytes())?;
 
         Ok(())
+    }
+
+    pub fn save_api_token(&self, conversation_id: Uuid, token: &str) -> Result<PathBuf> {
+        let dir = self.sessions_dir().join(conversation_id.to_string());
+        std::fs::create_dir_all(&dir)?;
+
+        let path = dir.join(API_TOKEN_FILE);
+        let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&path)?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        std::io::Write::write_all(&mut file, token.as_bytes())?;
+
+        Ok(path)
     }
 
     pub fn bearer_token(&self) -> String {

@@ -108,7 +108,7 @@ fn snapshot() -> Value {
 
 async fn mirror_transcript(moving: &mut Moving) {
     let engine = base64::engine::general_purpose::STANDARD;
-    moving.source.send(NodeToControl::Transcript { path: TRANSCRIPT.into(), offset: 0, data: engine.encode("one\ntwo\nxyz") }).await;
+    moving.source.send(NodeToControl::Transcript { path: TRANSCRIPT.into(), offset: 0, data: engine.encode("one\ntwo\nxyz"), size: None }).await;
 }
 
 async fn request_move(moving: &Moving, fork: bool) -> (u16, Value) {
