@@ -7,6 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -127,15 +129,17 @@ fun ThreadView(
         }
     }
 
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        val side = maxOf(Tokens.Space.S4, (maxWidth - Tokens.Size.Measure) / 2 + Tokens.Space.S4)
+
         LazyColumn(
-            Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().semantics { contentDescription = "Conversation" },
+            Modifier.fillMaxSize().semantics { contentDescription = "Conversation" },
             state = state,
             reverseLayout = true,
             contentPadding = PaddingValues(
-                start = Tokens.Space.S4,
+                start = side,
                 top = Tokens.Space.S8,
-                end = Tokens.Space.S4,
+                end = side,
                 bottom = Tokens.Space.S4,
             ),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
