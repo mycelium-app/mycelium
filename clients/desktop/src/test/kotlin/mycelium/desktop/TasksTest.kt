@@ -50,8 +50,8 @@ private class BoardPlatform(val saved: MutableMap<String, String> = mutableMapOf
     }
 }
 
-private fun conversation(id: String, title: String, status: String, cwd: String = "/other", agent: String = "claude", model: String = "null") =
-    """{"id":"$id","owner":"u","node_id":"n1","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","acp_session_id":"s","mode":null,"model":$model,
+private fun conversation(id: String, title: String, status: String, cwd: String = "/other", agent: String = "claude", model: String = "null", project: String = "null") =
+    """{"id":"$id","owner":"u","node_id":"n1","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","acp_session_id":"s","mode":null,"model":$model,"project_id":$project,
 "created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
 private const val BoardNodes = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"v0.1.13","online":true,"draining":false,
@@ -87,7 +87,7 @@ class TasksTest {
     private val posts = mutableListOf<Pair<String, String>>()
     private val platform = BoardPlatform()
 
-    private fun store(tasks: String = BoardTaskList): Store {
+    private fun store(tasks: String = BoardTaskList, conversations: String = BoardConversations): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -101,6 +101,7 @@ class TasksTest {
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tp/decline") -> respond(task("tp", "Cache cargo in the release jobs", "declined"), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tq/answer") -> respond(task("tq", "Tag now, or wait?", "done", ""","answer":"Wait""""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tc/done") -> respond(task("tc", "Merge the Gradle jobs", "done", ""","conversation_id":"c-claimed""""), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/tasks/t1/start") && posts.last().second.contains("c-idle") -> respond(conversation("c-idle", "Ready for a look", "working", "/work/app", project = "\"p1\""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/t1/start") -> respond(conversation("c-new", "Rebuild install.md", "working", "/work/app"), HttpStatusCode.Created, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks") -> respond("""{"id":"t2","node_id":"n1","agent":"claude","cwd":"/srv","title":"Tidy","created_at":"2026-10-22T10:00:00Z"}""", HttpStatusCode.Created, json)
                 path.endsWith("/conversations/c-input/events") -> respond(PermissionEvent, HttpStatusCode.OK, json)
@@ -109,7 +110,7 @@ class TasksTest {
                 path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"app","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/worktrees") -> respond("""[{"id":"w1","project_id":"p1","branch":"feature/x","path":"/work/app-wt/feature-x","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(BoardNodes, HttpStatusCode.OK, json)
-                path.endsWith("/conversations") -> respond(BoardConversations, HttpStatusCode.OK, json)
+                path.endsWith("/conversations") -> respond(conversations, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
@@ -340,6 +341,57 @@ class TasksTest {
         rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
         rule.waitUntil { rule.onAllNodesWithText("Start", substring = false).fetchSemanticsNodes().isEmpty() }
         rule.onNodeWithContentDescription("Stop Rebuild install.md").assertExists()
+    }
+
+    private fun withIdleConversation(vararg others: String) = store(conversations = "[" + (listOf(conversation("c-idle", "Ready for a look", "review", "/work/app", project = "\"p1\"")) + others).joinToString(",") + "]")
+
+    @Test
+    fun anOpenTaskOffersAnyIdleConversationOfItsProject() {
+        showBoard(withIdleConversation())
+
+        rule.onNodeWithText("app · any idle conversation").assertExists()
+    }
+
+    @Test
+    fun anOpenTaskKeepsItsOwnDetailsWhenNoConversationOfItsProjectIsIdle() {
+        showBoard(store(conversations = "[" + conversation("c-working", "Busy", "working", "/work/app", project = "\"p1\"") + "," + conversation("c-other", "Elsewhere", "review", project = "\"p2\"") + "]"))
+
+        rule.onNodeWithText("any idle conversation", substring = true).assertDoesNotExist()
+        rule.onAllNodesWithText("Claude Code · app").fetchSemanticsNodes().isNotEmpty().let(::assertTrue)
+    }
+
+    @Test
+    fun startingATaskWithIdleConversationsOffersNewAndEachConversation() {
+        showBoard(withIdleConversation())
+
+        rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
+
+        rule.onNodeWithText("New conversation").assertExists()
+        rule.onNodeWithText("Send to Ready for a look").assertExists()
+        assertTrue(posts.none { it.first.endsWith("/tasks/t1/start") })
+    }
+
+    @Test
+    fun sendingATaskToAnIdleConversationPostsItsIdAndClaimsTheCard() {
+        showBoard(withIdleConversation())
+
+        rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
+        rule.onNodeWithText("Send to Ready for a look").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        assertEquals("""{"conversation_id":"c-idle"}""", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Start Rebuild install.md").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun choosingNewConversationFromTheStartMenuStartsOneWithoutATarget() {
+        showBoard(withIdleConversation())
+
+        rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
+        rule.onNodeWithText("New conversation").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        assertEquals("", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
     }
 
     @Test

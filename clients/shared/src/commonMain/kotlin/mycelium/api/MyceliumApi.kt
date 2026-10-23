@@ -258,8 +258,8 @@ class MyceliumApi(
     suspend fun createTask(request: CreateTaskRequest): Task =
         call("/tasks") { client.post(it) { authorise(); json(request) } }.body()
 
-    suspend fun startTask(id: String): Conversation =
-        call("/tasks/$id/start") { client.post(it) { authorise() } }.body()
+    suspend fun startTask(id: String, conversationId: String? = null): Conversation =
+        call("/tasks/$id/start") { client.post(it) { authorise(); conversationId?.let { target -> json(StartTaskRequest(target)) } } }.body()
 
     suspend fun approveTask(id: String): Task =
         call("/tasks/$id/approve") { client.post(it) { authorise() } }.body()

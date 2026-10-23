@@ -195,8 +195,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         return task
     }
 
-    suspend fun startTask(task: Task): Conversation {
-        val conversation = api.startTask(task.id)
+    suspend fun startTask(task: Task, conversationId: String? = null): Conversation {
+        val conversation = api.startTask(task.id, conversationId)
 
         mutableState.update { it.copy(tasks = it.tasks + (task.id to task.copy(status = TaskStatuses.Claimed, conversationId = conversation.id)), conversations = it.conversations + (conversation.id to conversation)) }
 

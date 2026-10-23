@@ -91,6 +91,18 @@ class TasksStoreTest {
     }
 
     @Test
+    fun sendingATaskToAConversationPostsItsIdAndClaimsTheTaskForIt() = runTest {
+        val requests = mutableListOf<Triple<String, String, String>>()
+        val store = store(backgroundScope, requests)
+        store.refreshBoard()
+
+        store.startTask(store.state.value.tasks.getValue("t1"), "c1")
+
+        assertEquals("""{"conversation_id":"c1"}""", requests.last { it.second.endsWith("/tasks/t1/start") }.third)
+        assertEquals("c1", store.state.value.tasks.getValue("t1").conversationId)
+    }
+
+    @Test
     fun approvingDecliningAnsweringAndFinishingATaskReplaceItWithTheControlPlanesCopy() = runTest {
         val requests = mutableListOf<Triple<String, String, String>>()
         val store = store(backgroundScope, requests)

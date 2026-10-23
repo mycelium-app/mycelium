@@ -305,6 +305,7 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
     val conversation = card.conversation
     val permission = conversation?.let { pendingPermission(state.events[it.id].orEmpty()) }
     var explained by remember { mutableStateOf(false) }
+    var startMenu by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxWidth().background(colors.bgRaised, BlockShape).padding(Tokens.Space.S2),
@@ -360,14 +361,33 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
 
                 TaskStatuses.Open -> {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                        MyButton(
-                            { if (card.waitingOn.isEmpty()) store.act { store.startTask(task) } else explained = true },
-                            text = "Start",
-                            description = "Start ${task.title}",
-                            variant = ButtonVariant.Outline,
-                            size = ButtonSize.Sm,
-                            muted = card.waitingOn.isNotEmpty(),
-                        )
+                        Box {
+                            MyButton(
+                                {
+                                    when {
+                                        card.waitingOn.isNotEmpty() -> explained = true
+                                        card.idleConversations.isEmpty() -> store.act { store.startTask(task) }
+                                        else -> startMenu = true
+                                    }
+                                },
+                                text = "Start",
+                                description = "Start ${task.title}",
+                                variant = ButtonVariant.Outline,
+                                size = ButtonSize.Sm,
+                                muted = card.waitingOn.isNotEmpty(),
+                                trailingIcon = if (card.idleConversations.isEmpty() || card.waitingOn.isNotEmpty()) null else MyIcon.ChevronDown,
+                            )
+
+                            if (startMenu) {
+                                MenuPopup(onDismiss = { startMenu = false }) {
+                                    MenuItem("New conversation", onClick = { startMenu = false; store.act { store.startTask(task) } })
+
+                                    for (idle in card.idleConversations) {
+                                        MenuItem("Send to ${idle.title}", onClick = { startMenu = false; store.act { store.startTask(task, idle.id) } })
+                                    }
+                                }
+                            }
+                        }
                         MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
                     }
 

@@ -27,11 +27,17 @@ data class BoardCard(
     val conversation: Conversation?,
     val task: Task?,
     val waitingOn: List<Task> = emptyList(),
+    val idleConversations: List<Conversation> = emptyList(),
 ) {
     val details: String
         get() = when (task?.status) {
             TaskStatuses.Question -> "From ${task.sourceTitle ?: "a conversation that is gone"}"
             TaskStatuses.Proposed -> listOfNotNull(projectName, task.sourceTitle?.let { "from $it" }).joinToString(" · ")
+            TaskStatuses.Open -> if (idleConversations.isNotEmpty() && waitingOn.isEmpty()) {
+                listOfNotNull(projectName, "any idle conversation").joinToString(" · ")
+            } else {
+                listOfNotNull(agentName(agent), model, projectName, branch, waitsOnText(waitingOn.size)).joinToString(" · ")
+            }
             else -> listOfNotNull(agentName(agent), model, projectName, branch, waitsOnText(waitingOn.size)).joinToString(" · ")
         }
 }
@@ -44,6 +50,17 @@ private fun waitsOnText(count: Int): String? = if (count == 0) null else "waits 
 
 fun waitingOn(task: Task, tasks: Map<String, Task>): List<Task> =
     if (task.status == TaskStatuses.Open) task.dependsOn.mapNotNull { tasks[it] }.filter { it.status in unfinishedStatuses } else emptyList()
+
+fun idleConversationsFor(task: Task, state: AppState): List<Conversation> =
+    if (task.status != TaskStatuses.Open) {
+        emptyList()
+    } else {
+        state.conversations.values
+            .filter { it.projectId == task.projectId && it.archivedAt == null && !it.isChat && it.acpSessionId != null }
+            .filter { it.status == ConversationStatus.Review || it.status == ConversationStatus.Done }
+            .filter { state.nodes[it.nodeId]?.online == true }
+            .sortedByDescending { it.updatedAt }
+    }
 
 fun laneOf(status: ConversationStatus): Lane = when (status) {
     ConversationStatus.Done -> Lane.Done
@@ -75,7 +92,7 @@ fun boardCards(state: AppState, filter: BoardFilter = BoardFilter()): Map<Lane, 
         val conversation = task.conversationId?.let { state.conversations[it] }
         val project = task.projectId?.let { state.projects[it] }
 
-        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task, waitingOn(task, state.tasks))
+        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task, waitingOn(task, state.tasks), idleConversationsFor(task, state))
     }
     val matching = (fromConversations + fromTasks).filter { (_, card) -> matches(card, filter) }
     val lanes = matching.groupBy({ it.first }, { it.second })

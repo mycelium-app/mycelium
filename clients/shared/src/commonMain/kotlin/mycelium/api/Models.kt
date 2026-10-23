@@ -413,6 +413,9 @@ object TaskStatuses {
 data class AnswerTaskRequest(val answer: String)
 
 @Serializable
+data class StartTaskRequest(@SerialName("conversation_id") val conversationId: String)
+
+@Serializable
 data class CreateTaskRequest(
     @SerialName("node_id") val nodeId: String,
     val agent: String,
@@ -649,6 +652,7 @@ data class Conversation(
     @SerialName("parent_id") val parentId: String? = null,
     @SerialName("side_kind") val sideKind: String? = null,
     @SerialName("provider_id") val providerId: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
 )
 
 @Serializable

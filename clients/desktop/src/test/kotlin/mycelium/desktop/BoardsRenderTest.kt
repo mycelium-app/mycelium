@@ -19,7 +19,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
+import mycelium.state.Lane
 import mycelium.state.Store
+import mycelium.state.boardCards
 import mycelium.ui.MyTheme
 import mycelium.ui.MoveSheet
 import mycelium.ui.NewChatScreen
@@ -30,6 +32,7 @@ import mycelium.ui.Route
 import mycelium.ui.SessionsSettings
 import mycelium.ui.Shell
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private const val BackupsId = "77777777-7777-7777-7777-777777777777"
@@ -44,8 +47,8 @@ private fun ago(minutes: Long = 0, hours: Long = 0, days: Long = 0) = (Clock.Sys
 
 private fun ahead(hours: Long = 0, days: Long = 0) = (Clock.System.now() + hours.hours + days.days).toString()
 
-private fun conversationJson(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", parent: String? = null, side: String? = null, cwd: String = "/home/sam/projects/acme-backups", account: String? = null) =
-    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","mode":"acceptEdits","model":"Opus 5.5",${if (account != null) """"account":"$account",""" else ""}
+private fun conversationJson(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", parent: String? = null, side: String? = null, cwd: String = "/home/sam/projects/acme-backups", account: String? = null, project: String? = null) =
+    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","mode":"acceptEdits","model":"Opus 5.5",${if (project != null) """"project_id":"$project","acp_session_id":"s",""" else ""}${if (account != null) """"account":"$account",""" else ""}
     "created_at":"${ago(days = 2)}","updated_at":"$updated","archived_at":null${if (parent != null) ""","parent_id":"$parent","side_kind":"$side"""" else ""}}"""
 
 private fun nodeJson(id: String, name: String, os: String, icon: String, online: Boolean = true, revision: String = "afad776", older: Int = 0, address: String, version: String = "0.1.10", extraLogins: String = "") =
@@ -239,7 +242,13 @@ class BoardsRenderTest {
 
     @Test
     fun tasksAndSchedules() {
-        assertTrue(renderAt("board-tasks", true, false, content = shell(Route.Tasks, board = true)).length() > 1_000)
+        val idle = mapOf("/conversations" to BoardConversations.dropLast(1) + "," + conversationJson("88888888-8888-8888-8888-888888888888", "Release", "review", WillowId, ago(minutes = 9), cwd = "/home/sam/projects/mycelium", project = "p2") + "]")
+
+        assertTrue(renderAt("board-tasks", true, false, content = shell(Route.Tasks, idle, board = true)).length() > 1_000)
+
+        val details = boardCards(store(idle, board = true).state.value).getValue(Lane.Open).associate { it.title to it.details }
+        assertEquals("mycelium · any idle conversation", details.getValue("Rebuild install.md for the new flags"))
+        assertTrue(!details.getValue("Rotate the S3 keys").contains("idle"))
         assertTrue(renderAt("board-schedules", true, false, content = shell(Route.Schedules, board = true)).length() > 1_000)
     }
 
