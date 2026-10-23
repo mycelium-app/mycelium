@@ -26,6 +26,16 @@ private fun chunk(seq: Long, text: String) =
 
 class ThreadTest {
     @Test
+    fun thoughtChunksJoinIntoOneThoughtThatEndsWhenTheReplyStarts() {
+        val thinking = buildThread(listOf(update(1, """{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Checking "}}"""), update(2, """{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"the tests"}}""")))
+        val answered = buildThread(listOf(update(1, """{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Checking the tests"}}"""), chunk(2, "They pass.")))
+
+        assertEquals(ThreadItem.Thought("acp-1", "Checking the tests", finished = false), thinking.single().let { it as ThreadItem.Thought }.copy(key = "acp-1"))
+        assertEquals(true, (answered.first() as ThreadItem.Thought).finished)
+        assertEquals("They pass.", (answered.last() as ThreadItem.AgentMessage).text)
+    }
+
+    @Test
     fun aCommandNamedOnlyByALaterUpdateShowsTheCommandAndItsUnfencedOutput() {
         val thread = buildThread(
             listOf(

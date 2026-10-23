@@ -47,6 +47,8 @@ sealed interface ThreadItem {
 
     data class AgentMessage(override val key: String, val text: String) : ThreadItem
 
+    data class Thought(override val key: String, val text: String, val finished: Boolean = false) : ThreadItem
+
     data class ToolCall(
         override val key: String,
         val callId: String,
@@ -96,7 +98,9 @@ fun buildThread(events: List<Event>): List<ThreadItem> {
         }
     }
 
-    return withSameImagesMarked(items)
+    val thoughtsEnded = items.mapIndexed { index, item -> if (item is ThreadItem.Thought && index < items.lastIndex) item.copy(finished = true) else item }
+
+    return withSameImagesMarked(thoughtsEnded)
 }
 
 private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMessage {
@@ -177,11 +181,23 @@ private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: Js
 
     when (update.string("sessionUpdate")) {
         "agent_message_chunk" -> appendAgentText(items, key, update.contentText())
+        "agent_thought_chunk" -> appendThought(items, key, update.contentText())
         "user_message_chunk" -> Unit
         "tool_call" -> items += toolCallFrom(key, update)
         "tool_call_update" -> mergeToolUpdate(items, update)
         "plan" -> items += ThreadItem.Plan(key, planEntries(update))
     }
+}
+
+private fun appendThought(items: MutableList<ThreadItem>, key: String, text: String) {
+    val last = items.lastOrNull()
+
+    if (last is ThreadItem.Thought) {
+        items[items.lastIndex] = last.copy(text = last.text + text)
+        return
+    }
+
+    items += ThreadItem.Thought(key, text)
 }
 
 private fun appendAgentText(items: MutableList<ThreadItem>, key: String, text: String) {

@@ -184,6 +184,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
+        is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             ToolCall(item)
 
@@ -223,6 +224,33 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
 
             if (files.isNotEmpty() || images.isNotEmpty()) {
                 MessageAttachments(files, images)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Thought(item: ThreadItem.Thought) {
+    val colors = MyTheme.colors
+    var expanded by remember(item.key, item.finished) { mutableStateOf(!item.finished) }
+
+    Column(Modifier.fillMaxWidth()) {
+        MyButton(
+            { expanded = !expanded },
+            text = if (item.finished) "Thought" else "Thinking",
+            icon = if (item.finished) null else MyIcon.Working,
+            trailingIcon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
+            description = if (expanded) "Hide the agent's thinking" else "Show the agent's thinking",
+            size = ButtonSize.Sm,
+            muted = true,
+        )
+
+        if (expanded) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = Tokens.Space.S2)) {
+                Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(colors.border))
+                Box(Modifier.padding(start = Tokens.Space.S3)) {
+                    BasicText(inlineText(item.text.trim(), colors.textMuted), style = Tokens.Type.Prose.themed())
+                }
             }
         }
     }
