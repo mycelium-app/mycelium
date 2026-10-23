@@ -356,7 +356,7 @@ pub fn parse_kind(text: &str) -> ApiResult<ForgeKind> {
     }
 }
 
-fn token_hint(token: &str) -> String {
+pub fn token_hint(token: &str) -> String {
     let characters: Vec<char> = token.chars().collect();
 
     if characters.len() < 12 {

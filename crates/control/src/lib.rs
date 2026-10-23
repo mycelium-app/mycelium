@@ -1,6 +1,7 @@
 mod activity;
 mod auth;
 mod boot;
+mod chats;
 mod config;
 mod conversations;
 mod git;
@@ -15,6 +16,7 @@ mod issues;
 mod link;
 mod mcp;
 mod memories;
+mod model_providers;
 mod moves;
 mod nodes;
 mod projects;
@@ -132,6 +134,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))
+        .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
+        .route("/api/v1/model-providers/{id}", delete(model_providers::delete))
+        .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
+        .route("/api/v1/chats", post(chats::create))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
         .route("/api/v1/instructions", get(instructions::get))

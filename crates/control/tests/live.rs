@@ -19,6 +19,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PATCH /api/v1/nodes/{id}",
     "DELETE /api/v1/logins/{login_id}",
     "POST /api/v1/conversations",
+    "POST /api/v1/chats",
     "POST /api/v1/conversations/{id}/side",
     "POST /api/v1/conversations/{id}/move",
     "DELETE /api/v1/conversations/{id}/move",
@@ -58,6 +59,9 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/terminals/{terminal_id}/resize",
     "POST /api/v1/forges",
     "DELETE /api/v1/forges/{id}",
+    "POST /api/v1/model-providers",
+    "POST /api/v1/model-providers/{id}/refresh",
+    "DELETE /api/v1/model-providers/{id}",
     "POST /api/v1/projects",
     "POST /api/v1/tasks",
     "DELETE /api/v1/tasks/{id}",
@@ -99,6 +103,28 @@ fn every_route_that_changes_state_is_either_covered_here_or_listed_as_silent() {
     let known: BTreeSet<String> = PUBLISHING_ROUTES.iter().chain(SILENT_ROUTES).map(|route| route.to_string()).collect();
 
     assert_eq!(routes_that_change_state(), known, "a route was added or removed: publish its change to the stream and test it in live.rs, or list it as silent with a reason in docs/STAGE1.md");
+}
+
+#[tokio::test]
+async fn a_new_chat_is_streamed_as_a_conversation_without_a_node() {
+    let server = Server::start().await;
+    let mut stream = server.user.stream().await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let provider = sqlx::query_scalar::<_, Uuid>("insert into model_providers (owner, kind, name, base_url, models, default_model) values ($1, 'openai_compatible', 'Ollama', 'http://127.0.0.1:9/v1', '{llama3.2}', 'llama3.2') returning id")
+        .bind(owner)
+        .fetch_one(&server.pool)
+        .await
+        .unwrap();
+
+    let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider}))).await;
+    let streamed = stream.until(|message| match message {
+        StreamMessage::Conversation(conversation) if conversation.id.to_string() == chat["id"].as_str().unwrap_or_default() => Some(conversation),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!(status, 201, "{chat}");
+    assert_eq!((streamed.agent, streamed.provider_id, streamed.model), (mycelium_proto::conversation::ConversationAgent::Chat, Some(provider), Some("llama3.2".to_string())));
 }
 
 async fn device_message(stream: &mut StreamClient, user_code: &str, wanted: DeviceState) -> (DeviceKind, String, String, Option<Uuid>) {

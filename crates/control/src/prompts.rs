@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::conversations::derived_title;
 use crate::instructions;
@@ -85,6 +86,13 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
+
+    if chats::is_chat(&row) {
+        drop(tx);
+        chats::send(&state, user.id, id, text).await?;
+
+        return Ok(StatusCode::NO_CONTENT);
+    }
 
     if row.archived_at.is_some() {
         let restored = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
@@ -190,6 +198,12 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
 
 pub async fn cancel(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     let row = find_owned(&state.pool, id, user.id).await?;
+
+    if chats::is_chat(&row) {
+        chats::stop(&state, user.id, id).await?;
+
+        return Ok(StatusCode::NO_CONTENT);
+    }
 
     if !state.hub.send(row.node_id, ControlToNode::Cancel { conversation_id: id }) {
         return Err(node_offline());

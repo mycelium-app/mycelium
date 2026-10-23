@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions;
 use crate::nodes::node_offline;
@@ -9,7 +10,7 @@ use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, pars
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
+use mycelium_proto::api::{CreateChatRequest, CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
 use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, SideKind};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
@@ -189,6 +190,16 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     let parent = find_owned(&state.pool, id, user.id).await?;
     let text = request.text.as_deref().map(str::trim).filter(|text| !text.is_empty());
 
+    if chats::is_chat(&parent) {
+        let Some(provider_id) = parent.provider_id else {
+            return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Start a new chat with another provider."));
+        };
+        let started = CreateChatRequest { provider_id, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
+        let conversation = chats::start(&state, &user, started, Some(request.kind)).await?;
+
+        return Ok((StatusCode::CREATED, Json(conversation)));
+    }
+
     if request.kind == SideKind::Btw && text.is_none() {
         return Err(ApiError::bad_request("text_required", "Enter a question to ask."));
     }
@@ -305,6 +316,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
+
+    if title.is_some() && chats::is_chat(&row) {
+        chats::index_title(&state, id, &row.title).await?;
+    }
 
     if request.archived == Some(true) && before.is_idle() {
         state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });

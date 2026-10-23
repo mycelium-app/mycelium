@@ -352,6 +352,52 @@ impl std::fmt::Debug for ConnectForgeRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderKind {
+    OpenaiCompatible,
+    Anthropic,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelProvider {
+    pub id: Uuid,
+    pub kind: ModelProviderKind,
+    pub name: String,
+    pub base_url: Option<String>,
+    pub key_hint: Option<String>,
+    pub models: Vec<String>,
+    pub default_model: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateModelProviderRequest {
+    pub kind: ModelProviderKind,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+impl std::fmt::Debug for CreateModelProviderRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("CreateModelProviderRequest").field("kind", &self.kind).field("name", &self.name).field("base_url", &self.base_url).field("api_key", &"<hidden>").finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateChatRequest {
+    pub provider_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Repository {
     pub forge_id: Uuid,

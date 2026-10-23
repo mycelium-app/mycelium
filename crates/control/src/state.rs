@@ -73,9 +73,32 @@ pub struct Hub {
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
+    chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
 }
 
 impl Hub {
+    pub fn track_chat_turn(&self, conversation_id: Uuid, turn: tokio::task::AbortHandle) {
+        if let Ok(mut turns) = self.chat_turns.lock() {
+            turns.insert(conversation_id, turn);
+        }
+    }
+
+    pub fn forget_chat_turn(&self, conversation_id: Uuid) {
+        if let Ok(mut turns) = self.chat_turns.lock() {
+            turns.remove(&conversation_id);
+        }
+    }
+
+    pub fn abort_chat_turn(&self, conversation_id: Uuid) -> bool {
+        let turn = self.chat_turns.lock().ok().and_then(|mut turns| turns.remove(&conversation_id));
+
+        turn.is_some_and(|turn| {
+            turn.abort();
+
+            true
+        })
+    }
+
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {
         let connection_id = Uuid::new_v4();
         self.forget_send_now_on(node_id);

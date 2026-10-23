@@ -58,6 +58,10 @@ pub async fn migrate_until_ready(state: AppState) {
                     tracing::error!("could not restore the activity dates of imported conversations: {cause:#}");
                 }
 
+                if let Err(cause) = crate::chats::end_interrupted(&state).await {
+                    tracing::error!("could not end the chats that were replying when the control plane stopped: {cause:?}");
+                }
+
                 return;
             }
             Err(cause) => {

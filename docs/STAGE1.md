@@ -114,7 +114,11 @@ goals            conversation_id uuid pk, text text, token_budget bigint, state 
 walkthroughs     id uuid pk, conversation_id uuid, steps jsonb, created_at (every version kept, the newest is shown)
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
+model_providers  id uuid pk, owner uuid, kind text ('openai_compatible'|'anthropic'), name text, base_url text null, api_key text null,
+                 models text[], default_model text null, created_at
 ```
+
+`conversations.provider_id` (null) marks a chat. A chat is a conversation with `agent` `chat` whose `node_id` is a per-owner hidden node (hostname `control-plane`, always revoked, never listed or reachable), so events, search, titles, stream and usage records need no second code path. A chat's title is also a `search_entries` row at `seq` 0.
 
 Stage 1 is single-tenant: conversations belong to the person who created them, but nodes are shared by
 everyone who may sign in. Sign-in output, input and stopping belong to the person who started the sign-in.
@@ -277,6 +281,12 @@ in `forges.token` in Postgres, in plain text, and no API response carries one: a
 four characters) and the `account` the forge's user endpoint named when the token was saved. The control plane makes every forge
 call itself (GitHub `/user`, `/user/orgs`, `/user/repos`; GitLab `/user`, `/groups`, `/projects`; GitHub Enterprise is
 `<base_url>/api/v3`, GitLab `<base_url>/api/v4`). Organisations always start with the account itself.
+
+### Chats and model providers
+
+- `GET /api/v1/model-providers` → `[{id, kind: "openai_compatible"|"anthropic", name, base_url, key_hint, models, default_model, created_at}]`; `POST` `{kind, name, base_url?, api_key?}` → the provider (201). OpenAI-compatible needs `base_url` (Ollama serves one at `http://<host>:11434/v1`), the key is optional; Anthropic needs `api_key`, and `base_url` defaults to `https://api.anthropic.com`. The models are fetched first (`GET {base_url}/models`, Anthropic `GET /v1/models`), so a bad address or key is refused and nothing is stored: 400 `provider_key_rejected`, `provider_unreachable`, `provider_failed`, `base_url_invalid`, `base_url_required`, `api_key_required`, `name_required`. `default_model` is the first model for OpenAI-compatible, and for Anthropic the first listed of `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-5-5`. Keys are stored server-side and never returned, only `key_hint`. `POST /api/v1/model-providers/{id}/refresh` fetches the models again; `DELETE` removes it and its chats keep their history but cannot continue (409 `provider_removed`).
+- `POST /api/v1/chats` `{provider_id, model?, prompt?, parent_id?}` → the chat as a conversation (201), `agent` `chat`, `provider_id` set, `model` defaulting to the provider's `default_model` (400 `model_required`). A `prompt` is sent at once. `parent_id` makes it a side chat of another chat.
+- Chats use the conversation endpoints: `prompt` sends a message (409 `chat_busy` while it is replying), `cancel` stops the reply and ends the turn with `stop_reason` `cancelled`, `events`, `PATCH` for title and archive, and `side` starts a linked chat on the same provider and model. A reply streams as `acp_update` events with `agent_message_chunk` content, one per token group the provider sends, then `turn_end` (`end_turn`, `cancelled` or `error`); a provider failure adds an `error` event first. Replies run in the control plane; the whole conversation so far is sent each time, with a system prompt that describes the `mycelium-ui` block. The title is predicted from the first message like a workspace's. Chats are searchable by title and contents and are never indexed with ctx. Each turn writes a usage record, with tokens where the provider reports them (OpenAI-compatible: the final `usage` chunk; Anthropic: `message_start` and `message_delta`). A chat that was replying when the control plane stopped is `review` again after the restart.
 
 ### Projects
 
