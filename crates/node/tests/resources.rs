@@ -1,4 +1,4 @@
-use mycelium_node::resources::{Sampler, Watcher, keeper_conversation, parse_cores, parse_cpu_times, parse_listening_sockets, parse_docker_containers, parse_loadavg, parse_meminfo, parse_process_stat, parse_status_uid};
+use mycelium_node::resources::{Sampler, Watcher, keeper_conversation, parse_cores, parse_cpu_times, parse_listening_sockets, parse_docker_containers, parse_docker_reclaimable, parse_loadavg, parse_meminfo, parse_process_stat, parse_status_uid};
 use nix::unistd::geteuid;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
@@ -192,6 +192,13 @@ fn docker_output_lists_each_container_with_its_state() {
 }
 
 #[test]
+fn docker_reclaimable_sizes_are_summed_across_images_containers_volumes_and_cache() {
+    assert_eq!(parse_docker_reclaimable("1.2GB (50%)\n512MB (100%)\n0B\n2.5kB (3%)\n"), Some(1_712_002_500));
+    assert_eq!(parse_docker_reclaimable("not a size\n"), None);
+    assert_eq!(parse_docker_reclaimable(""), None);
+}
+
+#[test]
 fn a_process_is_stoppable_when_it_belongs_to_a_conversation_or_to_the_node_user() {
     let (_directory, root) = proc_with_sockets();
     std::fs::write(root.join("200/status"), status_of(other_user())).unwrap();
@@ -215,6 +222,27 @@ fn docker_containers_are_reported_when_the_cli_answers() {
 
     assert_eq!(docker.running, 1);
     assert_eq!(docker.containers.len(), 2);
+    assert_eq!(docker.reclaimable_bytes, None);
+}
+
+#[test]
+fn docker_reclaimable_size_is_reported_from_system_df() {
+    let (directory, root) = proc_with_sockets();
+    let script = docker_script(directory.path(), "if [ \"$1\" = system ]; then echo '20GB (90%)'; echo '1.8GB (60%)'; else echo 'db|running'; fi");
+
+    let docker = Sampler::new(root, vec![]).with_docker_program(script).sample(0, 1.0).docker.unwrap();
+
+    assert_eq!(docker.reclaimable_bytes, Some(21_800_000_000));
+}
+
+#[test]
+fn a_failing_system_df_leaves_the_containers_and_no_reclaimable_size() {
+    let (directory, root) = proc_with_sockets();
+    let script = docker_script(directory.path(), "if [ \"$1\" = system ]; then exit 1; else echo 'db|running'; fi");
+
+    let docker = Sampler::new(root, vec![]).with_docker_program(script).sample(0, 1.0).docker.unwrap();
+
+    assert_eq!((docker.containers.len(), docker.reclaimable_bytes), (1, None));
 }
 
 #[test]

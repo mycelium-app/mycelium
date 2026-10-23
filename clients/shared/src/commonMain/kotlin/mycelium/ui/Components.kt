@@ -367,6 +367,7 @@ fun TextInput(
     showLabel: Boolean = true,
     onSubmit: (() -> Unit)? = null,
     masked: Boolean = false,
+    leadingIcon: MyIcon? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -400,12 +401,18 @@ fun TextInput(
                     contentDescription = if (error != null) "$label. Error: $error" else label
                 },
             decorationBox = { inner ->
-                Box(Modifier.padding(horizontal = Tokens.Space.S2), contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty() && placeholder.isNotEmpty()) {
-                        Label(placeholder, style = base, color = colors.textFaint, maxLines = 1)
+                Row(Modifier.fillMaxSize().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    if (leadingIcon != null) {
+                        Icon(leadingIcon, colors.textMuted, Tokens.Size.IconSm)
                     }
 
-                    inner()
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty() && placeholder.isNotEmpty()) {
+                            Label(placeholder, style = base, color = colors.textFaint, maxLines = 1)
+                        }
+
+                        inner()
+                    }
                 }
             },
         )

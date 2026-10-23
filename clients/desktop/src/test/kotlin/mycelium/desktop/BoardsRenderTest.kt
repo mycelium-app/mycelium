@@ -112,7 +112,7 @@ private val BoardTasks = list(
     """{"id":"k0","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Tag v0.1.11 now, or wait for the Firefox fix?","status":"question","options":["Tag now","Wait"],"source_title":"Release","created_at":"${ago(hours = 6)}"}""",
     """{"id":"kp","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Cache cargo and Gradle in the release jobs","status":"proposed","source_title":"Release","created_at":"${ago(hours = 6)}"}""",
     """{"id":"k1","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Rebuild install.md for the new flags","status":"open","created_at":"${ago(hours = 5)}"}""",
-    """{"id":"k2","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Verify v0.1.11 from S3","status":"open","created_at":"${ago(hours = 4)}"}""",
+    """{"id":"k2","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Verify v0.1.11 from S3","status":"open","depends_on":["k1"],"created_at":"${ago(hours = 4)}"}""",
     """{"id":"k3","node_id":"$AtlasNodeId","agent":"codex","cwd":"/srv","title":"Rotate the S3 keys","status":"open","created_at":"${ago(hours = 3)}"}""",
     """{"id":"kc","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Merge the three Gradle jobs","status":"claimed","conversation_id":"11111111-1111-1111-1111-111111111111","created_at":"${ago(hours = 2)}"}""",
     *(1..13).map { """{"id":"kd$it","node_id":"$WillowId","agent":"claude","cwd":"/home/sam/projects/mycelium","project_id":"p2","title":"Finished task $it","status":"done","created_at":"${ago(days = 2)}"}""" }.toTypedArray(),
@@ -151,7 +151,7 @@ private val BoardResources = """{"latest":{"at_ms":${Clock.System.now().toEpochM
 "disks":[{"mount":"/","total_bytes":512000000000,"free_bytes":13000000000}],
 "processes":[{"pid":10,"name":"gradle daemon","cpu_percent":212.0,"memory_bytes":3300000000,"agent":false,"stoppable":true},{"pid":11,"name":"claude","cpu_percent":14.0,"memory_bytes":670000000,"agent":true,"stoppable":true,"conversation_id":"$BackupsId"},{"pid":12,"name":"postgres","cpu_percent":3.0,"memory_bytes":440000000}],
 "ports":[{"port":5173,"address":"127.0.0.1","pid":13,"process":"vite"}],
-"docker":{"running":9,"containers":[${(1..14).joinToString(",") { """{"name":"service-$it","state":"${if (it <= 9) "running" else "exited"}"}""" }}]}},
+"docker":{"running":9,"reclaimable_bytes":21800000000,"containers":[${(1..14).joinToString(",") { """{"name":"service-$it","state":"${if (it <= 9) "running" else "exited"}"}""" }}]}},
 "history":[${(0..59).joinToString(",") { """{"at_ms":${Clock.System.now().toEpochMilliseconds() - (60 - it) * 10_000},"cpu_percent":${25 + (it * 7) % 30}.0}""" }}]}"""
 
 private val BoardIssues = """{"issues":[

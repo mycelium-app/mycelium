@@ -179,7 +179,11 @@ data class ProcessUsage(
 data class DockerContainer(val name: String, val state: String)
 
 @Serializable
-data class DockerUsage(val running: Int = 0, val containers: List<DockerContainer> = emptyList())
+data class DockerUsage(
+    val running: Int = 0,
+    val containers: List<DockerContainer> = emptyList(),
+    @SerialName("reclaimable_bytes") val reclaimableBytes: Long? = null,
+)
 
 @Serializable
 data class ListeningPort(
@@ -393,6 +397,7 @@ data class Task(
     @SerialName("source_id") val sourceId: String? = null,
     @SerialName("source_title") val sourceTitle: String? = null,
     @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("depends_on") val dependsOn: List<String> = emptyList(),
 )
 
 object TaskStatuses {
@@ -416,6 +421,7 @@ data class CreateTaskRequest(
     @SerialName("project_id") val projectId: String? = null,
     val branch: String? = null,
     val prompt: String? = null,
+    @SerialName("depends_on") val dependsOn: List<String> = emptyList(),
 )
 
 @Serializable

@@ -143,6 +143,8 @@ pub struct DockerContainer {
 pub struct DockerUsage {
     pub running: u32,
     pub containers: Vec<DockerContainer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reclaimable_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

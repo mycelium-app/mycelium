@@ -96,7 +96,7 @@ fun BarChart(values: List<Long>, description: String, modifier: Modifier = Modif
         values.forEachIndexed { index, value ->
             val height = size.height * value / peak
 
-            drawRoundRect(colors.accent, Offset(index * slot + gap / 2f, size.height - height), Size((slot - gap).coerceAtLeast(1f), height), CornerRadius(1f))
+            drawRoundRect(colors.statusWorking, Offset(index * slot + gap / 2f, size.height - height), Size((slot - gap).coerceAtLeast(1f), height), CornerRadius(1f))
         }
     }
 }

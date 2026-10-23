@@ -138,6 +138,15 @@ class NodePageTest {
     }
 
     @Test
+    fun theDockerCardShowsHowMuchCanBeReclaimedWhenTheNodeReportsIt() {
+        showNodes(nodeJson(), """{"latest":${Sample.replace(""""running":2,""", """"running":2,"reclaimable_bytes":21800000000,""")},"history":[]}""")
+
+        openNode("Resources")
+
+        rule.onNodeWithText("21.8 GB reclaimable").assertExists()
+    }
+
+    @Test
     fun aNodeWithoutDockerSaysSoAndTheRestOfThePageStillShows() {
         showNodes(nodeJson(), """{"latest":${Sample.substringBefore(",\n\"docker\"")}},"history":[]}""")
 

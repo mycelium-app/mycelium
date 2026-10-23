@@ -175,10 +175,21 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             StepHeading(1, "Start from")
-            Segmented(ProjectSources, source, { source = it; failure = null }, groupLabel = "Start from")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                for (option in ProjectSources) {
+                    MyButton(
+                        { source = option; failure = null },
+                        text = option,
+                        variant = ButtonVariant.Outline,
+                        size = ButtonSize.Sm,
+                        muted = option != source,
+                        selected = option == source,
+                    )
+                }
+            }
 
             if (cloning) {
-                TextInput(repository?.fullName ?: query, { repository = null; query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false)
+                TextInput(repository?.fullName ?: query, { repository = null; query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false, leadingIcon = MyIcon.Search)
 
                 if (repository == null) {
                     for (option in found) {

@@ -36,7 +36,7 @@ fn sample() -> ResourceSample {
         disks: vec![DiskUsage { mount: "/".into(), total_bytes: 10, free_bytes: 5 }],
         processes: vec![ProcessUsage { pid: 7, name: "claude".into(), command: "claude".into(), cpu_percent: 1.0, memory_bytes: 3, agent: true, stoppable: true, conversation_id: Some(id()), cwd: Some("/work".into()) }],
         ports: vec![ListeningPort { port: 3000, address: "0.0.0.0".into(), pid: Some(7), process: Some("node".into()), conversation_id: Some(id()), cwd: Some("/work".into()) }],
-        docker: Some(DockerUsage { running: 1, containers: vec![DockerContainer { name: "db".into(), state: "running".into() }] }),
+        docker: Some(DockerUsage { running: 1, containers: vec![DockerContainer { name: "db".into(), state: "running".into() }], reclaimable_bytes: Some(21_800_000_000) }),
     }
 }
 

@@ -167,7 +167,7 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
         when {
             docker == null -> Kpi("Docker", "Not available", kpiSlot(), caption = "Docker is not installed on this node, or its service is not running.")
             docker.containers.isEmpty() -> Kpi("Docker", "No containers", kpiSlot())
-            else -> Kpi("Docker", "${docker.containers.size} ${if (docker.containers.size == 1) "container" else "containers"}", kpiSlot(), caption = "${docker.running} running")
+            else -> Kpi("Docker", "${docker.containers.size} ${if (docker.containers.size == 1) "container" else "containers"}", kpiSlot(), caption = docker.reclaimableBytes?.let { "${formatBytes(it)} reclaimable" } ?: "${docker.running} running")
         }
     }
 

@@ -135,6 +135,31 @@ pub fn parse_docker_containers(text: &str) -> Vec<DockerContainer> {
         .collect()
 }
 
+pub fn parse_docker_reclaimable(text: &str) -> Option<u64> {
+    let mut total = 0.0;
+    let mut seen = false;
+
+    for line in text.lines() {
+        let Some(size) = line.split_whitespace().next() else {
+            continue;
+        };
+        let split = size.find(|character: char| !(character.is_ascii_digit() || character == '.'))?;
+        let multiplier = match size[split..].to_ascii_lowercase().as_str() {
+            "b" => 1.0,
+            "kb" => 1e3,
+            "mb" => 1e6,
+            "gb" => 1e9,
+            "tb" => 1e12,
+            _ => return None,
+        };
+
+        total += size[..split].parse::<f64>().ok()? * multiplier;
+        seen = true;
+    }
+
+    seen.then_some(total as u64)
+}
+
 pub fn keeper_conversation(arguments: &[&str]) -> Option<Uuid> {
     let keeper = arguments.iter().position(|argument| *argument == "keeper")?;
     let directory = arguments.get(keeper..)?.windows(2).find(|pair| pair[0] == "--dir")?[1];
@@ -307,23 +332,26 @@ impl Sampler {
     }
 
     fn docker(&self) -> Option<DockerUsage> {
+        let listing = self.run_docker(&["ps", "--all", "--format", "{{.Names}}|{{.State}}"])?;
+        let containers = parse_docker_containers(&listing);
+        let reclaimable_bytes = self.run_docker(&["system", "df", "--format", "{{.Reclaimable}}"]).as_deref().and_then(parse_docker_reclaimable);
+
+        Some(DockerUsage { running: containers.iter().filter(|container| container.state == "running").count() as u32, containers, reclaimable_bytes })
+    }
+
+    fn run_docker(&self, arguments: &[&str]) -> Option<String> {
         let program = self.docker_program.clone();
+        let arguments: Vec<String> = arguments.iter().map(|argument| argument.to_string()).collect();
         let (sender, receiver) = std::sync::mpsc::channel();
 
         std::thread::spawn(move || {
-            let output = Command::new(program).args(["ps", "--all", "--format", "{{.Names}}|{{.State}}"]).stdin(Stdio::null()).stderr(Stdio::null()).output();
+            let output = Command::new(program).args(arguments).stdin(Stdio::null()).stderr(Stdio::null()).output();
             let _ = sender.send(output);
         });
 
         let output = receiver.recv_timeout(DOCKER_TIMEOUT).ok()?.ok()?;
 
-        if !output.status.success() {
-            return None;
-        }
-
-        let containers = parse_docker_containers(&String::from_utf8_lossy(&output.stdout));
-
-        Some(DockerUsage { running: containers.iter().filter(|container| container.state == "running").count() as u32, containers })
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
     fn read(&self, relative: &str) -> String {
