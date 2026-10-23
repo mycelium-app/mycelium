@@ -20,3 +20,4 @@ local.properties
 # Node
 node_modules/
 .android-sdk/
+dist/

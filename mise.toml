@@ -15,6 +15,11 @@ description = "Client tests across JVM forks, plus the web and Android compiles"
 dir = "clients"
 run = "./gradlew :shared:jvmTest :desktop:test :web:compileKotlinWasmJs :androidApp:compileDebugKotlin --continue"
 
+[tasks.test-editor]
+description = "Design editor unit tests"
+dir = "editor"
+run = "pnpm install && pnpm test"
+
 [tasks.test]
-description = "Every suite, Rust first, then the clients"
-run = [{ task = "test-rust" }, { task = "test-clients" }]
+description = "Every suite, Rust first, then the clients and the editor"
+run = [{ task = "test-rust" }, { task = "test-clients" }, { task = "test-editor" }]
