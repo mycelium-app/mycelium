@@ -218,6 +218,7 @@ struct Environment {
     node_home: PathBuf,
     projects: PathBuf,
     data_dir: PathBuf,
+    logs: PathBuf,
     streamed: Arc<Mutex<Vec<Value>>>,
     _control: Child,
     _directory: TempDir,
@@ -226,6 +227,12 @@ struct Environment {
 impl Drop for Environment {
     fn drop(&mut self) {
         common::kill_keepers(&sessions_dir(&self.node_home));
+
+        if std::thread::panicking() {
+            eprintln!("control plane and node logs kept in {}", self.logs.display());
+        } else {
+            std::fs::remove_dir_all(&self.logs).ok();
+        }
     }
 }
 
@@ -258,6 +265,8 @@ impl Environment {
         std::fs::create_dir_all(&node_home).unwrap();
         std::fs::create_dir_all(&projects).unwrap();
 
+        let logs = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("end-to-end").join(database.rsplit('/').next().unwrap());
+        std::fs::create_dir_all(&logs).unwrap();
         let control = mycelium()
             .args(["control", "serve"])
             .env("MYCELIUM_PUBLIC_URL", &base)
@@ -267,7 +276,7 @@ impl Environment {
             .env("MYCELIUM_WEB_DIR", &web_dir)
             .env("MYCELIUM_DEV_LOGIN", "dev@example.com")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(logs.join("control.log")).unwrap())
             .spawn()
             .unwrap();
 
@@ -287,7 +296,7 @@ impl Environment {
         let api = Api { base, cookie, http };
         let streamed = Arc::new(Mutex::new(Vec::new()));
 
-        Some(Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, data_dir: directory.path().join("data"), streamed, _control: control, _directory: directory })
+        Some(Environment { api, node_config: directory.path().join("node.toml"), node_home, projects, data_dir: directory.path().join("data"), logs, streamed, _control: control, _directory: directory })
     }
 
     async fn join_node(&self) {
@@ -310,7 +319,9 @@ impl Environment {
     }
 
     fn run_daemon(&self) -> Child {
-        self.node_command(&["node", "run"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(self.logs.join("node.log")).unwrap();
+
+        self.node_command(&["node", "run"]).stdout(Stdio::null()).stderr(log).spawn().unwrap()
     }
 
     async fn wait_for_node_with_claude(&self) -> Uuid {
