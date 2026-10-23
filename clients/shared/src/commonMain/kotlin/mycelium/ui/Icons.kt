@@ -62,6 +62,7 @@ enum class MyIcon(vararg val paths: String) {
     Copy(rect(9f, 9f, 13f, 13f, 2f), "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"),
     Back("M19 12H5M12 19l-7-7 7-7"),
     Info(circle(12f, 12f, 9f), "M12 11v5M12 8h.01"),
+    Layers("m12 3 9 5-9 5-9-5Z", "m3 13 9 5 9-5"),
     File("M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6"),
     Branch("M6 3v12", circle(18f, 6f, 3f), circle(6f, 18f, 3f), "M18 9a9 9 0 0 1-9 9"),
     Diff("M12 3v8M8 7h8M8 17h8"),

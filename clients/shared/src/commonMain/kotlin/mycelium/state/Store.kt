@@ -117,6 +117,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         return project
     }
 
+    suspend fun setProjectGroup(projectId: String, groupId: String?): Project {
+        val project = api.setProjectGroup(projectId, groupId)
+
+        mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
+
+        return project
+    }
+
     suspend fun refreshBoard() {
         val projects = api.projects()
         val worktrees = api.worktrees()

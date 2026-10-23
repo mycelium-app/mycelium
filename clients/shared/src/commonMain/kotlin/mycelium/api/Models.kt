@@ -143,6 +143,9 @@ data class NodeSummary(
     val agents: List<AgentInfo> = emptyList(),
     val logins: List<LoginInfo> = emptyList(),
     val sessions: List<String> = emptyList(),
+    @SerialName("instructions_revision") val instructionsRevision: String? = null,
+    @SerialName("instructions_unmanaged") val instructionsUnmanaged: List<String> = emptyList(),
+    @SerialName("sessions_on_older_instructions") val sessionsOnOlderInstructions: Int = 0,
 )
 
 @Serializable
@@ -188,6 +191,52 @@ data class Project(
     @SerialName("forge_id") val forgeId: String? = null,
     val repository: String? = null,
     @SerialName("created_at") val createdAt: String,
+    @SerialName("group_id") val groupId: String? = null,
+)
+
+@Serializable
+data class PatchProjectRequest(@SerialName("group_id") val groupId: String?)
+
+@Serializable
+data class Group(val id: String, val name: String, @SerialName("created_at") val createdAt: String)
+
+@Serializable
+data class GroupRequest(val name: String)
+
+@Serializable
+data class InstructionVersion(val id: String, @SerialName("created_at") val createdAt: String)
+
+@Serializable
+data class InstructionLayer(
+    val layer: String,
+    val name: String,
+    val path: String? = null,
+    val text: String = "",
+    val version: InstructionVersion? = null,
+)
+
+@Serializable
+data class InstructionSource(
+    @SerialName("forge_id") val forgeId: String,
+    val repository: String,
+    val path: String,
+)
+
+@Serializable
+data class Instructions(
+    val source: InstructionSource? = null,
+    val revision: String? = null,
+    val layers: List<InstructionLayer> = emptyList(),
+)
+
+@Serializable
+data class SaveInstructionsRequest(val text: String)
+
+@Serializable
+data class SetInstructionSourceRequest(
+    @SerialName("forge_id") val forgeId: String,
+    val repository: String,
+    val path: String? = null,
 )
 
 @Serializable

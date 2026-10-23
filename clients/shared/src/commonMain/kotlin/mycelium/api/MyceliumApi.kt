@@ -13,6 +13,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
@@ -194,6 +195,35 @@ class MyceliumApi(
                 if (query.isNotBlank()) parameter("q", query.trim())
             }
         }.body()
+
+    suspend fun groups(): List<Group> = call("/groups") { client.get(it) { authorise() } }.body()
+
+    suspend fun createGroup(name: String): Group =
+        call("/groups") { client.post(it) { authorise(); json(GroupRequest(name)) } }.body()
+
+    suspend fun renameGroup(id: String, name: String): Group =
+        call("/groups/$id") { client.patch(it) { authorise(); json(GroupRequest(name)) } }.body()
+
+    suspend fun deleteGroup(id: String) {
+        call("/groups/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun setProjectGroup(projectId: String, groupId: String?): Project =
+        call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(groupId)) } }.body()
+
+    suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveInstructions(layer: String, text: String): InstructionLayer =
+        call("/instructions/$layer") { client.put(it) { authorise(); json(SaveInstructionsRequest(text)) } }.body()
+
+    suspend fun pullInstructions(): Instructions = call("/instructions/pull") { client.post(it) { authorise() } }.body()
+
+    suspend fun setInstructionSource(request: SetInstructionSourceRequest): Instructions =
+        call("/instruction-source") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun clearInstructionSource() {
+        call("/instruction-source") { client.delete(it) { authorise() } }
+    }
 
     suspend fun projects(): List<Project> = call("/projects") { client.get(it) { authorise() } }.body()
 
