@@ -330,7 +330,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              title_user_set = case when $6 then false when $2::text is not null then true else title_user_set end,
              account = case when $5 then null else coalesce($4, account) end,
              provider_id = coalesce($7, provider_id), model = coalesce($8, model),
-             archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
+             archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
+             pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
@@ -343,6 +344,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.clear_title == Some(true))
     .bind(switched_provider)
     .bind(switched_model)
+    .bind(request.pinned)
     .fetch_one(&mut *tx)
     .await?;
     let model_change = match &switched_to {

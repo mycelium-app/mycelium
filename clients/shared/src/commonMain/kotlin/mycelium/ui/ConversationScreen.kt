@@ -185,6 +185,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
                     onRename = { title -> store.rename(conversation, title) },
+                    onPin = { store.pin(conversation, conversation.pinnedAt == null) },
                     onArchive = {
                         store.act {
                             api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
@@ -322,6 +323,7 @@ private fun ConversationHeader(
     onTerminal: () -> Unit,
     onGit: () -> Unit,
     onRename: (String) -> Unit,
+    onPin: () -> Unit,
     onArchive: () -> Unit,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
@@ -413,6 +415,8 @@ private fun ConversationHeader(
                     if (compact) {
                         MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
                     }
+
+                    MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
 
                     MenuItem(if (archived) "Restore" else "Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
 

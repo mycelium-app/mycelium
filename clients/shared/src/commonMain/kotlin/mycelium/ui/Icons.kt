@@ -59,6 +59,7 @@ enum class MyIcon(vararg val paths: String) {
     Terminal(rect(2f, 4f, 20f, 16f, 2f), "m7 10 3 2-3 2M13 15h4"),
     Chip(rect(5f, 5f, 14f, 14f, 2f), rect(9f, 9f, 6f, 6f, 1f), "M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"),
     Archive(rect(3f, 4f, 18f, 5f, 1f), "M5 9v10h14V9M10 13h4"),
+    Pin("M12 17v5", "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"),
     More("M5 12h.01M12 12h.01M19 12h.01"),
     Menu("M4 6h16M4 12h16M4 18h16"),
     Send("M22 2 11 13", "M22 2 15 22l-4-9-9-4Z"),

@@ -51,7 +51,18 @@ import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.Me
 import mycelium.api.NodeSummary
+import mycelium.state.AllGroups
+import mycelium.state.Choice
 import mycelium.state.AppState
+import mycelium.state.NoGroup
+import mycelium.state.PinnedName
+import mycelium.state.pinnedChats
+import mycelium.state.pinnedConversations
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import mycelium.state.SidebarSection
 import mycelium.state.Store
 import androidx.compose.foundation.layout.size
@@ -138,6 +149,8 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
 
     Row(Modifier.fillMaxSize().background(colors.bgContent)) {
         Sidebar(
+            store = store,
+            platform = platform,
             state = state,
             route = route,
             onRoute = { route = it },
@@ -223,6 +236,8 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
             )
 
             Sidebar(
+                store = store,
+                platform = platform,
                 state = state,
                 route = route,
                 onRoute = { route = it; drawerOpen = false },
@@ -290,10 +305,18 @@ private const val WorkspacesMode = "Workspaces"
 private const val ChatsMode = "Chats"
 
 @Composable
-private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
+private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
-    val sections = sidebarSections(state.conversations.values)
+    var savedGroupFilter by remember { mutableStateOf(platform.loadPreference(GroupFilterPreference) ?: AllGroups) }
+    val groupFilter = if (savedGroupFilter == AllGroups || savedGroupFilter == NoGroup || savedGroupFilter in state.groups) savedGroupFilter else AllGroups
+    val pinned = pinnedConversations(state.conversations.values, groupFilter)
+    val sections = sidebarSections(state.conversations.values, groupFilter)
+    val pinnedChatRows = pinnedChats(state.conversations.values)
     val chats = chatSections(state.conversations.values)
+
+    LaunchedEffect(Unit) {
+        store.act { store.refreshGroups() }
+    }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
     var lastOpened by remember { mutableStateOf(mapOf(WorkspacesMode to Route.New, ChatsMode to Route.NewChat)) }
@@ -334,46 +357,32 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
             if (mode == ChatsMode) {
-                for (section in chats) {
-                    item(key = "chats-${section.name}") {
-                        Label(section.name, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, colors.textMuted)
-                    }
+                conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
 
-                    items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
-                        ConversationRow(
-                            row.conversation,
-                            null,
-                            selected = row.conversation.id == (route as? Route.Chat)?.id,
-                            onClick = { onRoute(Route.Chat(row.conversation.id)) },
-                            depth = row.depth,
-                            sideChats = row.sideChats,
-                            expanded = row.conversation.id !in collapsed,
-                            onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
-                        )
-                    }
+                for (section in chats) {
+                    conversationRows(section.name, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
                 }
             } else {
                 item(key = "label") {
-                    Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+
+                        if (state.groups.isNotEmpty()) {
+                            val choices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
+
+                            OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show conversations in")
+                        }
+                    }
                 }
+
+                conversationRows(PinnedName, pinned, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
 
                 for (section in sections) {
                     item(key = "section-${section.status}") {
                         SectionHeading(section)
                     }
 
-                    items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
-                        ConversationRow(
-                            row.conversation,
-                            state.nodes[row.conversation.nodeId],
-                            selected = row.conversation.id == (route as? Route.Chat)?.id,
-                            onClick = { onRoute(Route.Chat(row.conversation.id)) },
-                            depth = row.depth,
-                            sideChats = row.sideChats,
-                            expanded = row.conversation.id !in collapsed,
-                            onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
-                        )
-                    }
+                    conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
                 }
             }
         }
@@ -397,6 +406,42 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
             MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
+    }
+}
+
+private fun LazyListScope.conversationRows(
+    title: String?,
+    parents: List<Conversation>,
+    state: AppState,
+    store: Store,
+    route: Route,
+    onRoute: (Route) -> Unit,
+    collapsed: Set<String>,
+    onCollapsed: (Set<String>) -> Unit,
+    withNode: Boolean,
+) {
+    if (parents.isEmpty()) {
+        return
+    }
+
+    if (title != null) {
+        item(key = "heading-$title") {
+            Label(title, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, MyTheme.colors.textMuted)
+        }
+    }
+
+    items(sidebarRows(parents, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
+        ConversationRow(
+            row.conversation,
+            if (withNode) state.nodes[row.conversation.nodeId] else null,
+            selected = row.conversation.id == (route as? Route.Chat)?.id,
+            onClick = { onRoute(Route.Chat(row.conversation.id)) },
+            depth = row.depth,
+            sideChats = row.sideChats,
+            expanded = row.conversation.id !in collapsed,
+            onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
+            onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
+        )
     }
 }
 
@@ -435,13 +480,36 @@ private fun SectionHeading(section: SidebarSection) {
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}) {
     val colors = MyTheme.colors
+    var menuOpen by remember { mutableStateOf(false) }
     val statusName = statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
 
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .pointerInput(Unit) { detectTapGestures(onLongPress = { menuOpen = true }) }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+
+                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                            menuOpen = true
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (menuOpen) {
+            MenuPopup(onDismiss = { menuOpen = false }) {
+                MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
+            }
+        }
+
         Row(
             Modifier
                 .fillMaxWidth()
@@ -488,3 +556,5 @@ fun nodeColour(node: NodeSummary): Color {
 }
 
 private const val SidebarWidthPreference = "sidebar-width"
+
+private const val GroupFilterPreference = "conversation-group-filter"

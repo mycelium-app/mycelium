@@ -574,6 +574,32 @@ async fn renaming_and_archiving_move_a_conversation_between_the_lists_and_close_
 }
 
 #[tokio::test]
+async fn pinning_a_conversation_keeps_pin_order_and_unpinning_clears_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let first = started_conversation(&server, &mut link, None).await;
+    link.barrier(first, 1).await;
+    let second = started_conversation(&server, &mut link, None).await;
+    link.barrier(second, 1).await;
+    sqlx::query("update conversations set updated_at = '2026-09-01T00:00:00Z'").execute(&server.pool).await.unwrap();
+
+    let (_, pinned) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{second}")).json(&json!({"pinned": true}))).await;
+    let (_, repinned) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{second}")).json(&json!({"pinned": true}))).await;
+    server.user.json(server.user.patch(&format!("/api/v1/conversations/{first}")).json(&json!({"pinned": true}))).await;
+
+    assert!(pinned["pinned_at"].is_string());
+    assert_eq!(repinned["pinned_at"], pinned["pinned_at"]);
+    assert_eq!(pinned["updated_at"], json!("2026-09-01T00:00:00Z"));
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations?archived=false")).await;
+    let mut order: Vec<(String, String)> = listed.as_array().unwrap().iter().map(|row| (row["pinned_at"].as_str().unwrap().to_string(), row["id"].as_str().unwrap().to_string())).collect();
+    order.sort();
+    assert_eq!(order.iter().map(|(_, id)| id.clone()).collect::<Vec<_>>(), vec![second.to_string(), first.to_string()]);
+
+    let (_, unpinned) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{second}")).json(&json!({"pinned": false}))).await;
+    assert_eq!(unpinned["pinned_at"], json!(null));
+}
+
+#[tokio::test]
 async fn renaming_or_archiving_a_conversation_leaves_its_last_activity_alone() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -171,12 +171,29 @@ fun statusSectionName(status: ConversationStatus): String = when (status) {
     ConversationStatus.Done -> "Done"
 }
 
-fun sidebarSections(conversations: Collection<Conversation>): List<SidebarSection> {
-    val active = conversations.filter { it.archivedAt == null && !it.isChat }
+const val AllGroups = "all"
+const val NoGroup = "none"
+const val PinnedName = "Pinned"
+
+fun inGroupFilter(conversation: Conversation, filter: String): Boolean = when (filter) {
+    AllGroups -> true
+    NoGroup -> conversation.groupId == null
+    else -> conversation.groupId == filter
+}
+
+private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
+    val active = conversations.filter { it.archivedAt == null && !it.isChat && inGroupFilter(it, filter) }
     val activeIds = active.map { it.id }.toSet()
 
-    return active
-        .filter { it.parentId == null || it.parentId !in activeIds }
+    return active.filter { it.parentId == null || it.parentId !in activeIds }
+}
+
+fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
+    topLevel(conversations, filter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
+
+fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups): List<SidebarSection> {
+    return topLevel(conversations, filter)
+        .filter { it.pinnedAt == null }
         .groupBy { it.status }
         .map { (status, rows) -> SidebarSection(status, statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }

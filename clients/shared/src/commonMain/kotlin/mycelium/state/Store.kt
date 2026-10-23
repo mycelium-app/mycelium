@@ -406,6 +406,13 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         }
     }
 
+    fun pin(conversation: Conversation, pinned: Boolean) {
+        act {
+            val updated = api.patchConversation(conversation.id, PatchConversationRequest(pinned = pinned))
+            mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
+        }
+    }
+
     fun act(block: suspend () -> Unit) {
         scope.launch {
             mutableProblem.value = null
