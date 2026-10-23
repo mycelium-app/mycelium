@@ -1,6 +1,8 @@
 package mycelium
 
+import mycelium.state.CalloutKind
 import mycelium.state.ColumnAlign
+import mycelium.state.Footnote
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
 import mycelium.state.markdownBlocks
@@ -138,6 +140,31 @@ class MarkdownTest {
         assertEquals(
             listOf(MarkdownBlock.Bullets(listOf(item("run", children = listOf(MarkdownBlock.Code("sh", "make")))))),
             markdownBlocks("- run\n  ```sh\n  make\n  ```"),
+        )
+    }
+
+    @Test
+    fun aQuoteStartingWithAnAlertMarkerBecomesACalloutOfThatKind() {
+        assertEquals(
+            listOf(MarkdownBlock.Callout(CalloutKind.Warning, listOf(MarkdownBlock.Paragraph("Back up first.")))),
+            markdownBlocks("> [!WARNING]\n> Back up first."),
+        )
+        assertEquals(CalloutKind.Tip, (markdownBlocks("> [!tip]\n> x").single() as MarkdownBlock.Callout).kind)
+    }
+
+    @Test
+    fun anUnknownAlertMarkerStaysAnOrdinaryQuote() {
+        assertEquals(listOf(MarkdownBlock.Quote(listOf(MarkdownBlock.Paragraph("[!NOPE]\ntext")))), markdownBlocks("> [!NOPE]\n> text"))
+    }
+
+    @Test
+    fun footnoteDefinitionsLeaveTheTextAndGatherAtTheEnd() {
+        assertEquals(
+            listOf(
+                MarkdownBlock.Paragraph("Claim[^1] and more[^note]."),
+                MarkdownBlock.Footnotes(listOf(Footnote("1", "First source."), Footnote("note", "Second."))),
+            ),
+            markdownBlocks("Claim[^1] and more[^note].\n\n[^1]: First source.\n[^note]: Second.\n"),
         )
     }
 }

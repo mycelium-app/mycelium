@@ -72,8 +72,27 @@ Visit [the docs](https://example.com/docs) or https://example.org/raw. ***Both**
 | beta | 22 | right |
 
 ```kotlin
-fun main() = println("hi")
+// entry point
+fun main() = println("hi ${'$'}{40 + 2}")
 ```
+
+```diff
+@@ -1 +1 @@
+-old line
++new line
+```
+
+> [!WARNING]
+> Back up first.
+
+> [!TIP]
+> Use `--dry-run`.
+
+Water is H~2~O and E = mc^2^.
+
+A source[^1].
+
+[^1]: The original paper.
 
 ---
 
@@ -131,6 +150,30 @@ class AgentMarkdownTest {
 
         rule.onNodeWithText("kotlin").assertIsDisplayed()
         rule.onNodeWithContentDescription("Copy kotlin code").assertIsDisplayed()
+    }
+
+    @Test
+    fun aCalloutNamesItsKindInTextAndKeepsItsContent() {
+        show("> [!WARNING]\n> Back up first.")
+
+        rule.onNodeWithText("Warning").assertIsDisplayed()
+        rule.onNodeWithText("Back up first.").assertIsDisplayed()
+        rule.onAllNodesWithText("[!WARNING]", substring = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun superscriptSubscriptAndAFootnoteReferenceCanShareAParagraph() {
+        show("Water is H~2~O and E = mc^2^, with a source[^1].\n\n[^1]: The original paper.")
+
+        rule.onNodeWithText("Water is H2O and E = mc2, with a source1.").assertIsDisplayed()
+    }
+
+    @Test
+    fun footnotesListAtTheEndWithTheirLabelAndText() {
+        show("Claim[^1].\n\n[^1]: The original paper.")
+
+        rule.onNodeWithText("Claim1.").assertIsDisplayed()
+        rule.onNodeWithText("The original paper.").assertIsDisplayed()
     }
 
     @Test

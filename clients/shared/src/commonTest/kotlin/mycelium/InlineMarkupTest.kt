@@ -3,6 +3,7 @@ package mycelium
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import mycelium.ui.inlineMarkup
@@ -56,5 +57,28 @@ class InlineMarkupTest {
     @Test
     fun anEscapedMarkerIsShownLiterally() {
         assertEquals("*not italic*", render("\\*not italic\\*").text)
+    }
+
+    @Test
+    fun superscriptAndSubscriptShiftTheirTextAndASingleTildeIsNotStrikethrough() {
+        val text = render("x^2^ H~2~O ~~gone~~")
+
+        assertEquals("x2 H2O gone", text.text)
+        assertEquals(listOf("2"), text.spanStyles.filter { it.item.baselineShift == BaselineShift.Superscript }.map { text.text.substring(it.start, it.end) })
+        assertEquals(listOf("2"), text.spanStyles.filter { it.item.baselineShift == BaselineShift.Subscript }.map { text.text.substring(it.start, it.end) })
+        assertEquals(listOf("gone"), text.spanStyles.filter { it.item.textDecoration == TextDecoration.LineThrough }.map { text.text.substring(it.start, it.end) })
+    }
+
+    @Test
+    fun carretsAndTildesAroundSpacesStayLiteral() {
+        assertEquals("a^b and c^d ~/x and ~/y", render("a^b and c^d ~/x and ~/y").text)
+    }
+
+    @Test
+    fun aFootnoteReferenceShowsItsLabelRaised() {
+        val text = render("Claim[^1].")
+
+        assertEquals("Claim1.", text.text)
+        assertEquals(listOf("1"), text.spanStyles.filter { it.item.baselineShift == BaselineShift.Superscript }.map { text.text.substring(it.start, it.end) })
     }
 }

@@ -15,15 +15,25 @@ sealed interface MarkdownBlock {
 
     data class Table(val header: List<String>, val rows: List<List<String>>, val aligns: List<ColumnAlign> = emptyList()) : MarkdownBlock
 
+    data class Callout(val kind: CalloutKind, val blocks: List<MarkdownBlock>) : MarkdownBlock
+
+    data class Footnotes(val items: List<Footnote>) : MarkdownBlock
+
     data object Rule : MarkdownBlock
 }
 
 data class MarkdownListItem(val text: String, val checked: Boolean? = null, val children: List<MarkdownBlock> = emptyList())
 
+data class Footnote(val label: String, val text: String)
+
 enum class ColumnAlign { Start, Center, End }
+
+enum class CalloutKind(val label: String) { Note("Note"), Tip("Tip"), Important("Important"), Warning("Warning"), Caution("Caution") }
 
 private val HeadingLine = Regex("^(#{1,6})\\s+(.*)$")
 private val ListLine = Regex("^(\\s*)([-*+]|\\d+[.)])\\s+(.*)$")
+private val CalloutLine = Regex("^\\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)]\\s*$", RegexOption.IGNORE_CASE)
+private val FootnoteLine = Regex("^\\[\\^([^\\]\\s]+)]:\\s*(.*)$")
 private val TaskText = Regex("^\\[([ xX])](?:\\s+(.*))?$", RegexOption.DOT_MATCHES_ALL)
 private val RuleLine = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
 private val TableDivider = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
@@ -43,6 +53,7 @@ private fun startsTable(lines: List<String>, index: Int): Boolean =
 
 fun markdownBlocks(text: String): List<MarkdownBlock> {
     val blocks = mutableListOf<MarkdownBlock>()
+    val notes = mutableListOf<Footnote>()
     val lines = text.replace("\r\n", "\n").split("\n")
     var index = 0
 
@@ -66,6 +77,12 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
             }
 
             line.isBlank() -> index++
+
+            FootnoteLine.matches(trimmed) -> {
+                val match = FootnoteLine.find(trimmed)!!
+                notes += Footnote(match.groupValues[1], match.groupValues[2])
+                index++
+            }
 
             RuleLine.matches(line) -> {
                 blocks += MarkdownBlock.Rule
@@ -149,7 +166,13 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
                     index++
                 }
 
-                blocks += MarkdownBlock.Quote(markdownBlocks(quoted.joinToString("\n")))
+                val kind = CalloutLine.find(quoted.first())?.let { match -> CalloutKind.entries.first { it.name.equals(match.groupValues[1], ignoreCase = true) } }
+
+                blocks += if (kind != null) {
+                    MarkdownBlock.Callout(kind, markdownBlocks(quoted.drop(1).joinToString("\n")))
+                } else {
+                    MarkdownBlock.Quote(markdownBlocks(quoted.joinToString("\n")))
+                }
             }
 
             else -> {
@@ -165,11 +188,15 @@ fun markdownBlocks(text: String): List<MarkdownBlock> {
         }
     }
 
+    if (notes.isNotEmpty()) {
+        blocks += MarkdownBlock.Footnotes(notes)
+    }
+
     return blocks
 }
 
 private fun startsBlock(line: String): Boolean {
     val trimmed = line.trimStart()
 
-    return trimmed.startsWith("```") || trimmed.startsWith(">") || HeadingLine.matches(trimmed) || ListLine.matches(line) || RuleLine.matches(line)
+    return trimmed.startsWith("```") || trimmed.startsWith(">") || FootnoteLine.matches(trimmed) || HeadingLine.matches(trimmed) || ListLine.matches(line) || RuleLine.matches(line)
 }

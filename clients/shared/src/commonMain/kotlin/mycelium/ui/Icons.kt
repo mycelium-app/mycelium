@@ -41,6 +41,8 @@ enum class MyIcon(vararg val paths: String) {
     Plus("M12 5v14M5 12h14"),
     Alert(circle(12f, 12f, 9f), "M12 8v4M12 16h.01"),
     Question(circle(12f, 12f, 9f), "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"),
+    Lightbulb("M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5", "M9 18h6M10 22h4"),
+    TriangleAlert("m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4M12 17h.01"),
     Failed(circle(12f, 12f, 9f), "m15 9-6 6M9 9l6 6"),
     Review(circle(12f, 12f, 9f), circle(12f, 12f, 3f)),
     Working("M21 12a9 9 0 1 1-6.2-8.56"),

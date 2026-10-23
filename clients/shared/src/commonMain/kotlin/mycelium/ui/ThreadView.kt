@@ -41,6 +41,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
@@ -61,7 +63,10 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import mycelium.state.GeneratedUiLanguage
+import mycelium.state.CalloutKind
 import mycelium.state.ColumnAlign
+import mycelium.state.TokenKind
+import mycelium.state.highlight
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseGeneratedUi
@@ -251,7 +256,7 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                             }
 
                             Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = Tokens.Space.S3, end = Tokens.Space.S3, bottom = Tokens.Space.S2)) {
-                                Label(block.text, style = Tokens.Type.Code)
+                                BasicText(highlighted(block.language, block.text), style = Tokens.Type.Code.themed())
                             }
                         }
 
@@ -268,8 +273,72 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                         MarkdownBlocks(block.blocks)
                     }
                 }
+                is MarkdownBlock.Callout -> {
+                    val tone = calloutTone(block.kind)
+
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(colors.bgPanel, BlockShape)) {
+                        Box(Modifier.fillMaxHeight().width(Tokens.Size.FocusRing).background(tone.color))
+                        Column(Modifier.weight(1f).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(tone.icon, tone.color)
+                                Label(block.kind.label, style = Tokens.Type.UiStrong, color = tone.color)
+                            }
+
+                            MarkdownBlocks(block.blocks)
+                        }
+                    }
+                }
+                is MarkdownBlock.Footnotes -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Hairline()
+
+                    for (note in block.items) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                            Label(note.label, style = Tokens.Type.Meta, color = colors.textMuted)
+                            BasicText(inlineText(note.text, colors.textMuted), style = Tokens.Type.Meta.themed())
+                        }
+                    }
+                }
                 MarkdownBlock.Rule -> Hairline()
                 is MarkdownBlock.Table -> TableBlock(block)
+            }
+        }
+    }
+}
+
+private data class CalloutTone(val color: Color, val icon: MyIcon)
+
+@Composable
+private fun calloutTone(kind: CalloutKind): CalloutTone {
+    val colors = MyTheme.colors
+
+    return when (kind) {
+        CalloutKind.Note -> CalloutTone(colors.statusWorking, MyIcon.Info)
+        CalloutKind.Tip -> CalloutTone(colors.diffAdd, MyIcon.Lightbulb)
+        CalloutKind.Important -> CalloutTone(colors.accent, MyIcon.Alert)
+        CalloutKind.Warning -> CalloutTone(colors.statusAttention, MyIcon.TriangleAlert)
+        CalloutKind.Caution -> CalloutTone(colors.statusFailed, MyIcon.Failed)
+    }
+}
+
+@Composable
+private fun highlighted(language: String, code: String): AnnotatedString {
+    val colors = MyTheme.colors
+
+    return remember(language, code, colors) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = colors.text)) {
+                for (token in highlight(language, code)) {
+                    val color = when (token.kind) {
+                        TokenKind.Plain -> colors.text
+                        TokenKind.Keyword -> colors.statusWorking
+                        TokenKind.Text, TokenKind.Added -> colors.diffAdd
+                        TokenKind.Comment -> colors.textMuted
+                        TokenKind.Number -> colors.statusAttention
+                        TokenKind.Removed -> colors.diffDel
+                    }
+
+                    withStyle(SpanStyle(color = color)) { append(token.text) }
+                }
             }
         }
     }
@@ -379,6 +448,7 @@ private fun ListBlock(items: List<MarkdownListItem>, numbering: ((Int) -> String
 
 private val InlineLink = Regex("\\[([^\\]]+)]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)")
 private val InlineImage = Regex("!\\[([^\\]]*)]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)")
+private val FootnoteReference = Regex("\\[\\^([^\\]\\s]+)]")
 private val BareUrl = Regex("<(https?://[^>\\s]+)>|https?://[^\\s<>]+")
 private const val UrlTrailing = ".,;:!?)]}'\""
 
@@ -403,11 +473,18 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
         val previous = if (index == 0) ' ' else text[index - 1]
         val image = InlineImage.matchAt(text, index)
         val link = InlineLink.matchAt(text, index)
+        val note = FootnoteReference.matchAt(text, index)
         val bare = if (previous.isLetterOrDigit()) null else BareUrl.matchAt(text, index)
 
         if (text[index] == '\\' && index + 1 < text.length && !text[index + 1].isLetterOrDigit()) {
             append(text[index + 1])
             index += 2
+            continue
+        }
+
+        if (note != null) {
+            withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.75.em, color = codeColor)) { append(note.groupValues[1]) }
+            index += note.value.length
             continue
         }
 
@@ -438,7 +515,7 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
             continue
         }
 
-        val marker = listOf("***", "**", "__", "~~", "`", "*", "_").firstOrNull { text.startsWith(it, index) }
+        val marker = listOf("***", "**", "__", "~~", "`", "*", "_", "~", "^").firstOrNull { text.startsWith(it, index) }
         val close = if (marker == null) -1 else closingMarker(text, marker, index, previous)
 
         if (marker == null || close < 0) {
@@ -452,6 +529,8 @@ private fun AnnotatedString.Builder.appendInline(text: String, codeColor: Color,
         when (marker) {
             "`" -> withStyle(SpanStyle(color = codeColor, fontFamily = codeFont, fontSize = Tokens.Type.Code.fontSize)) { append(inner) }
             "~~" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInline(inner, codeColor, codeFont, open) }
+            "^" -> withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }
+            "~" -> withStyle(SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.75.em)) { appendInline(inner, codeColor, codeFont, open) }
             "*", "_" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
             "***" -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontStyle = FontStyle.Italic)) { appendInline(inner, codeColor, codeFont, open) }
             else -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { appendInline(inner, codeColor, codeFont, open) }
@@ -466,6 +545,10 @@ private fun closingMarker(text: String, marker: String, index: Int, previous: Ch
 
     if (marker == "`") {
         return text.indexOf(marker, opens)
+    }
+
+    if (opens >= text.length || (marker == "^" || marker == "~") && text.indexOf(marker, opens).let { it < 0 || text.substring(opens, it).any { char -> char.isWhitespace() } }) {
+        return -1
     }
 
     if (opens >= text.length || text[opens].isWhitespace() || (marker.startsWith("_") && previous.isLetterOrDigit())) {

@@ -477,6 +477,11 @@ pub struct GroupFolderRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Extensions {
+    pub generated_ui: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InstructionVersion {
     pub id: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
