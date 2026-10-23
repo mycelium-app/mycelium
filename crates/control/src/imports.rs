@@ -1,7 +1,8 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
-use crate::activity::record_imported_turns;
+use crate::activity::{ImportedTurn, record_imported_turns};
+use crate::pricing::{Tokens, estimated_cost};
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text};
 use axum::Json;
 use axum::extract::State;
@@ -10,13 +11,22 @@ use mycelium_proto::api::{ImportRequest, ImportResult, ImportStatus};
 use mycelium_proto::conversation::{AgentId, ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 80;
 const AGENTS: [AgentId; 2] = [AgentId::Claude, AgentId::Codex];
+const WORKING_CAP_MS: i64 = 2 * 60 * 60 * 1000;
+
+struct Usage {
+    message_id: String,
+    model: String,
+    tokens: Tokens,
+}
 
 enum Item {
+    At(DateTime<Utc>),
+    Usage(Usage),
     User(String),
     Agent(String),
     Tool { id: String, title: String, kind: &'static str, input: Value },
@@ -61,6 +71,23 @@ fn claude_tool(id: &str, name: &str, input: &Value) -> Item {
     Item::Tool { id: id.to_string(), title, kind, input: input.clone() }
 }
 
+fn claude_usage(entry: &Value) -> Option<Usage> {
+    let message = &entry["message"];
+    let usage = message["usage"].as_object()?;
+    let model = message["model"].as_str().unwrap_or_default();
+
+    if model.starts_with('<') {
+        return None;
+    }
+
+    let count = |field: &str| usage.get(field).and_then(Value::as_i64).unwrap_or(0).max(0);
+    let cache_write = count("cache_creation_input_tokens");
+    let write_1h = usage.get("cache_creation").and_then(|split| split["ephemeral_1h_input_tokens"].as_i64()).unwrap_or(0).clamp(0, cache_write);
+    let tokens = Tokens { input: count("input_tokens"), output: count("output_tokens"), cache_read: count("cache_read_input_tokens"), cache_write_5m: cache_write - write_1h, cache_write_1h: write_1h };
+
+    Some(Usage { message_id: message["id"].as_str().unwrap_or_default().to_string(), model: model.to_string(), tokens })
+}
+
 fn claude_result(block: &Value) -> Item {
     let content = &block["content"];
     let output = match content.as_array() {
@@ -95,6 +122,7 @@ fn codex_output(payload: &Value) -> Item {
 
 fn parse_claude(text: &str) -> Option<Parsed> {
     let mut parsed = Parsed { session_id: String::new(), cwd: String::new(), first_at: None, last_at: None, items: Vec::new() };
+    let mut usage_positions: HashMap<String, usize> = HashMap::new();
 
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
@@ -127,6 +155,17 @@ fn parse_claude(text: &str) -> Option<Parsed> {
             let at = at.with_timezone(&Utc);
             parsed.first_at = parsed.first_at.or(Some(at));
             parsed.last_at = Some(at);
+            parsed.items.push(Item::At(at));
+        }
+
+        if let Some(usage) = claude_usage(&entry) {
+            match usage_positions.get(&usage.message_id) {
+                Some(position) if !usage.message_id.is_empty() => parsed.items[*position] = Item::Usage(usage),
+                _ => {
+                    usage_positions.insert(usage.message_id.clone(), parsed.items.len());
+                    parsed.items.push(Item::Usage(usage));
+                }
+            }
         }
 
         let content = &entry["message"]["content"];
@@ -170,6 +209,8 @@ fn parse_claude(text: &str) -> Option<Parsed> {
 
 fn parse_codex(text: &str) -> Option<Parsed> {
     let mut parsed = Parsed { session_id: String::new(), cwd: String::new(), first_at: None, last_at: None, items: Vec::new() };
+    let mut model = String::new();
+    let mut counted = [0i64; 3];
 
     for line in text.lines() {
         let Ok(entry) = serde_json::from_str::<Value>(line) else {
@@ -182,10 +223,28 @@ fn parse_codex(text: &str) -> Option<Parsed> {
                 parsed.session_id = payload["id"].as_str().unwrap_or_default().to_string();
                 parsed.cwd = payload["cwd"].as_str().unwrap_or_default().to_string();
             }
+            Some("turn_context") => model = payload["model"].as_str().unwrap_or_default().to_string(),
+            Some("event_msg") if payload["type"] == "token_count" => {
+                let total = &payload["info"]["total_token_usage"];
+                let current = ["input_tokens", "cached_input_tokens", "output_tokens"].map(|field| total[field].as_i64().unwrap_or(0).max(0));
+
+                if total.is_object() && current != counted {
+                    let fresh = current.iter().zip(counted).any(|(now, before)| *now < before);
+                    let delta = if fresh { current } else { [current[0] - counted[0], current[1] - counted[1], current[2] - counted[2]] };
+                    let cached = delta[1].min(delta[0]);
+
+                    counted = current;
+                    parsed.items.push(Item::Usage(Usage { message_id: String::new(), model: model.clone(), tokens: Tokens { input: delta[0] - cached, output: delta[2], cache_read: cached, ..Tokens::default() } }));
+                }
+            }
             Some("response_item") => {
                 let at = entry["timestamp"].as_str().and_then(|at| DateTime::parse_from_rfc3339(at).ok()).map(|at| at.with_timezone(&Utc));
                 parsed.first_at = parsed.first_at.or(at);
                 parsed.last_at = at.or(parsed.last_at);
+
+                if let Some(at) = at {
+                    parsed.items.push(Item::At(at));
+                }
 
                 match payload["type"].as_str() {
                     Some("message") => {
@@ -224,6 +283,7 @@ fn events_of(items: &[Item]) -> Vec<(EventKind, Value)> {
 
     for item in items {
         match item {
+            Item::At(_) | Item::Usage(_) => {}
             Item::User(text) if text.trim().is_empty() => {}
             Item::User(text) => {
                 if turn_open {
@@ -256,6 +316,64 @@ fn events_of(items: &[Item]) -> Vec<(EventKind, Value)> {
     events
 }
 
+fn finished_turn(mut turn: ImportedTurn, cost_unknown: bool, started_at: Option<DateTime<Utc>>, last_activity: Option<DateTime<Utc>>) -> ImportedTurn {
+    turn.cost_usd = turn.cost_usd.filter(|_| !cost_unknown);
+    turn.ended_at = last_activity;
+    turn.working_ms = started_at.zip(last_activity).map(|(start, end)| (end - start).num_milliseconds().clamp(0, WORKING_CAP_MS));
+
+    turn
+}
+
+fn turns_of(items: &[Item]) -> Vec<ImportedTurn> {
+    let mut turns = Vec::new();
+    let mut turn_open = false;
+    let mut now = None;
+    let mut started_at = None;
+    let mut last_activity = None;
+    let mut turn = ImportedTurn::default();
+    let mut cost_unknown = false;
+
+    for item in items {
+        match item {
+            Item::At(at) => now = Some(*at),
+            Item::Usage(usage) => {
+                turn.reported = true;
+                turn.model = Some(usage.model.clone()).filter(|model| !model.is_empty());
+                turn.tokens.add(&usage.tokens);
+
+                match estimated_cost(&usage.model, &usage.tokens) {
+                    Some(cost) => turn.cost_usd = Some(turn.cost_usd.unwrap_or(0.0) + cost),
+                    None => cost_unknown = true,
+                }
+            }
+            Item::User(text) if text.trim().is_empty() => {}
+            Item::User(_) => {
+                if turn_open {
+                    turns.push(finished_turn(std::mem::take(&mut turn), cost_unknown, started_at, last_activity));
+                    turn_open = false;
+                }
+
+                turn = ImportedTurn::default();
+                cost_unknown = false;
+                started_at = now;
+                last_activity = now;
+            }
+            Item::Agent(text) if text.trim().is_empty() => {}
+            Item::Agent(_) | Item::Tool { .. } => {
+                turn_open = true;
+                last_activity = now;
+            }
+            Item::ToolResult { .. } => last_activity = now,
+        }
+    }
+
+    if turn_open {
+        turns.push(finished_turn(turn, cost_unknown, started_at, last_activity));
+    }
+
+    turns
+}
+
 async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> ApiResult<(i64, Vec<String>)> {
     let paths = sqlx::query_scalar::<_, String>("select path from transcripts where node_id = $1 and starts_with(path, $2) and position('/subagents/' in path) = 0 order by path")
         .bind(node_id)
@@ -274,13 +392,7 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
     Ok((found, pending))
 }
 
-pub async fn repair_activity_dates(state: &AppState) -> anyhow::Result<()> {
-    let claimed = sqlx::query("insert into boot_repairs (name) values ('import_activity_dates') on conflict do nothing").execute(&state.pool).await?;
-
-    if claimed.rows_affected() == 0 {
-        return Ok(());
-    }
-
+async fn parsed_pure_imports(state: &AppState) -> anyhow::Result<Vec<(Uuid, Parsed)>> {
     let imports = sqlx::query_as::<_, (Uuid, Uuid, String, String)>(
         "select c.id, c.node_id, c.agent, c.imported_from from conversations c
          where c.imported_from is not null
@@ -288,6 +400,7 @@ pub async fn repair_activity_dates(state: &AppState) -> anyhow::Result<()> {
     )
     .fetch_all(&state.pool)
     .await?;
+    let mut found = Vec::new();
 
     for (id, node_id, agent, path) in imports {
         let Ok(bytes) = tokio::fs::read(state.config.data_dir.join("transcripts").join(node_id.to_string()).join(&path)).await else {
@@ -296,9 +409,43 @@ pub async fn repair_activity_dates(state: &AppState) -> anyhow::Result<()> {
         let text = String::from_utf8_lossy(&bytes);
         let parsed = if agent == enum_text(&AgentId::Codex) { parse_codex(&text) } else { parse_claude(&text) };
 
-        if let Some(last_at) = parsed.and_then(|parsed| parsed.last_at) {
+        if let Some(parsed) = parsed {
+            found.push((id, parsed));
+        }
+    }
+
+    Ok(found)
+}
+
+pub async fn repair_activity_dates(state: &AppState) -> anyhow::Result<()> {
+    let claimed = sqlx::query("insert into boot_repairs (name) values ('import_activity_dates') on conflict do nothing").execute(&state.pool).await?;
+
+    if claimed.rows_affected() == 0 {
+        return Ok(());
+    }
+
+    for (id, parsed) in parsed_pure_imports(state).await? {
+        if let Some(last_at) = parsed.last_at {
             sqlx::query("update conversations set updated_at = $2 where id = $1").bind(id).bind(last_at).execute(&state.pool).await?;
         }
+    }
+
+    Ok(())
+}
+
+pub async fn repair_import_usage(state: &AppState) -> anyhow::Result<()> {
+    let claimed = sqlx::query("insert into boot_repairs (name) values ('import_usage') on conflict do nothing").execute(&state.pool).await?;
+
+    if claimed.rows_affected() == 0 {
+        return Ok(());
+    }
+
+    for (id, parsed) in parsed_pure_imports(state).await? {
+        let mut tx = state.pool.begin().await?;
+
+        sqlx::query("delete from usage_turns where conversation_id = $1").bind(id).execute(&mut *tx).await?;
+        record_imported_turns(&mut tx, id, &turns_of(&parsed.items)).await.map_err(|cause| anyhow::anyhow!("{cause:?}"))?;
+        tx.commit().await?;
     }
 
     Ok(())
@@ -391,7 +538,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             append_event(&mut tx, row.id, *kind, payload, None).await?;
         }
 
-        record_imported_turns(&mut tx, row.id).await?;
+        record_imported_turns(&mut tx, row.id, &turns_of(&parsed.items)).await?;
 
         tx.commit().await?;
         imported += 1;
@@ -461,5 +608,101 @@ mod tests {
     fn session_ids_are_read_from_transcript_file_names() {
         assert_eq!(session_id_of_path(AgentId::Claude, ".claude/projects/p/abc-123.jsonl"), "abc-123");
         assert_eq!(session_id_of_path(AgentId::Codex, ".codex/sessions/2026/10/01/rollout-2026-10-01T10-00-00-0199aaaa-bbbb-cccc-dddd-eeeeffff0000.jsonl"), "0199aaaa-bbbb-cccc-dddd-eeeeffff0000");
+    }
+
+    fn usage_entry(id: &str, at: &str, model: &str, output: i64) -> String {
+        json!({"type": "assistant", "sessionId": "s1", "timestamp": at, "message": {"id": id, "role": "assistant", "model": model, "content": [{"type": "text", "text": "Working."}], "usage": {"input_tokens": 10, "output_tokens": output, "cache_creation_input_tokens": 300, "cache_read_input_tokens": 2000, "cache_creation": {"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200}}}}).to_string()
+    }
+
+    fn user_entry(at: &str, text: &str) -> String {
+        json!({"type": "user", "sessionId": "s1", "timestamp": at, "message": {"role": "user", "content": text}}).to_string()
+    }
+
+    #[test]
+    fn claude_usage_is_counted_once_per_message_and_priced_from_the_list() {
+        let text = [
+            user_entry("2026-10-01T10:00:00Z", "Go"),
+            usage_entry("m1", "2026-10-01T10:00:05Z", "claude-opus-5", 4),
+            usage_entry("m1", "2026-10-01T10:00:06Z", "claude-opus-5", 40),
+            usage_entry("m2", "2026-10-01T10:00:09Z", "claude-opus-5", 60),
+        ]
+        .join("\n");
+
+        let turns = turns_of(&parse_claude(&text).unwrap().items);
+        let expected = (20.0 * 5.0 + 100.0 * 25.0 + 4000.0 * 0.5 + 200.0 * 6.25 + 400.0 * 10.0) / 1_000_000.0;
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tokens, Tokens { input: 20, output: 100, cache_read: 4000, cache_write_5m: 200, cache_write_1h: 400 });
+        assert_eq!(turns[0].model.as_deref(), Some("claude-opus-5"));
+        assert!((turns[0].cost_usd.unwrap() - expected).abs() < 1e-12);
+        assert!(turns[0].reported);
+    }
+
+    #[test]
+    fn a_turn_with_an_unpriced_model_keeps_its_tokens_and_has_no_cost() {
+        let text = [user_entry("2026-10-01T10:00:00Z", "Go"), usage_entry("m1", "2026-10-01T10:00:05Z", "some-local-model", 5), usage_entry("m2", "2026-10-01T10:00:06Z", "<synthetic>", 0)].join("\n");
+
+        let turns = turns_of(&parse_claude(&text).unwrap().items);
+
+        assert_eq!(turns[0].tokens.output, 5);
+        assert_eq!(turns[0].cost_usd, None);
+    }
+
+    #[test]
+    fn each_turn_carries_its_own_usage_and_end_time() {
+        let text = [
+            user_entry("2026-10-01T10:00:00Z", "One"),
+            usage_entry("m1", "2026-10-01T10:00:05Z", "claude-opus-5", 1),
+            user_entry("2026-10-02T09:00:00Z", "Two"),
+            usage_entry("m2", "2026-10-02T09:00:05Z", "claude-opus-5", 2),
+        ]
+        .join("\n");
+
+        let turns = turns_of(&parse_claude(&text).unwrap().items);
+
+        assert_eq!(turns.iter().map(|turn| turn.tokens.output).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(turns.iter().map(|turn| turn.ended_at.unwrap().to_rfc3339()).collect::<Vec<_>>(), ["2026-10-01T10:00:05+00:00", "2026-10-02T09:00:05+00:00"]);
+    }
+
+    #[test]
+    fn time_working_runs_from_the_prompt_to_the_last_agent_or_tool_entry_and_is_capped() {
+        let tool_result = json!({"type": "user", "sessionId": "s1", "timestamp": "2026-10-01T10:00:40Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}).to_string();
+        let text = [
+            user_entry("2026-10-01T10:00:00Z", "Short"),
+            usage_entry("m1", "2026-10-01T10:00:05Z", "claude-opus-5", 1),
+            tool_result,
+            user_entry("2026-10-01T12:00:00Z", "Long"),
+            usage_entry("m2", "2026-10-01T18:00:00Z", "claude-opus-5", 1),
+        ]
+        .join("\n");
+
+        let turns = turns_of(&parse_claude(&text).unwrap().items);
+
+        assert_eq!(turns[0].working_ms, Some(40_000));
+        assert_eq!(turns[1].working_ms, Some(WORKING_CAP_MS));
+    }
+
+    #[test]
+    fn codex_usage_is_the_growth_of_the_running_total_with_cached_input_split_out() {
+        let token_count = |total: Value| json!({"timestamp": "2026-10-01T10:00:04Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": total}}}).to_string();
+        let text = [
+            r#"{"timestamp":"2026-10-01T10:00:00Z","type":"session_meta","payload":{"id":"abc","cwd":"/work/app"}}"#.to_string(),
+            r#"{"timestamp":"2026-10-01T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5.4"}}"#.to_string(),
+            r#"{"timestamp":"2026-10-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Add a test"}]}}"#.to_string(),
+            r#"{"timestamp":"2026-10-01T10:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Added."}]}}"#.to_string(),
+            token_count(json!({"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 50, "total_tokens": 1050})),
+            token_count(json!({"input_tokens": 1000, "cached_input_tokens": 600, "output_tokens": 50, "total_tokens": 1050})),
+            token_count(json!({"input_tokens": 1500, "cached_input_tokens": 900, "output_tokens": 80, "total_tokens": 1580})),
+            r#"{"timestamp":"2026-10-01T10:00:05Z","type":"event_msg","payload":{"type":"token_count","info":null}}"#.to_string(),
+        ]
+        .join("\n");
+
+        let turns = turns_of(&parse_codex(&text).unwrap().items);
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tokens, Tokens { input: 600, output: 80, cache_read: 900, ..Tokens::default() });
+        assert_eq!(turns[0].model.as_deref(), Some("gpt-5.4"));
+        assert!((turns[0].cost_usd.unwrap() - (600.0 * 2.5 + 80.0 * 15.0 + 900.0 * 0.25) / 1_000_000.0).abs() < 1e-12);
+        assert_eq!(turns[0].working_ms, Some(1000));
     }
 }

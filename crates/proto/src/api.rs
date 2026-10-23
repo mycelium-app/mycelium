@@ -705,6 +705,8 @@ pub struct ActivityRow {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub cost_usd: Option<f64>,
+    #[serde(default)]
+    pub cost_estimated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

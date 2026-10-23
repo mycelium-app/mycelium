@@ -109,7 +109,7 @@ instruction_versions  id text pk (commit SHA with a source, else 40 hex characte
                  text text, author uuid null, created_at
 instruction_source    singleton row: forge_id uuid, repository text, path text
 usage_turns      id bigserial pk, conversation_id uuid, owner uuid, node_id uuid, agent text, project_id uuid null, model text null, ended_at, day date (UTC),
-                 working_ms bigint null, reported bool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens bigint, cost_usd double null, cost_total double null
+                 working_ms bigint null, reported bool, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens bigint, cost_usd double null, cost_total double null, cost_estimated bool (cost_usd came from list prices)
 goals            conversation_id uuid pk, text text, token_budget bigint, state text ('active'|'paused'|'met'|'stuck'|'over_budget'), reason text null, check_id uuid null, started_at
 walkthroughs     id uuid pk, conversation_id uuid, steps jsonb, created_at (every version kept, the newest is shown)
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
@@ -189,7 +189,7 @@ Conversations:
   or `session/set_config_option`, whichever the agent advertises.
 
 Activity:
-- `GET /api/v1/activity?range=today|7d|30d&node_id=` → `{range, totals, days, hours, conversations, nodes, agents, projects, models, unreported_agents}` for the caller's own conversations, `range` defaulting to `7d` (400 `range_invalid` otherwise) and `node_id` narrowing to one node. Every row is `{key, name, turns, reported_turns, working_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd}`; `days` has one row per UTC day of the range and `hours` one row per UTC hour (`key` is `YYYY-MM-DDTHH`) from the first day of the range to the current hour, empty ones included, `cost_usd` is null until an agent reports a cost, and the breakdowns hold the top 50 by tokens. A turn is recorded when its `turn_end` arrives: tokens from the turn's `usage`, cost as the change in the agent's running total from its latest `usage_update` (`cost.amount`), the model from that update's `_meta["_claude/model"]` else the conversation's, and time working from the last user message to the turn end. A turn with neither tokens nor cost is counted as a turn only (`reported_turns` does not include it), and `unreported_agents` names the agents in the range with no reported turn. Imported conversations count their turns on the day they were last active, with no usage.
+- `GET /api/v1/activity?range=today|7d|30d&node_id=` → `{range, totals, days, hours, conversations, nodes, agents, projects, models, unreported_agents}` for the caller's own conversations, `range` defaulting to `7d` (400 `range_invalid` otherwise) and `node_id` narrowing to one node. Every row is `{key, name, turns, reported_turns, working_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd}`; `days` has one row per UTC day of the range and `hours` one row per UTC hour (`key` is `YYYY-MM-DDTHH`) from the first day of the range to the current hour, empty ones included, `cost_usd` is null until an agent reports a cost, and the breakdowns hold the top 50 by tokens. A turn is recorded when its `turn_end` arrives: tokens from the turn's `usage`, cost as the change in the agent's running total from its latest `usage_update` (`cost.amount`), the model from that update's `_meta["_claude/model"]` else the conversation's, and time working from the last user message to the turn end. A turn with neither tokens nor cost is counted as a turn only (`reported_turns` does not include it), and `unreported_agents` names the agents in the range with no reported turn. Every row also carries `cost_estimated`, true when any turn in it was priced from list prices rather than reported by an agent. Imported conversations record one row per turn from the transcript (see History import and search).
 
 History:
 - `GET /api/v1/imports` → `[{node_id, agent, found, imported}]` per node and agent; `POST /api/v1/imports`
@@ -510,6 +510,39 @@ transcript whose session id already belongs to a conversation on that node is co
 Every user message and every assistant turn, live or imported, is stored in `search_entries` and searched with
 Postgres full-text search (`websearch_to_tsquery`, English) for now, not ctx. Search is scoped to the caller's own
 conversations and returns the best matching message per conversation with `**` around the matched words.
+
+An import records one `usage_turns` row per turn from the transcript: the turn's day is the day of its last assistant or
+tool entry, time working runs from the user message that starts the turn to that entry (capped at two hours so an idle
+gap is not work), and tokens are summed over the turn's assistant messages. Claude Code usage is read from
+`message.usage` once per `message.id` (a message is written several times while streaming, the last copy wins; `<synthetic>`
+messages are skipped), with cache writes split into five-minute and one-hour from `cache_creation`. Codex usage is the growth
+of `token_count` `info.total_token_usage` between events, with `cached_input_tokens` counted as cache reads and removed from
+input, and the model comes from the latest `turn_context`. Cost is estimated from list prices by the longest model id
+prefix and stored with `cost_estimated`; a turn with a model that has no price keeps its tokens and has no cost. Boot
+repair `import_usage` re-parses every import without live events from the mirrored transcript and replaces its rows.
+
+List prices, USD per million tokens (input, cache write 5 minutes, cache write 1 hour, cache read, output), read from
+https://platform.claude.com/docs/en/about-claude/pricing and https://developers.openai.com/api/docs/pricing on 2026-10-23.
+The table is `PRICES` in `crates/control/src/pricing.rs`; Claude Haiku 5.5 is left out because its price depends on
+prompt size, so its turns show tokens only.
+
+| Model | Input | Write 5m | Write 1h | Read | Output |
+|---|---|---|---|---|---|
+| claude-fable-5-1, claude-mythos-5-1 | 10 | 12.5 | 20 | 0.25 | 50 |
+| claude-fable-5, claude-mythos-5 | 10 | 12.5 | 20 | 1 | 50 |
+| claude-opus-5-5 | 4 | 5 | 8 | 0.2 | 20 |
+| claude-opus-5, 4-8, 4-7, 4-6, 4-5 | 5 | 6.25 | 10 | 0.5 | 25 |
+| claude-opus-4-1, claude-opus-4 | 15 | 18.75 | 30 | 1.5 | 75 |
+| claude-sonnet-5-5 | 2 | 2.5 | 4 | 0.1 | 10 |
+| claude-sonnet-5 | 2 | 2.5 | 4 | 0.2 | 10 |
+| claude-sonnet-4 (4, 4-5, 4-6) | 3 | 3.75 | 6 | 0.3 | 15 |
+| claude-haiku-4-5 | 1 | 1.25 | 2 | 0.1 | 5 |
+| claude-3-5-haiku | 0.8 | 1 | 1.6 | 0.08 | 4 |
+
+OpenAI (input, cached input, output): gpt-5.6-sol 4 / 0.4 / 20, gpt-5.6-terra 2 / 0.2 / 12, gpt-5.6-luna 0.2 / 0.02 / 1.2,
+gpt-5.5 5 / 0.5 / 30, gpt-5.4 2.5 / 0.25 / 15, gpt-5.4-mini 0.75 / 0.075 / 4.5, gpt-5.4-nano 0.2 / 0.02 / 1.25,
+gpt-5.3-codex and gpt-5.2 1.75 / 0.175 / 14, gpt-5.1 and gpt-5 1.25 / 0.125 / 10, gpt-5-mini 0.25 / 0.025 / 2,
+gpt-5-nano 0.05 / 0.005 / 0.4. Short-context rates; long-context rates are higher and not applied.
 
 ### Terminal
 

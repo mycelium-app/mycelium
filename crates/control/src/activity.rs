@@ -1,10 +1,11 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::pricing::Tokens;
 use crate::state::AppState;
 use crate::store::Tx;
 use axum::Json;
 use axum::extract::{Query, State};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use mycelium_proto::api::{Activity, ActivityRow};
 use serde::Deserialize;
 use serde_json::Value;
@@ -33,6 +34,7 @@ struct TotalsRow {
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     cost_usd: Option<f64>,
+    cost_estimated: bool,
 }
 
 impl TotalsRow {
@@ -48,6 +50,7 @@ impl TotalsRow {
             cache_read_tokens: self.cache_read_tokens,
             cache_write_tokens: self.cache_write_tokens,
             cost_usd: self.cost_usd,
+            cost_estimated: self.cost_estimated,
         }
     }
 }
@@ -101,15 +104,36 @@ pub async fn record_turn(state: &AppState, conversation_id: Uuid, usage: Option<
     Ok(())
 }
 
-pub async fn record_imported_turns(tx: &mut Tx<'_>, conversation_id: Uuid) -> ApiResult<()> {
-    sqlx::query(sqlx::AssertSqlSafe(format!(
-        "insert into usage_turns (conversation_id, owner, node_id, agent, project_id, model, ended_at, day)
-         select c.id, c.owner, c.node_id, c.agent, {PROJECT_OF_CONVERSATION}, c.model, c.updated_at, (c.updated_at at time zone 'utc')::date
-         from events e join conversations c on c.id = e.conversation_id where e.conversation_id = $1 and e.kind = 'turn_end'"
-    )))
-    .bind(conversation_id)
-    .execute(&mut **tx)
-    .await?;
+#[derive(Default)]
+pub struct ImportedTurn {
+    pub ended_at: Option<DateTime<Utc>>,
+    pub working_ms: Option<i64>,
+    pub model: Option<String>,
+    pub reported: bool,
+    pub tokens: Tokens,
+    pub cost_usd: Option<f64>,
+}
+
+pub async fn record_imported_turns(tx: &mut Tx<'_>, conversation_id: Uuid, turns: &[ImportedTurn]) -> ApiResult<()> {
+    for turn in turns {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "insert into usage_turns (conversation_id, owner, node_id, agent, project_id, model, ended_at, day, working_ms, reported, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, cost_estimated)
+             select c.id, c.owner, c.node_id, c.agent, {PROJECT_OF_CONVERSATION}, coalesce($2, c.model), turn_time.moment, (turn_time.moment at time zone 'utc')::date, $4, $5, $6, $7, $8, $9, $10, $10 is not null
+             from conversations c cross join lateral (select coalesce($3, c.updated_at) as moment) turn_time where c.id = $1"
+        )))
+        .bind(conversation_id)
+        .bind(&turn.model)
+        .bind(turn.ended_at)
+        .bind(turn.working_ms)
+        .bind(turn.reported)
+        .bind(turn.tokens.input)
+        .bind(turn.tokens.output)
+        .bind(turn.tokens.cache_read)
+        .bind(turn.tokens.cache_write())
+        .bind(turn.cost_usd)
+        .execute(&mut **tx)
+        .await?;
+    }
 
     Ok(())
 }
@@ -119,7 +143,7 @@ async fn grouped(state: &AppState, owner: Uuid, days: i32, node_id: Option<Uuid>
         "select {key} as key, {name} as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
                 coalesce(sum(u.working_ms), 0)::bigint as working_ms, coalesce(sum(u.input_tokens), 0)::bigint as input_tokens,
                 coalesce(sum(u.output_tokens), 0)::bigint as output_tokens, coalesce(sum(u.cache_read_tokens), 0)::bigint as cache_read_tokens,
-                coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd
+                coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd, coalesce(bool_or(u.cost_estimated), false) as cost_estimated
          from usage_turns u
          join conversations c on c.id = u.conversation_id
          join nodes n on n.id = u.node_id

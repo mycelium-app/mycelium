@@ -108,4 +108,14 @@ class ActivityTest {
         assertNull(decoded.totals.costUsd)
         assertEquals(listOf("codex"), decoded.unreportedAgents)
     }
+
+    @Test
+    fun anEstimatedCostIsDecodedAndDefaultsToReported() {
+        val json = """{"range":"7d","totals":{"key":"","name":"","turns":1,"cost_usd":1.5,"cost_estimated":true},"days":[{"key":"d","name":"d","cost_usd":1.0}],"unreported_agents":[]}"""
+
+        val decoded = MyceliumJson.decodeFromString(Activity.serializer(), json)
+
+        assertEquals(true, decoded.totals.costEstimated)
+        assertEquals(false, decoded.days.first().costEstimated)
+    }
 }

@@ -111,7 +111,7 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 Kpi("Tokens", if (reported) formatTokens(loaded.totals.tokens) else "Not reported", kpiSlot(), caption = "${loaded.totals.turns} turns, ${formatDuration(loaded.totals.workingMs)} working")
-                Kpi("API equivalent", formatCost(loaded.totals.costUsd), kpiSlot(), caption = "as the agents report it, not billed on a subscription")
+                Kpi("API equivalent", formatCost(loaded.totals.costUsd), kpiSlot(), caption = if (loaded.totals.costEstimated) "partly estimated from list prices, not billed on a subscription" else "as the agents report it, not billed on a subscription")
                 Kpi("Energy and water", if (reported) formatEnergy(estimate.energyWh) else "Not reported", kpiSlot(), caption = if (reported) formatWater(estimate.waterMl) else null)
                 Kpi("Forest", if (reported) formatTreeDays(estimate.treeDays) else "Not reported", kpiSlot(), caption = if (reported) formatCo2(estimate.co2Grams) else null)
             }

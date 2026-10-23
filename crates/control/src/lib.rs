@@ -20,6 +20,7 @@ mod model_providers;
 mod moves;
 mod nodes;
 mod projects;
+mod pricing;
 mod prompts;
 mod rate_limit;
 mod schedules;

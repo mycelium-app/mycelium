@@ -63,6 +63,78 @@ async fn importing_a_transcript_counts_its_turns_in_activity_without_usage() {
     assert_eq!(body["unreported_agents"], json!(["claude"]));
 }
 
+fn usage_transcript(session: &str, day: chrono::NaiveDate) -> String {
+    let at = |time: &str| format!("{day}T{time}Z");
+    let usage = json!({"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": 2000});
+
+    [
+        json!({"type": "user", "sessionId": session, "cwd": "/work/app", "timestamp": at("10:00:00"), "message": {"role": "user", "content": "Fix the build"}}),
+        json!({"type": "assistant", "sessionId": session, "timestamp": at("10:00:05"), "message": {"id": "m1", "role": "assistant", "model": "claude-opus-5", "content": [{"type": "text", "text": "Looking."}], "usage": usage}}),
+        json!({"type": "assistant", "sessionId": session, "timestamp": at("10:00:30"), "message": {"id": "m1", "role": "assistant", "model": "claude-opus-5", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}], "usage": usage}}),
+    ]
+    .iter()
+    .map(Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+fn yesterday() -> chrono::NaiveDate {
+    chrono::Utc::now().date_naive() - chrono::Duration::days(1)
+}
+
+async fn activity_day(server: &Server, day: chrono::NaiveDate) -> Value {
+    let (_, body) = server.user.json(server.user.get("/api/v1/activity?range=7d")).await;
+
+    body["days"].as_array().unwrap().iter().find(|row| row["key"] == day.to_string()).unwrap().clone()
+}
+
+#[tokio::test]
+async fn importing_a_transcript_with_usage_fills_activity_tokens_time_working_and_an_estimated_cost_on_its_day() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl"), &usage_transcript(CLAUDE_SESSION, yesterday())).await;
+
+    import(&server, link.id, "claude").await;
+
+    let row = activity_day(&server, yesterday()).await;
+    assert_eq!((row["turns"].clone(), row["reported_turns"].clone()), (json!(1), json!(1)));
+    assert_eq!((row["input_tokens"].clone(), row["output_tokens"].clone(), row["cache_read_tokens"].clone(), row["cache_write_tokens"].clone()), (json!(100), json!(50), json!(2000), json!(1000)));
+    assert_eq!(row["working_ms"], 30_000);
+    assert_eq!(row["cost_estimated"], true);
+    assert!((row["cost_usd"].as_f64().unwrap() - (100.0 * 5.0 + 50.0 * 25.0 + 2000.0 * 0.5 + 1000.0 * 6.25) / 1_000_000.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn a_restart_fills_the_usage_of_conversations_imported_before_usage_was_read() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl"), &usage_transcript(CLAUDE_SESSION, yesterday())).await;
+    import(&server, link.id, "claude").await;
+    sqlx::query("update usage_turns set reported = false, input_tokens = 0, output_tokens = 0, cache_read_tokens = 0, cache_write_tokens = 0, working_ms = null, cost_usd = null, cost_estimated = false, day = day - 5").execute(&server.pool).await.unwrap();
+    sqlx::query("delete from boot_repairs").execute(&server.pool).await.unwrap();
+
+    let data_dir = server.data_dir.clone();
+    let _restarted = Server::start_on(server.database_url.clone(), |config| config.data_dir = data_dir).await;
+
+    let row = eventually("repaired usage", || async {
+        let row = activity_day(&server, yesterday()).await;
+        (row["input_tokens"] == 100).then_some(row)
+    })
+    .await;
+    assert_eq!((row["turns"].clone(), row["working_ms"].clone(), row["cost_estimated"].clone()), (json!(1), json!(30_000), json!(true)));
+
+    sqlx::query("delete from boot_repairs").execute(&server.pool).await.unwrap();
+    let data_dir = server.data_dir.clone();
+    let _again = Server::start_on(server.database_url.clone(), |config| config.data_dir = data_dir).await;
+    eventually("second repair", || async {
+        let count: i64 = sqlx::query_scalar("select count(*) from boot_repairs where name = 'import_usage'").fetch_one(&server.pool).await.unwrap();
+        (count == 1).then_some(())
+    })
+    .await;
+    let rows: i64 = sqlx::query_scalar("select count(*) from usage_turns").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(rows, 1);
+}
+
 #[tokio::test]
 async fn importing_a_claude_transcript_creates_a_done_conversation_with_events_and_streams_it() {
     let server = Server::start().await;

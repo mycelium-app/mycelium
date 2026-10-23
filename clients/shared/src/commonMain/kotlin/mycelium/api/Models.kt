@@ -230,6 +230,7 @@ data class ActivityRow(
     @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
     @SerialName("cache_write_tokens") val cacheWriteTokens: Long = 0,
     @SerialName("cost_usd") val costUsd: Double? = null,
+    @SerialName("cost_estimated") val costEstimated: Boolean = false,
 ) {
     val tokens: Long get() = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
 }
