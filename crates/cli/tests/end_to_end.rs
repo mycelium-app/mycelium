@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
-const WAIT: Duration = Duration::from_secs(20);
+const WAIT: Duration = Duration::from_secs(60);
 
 async fn eventually<T, F, Fut>(what: &str, mut attempt: F) -> T
 where

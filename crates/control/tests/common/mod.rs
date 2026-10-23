@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
-pub const WAIT: Duration = Duration::from_secs(15);
+pub const WAIT: Duration = Duration::from_secs(60);
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

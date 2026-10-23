@@ -246,7 +246,10 @@ impl Rig {
         eventually("the turn to end", || async {
             let events = self.events(id).await;
 
-            (events.iter().filter(|event| event["kind"] == "turn_end").count() == count).then_some(events)
+            let ended = events.iter().filter(|event| event["kind"] == "turn_end").count() == count;
+            let settled = self.server.conversation(id.parse().unwrap()).await["status"] == "review";
+
+            (ended && settled).then_some(events)
         })
         .await
     }
