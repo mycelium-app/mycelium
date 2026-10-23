@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind};
 use serde_json::{Value, json};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -37,6 +37,7 @@ pub enum ProviderError {
     Unreachable,
     Failed(u16),
     Stopped(String),
+    ToolsRejected,
 }
 
 pub struct ChatImage {
@@ -44,14 +45,67 @@ pub struct ChatImage {
     pub data: String,
 }
 
+#[derive(Clone)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub schema: Value,
+}
+
+#[derive(Clone)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub input: Value,
+}
+
+#[derive(Clone)]
+pub struct ToolResult {
+    pub call_id: String,
+    pub content: String,
+    pub is_error: bool,
+}
+
+#[derive(Default)]
 pub struct ChatMessage {
     pub role: &'static str,
     pub content: String,
     pub images: Vec<ChatImage>,
+    pub tool_calls: Vec<ToolCall>,
+    pub tool_results: Vec<ToolResult>,
 }
 
 impl ChatMessage {
-    fn to_json(&self, kind: ModelProviderKind) -> Value {
+    fn to_json(&self, kind: ModelProviderKind) -> Vec<Value> {
+        match (kind, self.tool_calls.is_empty(), self.tool_results.is_empty()) {
+            (ModelProviderKind::OpenaiCompatible, false, _) => {
+                let calls: Vec<Value> = self.tool_calls.iter().map(|call| json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.input.to_string()}})).collect();
+                let content = if self.content.is_empty() { Value::Null } else { json!(self.content) };
+
+                vec![json!({"role": "assistant", "content": content, "tool_calls": calls})]
+            }
+            (ModelProviderKind::Anthropic, false, _) => {
+                let mut blocks = Vec::new();
+
+                if !self.content.is_empty() {
+                    blocks.push(json!({"type": "text", "text": self.content}));
+                }
+
+                blocks.extend(self.tool_calls.iter().map(|call| json!({"type": "tool_use", "id": call.id, "name": call.name, "input": call.input})));
+
+                vec![json!({"role": "assistant", "content": blocks})]
+            }
+            (ModelProviderKind::OpenaiCompatible, _, false) => self.tool_results.iter().map(|result| json!({"role": "tool", "tool_call_id": result.call_id, "content": result.content})).collect(),
+            (ModelProviderKind::Anthropic, _, false) => {
+                let blocks: Vec<Value> = self.tool_results.iter().map(|result| json!({"type": "tool_result", "tool_use_id": result.call_id, "content": result.content, "is_error": result.is_error})).collect();
+
+                vec![json!({"role": "user", "content": blocks})]
+            }
+            _ => vec![self.to_plain_json(kind)],
+        }
+    }
+
+    fn to_plain_json(&self, kind: ModelProviderKind) -> Value {
         if self.images.is_empty() {
             return json!({"role": self.role, "content": self.content});
         }
@@ -73,11 +127,28 @@ impl ChatMessage {
     }
 }
 
+fn tool_definitions_json(kind: ModelProviderKind, tools: &[ToolDefinition]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| match kind {
+            ModelProviderKind::OpenaiCompatible => json!({"type": "function", "function": {"name": tool.name, "description": tool.description, "parameters": tool.schema}}),
+            ModelProviderKind::Anthropic => json!({"name": tool.name, "description": tool.description, "input_schema": tool.schema}),
+        })
+        .collect()
+}
+
+struct PartialCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
 #[derive(Default)]
 pub struct Delta {
     pub text: String,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub tool_calls: Vec<ToolCall>,
 }
 
 pub struct ReplyStream {
@@ -85,6 +156,7 @@ pub struct ReplyStream {
     kind: ModelProviderKind,
     buffer: Vec<u8>,
     pending: VecDeque<Delta>,
+    calls: BTreeMap<usize, PartialCall>,
     finished: bool,
 }
 
@@ -95,6 +167,7 @@ impl ProviderError {
             ProviderError::Unreachable => ApiError::bad_request("provider_unreachable", format!("Mycelium could not reach {address}. Check the address and that the server is running, then try again.")),
             ProviderError::Failed(status) => ApiError::bad_request("provider_failed", format!("{name} answered with status {status}. Try again in a moment.")),
             ProviderError::Stopped(message) => ApiError::bad_request("provider_failed", message),
+            ProviderError::ToolsRejected => ApiError::bad_request("provider_failed", format!("{name} does not take tools. Try again.")),
         }
     }
 }
@@ -160,10 +233,10 @@ impl ProviderRow {
         Ok(Ok(models))
     }
 
-    pub async fn stream_reply(&self, http: &reqwest::Client, model: &str, system: &str, messages: &[ChatMessage]) -> ApiResult<Result<ReplyStream, ProviderError>> {
+    pub async fn stream_reply(&self, http: &reqwest::Client, model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolDefinition]) -> ApiResult<Result<ReplyStream, ProviderError>> {
         let kind = self.parsed_kind()?;
-        let turns: Vec<Value> = messages.iter().map(|message| message.to_json(kind)).collect();
-        let body = match kind {
+        let turns: Vec<Value> = messages.iter().flat_map(|message| message.to_json(kind)).collect();
+        let mut body = match kind {
             ModelProviderKind::OpenaiCompatible => {
                 let mut all = vec![json!({"role": "system", "content": system})];
                 all.extend(turns);
@@ -172,6 +245,11 @@ impl ProviderRow {
             }
             ModelProviderKind::Anthropic => json!({"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "system": system, "messages": turns, "stream": true}),
         };
+
+        if !tools.is_empty() {
+            body["tools"] = json!(tool_definitions_json(kind, tools));
+        }
+
         let path = match kind {
             ModelProviderKind::OpenaiCompatible => "chat/completions",
             ModelProviderKind::Anthropic => "messages",
@@ -187,10 +265,12 @@ impl ProviderRow {
         }
 
         if !status.is_success() {
-            return Ok(Err(ProviderError::Failed(status.as_u16())));
+            let mentions_tools = !tools.is_empty() && response.text().await.is_ok_and(|text| text.to_lowercase().contains("tool"));
+
+            return Ok(Err(if mentions_tools { ProviderError::ToolsRejected } else { ProviderError::Failed(status.as_u16()) }));
         }
 
-        Ok(Ok(ReplyStream { response, kind, buffer: Vec::new(), pending: VecDeque::new(), finished: false }))
+        Ok(Ok(ReplyStream { response, kind, buffer: Vec::new(), pending: VecDeque::new(), calls: BTreeMap::new(), finished: false }))
     }
 }
 
@@ -202,7 +282,7 @@ impl ReplyStream {
             }
 
             if self.finished {
-                return Ok(None);
+                return Ok(self.completed_calls().map(|tool_calls| Delta { tool_calls, ..Delta::default() }));
             }
 
             let chunk = self.response.chunk().await.map_err(|_| ProviderError::Stopped("The model stopped replying part way through. Send your message again.".to_string()))?;
@@ -236,12 +316,40 @@ impl ReplyStream {
             return Ok(());
         };
         let delta = match self.kind {
-            ModelProviderKind::OpenaiCompatible => Delta {
-                text: event["choices"][0]["delta"]["content"].as_str().unwrap_or_default().to_string(),
-                input_tokens: event["usage"]["prompt_tokens"].as_i64(),
-                output_tokens: event["usage"]["completion_tokens"].as_i64(),
-            },
+            ModelProviderKind::OpenaiCompatible => {
+                for (position, call) in event["choices"][0]["delta"]["tool_calls"].as_array().into_iter().flatten().enumerate() {
+                    let index = call["index"].as_u64().map(|index| index as usize).unwrap_or(position);
+                    let partial = self.calls.entry(index).or_insert_with(|| PartialCall { id: String::new(), name: String::new(), arguments: String::new() });
+
+                    partial.id.push_str(call["id"].as_str().unwrap_or_default());
+                    partial.name.push_str(call["function"]["name"].as_str().unwrap_or_default());
+                    partial.arguments.push_str(call["function"]["arguments"].as_str().unwrap_or_default());
+                }
+
+                Delta {
+                    text: event["choices"][0]["delta"]["content"].as_str().unwrap_or_default().to_string(),
+                    input_tokens: event["usage"]["prompt_tokens"].as_i64(),
+                    output_tokens: event["usage"]["completion_tokens"].as_i64(),
+                    ..Delta::default()
+                }
+            }
             ModelProviderKind::Anthropic => match event["type"].as_str() {
+                Some("content_block_start") if event["content_block"]["type"] == "tool_use" => {
+                    let index = event["index"].as_u64().unwrap_or_default() as usize;
+
+                    self.calls.insert(index, PartialCall { id: event["content_block"]["id"].as_str().unwrap_or_default().to_string(), name: event["content_block"]["name"].as_str().unwrap_or_default().to_string(), arguments: String::new() });
+
+                    Delta::default()
+                }
+                Some("content_block_delta") if event["delta"]["type"] == "input_json_delta" => {
+                    let index = event["index"].as_u64().unwrap_or_default() as usize;
+
+                    if let Some(partial) = self.calls.get_mut(&index) {
+                        partial.arguments.push_str(event["delta"]["partial_json"].as_str().unwrap_or_default());
+                    }
+
+                    Delta::default()
+                }
                 Some("content_block_delta") => Delta { text: event["delta"]["text"].as_str().unwrap_or_default().to_string(), ..Delta::default() },
                 Some("message_start") => Delta { input_tokens: event["message"]["usage"]["input_tokens"].as_i64(), ..Delta::default() },
                 Some("message_delta") => Delta { output_tokens: event["usage"]["output_tokens"].as_i64(), ..Delta::default() },
@@ -255,6 +363,25 @@ impl ReplyStream {
         }
 
         Ok(())
+    }
+
+    fn completed_calls(&mut self) -> Option<Vec<ToolCall>> {
+        let calls = std::mem::take(&mut self.calls);
+
+        if calls.is_empty() {
+            return None;
+        }
+
+        Some(
+            calls
+                .into_values()
+                .map(|partial| ToolCall {
+                    id: if partial.id.is_empty() { format!("call_{}", Uuid::new_v4().simple()) } else { partial.id },
+                    name: partial.name,
+                    input: serde_json::from_str(&partial.arguments).ok().filter(Value::is_object).unwrap_or_else(|| json!({})),
+                })
+                .collect(),
+        )
     }
 }
 

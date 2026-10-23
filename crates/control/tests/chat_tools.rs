@@ -1,0 +1,595 @@
+mod common;
+
+use axum::Json;
+use axum::Router;
+use axum::body::{Body, Bytes};
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use common::{Server, eventually, serve};
+use futures_util::StreamExt;
+use futures_util::stream;
+use serde_json::{Value, json};
+use std::collections::VecDeque;
+use std::convert::Infallible;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+const MCP_TOKEN: &str = "mcp-secret-0123456789abcdef";
+const ANTHROPIC_KEY: &str = "sk-ant-0123456789abcdefghij";
+const WEATHER: &str = "mcp__lab__get_weather";
+
+#[derive(Clone)]
+enum Reply {
+    Say(&'static str),
+    Call(&'static str, Value),
+    Forever(&'static str, Value),
+}
+
+#[derive(Default)]
+struct Model {
+    replies: Mutex<VecDeque<Reply>>,
+    requests: Mutex<Vec<Value>>,
+    counter: AtomicUsize,
+    reject_tools: bool,
+}
+
+#[derive(Default)]
+struct Remote {
+    seen: Mutex<Vec<(String, Value, HeaderMap)>>,
+}
+
+fn script(replies: Vec<Reply>, reject_tools: bool) -> Arc<Model> {
+    Arc::new(Model { replies: Mutex::new(replies.into()), reject_tools, ..Model::default() })
+}
+
+impl Model {
+    fn next(&self) -> Reply {
+        let mut replies = self.replies.lock().unwrap();
+
+        match replies.front().cloned() {
+            Some(Reply::Forever(name, input)) => Reply::Call(name, input),
+            Some(_) => replies.pop_front().unwrap(),
+            None => Reply::Say("Done."),
+        }
+    }
+
+    fn request(&self, index: usize) -> Value {
+        self.requests.lock().unwrap()[index].clone()
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+}
+
+fn event_stream(lines: Vec<String>) -> Response {
+    let sent = stream::iter(lines.into_iter().map(|line| Ok::<Bytes, Infallible>(Bytes::from(line))));
+
+    Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(sent.boxed())).unwrap()
+}
+
+fn openai_model(model: Arc<Model>) -> Router {
+    async fn completions(State(model): State<Arc<Model>>, Json(request): Json<Value>) -> Response {
+        model.requests.lock().unwrap().push(request.clone());
+
+        if model.reject_tools && request.get("tools").is_some() {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "registry.ollama.ai/library/gemma:2b does not support tools"}))).into_response();
+        }
+
+        let chunk = |delta: Value| format!("data: {}\n\n", json!({"choices": [{"delta": delta}]}));
+        let mut lines = Vec::new();
+
+        match model.next() {
+            Reply::Say(text) => lines.push(chunk(json!({"content": text}))),
+            Reply::Call(name, input) | Reply::Forever(name, input) => {
+                let id = format!("call_{}", model.counter.fetch_add(1, Ordering::SeqCst));
+                let arguments = input.to_string();
+                let (first, second) = arguments.split_at(arguments.len() / 2);
+
+                lines.push(chunk(json!({"tool_calls": [{"index": 0, "id": id, "type": "function", "function": {"name": name, "arguments": first}}]})));
+                lines.push(chunk(json!({"tool_calls": [{"index": 0, "function": {"arguments": second}}]})));
+            }
+        }
+
+        lines.push("data: [DONE]\n\n".to_string());
+
+        event_stream(lines)
+    }
+
+    async fn models() -> Json<Value> {
+        Json(json!({"data": [{"id": "qwen3:8b"}]}))
+    }
+
+    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions)).with_state(model)
+}
+
+fn anthropic_model(model: Arc<Model>) -> Router {
+    async fn messages(State(model): State<Arc<Model>>, Json(request): Json<Value>) -> Response {
+        model.requests.lock().unwrap().push(request);
+
+        let event = |name: &str, data: Value| format!("event: {name}\ndata: {data}\n\n");
+        let mut lines = vec![event("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 3}}}))];
+
+        match model.next() {
+            Reply::Say(text) => lines.push(event("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}}))),
+            Reply::Call(name, input) | Reply::Forever(name, input) => {
+                let id = format!("toolu_{}", model.counter.fetch_add(1, Ordering::SeqCst));
+                let arguments = input.to_string();
+                let (first, second) = arguments.split_at(arguments.len() / 2);
+
+                lines.push(event("content_block_start", json!({"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": id, "name": name, "input": {}}})));
+                lines.push(event("content_block_delta", json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": first}})));
+                lines.push(event("content_block_delta", json!({"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": second}})));
+                lines.push(event("content_block_stop", json!({"type": "content_block_stop", "index": 1})));
+            }
+        }
+
+        lines.push(event("message_delta", json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}})));
+
+        event_stream(lines)
+    }
+
+    async fn models() -> Json<Value> {
+        Json(json!({"data": [{"id": "claude-sonnet-5-5"}], "has_more": false}))
+    }
+
+    Router::new().route("/v1/models", get(models)).route("/v1/messages", post(messages)).with_state(model)
+}
+
+fn lab_tools() -> Value {
+    json!([
+        {"name": "get_weather", "description": "Get the weather forecast for a city", "inputSchema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}},
+        {"name": "create_issue", "description": "Create an issue in the tracker", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}}}},
+        {"name": "list_files", "description": "List the entries of a folder", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}},
+    ])
+}
+
+fn remote_server(legacy: bool) -> (Router, Arc<Remote>) {
+    async fn mcp(State((remote, legacy)): State<(Arc<Remote>, bool)>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+        let method = body["method"].as_str().unwrap_or_default().to_string();
+        remote.seen.lock().unwrap().push((method.clone(), body["params"].clone(), headers.clone()));
+
+        if headers.get("authorization").and_then(|value| value.to_str().ok()) != Some(&format!("Bearer {MCP_TOKEN}")) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+
+        if body.get("id").is_none() {
+            return StatusCode::ACCEPTED.into_response();
+        }
+
+        let answer = |result: Value| json!({"jsonrpc": "2.0", "id": body["id"], "result": result});
+        let result = match method.as_str() {
+            "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "lab", "version": "1"}}),
+            "tools/list" => json!({"tools": lab_tools()}),
+            "tools/call" => json!({"content": [{"type": "text", "text": format!("Sunny in {}", body["params"]["arguments"]["city"].as_str().unwrap_or("nowhere"))}]}),
+            _ => return StatusCode::NOT_FOUND.into_response(),
+        };
+
+        if legacy {
+            if method == "initialize" {
+                return Response::builder().header("content-type", "application/json").header("mcp-session-id", "sess-1").body(Body::from(answer(result).to_string())).unwrap();
+            }
+
+            if headers.get("mcp-session-id").and_then(|value| value.to_str().ok()) != Some("sess-1") {
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+
+            return Response::builder().header("content-type", "text/event-stream").body(Body::from(format!("event: message\ndata: {}\n\n", answer(result)))).unwrap();
+        }
+
+        let metadata = &body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"];
+
+        if headers.get("mcp-method").and_then(|value| value.to_str().ok()) != Some(method.as_str()) || metadata != "2026-07-28" {
+            return (StatusCode::BAD_REQUEST, Json(json!({"jsonrpc": "2.0", "id": body["id"], "error": {"code": -32020, "message": "Header mismatch"}}))).into_response();
+        }
+
+        Json(answer(result)).into_response()
+    }
+
+    let remote = Arc::new(Remote::default());
+
+    (Router::new().route("/mcp", post(mcp)).with_state((remote.clone(), legacy)), remote)
+}
+
+impl Remote {
+    fn calls(&self) -> Vec<Value> {
+        self.seen.lock().unwrap().iter().filter(|(method, _, _)| method == "tools/call").map(|(_, params, _)| params.clone()).collect()
+    }
+}
+
+struct Rig {
+    server: Server,
+    model: Arc<Model>,
+    remote: Arc<Remote>,
+    provider: Value,
+}
+
+async fn rig(replies: Vec<Reply>) -> Rig {
+    rig_with(replies, false, false, false).await
+}
+
+async fn rig_with(replies: Vec<Reply>, anthropic: bool, legacy: bool, reject_tools: bool) -> Rig {
+    let server = Server::start().await;
+    let model = script(replies, reject_tools);
+    let base = serve(if anthropic { anthropic_model(model.clone()) } else { openai_model(model.clone()) }).await;
+    let body = if anthropic {
+        json!({"kind": "anthropic", "name": "Anthropic", "base_url": base, "api_key": ANTHROPIC_KEY})
+    } else {
+        json!({"kind": "openai_compatible", "name": "Ollama", "base_url": format!("{base}/v1")})
+    };
+    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&body)).await;
+    assert_eq!(status, 201, "{provider}");
+
+    let (router, remote) = remote_server(legacy);
+    let remote_base = serve(router).await;
+    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Lab", "url": format!("{remote_base}/mcp"), "bearer_token": MCP_TOKEN}))).await;
+    assert_eq!(status, 201, "{added}");
+
+    Rig { server, model, remote, provider }
+}
+
+impl Rig {
+    async fn chat(&self, prompt: &str) -> String {
+        let (status, chat) = self.server.user.json(self.server.user.post("/api/v1/chats").json(&json!({"provider_id": self.provider["id"], "prompt": prompt}))).await;
+        assert_eq!(status, 201, "{chat}");
+
+        chat["id"].as_str().unwrap().to_string()
+    }
+
+    async fn events(&self, id: &str) -> Vec<Value> {
+        self.server.events(id.parse().unwrap()).await
+    }
+
+    async fn turns_ended(&self, id: &str, count: usize) -> Vec<Value> {
+        eventually("the turn to end", || async {
+            let events = self.events(id).await;
+
+            (events.iter().filter(|event| event["kind"] == "turn_end").count() == count).then_some(events)
+        })
+        .await
+    }
+
+    async fn request_waiting(&self, id: &str) -> Value {
+        eventually("a permission request", || async {
+            let events = self.events(id).await;
+            let open = events.iter().find(|event| event["kind"] == "permission_request" && !events.iter().any(|other| other["kind"] == "permission_resolved" && other["payload"]["request_id"] == event["payload"]["request_id"]));
+
+            open.map(|event| event["payload"].clone())
+        })
+        .await
+    }
+
+    async fn decide(&self, id: &str, request: &Value, option: &str) -> (u16, Value) {
+        self.server.user.json(self.server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": option}))).await
+    }
+
+    async fn say(&self, id: &str, text: &str) {
+        let (status, _) = self.server.user.json(self.server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": text}))).await;
+        assert_eq!(status, 204);
+    }
+}
+
+fn tool_names(request: &Value) -> Vec<String> {
+    request["tools"].as_array().into_iter().flatten().filter_map(|tool| tool["function"]["name"].as_str().or(tool["name"].as_str())).map(String::from).collect()
+}
+
+fn updates<'a>(events: &'a [Value], kind: &str) -> Vec<&'a Value> {
+    events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"]["update"]["sessionUpdate"] == kind).map(|event| &event["payload"]["update"]).collect()
+}
+
+fn roles(request: &Value) -> Vec<String> {
+    request["messages"].as_array().unwrap().iter().map(|message| message["role"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn the_model_is_sent_tool_search_and_mycelium_tools_and_a_tool_it_finds_stays_loaded_for_the_chat() {
+    let rig = rig(vec![Reply::Call("tool_search", json!({"query": "weather forecast"})), Reply::Say("Found it.")]).await;
+    let id = rig.chat("What is the weather in Paris?").await;
+    let events = rig.turns_ended(&id, 1).await;
+    rig.say(&id, "And tomorrow?").await;
+    rig.turns_ended(&id, 2).await;
+
+    let first = tool_names(&rig.model.request(0));
+    let second = tool_names(&rig.model.request(1));
+    let later = tool_names(&rig.model.request(2));
+
+    assert_eq!(first[0], "tool_search");
+    assert!(first.contains(&"mcp__mycelium__recall".to_string()) && !first.contains(&WEATHER.to_string()));
+    assert!(second.contains(&WEATHER.to_string()) && !second.contains(&"mcp__lab__create_issue".to_string()));
+    assert!(later.contains(&WEATHER.to_string()));
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["role"], "tool");
+    assert!(rig.model.request(0)["messages"][0]["content"].as_str().unwrap().contains("tool_search"));
+    assert_eq!(updates(&events, "tool_call_update")[0]["rawOutput"]["loaded"], json!([WEATHER]));
+    assert!(events.iter().all(|event| event["kind"] != "permission_request"));
+}
+
+#[tokio::test]
+async fn tool_search_ranks_name_matches_above_description_matches_and_says_when_nothing_matches() {
+    let rig = rig(vec![
+        Reply::Call("tool_search", json!({"query": "files"})),
+        Reply::Call("tool_search", json!({"query": "create issue"})),
+        Reply::Call("tool_search", json!({"query": "xylophone"})),
+        Reply::Say("Done."),
+    ])
+    .await;
+    let id = rig.chat("Look around").await;
+    let events = rig.turns_ended(&id, 1).await;
+    let answers = updates(&events, "tool_call_update");
+    let text = |index: usize| answers[index]["content"][0]["content"]["text"].as_str().unwrap().to_string();
+
+    assert_eq!(answers[0]["rawOutput"]["loaded"][0], "mcp__lab__list_files");
+    assert_eq!(answers[1]["rawOutput"]["loaded"][0], "mcp__lab__create_issue");
+    assert!(text(1).contains("Input schema:") && text(1).contains("server: Lab"));
+    assert!(text(2).starts_with("No tools match"));
+    assert_eq!(answers[2]["rawOutput"]["loaded"], json!([]));
+}
+
+#[tokio::test]
+async fn a_tool_call_waits_for_approval_and_runs_once_allowed() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("It is sunny.")]).await;
+    let id = rig.chat("Weather in Paris?").await;
+
+    let request = rig.request_waiting(&id).await;
+    let status = rig.server.conversation(id.parse().unwrap()).await["status"].clone();
+    let before = rig.remote.calls().len();
+    let (allowed, _) = rig.decide(&id, &request, "allow_once").await;
+    let (again, error) = rig.decide(&id, &request, "allow_once").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!((request["toolCall"]["title"].clone(), request["toolCall"]["server"].clone(), request["toolCall"]["rawInput"].clone()), (json!(WEATHER), json!("Lab"), json!({"city": "Paris"})));
+    assert_eq!(request["options"].as_array().unwrap().iter().map(|option| option["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Allow once", "Always allow this tool", "Deny"]);
+    assert_eq!((status, before), (json!("input"), 0));
+    assert_eq!((allowed, again), (204, 409));
+    assert_eq!(error["error"], "already_resolved");
+    assert_eq!(rig.remote.calls(), vec![json!({"name": "get_weather", "arguments": {"city": "Paris"}, "_meta": rig.remote.calls()[0]["_meta"].clone()})]);
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "Sunny in Paris");
+    assert_eq!(updates(&events, "tool_call_update")[0]["status"], "completed");
+    assert_eq!(rig.server.conversation(id.parse().unwrap()).await["status"], "review");
+}
+
+#[tokio::test]
+async fn a_denied_tool_call_never_runs_and_the_model_is_told_the_person_declined() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Understood.")]).await;
+    let id = rig.chat("Weather in Paris?").await;
+
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "reject_once").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert!(rig.remote.calls().is_empty());
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "The person declined this tool call.");
+    assert_eq!(updates(&events, "tool_call_update")[0]["status"], "failed");
+}
+
+#[tokio::test]
+async fn always_allow_is_remembered_for_the_chat_and_a_server_can_be_trusted_in_settings() {
+    let rig = rig(vec![
+        Reply::Call(WEATHER, json!({"city": "Paris"})),
+        Reply::Call(WEATHER, json!({"city": "London"})),
+        Reply::Say("Both sunny."),
+        Reply::Call(WEATHER, json!({"city": "Rome"})),
+        Reply::Say("Rome too."),
+        Reply::Call(WEATHER, json!({"city": "Oslo"})),
+        Reply::Say("Oslo too."),
+    ])
+    .await;
+    let id = rig.chat("Weather?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_always").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(events.iter().filter(|event| event["kind"] == "permission_request").count(), 1);
+    assert_eq!(rig.remote.calls().len(), 2);
+
+    rig.say(&id, "Rome?").await;
+    let events = rig.turns_ended(&id, 2).await;
+    assert_eq!(events.iter().filter(|event| event["kind"] == "permission_request").count(), 1);
+    assert_eq!(rig.remote.calls().len(), 3);
+
+    let other = rig.chat("Weather in Oslo?").await;
+    let waiting = rig.request_waiting(&other).await;
+    rig.decide(&other, &waiting, "reject_once").await;
+    rig.turns_ended(&other, 1).await;
+    let (_, servers) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;
+    let (patched, _) = rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", servers[0]["id"].as_str().unwrap())).json(&json!({"always_allow": true}))).await;
+    rig.model.replies.lock().unwrap().extend([Reply::Call(WEATHER, json!({"city": "Oslo"})), Reply::Say("Oslo too.")]);
+    let trusted = rig.chat("Weather in Oslo, again?").await;
+    let events = rig.turns_ended(&trusted, 1).await;
+
+    assert_eq!(patched, 200);
+    assert!(events.iter().all(|event| event["kind"] != "permission_request"));
+    assert_eq!(rig.remote.calls().len(), 4);
+}
+
+#[tokio::test]
+async fn a_new_message_cancels_the_waiting_call_with_a_refusal_the_model_sees() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Fine, never mind.")]).await;
+    let id = rig.chat("Weather in Paris?").await;
+    rig.request_waiting(&id).await;
+
+    rig.say(&id, "Never mind").await;
+    let events = rig.turns_ended(&id, 1).await;
+    let resolved = events.iter().find(|event| event["kind"] == "permission_resolved").unwrap();
+    let last = rig.model.request(1);
+
+    assert_eq!(resolved["payload"]["option_id"], "cancelled");
+    assert_eq!(roles(&last), ["system", "user", "assistant", "tool", "user"]);
+    assert_eq!(last["messages"][3]["content"], "The person did not approve this call, so it did not run.");
+    assert_eq!(last["messages"][4]["content"], "Never mind");
+    assert!(rig.remote.calls().is_empty());
+    assert_eq!(updates(&events, "tool_call_update")[0]["status"], "failed");
+}
+
+#[tokio::test]
+async fn stopping_a_chat_that_waits_for_approval_ends_the_turn_and_closes_the_card() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"}))]).await;
+    let id = rig.chat("Weather in Paris?").await;
+    rig.request_waiting(&id).await;
+
+    let (stopped, _) = rig.server.user.json(rig.server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(stopped, 204);
+    assert_eq!(events.last().unwrap()["payload"]["stop_reason"], "cancelled");
+    assert!(events.iter().any(|event| event["kind"] == "permission_resolved" && event["payload"]["option_id"] == "cancelled"));
+    assert_eq!(rig.server.conversation(id.parse().unwrap()).await["status"], "review");
+}
+
+#[tokio::test]
+async fn mycelium_tools_run_in_the_control_plane_and_say_plainly_when_they_need_a_workspace() {
+    let rig = rig(vec![
+        Reply::Call("mcp__mycelium__remember", json!({"text": "The lab uses Tailscale."})),
+        Reply::Call("mcp__mycelium__walkthrough", json!({"steps": []})),
+        Reply::Say("Done."),
+    ])
+    .await;
+    let id = rig.chat("Remember the lab network").await;
+
+    for _ in 0..2 {
+        let request = rig.request_waiting(&id).await;
+        rig.decide(&id, &request, "allow_once").await;
+        eventually("the call to finish", || async { rig.events(&id).await.iter().any(|event| event["kind"] == "permission_resolved" && event["payload"]["request_id"] == request["request_id"]).then_some(()) }).await;
+    }
+
+    let events = rig.turns_ended(&id, 1).await;
+    let answers = updates(&events, "tool_call_update");
+    let text = |index: usize| answers[index]["content"][0]["content"]["text"].as_str().unwrap().to_string();
+
+    assert!(text(0).starts_with("Remembered as"), "{}", text(0));
+    assert_eq!(answers[0]["status"], "completed");
+    assert!(text(1).contains("no workspace"));
+    assert_eq!(answers[1]["status"], "failed");
+}
+
+#[tokio::test]
+async fn an_anthropic_chat_sends_tool_definitions_and_returns_results_as_tool_result_blocks() {
+    let rig = rig_with(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny.")], true, false, false).await;
+    let id = rig.chat("Weather in Paris?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    let first = rig.model.request(0);
+    let second = rig.model.request(1);
+    let schema = first["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "tool_search").unwrap()["input_schema"].clone();
+    let used = &second["messages"][1]["content"][0];
+    let returned = &second["messages"][2]["content"][0];
+
+    assert_eq!(schema["required"], json!(["query"]));
+    assert_eq!((used["type"].clone(), used["name"].clone(), used["input"].clone()), (json!("tool_use"), json!(WEATHER), json!({"city": "Paris"})));
+    assert_eq!((returned["type"].clone(), returned["tool_use_id"].clone(), returned["content"].clone()), (json!("tool_result"), used["id"].clone(), json!("Sunny in Paris")));
+    assert_eq!(second["messages"][2]["role"], "user");
+}
+
+#[tokio::test]
+async fn the_loop_stops_after_twenty_rounds_of_tool_calls_and_says_so() {
+    let rig = rig(vec![Reply::Forever("tool_search", json!({"query": "weather"}))]).await;
+    let id = rig.chat("Keep searching").await;
+    let events = rig.turns_ended(&id, 1).await;
+    let notes = updates(&events, "note");
+
+    assert_eq!(rig.model.request_count(), 20);
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0]["content"]["text"].as_str().unwrap().contains("20 rounds"));
+}
+
+#[tokio::test]
+async fn a_model_that_rejects_tools_answers_without_them_and_the_thread_says_so_quietly() {
+    let rig = rig_with(vec![Reply::Say("Hello without tools.")], false, false, true).await;
+    let id = rig.chat("Hello").await;
+    let events = rig.turns_ended(&id, 1).await;
+    let notes = updates(&events, "note");
+
+    assert_eq!(rig.model.request_count(), 2);
+    assert!(rig.model.request(0).get("tools").is_some() && rig.model.request(1).get("tools").is_none());
+    assert!(!rig.model.request(1)["messages"][0]["content"].as_str().unwrap().contains("tool_search"));
+    assert_eq!(notes[0]["content"]["text"], "This model does not take tools, so it answered without them.");
+    assert!(updates(&events, "agent_message_chunk")[0]["content"]["text"].as_str().unwrap().contains("Hello without tools."));
+    assert!(events.iter().all(|event| event["kind"] != "error"));
+}
+
+#[tokio::test]
+async fn history_replays_tool_calls_and_results_to_the_model_in_order() {
+    let rig = rig(vec![Reply::Call("tool_search", json!({"query": "weather"})), Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny in Paris."), Reply::Say("You are welcome.")]).await;
+    let id = rig.chat("Weather in Paris?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    rig.say(&id, "Thanks").await;
+    rig.turns_ended(&id, 2).await;
+    let last = rig.model.request(rig.model.request_count() - 1);
+    let messages = last["messages"].as_array().unwrap();
+
+    assert_eq!(roles(&last), ["system", "user", "assistant", "tool", "assistant", "tool", "assistant", "user"]);
+    assert_eq!(messages[2]["tool_calls"][0]["function"]["name"], "tool_search");
+    assert_eq!(messages[2]["tool_calls"][0]["id"], messages[3]["tool_call_id"]);
+    assert_eq!(messages[4]["tool_calls"][0]["function"]["arguments"], json!({"city": "Paris"}).to_string());
+    assert_eq!(messages[5]["content"], "Sunny in Paris");
+    assert_eq!((messages[6]["content"].clone(), messages[7]["content"].clone()), (json!("Sunny in Paris."), json!("Thanks")));
+}
+
+#[tokio::test]
+async fn a_legacy_mcp_server_with_sessions_and_event_streams_is_listed_and_called() {
+    let rig = rig_with(vec![Reply::Call(WEATHER, json!({"city": "Rome"})), Reply::Say("Sunny.")], false, true, false).await;
+    let (_, servers) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;
+    let id = rig.chat("Weather in Rome?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    assert_eq!(servers[0]["tools"].as_array().unwrap().len(), 3);
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "Sunny in Rome");
+    assert!(rig.remote.seen.lock().unwrap().iter().any(|(method, _, headers)| method == "tools/call" && headers.get("mcp-session-id").is_some()));
+}
+
+#[tokio::test]
+async fn tool_servers_are_added_checked_switched_and_removed_without_returning_the_token() {
+    let server = Server::start().await;
+    let (router, remote) = remote_server(false);
+    let base = serve(router).await;
+    let url = format!("{base}/mcp");
+    let post = |body: Value| server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&body));
+
+    let (status, added) = post(json!({"name": "Lab", "url": url, "bearer_token": MCP_TOKEN})).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let stored = server.user.get("/api/v1/chat-tool-servers").send().await.unwrap().text().await.unwrap();
+    let (_, wrong) = post(json!({"name": "Other", "url": url, "bearer_token": "wrong"})).await;
+    let (_, unreachable) = post(json!({"name": "Gone", "url": "http://127.0.0.1:9/mcp"})).await;
+    let (_, malformed) = post(json!({"name": "Bad", "url": "example.com"})).await;
+    let (_, nameless) = post(json!({"name": " ", "url": url})).await;
+    let (_, reserved) = post(json!({"name": "Mycelium", "url": url, "bearer_token": MCP_TOKEN})).await;
+    let (duplicate, _) = post(json!({"name": "lab", "url": url, "bearer_token": MCP_TOKEN})).await;
+    let id = added["id"].as_str().unwrap();
+    let (_, switched) = server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"enabled": false}))).await;
+    let (refreshed, _) = server.user.json(server.user.post(&format!("/api/v1/chat-tool-servers/{id}/refresh"))).await;
+    let other = server.second_user("someone@example.com").await;
+    let (hidden, _) = other.json(other.delete(&format!("/api/v1/chat-tool-servers/{id}"))).await;
+    let (removed, _) = server.user.json(server.user.delete(&format!("/api/v1/chat-tool-servers/{id}"))).await;
+
+    assert_eq!(status, 201);
+    assert_eq!(added["token_hint"], "••••cdef");
+    assert_eq!(added["tools"][0], json!({"name": "get_weather", "description": "Get the weather forecast for a city"}));
+    assert_eq!((added["enabled"].clone(), added["always_allow"].clone()), (json!(true), json!(false)));
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert!(!stored.contains(MCP_TOKEN));
+    assert_eq!((wrong["error"].clone(), unreachable["error"].clone(), malformed["error"].clone()), (json!("tool_server_failed"), json!("tool_server_failed"), json!("url_invalid")));
+    assert_eq!((nameless["error"].clone(), reserved["error"].clone(), duplicate), (json!("name_required"), json!("name_taken"), 409));
+    assert_eq!(switched["enabled"], false);
+    assert_eq!((refreshed, hidden, removed), (200, 404, 204));
+    assert!(remote.seen.lock().unwrap().iter().all(|(_, _, headers)| headers.get("mcp-protocol-version").is_some()));
+}
+
+#[tokio::test]
+async fn a_switched_off_server_is_not_searched_and_the_token_never_reaches_the_thread() {
+    let rig = rig(vec![Reply::Call("tool_search", json!({"query": "weather"})), Reply::Say("Nothing.")]).await;
+    let (_, servers) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;
+    rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", servers[0]["id"].as_str().unwrap())).json(&json!({"enabled": false}))).await;
+    let id = rig.chat("Weather?").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(updates(&events, "tool_call_update")[0]["rawOutput"]["loaded"], json!([]));
+    assert!(!serde_json::to_string(&events).unwrap().contains(MCP_TOKEN));
+}

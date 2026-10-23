@@ -33,7 +33,7 @@ fn tool_text(text: &str, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
 }
 
-fn tool_definitions() -> Value {
+pub fn tool_definitions() -> Value {
     json!([
         {
             "name": "recall",
@@ -430,4 +430,21 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
     };
 
     Ok(response)
+}
+
+pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: Uuid, name: &str, arguments: &Value) -> ApiResult<(String, bool)> {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-mycelium-conversation", conversation_id.to_string().parse().map_err(crate::error::ApiError::internal)?);
+    let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+    let response = handle(State(state.clone()), AuthNode { id: node_id }, headers, Json(request)).await?;
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.map_err(crate::error::ApiError::internal)?;
+    let answer: Value = serde_json::from_slice(&bytes).map_err(crate::error::ApiError::internal)?;
+
+    if let Some(message) = answer["error"]["message"].as_str() {
+        return Ok((message.to_string(), true));
+    }
+
+    let text: Vec<&str> = answer["result"]["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+
+    Ok((text.join("\n"), answer["result"]["isError"].as_bool().unwrap_or(false)))
 }

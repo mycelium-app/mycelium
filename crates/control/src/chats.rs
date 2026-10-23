@@ -1,10 +1,11 @@
 use crate::attachments;
 use crate::auth::AuthUser;
 use crate::activity::record_turn;
+use crate::chat_tools::{self, TOOLS_INSTRUCTIONS, Toolbox};
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions::extensions_of;
-use crate::model_providers::{self, ChatImage, ChatMessage, ProviderRow};
+use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ToolCall, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
 use axum::Json;
@@ -14,13 +15,17 @@ use mycelium_proto::api::CreateChatRequest;
 use base64::Engine;
 use mycelium_proto::conversation::{Attachment, Conversation, ConversationStatus, EventKind, SideKind};
 use mycelium_proto::stream::StreamMessage;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::future::Future;
 use std::pin::Pin;
 use uuid::Uuid;
 
 pub const CHAT_AGENT: &str = "chat";
 const CHAT_HOST: &str = "control-plane";
+const MAX_TOOL_ROUNDS: usize = 20;
+const TOOLS_REJECTED_NOTE: &str = "This model does not take tools, so it answered without them.";
+const NOT_APPROVED_TEXT: &str = "The person did not approve this call, so it did not run.";
+const STOPPED_TEXT: &str = "The reply was stopped before this call ran.";
 const CHAT_INSTRUCTIONS: &str = "You are chatting inside Mycelium. Reply in Markdown.
 When an interface helps the person more than prose, you may include one fenced block whose language is mycelium-ui, containing valid JSON with no comments for a small component tree. Keep the explanation outside the block.
 Components, each an object with a \"type\":
@@ -70,7 +75,7 @@ pub async fn index_title(state: &AppState, conversation_id: Uuid, title: &str) -
 }
 
 pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
-    sqlx::query("update conversations set status = 'review' where agent = $1 and status = 'working'").bind(CHAT_AGENT).execute(&state.pool).await?;
+    sqlx::query("update conversations set status = 'review' where agent = $1 and status in ('working', 'input')").bind(CHAT_AGENT).execute(&state.pool).await?;
 
     Ok(())
 }
@@ -125,6 +130,8 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
 }
 
 pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachments: Vec<Attachment>) -> ApiResult<Conversation> {
+    withdraw_waiting_call(state, owner, id).await?;
+
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 
@@ -158,27 +165,7 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
 
     let provider = model_providers::find_owned(state, provider_id, owner).await?;
-    let said = sqlx::query_as::<_, (String, Option<String>, Option<sqlx::types::Json<Vec<Attachment>>>)>(
-        "select e.kind, s.text, e.payload->'attachments' from events e left join search_entries s on s.conversation_id = e.conversation_id and s.seq = e.seq
-         where e.conversation_id = $1 and e.kind in ('user_message', 'turn_end') and (s.text is not null or coalesce(jsonb_array_length(e.payload->'attachments'), 0) > 0) order by e.seq",
-    )
-    .bind(id)
-    .fetch_all(&state.pool)
-    .await?;
-    let mut messages: Vec<ChatMessage> = Vec::new();
-
-    for (kind, text, said_attachments) in said {
-        let role = if kind == "user_message" { "user" } else { "assistant" };
-        let (content, images) = chat_content(state, text.unwrap_or_default(), said_attachments.map(|json| json.0).unwrap_or_default()).await?;
-
-        match messages.last_mut() {
-            Some(last) if last.role == role => {
-                last.content = format!("{}\n\n{content}", last.content).trim().to_string();
-                last.images.extend(images);
-            }
-            _ => messages.push(ChatMessage { role, content, images }),
-        }
-    }
+    let messages = history(state, id).await?;
 
     let turn = tokio::spawn(run_turn(state.clone(), owner, id, provider, model, messages));
     state.hub.track_chat_turn(id, turn.abort_handle());
@@ -222,10 +209,139 @@ async fn chat_content(state: &AppState, text: String, attachments: Vec<Attachmen
     Ok((content, images))
 }
 
+async fn history(state: &AppState, id: Uuid) -> ApiResult<Vec<ChatMessage>> {
+    let rows = sqlx::query_as::<_, (String, sqlx::types::Json<Value>)>("select kind, payload from events where conversation_id = $1 and kind in ('user_message', 'acp_update', 'turn_end') order by seq").bind(id).fetch_all(&state.pool).await?;
+    let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut said = String::new();
+    let mut calls: Vec<ToolCall> = Vec::new();
+    let mut results: Vec<ToolResult> = Vec::new();
+
+    for (kind, sqlx::types::Json(payload)) in rows {
+        let update = &payload["update"];
+        let update_kind = update["sessionUpdate"].as_str().unwrap_or_default();
+
+        if kind == "acp_update" && update_kind == "tool_call_update" {
+            let status = update["status"].as_str().unwrap_or_default();
+            let call_id = update["toolCallId"].as_str().unwrap_or_default();
+
+            if matches!(status, "completed" | "failed") && calls.iter().any(|call| call.id == call_id) {
+                let content: Vec<&str> = update["content"].as_array().into_iter().flatten().filter_map(|block| block["content"]["text"].as_str()).collect();
+
+                results.push(ToolResult { call_id: call_id.to_string(), content: content.join("\n"), is_error: status == "failed" });
+            }
+
+            continue;
+        }
+
+        if kind == "acp_update" && update_kind == "tool_call" {
+            if !results.is_empty() {
+                messages.extend(finished_round(&mut said, &mut calls, &mut results));
+            }
+
+            calls.push(ToolCall { id: update["toolCallId"].as_str().unwrap_or_default().to_string(), name: update["title"].as_str().unwrap_or_default().to_string(), input: update["rawInput"].clone() });
+
+            continue;
+        }
+
+        if !calls.is_empty() {
+            messages.extend(finished_round(&mut said, &mut calls, &mut results));
+        }
+
+        if kind == "acp_update" {
+            if update_kind == "agent_message_chunk" {
+                said.push_str(update["content"]["text"].as_str().unwrap_or_default());
+            }
+
+            continue;
+        }
+
+        if !said.trim().is_empty() {
+            messages.push(ChatMessage { role: "assistant", content: said.trim().to_string(), ..ChatMessage::default() });
+        }
+
+        said.clear();
+
+        if kind == "user_message" {
+            let attachments: Vec<Attachment> = serde_json::from_value(payload["attachments"].clone()).unwrap_or_default();
+            let text = payload["text"].as_str().unwrap_or_default().trim().to_string();
+            let (content, images) = chat_content(state, text, attachments).await?;
+
+            if content.is_empty() && images.is_empty() {
+                continue;
+            }
+
+            match messages.last_mut() {
+                Some(last) if last.role == "user" && last.tool_results.is_empty() => {
+                    last.content = format!("{}\n\n{content}", last.content).trim().to_string();
+                    last.images.extend(images);
+                }
+                _ => messages.push(ChatMessage { role: "user", content, images, ..ChatMessage::default() }),
+            }
+        }
+    }
+
+    if !calls.is_empty() {
+        messages.extend(finished_round(&mut said, &mut calls, &mut results));
+    }
+
+    if !said.trim().is_empty() {
+        messages.push(ChatMessage { role: "assistant", content: said.trim().to_string(), ..ChatMessage::default() });
+    }
+
+    Ok(messages)
+}
+
+fn finished_round(said: &mut String, calls: &mut Vec<ToolCall>, results: &mut Vec<ToolResult>) -> [ChatMessage; 2] {
+    let answered: Vec<ToolResult> = calls
+        .iter()
+        .map(|call| results.iter().find(|result| result.call_id == call.id).cloned().unwrap_or_else(|| ToolResult { call_id: call.id.clone(), content: NOT_APPROVED_TEXT.to_string(), is_error: true }))
+        .collect();
+    let asked = ChatMessage { role: "assistant", content: said.trim().to_string(), tool_calls: std::mem::take(calls), ..ChatMessage::default() };
+
+    said.clear();
+    results.clear();
+
+    [asked, ChatMessage { role: "user", tool_results: answered, ..ChatMessage::default() }]
+}
+
+fn without_tool_blocks(messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    messages
+        .into_iter()
+        .map(|mut message| {
+            let called: Vec<String> = message.tool_calls.drain(..).map(|call| format!("[Called {} with {}]", call.name, call.input)).collect();
+            let returned: Vec<String> = message.tool_results.drain(..).map(|result| format!("[Tool result: {}]", result.content)).collect();
+
+            message.content = [vec![message.content.clone()], called, returned].concat().into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+
+            message
+        })
+        .collect()
+}
+
+async fn withdraw_waiting_call(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+    let waiting = sqlx::query_scalar::<_, bool>("select status = 'input' from conversations where id = $1 and owner = $2").bind(id).bind(owner).fetch_optional(&state.pool).await?.unwrap_or(false);
+
+    if !waiting {
+        return Ok(());
+    }
+
+    state.hub.abort_chat_turn(id);
+    chat_tools::close_open_calls(state, owner, id, NOT_APPROVED_TEXT).await?;
+
+    let mut tx = state.pool.begin().await?;
+    let review = set_status(&mut tx, id, ConversationStatus::Review).await?;
+    tx.commit().await?;
+
+    state.publish(Some(owner), StreamMessage::Conversation(review.to_proto()?));
+
+    Ok(())
+}
+
 pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     find_owned(&state.pool, id, owner).await?;
 
     if state.hub.abort_chat_turn(id) {
+        chat_tools::close_open_calls(state, owner, id, STOPPED_TEXT).await?;
         finish(state, owner, id, "cancelled", None).await?;
     }
 
@@ -235,7 +351,7 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
 fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model: String, messages: Vec<ChatMessage>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let mut usage = (None, None);
-        let outcome = relay(&state, owner, id, &provider, &model, &messages, &mut usage).await;
+        let outcome = relay(&state, owner, id, &provider, &model, messages, &mut usage).await;
         let stop_reason = match outcome {
             Ok(()) => "end_turn",
             Err(error) => {
@@ -253,40 +369,72 @@ fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model
     })
 }
 
-async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: &[ChatMessage], usage: &mut (Option<i64>, Option<i64>)) -> ApiResult<()> {
+async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: Vec<ChatMessage>, usage: &mut (Option<i64>, Option<i64>)) -> ApiResult<()> {
     let address = provider.address().unwrap_or_default();
-    let instructions = match extensions_of(state, owner).await?.rich_markdown {
+    let extensions = extensions_of(state, owner).await?;
+    let base_instructions = match extensions.rich_markdown {
         true => format!("{CHAT_INSTRUCTIONS}\n{RICH_MARKDOWN_INSTRUCTIONS}"),
         false => CHAT_INSTRUCTIONS.to_string(),
     };
-    let started = provider.stream_reply(&state.http, model, &instructions, messages).await?;
-    let mut stream = started.map_err(|error| error.into_api(&provider.name, &address))?;
+    let mut toolbox = Toolbox::open(state, owner, id).await?;
+    let mut messages = messages;
+    let mut tools_on = true;
+    let mut rounds = 0;
 
     loop {
-        let next = stream.next().await.map_err(|error| error.into_api(&provider.name, &address))?;
-        let Some(delta) = next else {
-            return Ok(());
-        };
+        let definitions = if tools_on { toolbox.definitions() } else { Vec::new() };
+        let instructions = if tools_on { format!("{base_instructions}\n{TOOLS_INSTRUCTIONS}") } else { base_instructions.clone() };
+        let started = provider.stream_reply(&state.http, model, &instructions, &messages, &definitions).await?;
+        let mut stream = match started {
+            Ok(stream) => stream,
+            Err(ProviderError::ToolsRejected) if tools_on => {
+                tools_on = false;
+                messages = without_tool_blocks(messages);
+                record(state, owner, id, EventKind::AcpUpdate, &json!({"update": {"sessionUpdate": "note", "content": {"type": "text", "text": TOOLS_REJECTED_NOTE}}})).await?;
 
-        usage.0 = delta.input_tokens.or(usage.0);
-        usage.1 = delta.output_tokens.or(usage.1);
-
-        if !delta.text.is_empty() {
-            let chunk = json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": delta.text}}});
-            let mut tx = state.pool.begin().await?;
-            let event = append_event(&mut tx, id, EventKind::AcpUpdate, &chunk, None).await?;
-            tx.commit().await?;
-
-            if let Some(event) = event {
-                state.publish(Some(owner), StreamMessage::Event(event));
+                continue;
             }
+            Err(error) => return Err(error.into_api(&provider.name, &address)),
+        };
+        let mut said = String::new();
+        let mut calls = Vec::new();
+
+        loop {
+            let next = stream.next().await.map_err(|error| error.into_api(&provider.name, &address))?;
+            let Some(delta) = next else {
+                break;
+            };
+
+            usage.0 = delta.input_tokens.or(usage.0);
+            usage.1 = delta.output_tokens.or(usage.1);
+            calls.extend(delta.tool_calls);
+
+            if !delta.text.is_empty() {
+                said.push_str(&delta.text);
+                record(state, owner, id, EventKind::AcpUpdate, &json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": delta.text}}})).await?;
+            }
+        }
+
+        if calls.is_empty() {
+            return Ok(());
+        }
+
+        rounds += 1;
+        let results = chat_tools::run_calls(state, owner, id, &mut toolbox, &calls).await?;
+        messages.push(ChatMessage { role: "assistant", content: said, tool_calls: calls, ..ChatMessage::default() });
+        messages.push(ChatMessage { role: "user", tool_results: results, ..ChatMessage::default() });
+
+        if rounds == MAX_TOOL_ROUNDS {
+            let note = format!("Stopped after {MAX_TOOL_ROUNDS} rounds of tool calls. Send a message to carry on.");
+
+            return record(state, owner, id, EventKind::AcpUpdate, &json!({"update": {"sessionUpdate": "note", "content": {"type": "text", "text": note}}})).await;
         }
     }
 }
 
-async fn record_failure(state: &AppState, owner: Uuid, id: Uuid, message: &str) -> ApiResult<()> {
+pub async fn record(state: &AppState, owner: Uuid, id: Uuid, kind: EventKind, payload: &Value) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let event = append_event(&mut tx, id, EventKind::Error, &json!({"message": message}), None).await?;
+    let event = append_event(&mut tx, id, kind, payload, None).await?;
     tx.commit().await?;
 
     if let Some(event) = event {
@@ -296,13 +444,17 @@ async fn record_failure(state: &AppState, owner: Uuid, id: Uuid, message: &str) 
     Ok(())
 }
 
+async fn record_failure(state: &AppState, owner: Uuid, id: Uuid, message: &str) -> ApiResult<()> {
+    record(state, owner, id, EventKind::Error, &json!({"message": message})).await
+}
+
 async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usage: Option<(Option<i64>, Option<i64>)>) -> ApiResult<()> {
     state.hub.forget_chat_turn(id);
 
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 
-    if row.status != enum_text(&ConversationStatus::Working) {
+    if row.status != enum_text(&ConversationStatus::Working) && row.status != enum_text(&ConversationStatus::Input) {
         return Ok(());
     }
 

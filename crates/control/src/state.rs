@@ -82,6 +82,7 @@ pub struct Hub {
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
+    chat_approvals: Mutex<HashMap<(Uuid, String), oneshot::Sender<String>>>,
 }
 
 impl Hub {
@@ -95,16 +96,41 @@ impl Hub {
         if let Ok(mut turns) = self.chat_turns.lock() {
             turns.remove(&conversation_id);
         }
+
+        self.drop_chat_approvals(conversation_id);
     }
 
     pub fn abort_chat_turn(&self, conversation_id: Uuid) -> bool {
         let turn = self.chat_turns.lock().ok().and_then(|mut turns| turns.remove(&conversation_id));
+        self.drop_chat_approvals(conversation_id);
 
         turn.is_some_and(|turn| {
             turn.abort();
 
             true
         })
+    }
+
+    pub fn await_chat_approval(&self, conversation_id: Uuid, request_id: &str) -> oneshot::Receiver<String> {
+        let (sender, receiver) = oneshot::channel();
+
+        if let Ok(mut approvals) = self.chat_approvals.lock() {
+            approvals.insert((conversation_id, request_id.to_string()), sender);
+        }
+
+        receiver
+    }
+
+    pub fn answer_chat_approval(&self, conversation_id: Uuid, request_id: &str, option_id: String) -> bool {
+        let sender = self.chat_approvals.lock().ok().and_then(|mut approvals| approvals.remove(&(conversation_id, request_id.to_string())));
+
+        sender.is_some_and(|sender| sender.send(option_id).is_ok())
+    }
+
+    fn drop_chat_approvals(&self, conversation_id: Uuid) {
+        if let Ok(mut approvals) = self.chat_approvals.lock() {
+            approvals.retain(|(conversation, _), _| *conversation != conversation_id);
+        }
     }
 
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {

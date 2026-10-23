@@ -403,6 +403,46 @@ impl std::fmt::Debug for CreateModelProviderRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatToolInfo {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatToolServer {
+    pub id: Uuid,
+    pub name: String,
+    pub url: String,
+    pub token_hint: Option<String>,
+    pub enabled: bool,
+    pub always_allow: bool,
+    pub tools: Vec<ChatToolInfo>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateChatToolServerRequest {
+    pub name: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
+}
+
+impl std::fmt::Debug for CreateChatToolServerRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("CreateChatToolServerRequest").field("name", &self.name).field("url", &self.url).field("bearer_token", &"<hidden>").finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PatchChatToolServerRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_allow: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatRequest {
     pub provider_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
