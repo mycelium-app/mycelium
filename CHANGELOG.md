@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.5.1
+
+- A message you send after the agent's turn has ended goes straight to it, even while background agents keep the chat showing as working.
+- Stop leaves the chat stopped, and ends the turn after a few seconds even when the agent keeps talking.
+- The composer shows Stop only while the agent is answering you, not while background work runs.
+
+## v0.5.0
+
+- A public Design opens for visitors, instead of failing to load its viewer.
+- Text typed into a text box or sticky note in the Design editor is kept when you click elsewhere or pick another tool.
+- A public artefact's menu also copies its private link.
+- A chat that finishes with messages still queued does not notify or chime until the queue has run.
+- Linux desktop notifications stay up for five seconds.
+- A diff of a long file shows only the changed lines.
+
 ## v0.4.0
 
 - Artifacts: agents create, update and read web pages, Markdown, files such as PDF, and Design boards, each kept with every version, comments and a small data store pages can save to.
