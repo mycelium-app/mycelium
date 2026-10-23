@@ -72,6 +72,7 @@ import mycelium.state.TokenKind
 import mycelium.state.highlight
 import mycelium.state.chatToolName
 import mycelium.state.myceliumCall
+import mycelium.state.toolSearchText
 import mycelium.state.myceliumTool
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
@@ -712,6 +713,25 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
 
     if (chat) {
         ChatToolCard(call, chatToolName(call.title))
+        return
+    }
+
+    val toolSearch = toolSearchText(call)
+
+    if (toolSearch != null) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = Tokens.Size.ControlSm),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (call.status == ToolStatus.Running) MyIcon.Working else MyIcon.Search, colors.textMuted, Tokens.Size.IconSm)
+            Label(toolSearch, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+
+            if (call.status == ToolStatus.Failed) {
+                StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+            }
+        }
+
         return
     }
 
