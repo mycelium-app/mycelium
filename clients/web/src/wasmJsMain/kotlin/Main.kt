@@ -9,6 +9,9 @@ import mycelium.state.PickedFile
 import mycelium.state.decodeBase64
 import mycelium.state.mediaTypeOf
 
+@JsFun("() => Intl.DateTimeFormat().resolvedOptions().timeZone || ''")
+private external fun browserTimeZone(): String
+
 @JsFun("(millis) => { const at = new Date(millis); const two = (value) => String(value).padStart(2, '0'); return at.getFullYear() + '-' + two(at.getMonth() + 1) + '-' + two(at.getDate()) + 'T' + two(at.getHours()) + ':' + two(at.getMinutes()) }")
 private external fun browserDateTime(millis: Double): String
 
@@ -126,6 +129,8 @@ private object WebPlatform : Platform {
     override fun openUrl(url: String) = openTab(url)
 
     override fun copyToClipboard(text: String) = writeClipboard(text)
+
+    override fun timeZone(): String? = browserTimeZone().ifBlank { null }
 
     override fun localDateTime(epochMillis: Long): String? = browserDateTime(epochMillis.toDouble())
 
