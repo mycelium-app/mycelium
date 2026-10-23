@@ -36,6 +36,8 @@ import mycelium.api.Attachment
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
 import mycelium.state.ThreadImage
+import mycelium.state.attachmentProblem
+import mycelium.state.mediaTypeOf
 import mycelium.state.decodeBase64
 import mycelium.state.formatSize
 import mycelium.state.isImage
@@ -47,6 +49,47 @@ class AttachmentControls(
     val onAdd: (List<PickedFile>) -> Unit,
     val onRemove: (DraftAttachment) -> Unit,
 )
+
+class AttachmentDrafts {
+    var drafts by mutableStateOf(emptyList<DraftAttachment>())
+        private set
+    var problem by mutableStateOf<String?>(null)
+        private set
+    private var nextId = 0
+
+    fun add(picked: List<PickedFile>) {
+        var held = drafts
+        problem = null
+
+        for (file in picked) {
+            val named = PickedFile(file.name, mediaTypeOf(file.name, file.bytes, file.mediaType), file.bytes)
+            val refused = attachmentProblem(named, held.size)
+
+            if (refused != null) {
+                problem = refused
+            } else {
+                held = held + DraftAttachment(nextId++, named)
+            }
+        }
+
+        drafts = held
+    }
+
+    fun remove(draft: DraftAttachment) {
+        drafts = drafts - draft
+        problem = null
+    }
+
+    fun clear() {
+        drafts = emptyList()
+        problem = null
+    }
+
+    fun controls() = AttachmentControls(drafts, problem, ::add, ::remove)
+}
+
+@Composable
+fun rememberAttachmentDrafts(key: Any? = null): AttachmentDrafts = remember(key) { AttachmentDrafts() }
 
 val LocalAttachmentBytes = staticCompositionLocalOf<suspend (String) -> ByteArray?> { { null } }
 

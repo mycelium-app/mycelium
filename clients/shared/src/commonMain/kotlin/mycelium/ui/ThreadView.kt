@@ -209,6 +209,18 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
             }
         }
         is ThreadItem.Workflow -> WorkflowCard(item.progress, onStopWorkflow)
+        is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
+    }
+}
+
+@Composable
+private fun ModelChangedDivider(text: String) {
+    val colors = MyTheme.colors
+
+    Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Hairline(Modifier.weight(1f))
+        Label(text, style = Tokens.Type.Meta, color = colors.textMuted)
+        Hairline(Modifier.weight(1f))
     }
 }
 

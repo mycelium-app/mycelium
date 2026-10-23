@@ -107,6 +107,7 @@ fun Composer(
     onRemoveAnnotation: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
     attachments: AttachmentControls? = null,
+    modelPicker: ModelPickerControls? = null,
 ) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
@@ -219,7 +220,9 @@ fun Composer(
             OptionMenu("Mode", modes, options.currentMode, onSetMode)
         }
 
-        if (options.models.isNotEmpty()) {
+        if (modelPicker != null) {
+            ModelPicker(modelPicker)
+        } else if (options.models.isNotEmpty()) {
             OptionMenu("Model", options.models, options.currentModel, onSetModel)
         } else if (options.currentModel != null) {
             Label(options.currentModel, Modifier.padding(horizontal = Tokens.Space.S2), Tokens.Type.Ui, colors.textMuted, maxLines = 1)
@@ -323,7 +326,7 @@ fun Composer(
 }
 
 @Composable
-private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build") {
     val colors = MyTheme.colors
 
     BasicTextField(
@@ -356,7 +359,7 @@ private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) ->
         decorationBox = { inner ->
             Box(contentAlignment = Alignment.CenterStart) {
                 if (text.text.isEmpty()) {
-                    Label("Ask, plan or build", style = Tokens.Type.Prose, color = colors.textFaint)
+                    Label(placeholder, style = Tokens.Type.Prose, color = colors.textFaint)
                 }
 
                 inner()

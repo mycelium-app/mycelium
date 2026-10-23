@@ -328,7 +328,9 @@ class BoardsRenderTest {
         assertTrue(renderAt("board-new-project", true, false, interact = { click(it, 1377f, 20f); click(it, 548f, 368f) }, content = shell(Route.Projects, board = true)).length() > 1_000)
         val chats = store(emptyMap(), null)
         assertTrue(renderAt("board-chats-new", true, false) {
-            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { NewChatScreen(chats, onCreated = {}) }
+            androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalPlatform provides QuietPlatform) {
+                Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { NewChatScreen(chats, onCreated = {}) }
+            }
         }.length() > 1_000)
     }
 

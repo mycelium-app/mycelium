@@ -76,6 +76,8 @@ sealed interface ThreadItem {
     data class Failure(override val key: String, val message: String) : ThreadItem
 
     data class Workflow(override val key: String, val progress: WorkflowProgress) : ThreadItem
+
+    data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
 }
 
 private const val MaxDiffSide = 400
@@ -155,6 +157,7 @@ class ThreadBuilder {
             EventKinds.TurnEnd -> items += ThreadItem.TurnEnd(key, payload.string("stop_reason") ?: "end_turn")
             EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.")
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
+            EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
         }
     }
 }

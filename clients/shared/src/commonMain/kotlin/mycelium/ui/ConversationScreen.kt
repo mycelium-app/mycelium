@@ -32,6 +32,7 @@ import mycelium.api.ConversationStatus
 import mycelium.api.ConfigRequest
 import mycelium.api.LoginInfo
 import mycelium.api.NodeSummary
+import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
 import mycelium.state.Annotation
 import mycelium.state.DraftAttachment
@@ -101,33 +102,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
     var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
-    var drafts by remember(id) { mutableStateOf(emptyList<DraftAttachment>()) }
-    var attachProblem by remember(id) { mutableStateOf<String?>(null) }
-    var nextDraftId by remember(id) { mutableStateOf(0) }
-
-    fun addFiles(picked: List<PickedFile>) {
-        var held = drafts
-        attachProblem = null
-
-        for (file in picked) {
-            val named = PickedFile(file.name, mediaTypeOf(file.name, file.bytes, file.mediaType), file.bytes)
-            val problem = attachmentProblem(named, held.size)
-
-            if (problem != null) {
-                attachProblem = problem
-            } else {
-                held = held + DraftAttachment(nextDraftId++, named)
-            }
-        }
-
-        drafts = held
-    }
+    val attached = rememberAttachmentDrafts(id)
 
     fun send(text: String) {
-        store.send(id, messageWithAnnotations(annotations, text), drafts.map { it.file })
+        store.send(id, messageWithAnnotations(annotations, text), attached.drafts.map { it.file })
         annotations = emptyList()
-        drafts = emptyList()
-        attachProblem = null
+        attached.clear()
     }
 
     LaunchedEffect(id) {
@@ -162,6 +142,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val groupName = groupId?.let { state.groups[it]?.name }
     val chat = conversation.isChat
+    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
+
+    LaunchedEffect(chat) {
+        if (chat) {
+            store.act { providers = api.modelProviders() }
+        }
+    }
+
     val node = if (chat) null else state.nodes[conversation.nodeId]
     val sideKind = { kind: String -> if (chat) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
@@ -244,7 +232,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onSend = ::send,
                     annotations = annotations,
                     onRemoveAnnotation = { removed -> annotations = annotations - removed },
-                    attachments = AttachmentControls(drafts, attachProblem, ::addFiles) { removed -> drafts = drafts - removed; attachProblem = null },
+                    attachments = attached.controls(),
+                    modelPicker = if (chat) ModelPickerControls(providers, conversation.providerId, conversation.model) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
                     onStop = { store.act { api.cancel(id) } },
                     onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
                     onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },

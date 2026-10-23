@@ -65,6 +65,7 @@ object EventKinds {
     const val TurnEnd = "turn_end"
     const val Error = "error"
     const val Workflow = "workflow"
+    const val ModelChanged = "model_changed"
 }
 
 @Serializable
@@ -642,6 +643,8 @@ data class PatchConversationRequest(
     val archived: Boolean? = null,
     val account: String? = null,
     @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
+    @SerialName("provider_id") val providerId: String? = null,
+    val model: String? = null,
 )
 
 @Serializable

@@ -16,10 +16,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import mycelium.api.Conversation
 import mycelium.api.CreateChatRequest
 import mycelium.api.ModelProvider
-import mycelium.state.Choice
 import mycelium.state.Store
 
 @Composable
@@ -28,7 +28,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     var providers by remember { mutableStateOf<List<ModelProvider>?>(null) }
     var providerId by remember { mutableStateOf<String?>(null) }
     var model by remember { mutableStateOf<String?>(null) }
-    var message by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf(TextFieldValue("")) }
+    val attached = rememberAttachmentDrafts()
     var messageError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -44,13 +45,25 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             return
         }
 
-        if (message.isBlank()) {
+        val text = message.text.trim()
+
+        if (text.isEmpty() && attached.drafts.isEmpty()) {
             messageError = "Enter a message to start the chat."
             return
         }
 
         messageError = null
-        store.act { onCreated(store.api.createChat(CreateChatRequest(provider.id, chosenModel, message.trim()))) }
+        val files = attached.drafts.map { it.file }
+
+        store.act {
+            if (files.isEmpty()) {
+                onCreated(store.api.createChat(CreateChatRequest(provider.id, chosenModel, text)))
+            } else {
+                val created = store.api.createChat(CreateChatRequest(provider.id, chosenModel))
+                store.send(created.id, text, files)
+                onCreated(created)
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -76,25 +89,25 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             return@Column
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Column(
-                Modifier.widthIn(max = Tokens.Size.Page).fillMaxWidth().padding(Tokens.Space.S4),
-                verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
+                Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().padding(Tokens.Space.S4),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Label("Model", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("What's on your mind?", style = Tokens.Type.Display)
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                        OptionMenu("Provider", loaded.map { Choice(it.id, it.name) }, provider.id, { providerId = it; model = null })
-                        OptionMenu("Model", provider.models.map { Choice(it, it) }, chosenModel, { model = it })
-                    }
-                }
-
-                TextInput(message, { message = it }, label = "Message", placeholder = "Ask anything", error = messageError, onSubmit = ::create)
-
-                Row {
-                    MyButton(::create, text = "Start chat", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
-                }
+                ComposerCard(
+                    value = message,
+                    onValueChange = { message = it; messageError = null },
+                    placeholder = "Ask anything",
+                    onSubmit = ::create,
+                    attachments = attached.controls(),
+                    error = messageError,
+                    trailing = {
+                        ModelPicker(ModelPickerControls(loaded, provider.id, chosenModel) { picked, chosenPick -> providerId = picked.id; model = chosenPick })
+                    },
+                )
             }
         }
     }

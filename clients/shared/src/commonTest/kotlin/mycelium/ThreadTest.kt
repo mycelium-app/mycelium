@@ -85,6 +85,18 @@ class ThreadTest {
     }
 
     @Test
+    fun aModelChangeBecomesAMarkerWhereTheConversationSwitched() {
+        val thread = buildThread(
+            listOf(
+                event(1, EventKinds.UserMessage, """{"text":"Hello"}"""),
+                event(2, EventKinds.ModelChanged, """{"provider_id":"p2","provider_name":"Anthropic","model":"claude-sonnet-5-5"}"""),
+            ),
+        )
+
+        assertEquals(ThreadItem.ModelChanged("e2", "Anthropic", "claude-sonnet-5-5"), thread[1])
+    }
+
+    @Test
     fun toolCallUpdateChangesTheExistingCallInPlace() {
         val thread = buildThread(
             listOf(
