@@ -73,6 +73,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/git/fetch",
     "POST /api/v1/conversations/{id}/git/pull",
     "POST /api/v1/conversations/{id}/git/push",
+    "POST /api/v1/conversations/{id}/git/town/sync",
+    "POST /api/v1/conversations/{id}/git/town/propose",
     "POST /api/v1/conversations/{id}/git/undo",
     "POST /api/v1/conversations/{id}/git/switch",
     "POST /api/v1/terminals/{terminal_id}/input",
