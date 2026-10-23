@@ -1,7 +1,7 @@
 mod common;
 
 use common::{NodeLink, Server};
-use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
+use mycelium_proto::link::{CommitOptions, ControlToNode, GitCommand, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -118,7 +118,20 @@ async fn a_commit_is_sent_to_the_node_with_its_message_trimmed() {
 
     let (_, command) = answer_next(&mut link, true, json!({}), None).await;
 
-    assert_eq!(command, GitCommand::Commit { message: "Fix the thing".into() });
+    assert_eq!(command, GitCommand::Commit { message: "Fix the thing".into(), options: CommitOptions::default() });
+    assert_eq!(asking.await.unwrap().0, 200);
+}
+
+#[tokio::test]
+async fn an_amend_may_keep_the_last_message_and_carries_its_options_to_the_node() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/conversations/{id}/git/commit")).json(&json!({"message": "", "amend": true, "signoff": true, "no_verify": true}))).await });
+
+    let (_, command) = answer_next(&mut link, true, json!({}), None).await;
+
+    assert_eq!(command, GitCommand::Commit { message: String::new(), options: CommitOptions { amend: true, signoff: true, no_verify: true } });
     assert_eq!(asking.await.unwrap().0, 200);
 }
 

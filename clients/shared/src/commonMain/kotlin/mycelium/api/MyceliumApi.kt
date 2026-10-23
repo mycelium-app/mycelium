@@ -434,8 +434,8 @@ class MyceliumApi(
         call("/conversations/$id/git/stage-all") { client.post(it) { authorise() } }
     }
 
-    suspend fun gitCommit(id: String, message: String) {
-        call("/conversations/$id/git/commit") { client.post(it) { authorise(); json(GitCommitRequest(message)) } }
+    suspend fun gitCommit(id: String, message: String, amend: Boolean = false, signoff: Boolean = false, noVerify: Boolean = false) {
+        call("/conversations/$id/git/commit") { client.post(it) { authorise(); json(GitCommitRequest(message, amend, signoff, noVerify)) } }
     }
 
     suspend fun gitFetch(id: String) {

@@ -942,4 +942,9 @@ data class GitDiff(val diff: String, val truncated: Boolean)
 data class GitPathsRequest(val paths: List<String>)
 
 @Serializable
-data class GitCommitRequest(val message: String)
+data class GitCommitRequest(
+    val message: String,
+    val amend: Boolean = false,
+    val signoff: Boolean = false,
+    @SerialName("no_verify") val noVerify: Boolean = false,
+)

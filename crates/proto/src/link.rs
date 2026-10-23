@@ -194,6 +194,16 @@ impl std::fmt::Debug for GitCredentials {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitOptions {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub amend: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signoff: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_verify: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GitCommand {
@@ -213,7 +223,11 @@ pub enum GitCommand {
     Stage { paths: Vec<String> },
     Unstage { paths: Vec<String> },
     StageAll,
-    Commit { message: String },
+    Commit {
+        message: String,
+        #[serde(default, flatten)]
+        options: CommitOptions,
+    },
     Fetch,
     UndoLastCommit,
     Clone {

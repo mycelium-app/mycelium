@@ -6,7 +6,7 @@ use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::link::GitCommand;
+use mycelium_proto::link::{CommitOptions, GitCommand};
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -58,6 +58,12 @@ pub struct PathsRequest {
 #[derive(Deserialize)]
 pub struct CommitRequest {
     message: String,
+    #[serde(default)]
+    amend: bool,
+    #[serde(default)]
+    signoff: bool,
+    #[serde(default)]
+    no_verify: bool,
 }
 
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
@@ -143,11 +149,13 @@ pub async fn stage_all(State(state): State<AppState>, user: AuthUser, Path(id): 
 pub async fn commit(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CommitRequest>) -> ApiResult<Json<Value>> {
     let message = request.message.trim().to_string();
 
-    if message.is_empty() {
+    if message.is_empty() && !request.amend {
         return Err(ApiError::bad_request("message_required", "Enter a commit message."));
     }
 
-    run(&state, &user, id, GitCommand::Commit { message }).await
+    let options = CommitOptions { amend: request.amend, signoff: request.signoff, no_verify: request.no_verify };
+
+    run(&state, &user, id, GitCommand::Commit { message, options }).await
 }
 
 pub async fn fetch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {

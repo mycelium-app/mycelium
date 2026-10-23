@@ -1,5 +1,5 @@
 use base64::Engine;
-use mycelium_proto::link::{GitCommand, GitCredentials};
+use mycelium_proto::link::{CommitOptions, GitCommand, GitCredentials};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -36,7 +36,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
         GitCommand::Unstage { paths } => changed(cwd, &["restore", "--staged", "--"], &paths),
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
-        GitCommand::Commit { message } => changed(cwd, &["commit", "-m", &message], &[]),
+        GitCommand::Commit { message, options } => commit(cwd, &message, &options),
         GitCommand::Fetch => changed(cwd, &["fetch"], &[]),
         GitCommand::UndoLastCommit => undo_last_commit(cwd),
         GitCommand::MovePlan => move_plan(cwd),
@@ -153,6 +153,30 @@ fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Value, String>
     git(cwd, &all, &[])?;
 
     Ok(json!({}))
+}
+
+fn commit(cwd: &Path, message: &str, options: &CommitOptions) -> Result<Value, String> {
+    let mut args = vec!["commit"];
+
+    if options.amend {
+        args.push("--amend");
+    }
+
+    if options.signoff {
+        args.push("--signoff");
+    }
+
+    if options.no_verify {
+        args.push("--no-verify");
+    }
+
+    if options.amend && message.is_empty() {
+        args.push("--no-edit");
+    } else {
+        args.extend(["-m", message]);
+    }
+
+    changed(cwd, &args, &[])
 }
 
 fn undo_last_commit(cwd: &Path) -> Result<Value, String> {
@@ -593,7 +617,7 @@ mod tests {
 
     fn commit_all(dir: &tempfile::TempDir, message: &str) {
         run(dir.path(), GitCommand::StageAll).unwrap();
-        run(dir.path(), GitCommand::Commit { message: message.into() }).unwrap();
+        run(dir.path(), GitCommand::Commit { message: message.into(), options: CommitOptions::default() }).unwrap();
     }
 
     fn file<'a>(status: &'a Value, path: &str) -> &'a Value {
@@ -852,9 +876,39 @@ mod tests {
     fn committing_nothing_returns_gits_own_message() {
         let dir = repository();
 
-        let error = run(dir.path(), GitCommand::Commit { message: "empty".into() }).unwrap_err();
+        let error = run(dir.path(), GitCommand::Commit { message: "empty".into(), options: CommitOptions::default() }).unwrap_err();
 
         assert!(error.contains("nothing to commit"), "{error}");
+    }
+
+    #[test]
+    fn amending_with_no_message_keeps_the_last_one_and_signoff_adds_the_trailer() {
+        let dir = repository();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "First change");
+        write(&dir, "a.txt", "two\n");
+        run(dir.path(), GitCommand::StageAll).unwrap();
+
+        run(dir.path(), GitCommand::Commit { message: String::new(), options: CommitOptions { amend: true, signoff: true, no_verify: false } }).unwrap();
+
+        let body = String::from_utf8(git(dir.path(), &["log", "--format=%B"], &[]).unwrap()).unwrap();
+        assert_eq!(run(dir.path(), GitCommand::Log { limit: 10 }).unwrap().as_array().unwrap().len(), 1);
+        assert!(body.starts_with("First change") && body.contains("Signed-off-by: Tester <tester@example.com>"), "{body}");
+    }
+
+    #[test]
+    fn skipping_hooks_commits_past_a_failing_pre_commit_hook() {
+        let dir = repository();
+        let hook = dir.path().join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        write(&dir, "a.txt", "one\n");
+        run(dir.path(), GitCommand::StageAll).unwrap();
+
+        assert!(run(dir.path(), GitCommand::Commit { message: "blocked".into(), options: CommitOptions::default() }).is_err());
+        run(dir.path(), GitCommand::Commit { message: "past the hook".into(), options: CommitOptions { no_verify: true, ..Default::default() } }).unwrap();
+
+        assert_eq!(run(dir.path(), GitCommand::Log { limit: 1 }).unwrap()[0]["subject"], "past the hook");
     }
 
     #[test]
@@ -863,7 +917,7 @@ mod tests {
         write(&dir, "a.txt", "one\n");
         run(dir.path(), GitCommand::StageAll).unwrap();
 
-        run(dir.path(), GitCommand::Commit { message: "--amend; touch pwned".into() }).unwrap();
+        run(dir.path(), GitCommand::Commit { message: "--amend; touch pwned".into(), options: CommitOptions::default() }).unwrap();
 
         let log = run(dir.path(), GitCommand::Log { limit: 1 }).unwrap();
         assert_eq!(log[0]["subject"], "--amend; touch pwned");
@@ -1288,7 +1342,7 @@ mod tests {
         init(&project);
         std::fs::write(project.join("a.txt"), "one\n").unwrap();
         run(&project, GitCommand::StageAll).unwrap();
-        run(&project, GitCommand::Commit { message: "first".into() }).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into(), options: CommitOptions::default() }).unwrap();
 
         let added = run_in(root.path(), project.to_str().unwrap(), GitCommand::AddWorktree { branch: "issue/12-fix".into() }).unwrap();
 
@@ -1306,7 +1360,7 @@ mod tests {
         init(&project);
         std::fs::write(project.join("a.txt"), "one\n").unwrap();
         run(&project, GitCommand::StageAll).unwrap();
-        run(&project, GitCommand::Commit { message: "first".into() }).unwrap();
+        run(&project, GitCommand::Commit { message: "first".into(), options: CommitOptions::default() }).unwrap();
         run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap();
 
         let existing = run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap_err();

@@ -27,6 +27,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -84,6 +85,8 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     var viewing by remember(id) { mutableStateOf<GitFile?>(null) }
     var diff by remember(id) { mutableStateOf<GitDiff?>(null) }
     var message by remember(id) { mutableStateOf("") }
+    var signoff by remember(id) { mutableStateOf(false) }
+    var skipHooks by remember(id) { mutableStateOf(false) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
     val files = status?.files.orEmpty()
 
@@ -274,9 +277,14 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     if (problem != null) {
                         failure = problem
                     } else {
-                        run { store.api.gitCommit(id, text.trim()); message = ""; refresh() }
+                        run { store.api.gitCommit(id, text.trim(), signoff = signoff, noVerify = skipHooks); message = ""; refresh() }
                     }
                 },
+                onAmend = { run { store.api.gitCommit(id, message.trim(), amend = true, signoff = signoff, noVerify = skipHooks); message = ""; refresh() } },
+                signoff = signoff,
+                onSignoff = { signoff = !signoff },
+                skipHooks = skipHooks,
+                onSkipHooks = { skipHooks = !skipHooks },
                 onUndo = {
                     run {
                         val undone = store.api.gitUndo(id)
@@ -475,9 +483,15 @@ fun CommitArea(
     branches: GitBranches? = null,
     onOpenBranches: () -> Unit = {},
     onSwitch: (BranchEntry) -> Unit = {},
+    onAmend: () -> Unit = {},
+    signoff: Boolean = false,
+    onSignoff: () -> Unit = {},
+    skipHooks: Boolean = false,
+    onSkipHooks: () -> Unit = {},
 ) {
     val colors = MyTheme.colors
     var picking by remember { mutableStateOf(false) }
+    var options by remember { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
     val focused = source.collectIsFocusedAsState()
 
@@ -529,7 +543,9 @@ fun CommitArea(
                 .onPreviewKeyEvent { event ->
                     val commit = event.type == KeyEventType.KeyDown && event.key == Key.Enter && (event.isCtrlPressed || event.isMetaPressed)
 
-                    if (commit) {
+                    if (commit && event.isShiftPressed) {
+                        onAmend()
+                    } else if (commit) {
                         onCommit()
                     }
 
@@ -547,7 +563,21 @@ fun CommitArea(
             },
         )
 
-        MyButton(onCommit, Modifier.fillMaxWidth(), text = "Commit", variant = ButtonVariant.Primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            MyButton(onCommit, Modifier.weight(1f), text = "Commit", variant = ButtonVariant.Primary)
+
+            Box {
+                MyButton({ options = true }, icon = MyIcon.ChevronDown, description = "Commit options", variant = ButtonVariant.Outline)
+
+                if (options) {
+                    MenuPopup(onDismiss = { options = false }) {
+                        MenuItem("Amend", onClick = { options = false; onAmend() }, hint = "Ctrl+Shift+Enter")
+                        MenuItem("Signoff", onClick = { options = false; onSignoff() }, checked = signoff)
+                        MenuItem("Skip hooks", onClick = { options = false; onSkipHooks() }, checked = skipHooks)
+                    }
+                }
+            }
+        }
 
         if (lastCommit != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {

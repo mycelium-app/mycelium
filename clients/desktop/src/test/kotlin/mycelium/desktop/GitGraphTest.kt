@@ -125,6 +125,28 @@ class GitGraphTest {
     }
 
     @Test
+    fun theCommitOptionsAmendWithTheLastMessageAndAddSignoffAndSkipHooksToACommit() {
+        val fake = GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":false,"untracked":false,"additions":1,"deletions":0}]}""")
+        open(fake)
+
+        rule.onNodeWithContentDescription("Commit options").performClick()
+        rule.onNodeWithText("Amend").performClick()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/commit") } }
+
+        assertEquals("""{"message":"","amend":true}""", fake.bodyOf("/git/commit"))
+
+        rule.onNodeWithContentDescription("Commit options").performClick()
+        rule.onNodeWithText("Signoff").performClick()
+        rule.onNodeWithContentDescription("Commit options").performClick()
+        rule.onNodeWithText("Skip hooks").performClick()
+        rule.onNodeWithContentDescription("Commit message").performTextInput("Tidy")
+        rule.onNodeWithText("Commit").performClick()
+        rule.waitUntil(5_000) { fake.requests.count { it.url.encodedPath.endsWith("/git/commit") } == 2 }
+
+        assertEquals("""{"message":"Tidy","signoff":true,"no_verify":true}""", fake.bodyOf("/git/commit"))
+    }
+
+    @Test
     fun aFileWithMoreChangesOnDiskThanStagedIsPartlyStaged() {
         open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":true,"untracked":false,"additions":2,"deletions":0}]}"""))
 

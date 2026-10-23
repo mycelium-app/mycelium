@@ -64,4 +64,23 @@ class GitCommitAreaTest {
 
         assertEquals(1, commits)
     }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun ctrlShiftEnterInTheMessageAmends() {
+        var commits = 0
+        var amends = 0
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                CommitArea(GitStatus("main", ahead = 0, behind = 0, files = emptyList()), null, "", {}, {}, { commits++ }, {}, onAmend = { amends++ })
+            }
+        }
+
+        val field = rule.onNodeWithContentDescription("Commit message")
+        field.performClick()
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { withKeyDown(Key.ShiftLeft) { pressKey(Key.Enter) } } }
+
+        assertEquals(0 to 1, commits to amends)
+    }
 }
