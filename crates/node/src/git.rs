@@ -127,8 +127,10 @@ fn register(folder: &Path) -> Result<Value, String> {
 
     let canonical = folder.canonicalize().map_err(|cause| format!("Could not read {}: {cause}.", folder.display()))?;
     let repository = git(&canonical, &["rev-parse", "--git-dir"], &[]).is_ok();
+    let configured = if repository { git(&canonical, &["config", "--get-regexp", r"^remote\..*\.url$"], &[1]).unwrap_or_default() } else { Vec::new() };
+    let remotes: Vec<&str> = std::str::from_utf8(&configured).unwrap_or_default().lines().filter_map(|line| line.split_once(' ').map(|(_, url)| url.trim())).collect();
 
-    Ok(json!({"path": canonical.to_string_lossy(), "repository": repository}))
+    Ok(json!({"path": canonical.to_string_lossy(), "repository": repository, "remotes": remotes}))
 }
 
 fn add_worktree(project: &Path, branch: &str) -> Result<Value, String> {
@@ -1402,6 +1404,7 @@ mod tests {
         std::fs::create_dir_all(root.path().join("plain")).unwrap();
         std::fs::create_dir_all(root.path().join("repo")).unwrap();
         init(&root.path().join("repo"));
+        git(&root.path().join("repo"), &["remote", "add", "origin", "git@example.com:a/b.git"], &[]).unwrap();
         std::fs::write(root.path().join("file.txt"), "x").unwrap();
 
         let plain = run_in(root.path(), "plain", GitCommand::Register).unwrap();
@@ -1409,6 +1412,8 @@ mod tests {
 
         assert_eq!(plain["repository"], false);
         assert_eq!(repo["repository"], true);
+        assert_eq!(repo["remotes"], serde_json::json!(["git@example.com:a/b.git"]));
+        assert_eq!(plain["remotes"], serde_json::json!([]));
         assert!(repo["path"].as_str().unwrap().ends_with("/repo"));
         assert!(run_in(root.path(), "missing", GitCommand::Register).unwrap_err().contains("does not exist"));
         assert!(run_in(root.path(), "file.txt", GitCommand::Register).unwrap_err().contains("does not exist"));

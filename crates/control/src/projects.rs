@@ -5,11 +5,14 @@ use crate::groups;
 use crate::git::relay;
 use crate::nodes::node_offline;
 use crate::state::AppState;
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
 use mycelium_proto::link::GitCommand;
+use mycelium_proto::stream::StreamMessage;
+use serde_json::Value;
 use uuid::Uuid;
 
 pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, created_at";
@@ -47,6 +50,55 @@ pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, reposi
     Ok(answer["path"].as_str().unwrap_or_default().to_string())
 }
 
+fn remote_location(url: &str) -> Option<(String, String)> {
+    let (authority, path) = match url.split_once("://") {
+        Some((_, rest)) => rest.split_once('/').unwrap_or((rest, "")),
+        None => url.split_once(':')?,
+    };
+    let host = authority.rsplit('@').next()?.split(':').next()?.to_lowercase();
+    let path = path.trim_matches('/').trim_end_matches(".git").to_string();
+
+    (!host.is_empty()).then_some((host, path))
+}
+
+fn check_checkout(answer: &Value, registered: &str, base_url: &str, repository: &str) -> ApiResult<()> {
+    let choose = format!("Choose the folder that holds {repository}.");
+
+    if answer["repository"] != true {
+        return Err(ApiError::bad_request("folder_not_checkout", format!("The folder at {registered} is not a git checkout. {choose}")));
+    }
+
+    let forge_host = remote_location(base_url).map(|(host, _)| host).unwrap_or_default();
+    let remotes: Vec<(String, String)> = answer["remotes"].as_array().into_iter().flatten().filter_map(|remote| remote.as_str().and_then(remote_location)).collect();
+
+    if remotes.iter().any(|(host, path)| *host == forge_host && path.eq_ignore_ascii_case(repository)) {
+        return Ok(());
+    }
+
+    match remotes.iter().find(|(host, _)| *host == forge_host) {
+        Some((_, other)) => Err(ApiError::bad_request("folder_other_repository", format!("The folder at {registered} is a checkout of {other}, not {repository}. {choose}"))),
+        None => Err(ApiError::bad_request("folder_other_repository", format!("The folder at {registered} has no remote on {forge_host}, so Mycelium cannot tell it holds {repository}. {choose}"))),
+    }
+}
+
+async fn link_conversations(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<()> {
+    let linked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set project_id = $4 where owner = $1 and node_id = $2 and project_id is null and (cwd = $3 or left(cwd, length($3) + 1) = $3 || '/') returning {CONVERSATION_COLUMNS}",
+    )))
+    .bind(owner)
+    .bind(project.node_id)
+    .bind(&project.path)
+    .bind(project.id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    for conversation in linked {
+        state.publish(Some(owner), StreamMessage::Conversation(conversation.to_proto()?));
+    }
+
+    Ok(())
+}
+
 pub fn valid_repository(repository: &str) -> bool {
     let segments: Vec<&str> = repository.split('/').collect();
 
@@ -71,6 +123,21 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     }
 
     let (name, path, forge_id, repository) = match (request.forge_id, request.repository.as_deref().map(str::trim), request.path.as_deref().map(str::trim)) {
+        (Some(forge_id), Some(repository), Some(path)) if !path.is_empty() && !request.new_repository => {
+            if !valid_repository(repository) {
+                return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
+            }
+
+            let forge = forges::find_owned(&state, forge_id, user.id).await?;
+            let answer = relay(&state, request.node_id, path.to_string(), GitCommand::Register).await?;
+            let registered = answer["path"].as_str().unwrap_or_default().to_string();
+
+            check_checkout(&answer, &registered, &forge.base_url, repository)?;
+
+            let name = repository.rsplit('/').next().unwrap_or(repository).to_string();
+
+            (name, registered, Some(forge_id), Some(repository.to_string()))
+        }
         (Some(forge_id), Some(repository), None) => {
             if !valid_repository(repository) {
                 return Err(ApiError::bad_request("repository_invalid", "Enter the repository as owner/name, for example acme-org/acme-backups."));
@@ -112,7 +179,11 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     .await;
 
     match inserted {
-        Ok(row) => Ok((StatusCode::CREATED, Json(row.to_proto()))),
+        Ok(row) => {
+            link_conversations(&state, user.id, &row).await?;
+
+            Ok((StatusCode::CREATED, Json(row.to_proto())))
+        }
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
         Err(cause) => Err(cause.into()),
     }
@@ -130,5 +201,19 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         .fetch_optional(&state.pool)
         .await?;
 
-    row.map(|row| Json(row.to_proto())).ok_or_else(|| ApiError::not_found("That project"))
+    let Some(row) = row else {
+        return Err(ApiError::not_found("That project"));
+    };
+
+    let regrouped = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where project_id = $1 and owner = $2")))
+        .bind(id)
+        .bind(user.id)
+        .fetch_all(&state.pool)
+        .await?;
+
+    for conversation in regrouped {
+        state.publish(Some(user.id), StreamMessage::Conversation(conversation.to_proto()?));
+    }
+
+    Ok(Json(row.to_proto()))
 }

@@ -409,3 +409,26 @@ async fn unreadable_transcripts_are_counted_as_skipped() {
 
     assert_eq!((result["imported"].as_i64(), result["skipped"].as_i64()), (Some(0), Some(1)));
 }
+
+#[tokio::test]
+async fn an_imported_conversation_joins_the_project_whose_folder_holds_its_directory() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let user = server.user.clone();
+    let node_id = link.id;
+    let registering = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&json!({"node_id": node_id, "path": "/work"}))).await });
+    let (request_id, ..) = match link.next().await {
+        mycelium_proto::link::ControlToNode::Git { request_id, cwd, command } => (request_id, cwd, command),
+        other => panic!("expected git, got {other:?}"),
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/work", "repository": false}), error: None }).await;
+    let (status, project) = registering.await.unwrap();
+    assert_eq!(status, 201, "{project}");
+    mirror(&server, link.id, &format!(".claude/projects/-work-app/{CLAUDE_SESSION}.jsonl"), &claude_transcript(CLAUDE_SESSION, "Fix the build", "Looking at it.")).await;
+
+    import(&server, link.id, "claude").await;
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/conversations?archived=true")).await;
+    let imported = listed.as_array().unwrap().iter().find(|conversation| conversation["title"] == "Fix the build").unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(imported["project_id"], project["id"]);
+}

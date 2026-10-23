@@ -67,12 +67,15 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     var organisationMenu by remember { mutableStateOf(false) }
     var nodeMenu by remember { mutableStateOf(false) }
     var setUpMenu by remember { mutableStateOf<String?>(null) }
+    var cloneChoice by remember { mutableStateOf(false) }
+    var existingFolder by remember { mutableStateOf<Repository?>(null) }
     var cloning by remember { mutableStateOf<Set<String>>(emptySet()) }
     var dismissed by remember { mutableStateOf<Set<String>>(emptySet()) }
     var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshProjects() }
+        store.act { store.refreshGroups() }
     }
 
     LaunchedEffect(Unit) {
@@ -204,7 +207,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
-            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 160.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
+            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 160.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 360.dp))) {
                 if (forges != null && connected.isEmpty() && folders.isEmpty()) {
                     Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
                 } else {
@@ -255,25 +258,32 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                             )
 
                                             if (setUpMenu == key) {
-                                                MenuPopup(onDismiss = { setUpMenu = null }) {
-                                                    MenuLabel("Set up on")
+                                                MenuPopup(onDismiss = { setUpMenu = null; cloneChoice = false }) {
+                                                    if (!cloneChoice) {
+                                                        MenuLabel("Set up on")
+                                                        MenuItem("Clone onto a node", onClick = { cloneChoice = true })
+                                                        MenuItem("Use an existing folder", onClick = { setUpMenu = null; existingFolder = repository })
+                                                    } else {
+                                                        MenuLabel("Clone onto")
 
-                                                    for (node in elsewhere) {
-                                                        MenuItem(
-                                                            node.name,
-                                                            onClick = {
-                                                                setUpMenu = null
-                                                                cloning = cloning + key
-                                                                store.act {
-                                                                    try {
-                                                                        store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
-                                                                    } finally {
-                                                                        cloning = cloning - key
+                                                        for (node in elsewhere) {
+                                                            MenuItem(
+                                                                node.name,
+                                                                onClick = {
+                                                                    setUpMenu = null
+                                                                    cloneChoice = false
+                                                                    cloning = cloning + key
+                                                                    store.act {
+                                                                        try {
+                                                                            store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
+                                                                        } finally {
+                                                                            cloning = cloning - key
+                                                                        }
                                                                     }
-                                                                }
-                                                            },
-                                                            leading = nodeIcon(node),
-                                                        )
+                                                                },
+                                                                leading = nodeIcon(node),
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -281,7 +291,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                     }
                                 }
 
-                                Row(horizontalArrangement = Arrangement.End) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                    if (setUp.isNotEmpty() && state.groups.isNotEmpty()) {
+                                        ProjectGroupMenu(store, state, setUp, repository.fullName)
+                                    }
+
                                     if (setUp.isNotEmpty()) {
                                         MyButton(
                                             { onNewConversation(newConversationProject(setUp, state).id) },
@@ -311,7 +325,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                     NodeMarks(listOf(folder), state)
                                 }
 
-                                Row(horizontalArrangement = Arrangement.End) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                    if (state.groups.isNotEmpty()) {
+                                        ProjectGroupMenu(store, state, listOf(folder), folder.name)
+                                    }
+
                                     MyButton(
                                         { onNewConversation(folder.id) },
                                         text = "New conversation",
@@ -332,6 +350,10 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                 }
             }
         }
+    }
+
+    existingFolder?.let { chosen ->
+        ExistingFolderDialog(store, state, chosen, onDismiss = { existingFolder = null })
     }
 
     if (creating) {

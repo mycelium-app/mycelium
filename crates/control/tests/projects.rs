@@ -78,9 +78,12 @@ async fn fake_creating_forge(kind: &str, seen: Seen) -> String {
 }
 
 async fn answer_next(link: &mut NodeLink, outcome: Result<Value, &str>) -> (String, GitCommand) {
-    let (request_id, cwd, command) = match link.next().await {
-        ControlToNode::Git { request_id, cwd, command } => (request_id, cwd, command),
-        other => panic!("expected git, got {other:?}"),
+    let (request_id, cwd, command) = loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command } => break (request_id, cwd, command),
+            ControlToNode::StartSession { .. } => continue,
+            other => panic!("expected git, got {other:?}"),
+        }
     };
     let message = match outcome {
         Ok(output) => NodeToControl::GitResult { request_id, ok: true, output, error: None },
@@ -177,13 +180,12 @@ async fn a_project_needs_exactly_one_source_a_valid_repository_and_a_forge_of_yo
     };
 
     let (_, nothing) = post(&server.user, json!({"node_id": link.id})).await;
-    let (_, both) = post(&server.user, json!({"node_id": link.id, "forge_id": forge_id, "repository": "a/b", "path": "x"})).await;
     let (_, blank) = post(&server.user, json!({"node_id": link.id, "path": "  "})).await;
     let (_, traversal) = post(&server.user, json!({"node_id": link.id, "forge_id": forge_id, "repository": "a/../../b"})).await;
     let (_, option) = post(&server.user, json!({"node_id": link.id, "forge_id": forge_id, "repository": "--upload-pack=x/y"})).await;
     let (stolen, _) = post(&other, json!({"node_id": link.id, "forge_id": forge_id, "repository": "a/b"})).await;
 
-    for error in [&nothing, &both, &blank] {
+    for error in [&nothing, &blank] {
         assert_eq!(error["error"], "project_source_required");
     }
 
@@ -362,4 +364,84 @@ async fn a_new_repository_the_forge_refuses_is_reported_and_nothing_is_cloned_or
     assert!(error["message"].as_str().unwrap().starts_with("GitHub did not create that repository"));
     let (_, projects) = server.user.json(server.user.get("/api/v1/projects")).await;
     assert_eq!(projects, json!([]));
+}
+
+async fn conversation_in(server: &Server, node_id: Uuid, cwd: &str) -> Uuid {
+    let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "cwd": cwd}))).await;
+    assert_eq!(status, 201, "{body}");
+
+    body["id"].as_str().unwrap().parse().unwrap()
+}
+
+async fn project_of(server: &Server, conversation_id: Uuid) -> Value {
+    server.conversation(conversation_id).await["project_id"].clone()
+}
+
+#[tokio::test]
+async fn an_existing_folder_whose_remote_is_the_repository_becomes_the_project_over_ssh_or_https() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let ssh = "git@127.0.0.1:acme-org/acme-backups.git";
+
+    let ((status, project), (cwd, command)) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "work/backups"}), Ok(json!({"path": "/home/sam/work/backups", "repository": true, "remotes": [ssh]}))).await;
+
+    assert_eq!((status, cwd.as_str(), command), (201, "work/backups", GitCommand::Register));
+    assert_eq!((project["name"].clone(), project["path"].clone(), project["repository"].clone(), project["forge_id"].clone()), (json!("acme-backups"), json!("/home/sam/work/backups"), json!("acme-org/acme-backups"), json!(forge_id)));
+
+    let ((other, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "/second"}), Ok(json!({"path": "/second", "repository": true, "remotes": [format!("{github}/acme-org/acme-backups")]}))).await;
+    assert_eq!(other, 201);
+}
+
+#[tokio::test]
+async fn an_existing_folder_that_holds_another_repository_or_no_checkout_is_refused_and_nothing_is_registered() {
+    let server = Server::start().await;
+    let github = fake_forge("github").await;
+    let forge_id = connect_forge(&server, "github", &github, GITHUB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+    let body = json!({"forge_id": forge_id, "repository": "acme-org/backups", "path": "/x"});
+
+    let ((status, error), _) = create_project(&server, &mut link, body.clone(), Ok(json!({"path": "/x", "repository": true, "remotes": [format!("{github}/other/repo.git")]}))).await;
+    assert_eq!((status, error["message"].clone()), (400, json!("The folder at /x is a checkout of other/repo, not acme-org/backups. Choose the folder that holds acme-org/backups.")));
+
+    let ((status, error), _) = create_project(&server, &mut link, body.clone(), Ok(json!({"path": "/x", "repository": true, "remotes": ["https://elsewhere.example/acme-org/backups.git"]}))).await;
+    assert_eq!((status, error["error"].clone()), (400, json!("folder_other_repository")));
+
+    let ((status, error), _) = create_project(&server, &mut link, body, Ok(json!({"path": "/x", "repository": false}))).await;
+    assert_eq!((status, error["message"].clone()), (400, json!("The folder at /x is not a git checkout. Choose the folder that holds acme-org/backups.")));
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert_eq!(listed, json!([]));
+}
+
+#[tokio::test]
+async fn a_new_project_adopts_the_unassigned_conversations_of_its_node_inside_its_folder_only() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut other = server.online_node("server").await;
+    let inside = conversation_in(&server, link.id, "/home/sam/backups/src").await;
+    let exact = conversation_in(&server, link.id, "/home/sam/backups").await;
+    let sibling = conversation_in(&server, link.id, "/home/sam/backups-old").await;
+    let elsewhere = conversation_in(&server, other.id, "/home/sam/backups").await;
+    let taken = conversation_in(&server, link.id, "/home/sam/backups/docs").await;
+
+    let ((_, parent), _) = create_project(&server, &mut link, json!({"path": "/home/sam/backups/docs"}), Ok(json!({"path": "/home/sam/backups/docs", "repository": false}))).await;
+    assert_eq!(project_of(&server, taken).await, parent["id"]);
+
+    let mut stream = server.user.stream().await;
+    let ((_, project), _) = create_project(&server, &mut link, json!({"path": "/home/sam/backups"}), Ok(json!({"path": "/home/sam/backups", "repository": false}))).await;
+    let _ = &mut other;
+
+    assert_eq!(project_of(&server, inside).await, project["id"]);
+    assert_eq!(project_of(&server, exact).await, project["id"]);
+    assert_eq!(project_of(&server, sibling).await, Value::Null);
+    assert_eq!(project_of(&server, elsewhere).await, Value::Null);
+    assert_eq!(project_of(&server, taken).await, parent["id"]);
+
+    let streamed: mycelium_proto::conversation::Conversation = stream.until(|message| match message {
+        mycelium_proto::stream::StreamMessage::Conversation(conversation) if conversation.id == inside => Some(conversation),
+        _ => None,
+    }).await;
+    assert_eq!(streamed.project_id.map(|id| json!(id)), Some(project["id"].clone()));
 }
