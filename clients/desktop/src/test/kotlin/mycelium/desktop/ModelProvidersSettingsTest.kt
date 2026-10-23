@@ -100,6 +100,23 @@ class ModelProvidersSettingsTest {
     }
 
     @Test
+    fun addingOpenRouterSendsItsAddressWithTheKeyAndAsksForAKeyFirst() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+
+        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNodeWithText("OpenRouter").performClick()
+        rule.onNodeWithText("Add provider").performClick()
+        rule.onNodeWithText("Enter your OpenRouter API key.").assertExists()
+
+        rule.onNodeWithContentDescription("API key").performTextInput("sk-or-secret")
+        rule.onNodeWithText("Add provider").performClick()
+
+        rule.waitUntil { bodies.any { it.contains("openrouter.ai") } }
+        assertEquals("""{"kind":"openai_compatible","name":"OpenRouter","base_url":"https://openrouter.ai/api/v1","api_key":"sk-or-secret"}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
     fun aServerErrorShowsItsMessageAndKeepsTheForm() {
         postAnswer = HttpStatusCode.BadRequest to """{"error":"provider_unreachable","message":"Mycelium could not reach http://box:11434/v1. Check the address and try again."}"""
         val store = store()

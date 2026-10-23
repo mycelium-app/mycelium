@@ -26,7 +26,9 @@ import mycelium.api.CreateModelProviderRequest
 import mycelium.api.ModelProvider
 import mycelium.state.Store
 
-private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic")
+private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic", "OpenRouter" to "openrouter")
+
+private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 
 @Composable
 fun ModelProvidersSettings(store: Store) {
@@ -45,9 +47,19 @@ fun ModelProvidersSettings(store: Store) {
     }
 
     fun add() {
+        if (kind == "openrouter" && apiKey.isBlank()) {
+            failure = "Enter your OpenRouter API key."
+
+            return
+        }
+
         scope.launch {
             try {
-                val added = store.api.createModelProvider(CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null }))
+                val request = when (kind) {
+                    "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
+                    else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null })
+                }
+                val added = store.api.createModelProvider(request)
                 providers = providers.filter { it.id != added.id } + added
                 adding = false
                 name = ""
@@ -126,14 +138,18 @@ fun ModelProvidersSettings(store: Store) {
                     { kind = ProviderKinds.getValue(it) },
                     groupLabel = "Provider type",
                 )
-                TextInput(name, { name = it }, label = "Name", placeholder = if (kind == "anthropic") "Anthropic" else "Ollama")
+                TextInput(name, { name = it }, label = "Name", placeholder = when (kind) {
+                    "anthropic" -> "Anthropic"
+                    "openrouter" -> "OpenRouter"
+                    else -> "Ollama"
+                })
 
                 if (kind == "openai_compatible") {
                     TextInput(baseUrl, { baseUrl = it }, label = "Base URL", placeholder = "http://localhost:11434/v1", mono = true)
                     Label("Ollama serves this at http://<host>:11434/v1.", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
-                TextInput(apiKey, { apiKey = it }, label = if (kind == "anthropic") "API key" else "API key, if the endpoint needs one", mono = true, masked = true, onSubmit = ::add)
+                TextInput(apiKey, { apiKey = it }, label = if (kind == "openai_compatible") "API key, if the endpoint needs one" else "API key", mono = true, masked = true, onSubmit = ::add)
 
                 failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
