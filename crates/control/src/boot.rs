@@ -15,6 +15,10 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 const MIGRATION_LOCK_KEY: i64 = 7461001;
+const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 static MIGRATOR: Migrator = sqlx::migrate!();
 
@@ -103,6 +107,10 @@ pub fn is_ready(state: &AppState) -> bool {
 
 pub async fn healthz() -> &'static str {
     "ok"
+}
+
+pub async fn version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"version": VERSION}))
 }
 
 pub async fn readyz(State(state): State<AppState>) -> Response {

@@ -78,6 +78,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(boot::healthz))
         .route("/readyz", get(boot::readyz))
+        .route("/api/v1/version", get(boot::version))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))

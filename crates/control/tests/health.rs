@@ -219,3 +219,14 @@ async fn creating_a_test_database_drops_the_ones_left_by_processes_that_have_exi
     let left: Vec<String> = sqlx::query_scalar("select datname from pg_database where datname in ('test_999999999_leftover', $1)").bind(fresh.rsplit('/').next().unwrap()).fetch_all(&mut connection).await.unwrap();
     assert_eq!(left, vec![fresh.rsplit('/').next().unwrap().to_string()]);
 }
+
+#[tokio::test]
+async fn the_control_plane_reports_its_version_without_signing_in() {
+    let server = Server::start().await;
+    let anonymous = server.anonymous();
+
+    let (status, body) = anonymous.json(anonymous.get("/api/v1/version")).await;
+
+    assert_eq!(status, 200);
+    assert!(body["version"].as_str().is_some_and(|version| !version.is_empty()));
+}

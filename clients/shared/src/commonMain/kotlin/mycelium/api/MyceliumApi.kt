@@ -91,6 +91,8 @@ class MyceliumApi(
 
     suspend fun me(): Me = call("/me") { client.get(it) { authorise() } }.body()
 
+    suspend fun version(): String = call("/version") { client.get(it) }.body<ServerVersion>().version
+
     suspend fun startDevice(request: DeviceRequest): DeviceResponse =
         call("/device") { client.post(it) { json(request) } }.body()
 

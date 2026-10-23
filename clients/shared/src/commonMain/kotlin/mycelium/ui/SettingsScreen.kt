@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -109,7 +110,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.ChatModels -> ModelProvidersSettings(store)
             SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
-            SettingsSection.Account -> AccountSettings(me, controlPlane, onSignOut)
+            SettingsSection.Account -> AccountSettings(store, me, controlPlane, onSignOut)
         }
     }
 }
@@ -152,8 +153,13 @@ private fun AppearanceSettings() {
 }
 
 @Composable
-private fun AccountSettings(me: Me, controlPlane: String, onSignOut: () -> Unit) {
+private fun AccountSettings(store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit) {
     val colors = MyTheme.colors
+    var serverVersion by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        serverVersion = runCatching { store.api.version() }.getOrNull()
+    }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -161,7 +167,7 @@ private fun AccountSettings(me: Me, controlPlane: String, onSignOut: () -> Unit)
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
                 Label(me.name.ifBlank { me.email }, color = colors.text)
                 Label(me.email, style = Tokens.Type.Meta, color = colors.textMuted)
-                Label("Control plane $controlPlane", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label(listOfNotNull("Control plane $controlPlane", serverVersion?.let { "version $it" }).joinToString(" · "), style = Tokens.Type.Meta, color = colors.textMuted)
             }
             MyButton(onSignOut, text = "Sign out", icon = MyIcon.Logout, variant = ButtonVariant.Outline)
         }

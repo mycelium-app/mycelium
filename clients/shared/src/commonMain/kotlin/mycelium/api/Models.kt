@@ -74,6 +74,9 @@ data class ErrorBody(val error: String, val message: String)
 data class Me(val id: String, val email: String, val name: String)
 
 @Serializable
+data class ServerVersion(val version: String)
+
+@Serializable
 data class DeviceRequest(
     val kind: DeviceKind,
     val label: String,

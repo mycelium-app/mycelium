@@ -109,6 +109,15 @@ class ApiTest {
     }
 
     @Test
+    fun theControlPlaneVersionIsReadFromItsVersionRoute() = runTest {
+        val (api, _) = apiWith { request ->
+            respond(if (request.url.encodedPath == "/api/v1/version") """{"version":"v0.3.6"}""" else "{}", HttpStatusCode.OK, JsonHeaders)
+        }
+
+        assertEquals("v0.3.6", api.version())
+    }
+
+    @Test
     fun anOlderControlPlaneWithoutTheRouteAsksForAnUpdateRatherThanACheckOfTheAddress() = runTest {
         val (api, _) = apiWith {
             respond("""{"error":"not_found","message":"That address was not found. Check the address and try again."}""", HttpStatusCode.NotFound, JsonHeaders)
