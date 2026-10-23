@@ -64,20 +64,41 @@ import mycelium.state.statusSectionName
 fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
-    var panel by remember { mutableStateOf<SidePanel?>(null) }
     val platform = LocalPlatform.current
-    var panelWidth by remember { mutableStateOf(platform?.loadPreference(SidePanelWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel) }
-
-    fun resizePanel(width: Dp) {
-        panelWidth = width.coerceIn(Tokens.Size.SidePanelMin, Tokens.Size.SidePanelMax)
-        platform?.savePreference(SidePanelWidthPreference, panelWidth.value.toString())
-    }
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
+    val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
+    var panel by remember(workspace) {
+        val saved = if (compact || workspace == null) null else platform?.loadPreference("$SidePanelPreference:$workspace")
+
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved })
+    }
+    var panelWidth by remember(workspace) {
+        val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
+
+        mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
+    }
+
+    fun openPanel(chosen: SidePanel?) {
+        panel = chosen
+
+        if (!compact && workspace != null) {
+            platform?.savePreference("$SidePanelPreference:$workspace", chosen?.name.orEmpty())
+        }
+    }
+
+    fun resizePanel(width: Dp) {
+        panelWidth = width.coerceIn(Tokens.Size.SidePanelMin, Tokens.Size.SidePanelMax)
+        platform?.savePreference(SidePanelWidthPreference, panelWidth.value.toString())
+
+        if (workspace != null) {
+            platform?.savePreference("$SidePanelWidthPreference:$workspace", panelWidth.value.toString())
+        }
+    }
     var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
     var drafts by remember(id) { mutableStateOf(emptyList<DraftAttachment>()) }
@@ -172,9 +193,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
-                    onDetails = { panel = SidePanel.Details },
-                    onTerminal = { panel = SidePanel.Terminal },
-                    onGit = { panel = SidePanel.Git },
+                    onDetails = { openPanel(SidePanel.Details) },
+                    onTerminal = { openPanel(SidePanel.Terminal) },
+                    onGit = { openPanel(SidePanel.Git) },
                     onRename = { title -> store.rename(conversation, title) },
                     onArchive = {
                         store.act {
@@ -273,13 +294,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(panel) { chosen -> panel = if (panel == chosen) null else chosen }
+                Rail(panel) { chosen -> openPanel(if (panel == chosen) null else chosen) }
             }
         }
     }
 
     if (compact && !chat && panel != null) {
-        BottomSheet(onDismiss = { panel = null }) {
+        BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet)) }
@@ -539,5 +560,7 @@ private fun InspectorSection(name: String, rows: List<Pair<String, String>>) {
         }
     }
 }
+
+private const val SidePanelPreference = "side-panel"
 
 private const val SidePanelWidthPreference = "side-panel-width"
