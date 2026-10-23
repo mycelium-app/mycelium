@@ -87,6 +87,9 @@ fun Composer(
     onSetSetting: (String, String) -> Unit,
     onSearchFiles: suspend (String) -> List<String>,
     modifier: Modifier = Modifier,
+    accounts: List<Choice> = emptyList(),
+    accountLocked: Boolean = false,
+    onSetAccount: (String) -> Unit = {},
 ) {
     val colors = MyTheme.colors
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
@@ -153,6 +156,12 @@ fun Composer(
     }
 
     val pickers: @Composable () -> Unit = {
+        if (accounts.isNotEmpty() && accountLocked) {
+            Label(conversation.account ?: "Account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
+        } else if (accounts.isNotEmpty()) {
+            OptionMenu("Account", accounts, conversation.account, onSetAccount)
+        }
+
         if (modes.isNotEmpty()) {
             OptionMenu("Mode", modes, options.currentMode, onSetMode)
         }
@@ -289,7 +298,7 @@ private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit
 }
 
 @Composable
-private fun OptionMenu(
+fun OptionMenu(
     name: String,
     choices: List<Choice>,
     current: String?,

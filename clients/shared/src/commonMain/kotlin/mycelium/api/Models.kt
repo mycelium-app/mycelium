@@ -135,6 +135,7 @@ data class NodeSummary(
     val os: String,
     val arch: String,
     val version: String,
+    val address: String = "",
     @SerialName("update_available") val updateAvailable: String? = null,
     val online: Boolean,
     val draining: Boolean,
@@ -318,7 +319,7 @@ data class Repositories(
 )
 
 @Serializable
-data class StartLoginRequest(val agent: String, val method: String)
+data class StartLoginRequest(val agent: String, val method: String, val account: String? = null)
 
 @Serializable
 data class StartLoginResponse(@SerialName("login_id") val loginId: String)
@@ -371,6 +372,7 @@ data class SearchHit(
 data class CreateConversationRequest(
     @SerialName("node_id") val nodeId: String,
     val agent: String,
+    val account: String? = null,
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     val branch: String? = null,
@@ -379,7 +381,18 @@ data class CreateConversationRequest(
 )
 
 @Serializable
-data class PatchConversationRequest(val title: String? = null, val archived: Boolean? = null)
+data class PatchConversationRequest(val title: String? = null, val archived: Boolean? = null, val account: String? = null)
+
+@Serializable
+data class SessionSummary(
+    val id: String,
+    val kind: String,
+    val label: String,
+    val hostname: String = "",
+    val address: String = "",
+    @SerialName("last_used_at") val lastUsedAt: String,
+    val current: Boolean = false,
+)
 
 @Serializable
 data class PromptRequest(val text: String)
@@ -416,6 +429,7 @@ data class Conversation(
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("archived_at") val archivedAt: String? = null,
+    val account: String? = null,
 )
 
 @Serializable

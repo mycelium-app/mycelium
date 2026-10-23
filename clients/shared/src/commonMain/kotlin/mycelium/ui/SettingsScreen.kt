@@ -36,8 +36,10 @@ import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon) {
     Appearance("Appearance", MyIcon.Sun),
+    Accounts("Accounts", MyIcon.Person),
     Agents("Agents", MyIcon.ClaudeMark),
     Memories("Memories", MyIcon.Info),
+    Sessions("Sessions", MyIcon.Key),
     Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
     Account("Account", MyIcon.Settings),
@@ -97,8 +99,10 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
     ) {
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
+            SettingsSection.Accounts -> AccountsSettings(store)
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
+            SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
             SettingsSection.Forges -> ForgesSettings(store)
             SettingsSection.Indexing -> IndexingSettings(store)
             SettingsSection.Account -> AccountSettings(me, controlPlane, onSignOut)

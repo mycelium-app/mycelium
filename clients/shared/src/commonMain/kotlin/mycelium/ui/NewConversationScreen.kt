@@ -18,9 +18,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import mycelium.api.Conversation
 import mycelium.api.CreateConversationRequest
+import mycelium.api.LoginState
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.accountChoices
 import mycelium.state.agentName
+import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
@@ -40,6 +43,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
+    var account by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshProjects() }
@@ -50,6 +54,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
+
+    val accounts = switchableAccounts(node, chosenAgent.orEmpty())
+    val chosenAccount = accounts.firstOrNull { it.account.orEmpty() == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
 
     fun create() {
         if (node == null || chosenAgent == null) {
@@ -73,6 +80,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                 CreateConversationRequest(
                     node.id,
                     chosenAgent,
+                    account = chosenAccount?.account,
                     cwd = if (project == null) cwd.trim() else null,
                     projectId = project?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
@@ -178,6 +186,14 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             onSelect = { picked -> agent = agents.first { agentName(it.agent) == picked }.agent },
                             groupLabel = "Agent",
                         )
+                    }
+                }
+
+                if (accounts.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+
+                        OptionMenu("Account", accountChoices(accounts), chosenAccount?.account.orEmpty(), { picked -> account = picked })
                     }
                 }
 

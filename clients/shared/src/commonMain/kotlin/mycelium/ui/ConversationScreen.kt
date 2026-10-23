@@ -37,7 +37,9 @@ import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.ago
+import mycelium.state.accountChoices
 import mycelium.state.agentName
+import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.buildThread
 import mycelium.state.sessionOptions
@@ -126,6 +128,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
                 onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
                 onSearchFiles = { query -> api.files(id, query) },
+                accounts = remember(node, conversation.agent) { accountChoices(switchableAccounts(node, conversation.agent)) },
+                accountLocked = conversation.acpSessionId != null,
+                onSetAccount = { account -> store.act { api.patchConversation(id, PatchConversationRequest(account = account)) } },
                 onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
             )
         }

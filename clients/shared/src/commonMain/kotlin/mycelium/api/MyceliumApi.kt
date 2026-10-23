@@ -120,6 +120,12 @@ class MyceliumApi(
         client.post("$root/auth/logout") { authorise() }
     }
 
+    suspend fun sessions(): List<SessionSummary> = call("/sessions") { client.get(it) { authorise() } }.body()
+
+    suspend fun endSession(id: String, confirmCurrent: Boolean = false) {
+        call("/sessions/$id") { client.delete(it) { authorise(); if (confirmCurrent) parameter("confirm_current", "true") } }
+    }
+
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
 
     suspend fun drainNode(id: String, draining: Boolean) {
