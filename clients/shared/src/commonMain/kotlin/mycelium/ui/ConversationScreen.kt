@@ -82,6 +82,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
     }
 
+    var walkthroughWidth by remember(workspace) {
+        val saved = workspace?.let { platform?.loadPreference("$WalkthroughWidthPreference:$it") }
+
+        mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.Walkthrough)
+    }
+
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
 
@@ -98,6 +104,15 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             platform?.savePreference("$SidePanelWidthPreference:$workspace", panelWidth.value.toString())
         }
     }
+
+    fun resizeWalkthrough(width: Dp) {
+        walkthroughWidth = width.coerceIn(Tokens.Size.WalkthroughMin, Tokens.Size.WalkthroughMax)
+
+        if (workspace != null) {
+            platform?.savePreference("$WalkthroughWidthPreference:$workspace", walkthroughWidth.value.toString())
+        }
+    }
+
     var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
     val attached = rememberAttachmentDrafts(id)
@@ -170,7 +185,17 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     )
 
     CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes) {
+        val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
+
         Row(Modifier.fillMaxSize()) {
+            if (walkthrough != null && !compact) {
+                Box(Modifier.width(walkthroughWidth).fillMaxHeight()) {
+                    WalkthroughView(store, id, walkthrough, Modifier.fillMaxSize())
+                }
+
+                ResizeHandle("Resize the walkthrough") { moved -> resizeWalkthrough(walkthroughWidth + moved) }
+            }
+
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 ConversationHeader(
                     conversation = conversation,
@@ -201,9 +226,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     },
                 )
 
-                val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed }
-
-                if (walkthrough != null && !chat) {
+                if (walkthrough != null && compact) {
                     TabRow(listOf(ConversationTab, WalkthroughTab), tab, { tab = it }, groupLabel = "Conversation sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
                     Hairline()
 
@@ -563,3 +586,4 @@ private fun InspectorSection(name: String, rows: List<Pair<String, String>>) {
 private const val SidePanelPreference = "side-panel"
 
 private const val SidePanelWidthPreference = "side-panel-width"
+private const val WalkthroughWidthPreference = "walkthrough-width"

@@ -2,9 +2,12 @@ package mycelium.desktop
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -55,7 +58,7 @@ class WalkthroughRenderTest {
         val walkthrough = MyceliumJson.decodeFromString(Walkthrough.serializer(), RenderWalkthrough)
 
         val file = renderAt(name, true, false, interact = interact) {
-            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { WalkthroughView(store, "c1", walkthrough) }
+            Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) { Box(Modifier.width(560.dp).fillMaxHeight()) { WalkthroughView(store, "c1", walkthrough) } }
         }
 
         assertTrue(file.length() > 1_000)

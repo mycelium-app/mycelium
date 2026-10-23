@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,6 +74,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     val scopes by store.walkthroughScopes.collectAsState()
     val allNotes by store.walkthroughNotes.collectAsState()
     val notes = allNotes[conversationId].orEmpty()
+    var stepsOpen by remember { mutableStateOf(true) }
     var uncovered by remember(walkthrough.id) { mutableStateOf(emptyList<WalkthroughFile>()) }
     val steps = walkthrough.steps + listOfNotNull(WalkthroughStep(NotCoveredTitle, section = "Not covered", explanation = "These changes are not in any step above.", files = uncovered).takeIf { uncovered.isNotEmpty() })
     val last = steps.lastIndex
@@ -151,6 +154,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
             onScope = { store.chooseWalkthroughScope(conversationId, it) },
             onRegenerate = { store.regenerateWalkthrough(conversationId) },
             onDismiss = { store.setWalkthroughDismissed(conversationId, true) },
+            stepsOpen = stepsOpen.takeIf { !LocalTouch.current },
+            onToggleSteps = { stepsOpen = !stepsOpen },
         )
     }
     val stepKeys = Modifier.onKeyEvent { event ->
@@ -186,11 +191,13 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         Hairline()
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
-                stepList()
-            }
+            if (stepsOpen) {
+                Column(stepKeys.width(Tokens.Size.WalkthroughSteps).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
+                    stepList()
+                }
 
-            VerticalHairline()
+                VerticalHairline()
+            }
 
             Column(Modifier.weight(1f).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 detail()
@@ -199,11 +206,16 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onRegenerate: () -> Unit, onDismiss: () -> Unit) {
+private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onRegenerate: () -> Unit, onDismiss: () -> Unit, stepsOpen: Boolean?, onToggleSteps: () -> Unit) {
     var open by remember { mutableStateOf(false) }
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
+        if (stepsOpen != null) {
+            MyButton(onToggleSteps, icon = MyIcon.List, description = if (stepsOpen) "Hide steps" else "Show steps", muted = true, size = ButtonSize.Sm)
+        }
+
         Box {
             MyButton({ open = true }, text = scope.label, icon = MyIcon.Branch, trailingIcon = MyIcon.ChevronDown, description = "Walkthrough scope: ${scope.label}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
 
