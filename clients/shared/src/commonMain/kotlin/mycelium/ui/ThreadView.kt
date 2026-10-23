@@ -58,7 +58,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import mycelium.state.GeneratedUiLanguage
 import mycelium.state.MarkdownBlock
+import mycelium.state.parseGeneratedUi
 import mycelium.state.markdownBlocks
 import mycelium.state.DiffLine
 import mycelium.state.FileDiff
@@ -209,15 +211,27 @@ private fun AgentMessage(text: String) {
                         Modifier.semantics { heading() },
                         style = (if (block.level <= 2) Tokens.Type.Display else Tokens.Type.Title).themed(),
                     )
-                    is MarkdownBlock.Code -> Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(colors.bgPanel, BlockShape)
-                            .border(Tokens.Size.Hairline, colors.border, BlockShape)
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                    ) {
-                        Label(block.text, style = Tokens.Type.Code)
+                    is MarkdownBlock.Code -> {
+                        val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseGeneratedUi(block.text) else null }
+
+                        if (generated != null) {
+                            GeneratedUi(generated)
+                        } else {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(colors.bgPanel, BlockShape)
+                                    .border(Tokens.Size.Hairline, colors.border, BlockShape)
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                            ) {
+                                Label(block.text, style = Tokens.Type.Code)
+                            }
+
+                            if (block.language == GeneratedUiLanguage) {
+                                Label("This block could not be shown as an interface.", style = Tokens.Type.Meta, color = colors.textMuted)
+                            }
+                        }
                     }
                     is MarkdownBlock.Bullets -> ListBlock(block.items) {
                         Box(Modifier.height(Tokens.Type.Prose.lineHeight.value.dp), contentAlignment = Alignment.Center) {
@@ -249,7 +263,7 @@ private fun Prose(text: String) {
 }
 
 @Composable
-private fun TableBlock(table: MarkdownBlock.Table) {
+internal fun TableBlock(table: MarkdownBlock.Table) {
     val colors = MyTheme.colors
     val codeFont = LocalFonts.current.mono
     val measurer = rememberTextMeasurer()
