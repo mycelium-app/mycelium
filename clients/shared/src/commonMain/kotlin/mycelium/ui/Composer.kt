@@ -234,16 +234,7 @@ fun Composer(
         return
     }
 
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(colors.bgContent)
-            .drawBehind {
-                val line = Tokens.Size.Hairline.toPx()
-                drawRect(colors.border, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, line))
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         val measured = Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth()
 
         goal?.goal?.let { held ->
@@ -258,25 +249,36 @@ fun Composer(
             }
         }
 
-        Box(measured.padding(horizontal = Tokens.Space.S2)) {
-            AnnotationChips(annotations, onRemoveAnnotation)
-        }
-
-        field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
-
-        Row(
-            measured.padding(start = Tokens.Space.S2, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(colors.bgContent)
+                .drawBehind {
+                    val line = Tokens.Size.Hairline.toPx()
+                    drawRect(colors.border, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, line))
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(Modifier.weight(1f))
-
-            if (working) {
-                Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
+            Box(measured.padding(horizontal = Tokens.Space.S2)) {
+                AnnotationChips(annotations, onRemoveAnnotation)
             }
 
-            pickers()
-            SendButtons(working, onStop, ::submit)
+            field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
+
+            Row(
+                measured.padding(start = Tokens.Space.S2, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f))
+
+                if (working) {
+                    Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
+                }
+
+                pickers()
+                SendButtons(working, onStop, ::submit)
+            }
         }
     }
 }
