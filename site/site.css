@@ -113,15 +113,34 @@ a { color: var(--accent); }
 .compare h3 { margin: 24px 0 0; font-size: 22px; line-height: 28px; font-weight: 600; }
 .compare-lead, .footnote { margin: 0; color: var(--text-muted); font-size: 15px; line-height: 24px; max-width: 70ch; }
 .footnote { font-size: 13px; line-height: 20px; }
-.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-float); }
+.table-scroll { overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--border); border-radius: var(--radius-float); background: var(--bg-content); }
 .table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.matrix { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 14px; line-height: 20px; }
-.matrix-two { min-width: 0; }
-.matrix-two tbody th { width: 50%; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.matrix { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; line-height: 20px; }
 .matrix th, .matrix td { padding: 10px 14px; text-align: left; vertical-align: top; border-top: 1px solid var(--border); }
-.matrix thead th { border-top: 0; font-size: 13px; font-weight: 600; color: var(--text); background: var(--bg-panel); }
-.matrix thead th a { color: var(--text); }
-.matrix tbody th { font-weight: 500; color: var(--text); width: 22%; }
-.matrix td { color: var(--text-muted); }
-.matrix td:nth-child(2) { color: var(--text); }
-.matrix sup a { color: var(--accent); text-decoration: none; }
+.matrix thead th { border-top: 0; vertical-align: middle; background: var(--bg-panel); }
+.matrix thead a { display: inline-flex; align-items: center; min-height: 32px; border-radius: 4px; }
+.matrix thead a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.matrix thead img { display: block; height: 24px; width: auto; max-width: 100%; }
+.matrix th[scope="row"], .matrix thead th:first-child { position: sticky; left: 0; z-index: 1; width: 30%; background: var(--bg-content); box-shadow: inset -1px 0 0 var(--border); }
+.matrix thead th:first-child { background: var(--bg-panel); }
+.matrix th[scope="row"] { font-weight: 500; color: var(--text); }
+.matrix th[scope="rowgroup"] { padding-top: 20px; background: var(--bg-panel); font-size: 13px; font-weight: 600; color: var(--accent); }
+.matrix th[scope="rowgroup"] span { position: sticky; left: 14px; }
+.matrix td { width: 23%; color: var(--text); }
+.matrix td:nth-child(2) { background: color-mix(in srgb, var(--accent) 5%, var(--bg-content)); }
+.st { display: inline-flex; align-items: flex-start; gap: 6px; font-weight: 500; }
+.st svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.st-yes svg { color: var(--accent); }
+.st-partly svg { color: var(--status-attention); }
+.st-no svg { color: var(--status-failed); }
+.st-unknown { color: var(--text-muted); font-weight: 400; }
+.q { display: block; margin-top: 2px; font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.q a, .matrix sup a { color: var(--accent); }
+@media (max-width: 600px) {
+  .matrix { font-size: 13px; line-height: 18px; }
+  .matrix th, .matrix td { padding: 8px; }
+  .matrix th[scope="rowgroup"] span { left: 8px; }
+  .matrix thead img { height: 20px; }
+  .q { font-size: 12px; line-height: 16px; }
+}
