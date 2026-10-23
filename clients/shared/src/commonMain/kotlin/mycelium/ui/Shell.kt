@@ -160,6 +160,10 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
         ResizeHandle("Resize the sidebar") { moved -> resize(sidebarWidth + moved) }
 
         Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (!state.connected) {
+                ReconnectingBanner()
+            }
+
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -173,10 +177,6 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
 @Composable
 fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     val state by store.state.collectAsState()
-            if (!state.connected) {
-                ReconnectingBanner()
-            }
-
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
     var drawerOpen by remember { mutableStateOf(false) }
@@ -209,6 +209,10 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
         CompositionLocalProvider(LocalOpenList provides { drawerOpen = true }) {
             Column(Modifier.fillMaxSize()) {
+                if (!state.connected) {
+                    ReconnectingBanner()
+                }
+
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -222,10 +226,6 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
         }
 
         if (drawerShown) {
-                if (!state.connected) {
-                    ReconnectingBanner()
-                }
-
             Box(
                 Modifier
                     .fillMaxSize()
