@@ -3,6 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::conversation::{AgentId, AgentInfo, DeviceKind, LoginInfo, SideKind};
+use crate::link::ResourceSample;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -581,4 +582,43 @@ pub struct ScheduleRun {
     pub outcome: RunOutcome,
     pub reason: Option<String>,
     pub conversation_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CpuPoint {
+    pub at_ms: i64,
+    pub cpu_percent: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeResources {
+    pub latest: Option<ResourceSample>,
+    pub history: Vec<CpuPoint>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ActivityRow {
+    pub key: String,
+    pub name: String,
+    pub turns: i64,
+    pub reported_turns: i64,
+    pub working_ms: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Activity {
+    pub range: String,
+    pub totals: ActivityRow,
+    pub days: Vec<ActivityRow>,
+    pub conversations: Vec<ActivityRow>,
+    pub nodes: Vec<ActivityRow>,
+    pub agents: Vec<ActivityRow>,
+    pub projects: Vec<ActivityRow>,
+    pub models: Vec<ActivityRow>,
+    pub unreported_agents: Vec<String>,
 }

@@ -3,12 +3,13 @@ use crate::error::ApiResult;
 use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
-use mycelium_proto::link::{ControlToNode, GitCommand};
+use mycelium_proto::api::{CpuPoint, NodeResources};
+use mycelium_proto::link::{ControlToNode, GitCommand, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
@@ -47,6 +48,14 @@ pub struct UnacknowledgedPrompt {
     pub text: String,
 }
 
+const RESOURCE_HISTORY: usize = 200;
+
+#[derive(Default)]
+struct WatchedResources {
+    latest: Option<ResourceSample>,
+    history: VecDeque<CpuPoint>,
+}
+
 pub struct GitAnswer {
     pub ok: bool,
     pub output: Value,
@@ -62,6 +71,7 @@ pub struct Hub {
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
+    resources: Mutex<HashMap<Uuid, WatchedResources>>,
 }
 
 impl Hub {
@@ -87,6 +97,7 @@ impl Hub {
             nodes.remove(&node_id);
             drop(nodes);
             self.forget_send_now_on(node_id);
+            self.forget_resources_of(node_id);
 
             return true;
         }
@@ -100,6 +111,7 @@ impl Hub {
         }
 
         self.forget_send_now_on(node_id);
+        self.forget_resources_of(node_id);
     }
 
     pub fn request_files(&self, node_id: Uuid, cwd: String, query: String) -> Option<(Uuid, oneshot::Receiver<Vec<String>>)> {
@@ -165,6 +177,38 @@ impl Hub {
     pub fn forget_git_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.git_requests.lock() {
             requests.remove(&request_id);
+        }
+    }
+
+    pub fn record_resources(&self, node_id: Uuid, sample: ResourceSample) {
+        let Ok(mut resources) = self.resources.lock() else {
+            return;
+        };
+        let watched = resources.entry(node_id).or_default();
+
+        watched.history.push_back(CpuPoint { at_ms: sample.at_ms, cpu_percent: sample.cpu_percent });
+
+        while watched.history.len() > RESOURCE_HISTORY {
+            watched.history.pop_front();
+        }
+
+        watched.latest = Some(sample);
+    }
+
+    pub fn resources_of(&self, node_id: Uuid) -> NodeResources {
+        let Ok(resources) = self.resources.lock() else {
+            return NodeResources { latest: None, history: Vec::new() };
+        };
+
+        match resources.get(&node_id) {
+            Some(watched) => NodeResources { latest: watched.latest.clone(), history: watched.history.iter().cloned().collect() },
+            None => NodeResources { latest: None, history: Vec::new() },
+        }
+    }
+
+    fn forget_resources_of(&self, node_id: Uuid) {
+        if let Ok(mut resources) = self.resources.lock() {
+            resources.remove(&node_id);
         }
     }
 

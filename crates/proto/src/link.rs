@@ -46,6 +46,8 @@ pub enum NodeToControl {
         conversation_id: Uuid,
         seq: i64,
         stop_reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Value>,
     },
     SessionFailed {
         conversation_id: Uuid,
@@ -95,7 +97,62 @@ pub enum NodeToControl {
         revision: String,
         unmanaged: Vec<String>,
     },
+    Resources {
+        sample: ResourceSample,
+    },
     Pong,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiskUsage {
+    pub mount: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProcessUsage {
+    pub pid: u32,
+    pub name: String,
+    pub command: String,
+    pub cpu_percent: f32,
+    pub memory_bytes: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ListeningPort {
+    pub port: u16,
+    pub address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResourceSample {
+    pub at_ms: i64,
+    pub available: bool,
+    pub cpu_percent: f32,
+    pub cores: u32,
+    pub load: [f32; 3],
+    pub memory_total_bytes: u64,
+    pub memory_available_bytes: u64,
+    pub swap_total_bytes: u64,
+    pub swap_free_bytes: u64,
+    pub disks: Vec<DiskUsage>,
+    pub processes: Vec<ProcessUsage>,
+    pub ports: Vec<ListeningPort>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -229,6 +286,9 @@ pub enum ControlToNode {
         request_id: Uuid,
         cwd: String,
         command: GitCommand,
+    },
+    Watch {
+        seconds: u32,
     },
     Ping,
     Revoked,

@@ -146,7 +146,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
         }
-        NodeToControl::TurnEnd { conversation_id, seq, stop_reason } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
+        NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage: _ } => turn_end(state, node_id, conversation_id, seq, stop_reason).await,
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
             state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
@@ -188,6 +188,12 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::Transcript { path, offset, data } => store_transcript(state, node_id, path, offset, data).await,
+        NodeToControl::Resources { sample } => {
+            state.hub.record_resources(node_id, sample.clone());
+            state.publish(None, StreamMessage::NodeResources { node_id, sample });
+
+            Ok(())
+        }
         NodeToControl::Files { request_id, paths } => {
             state.hub.answer_files(node_id, request_id, paths);
 

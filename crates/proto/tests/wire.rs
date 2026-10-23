@@ -22,6 +22,23 @@ fn now() -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()
 }
 
+fn sample() -> ResourceSample {
+    ResourceSample {
+        at_ms: 1,
+        available: true,
+        cpu_percent: 12.5,
+        cores: 4,
+        load: [0.5, 0.4, 0.3],
+        memory_total_bytes: 8,
+        memory_available_bytes: 4,
+        swap_total_bytes: 2,
+        swap_free_bytes: 1,
+        disks: vec![DiskUsage { mount: "/".into(), total_bytes: 10, free_bytes: 5 }],
+        processes: vec![ProcessUsage { pid: 7, name: "claude".into(), command: "claude".into(), cpu_percent: 1.0, memory_bytes: 3, agent: true, conversation_id: Some(id()), cwd: Some("/work".into()) }],
+        ports: vec![ListeningPort { port: 3000, address: "0.0.0.0".into(), pid: Some(7), process: Some("node".into()), conversation_id: Some(id()), cwd: Some("/work".into()) }],
+    }
+}
+
 fn conversation() -> Conversation {
     Conversation {
         id: id(),
@@ -68,7 +85,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::PromptReceived { conversation_id: id(), prompt_id: id() }, "prompt_received"),
         (NodeToControl::AcpUpdate { conversation_id: id(), seq: 1, update: json!({"a": 1}) }, "acp_update"),
         (NodeToControl::PermissionRequest { conversation_id: id(), seq: 2, request_id: "r".into(), request: json!({}) }, "permission_request"),
-        (NodeToControl::TurnEnd { conversation_id: id(), seq: 3, stop_reason: "end_turn".into() }, "turn_end"),
+        (NodeToControl::TurnEnd { conversation_id: id(), seq: 3, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 3})) }, "turn_end"),
         (NodeToControl::SessionFailed { conversation_id: id(), seq: 4, message: "x".into() }, "session_failed"),
         (NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut }] }, "logins"),
         (NodeToControl::LoginOutput { login_id: id(), data: "hi".into() }, "login_output"),
@@ -79,6 +96,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec!["Claude Code: /h/.claude/CLAUDE.md".into()] }, "instructions_held"),
+        (NodeToControl::Resources { sample: sample() }, "resources"),
         (NodeToControl::Pong, "pong"),
     ];
 
@@ -108,6 +126,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::TerminalInput { terminal_id: id(), data: "bHM=".into() }, "terminal_input"),
         (ControlToNode::ResizeTerminal { terminal_id: id(), cols: 100, rows: 30 }, "resize_terminal"),
         (ControlToNode::StopTerminal { terminal_id: id() }, "stop_terminal"),
+        (ControlToNode::Watch { seconds: 30 }, "watch"),
         (ControlToNode::Git { request_id: id(), cwd: "/work".into(), command: GitCommand::Diff { path: "a".into(), staged: true } }, "git"),
         (ControlToNode::TranscriptAck { path: "p".into(), bytes: 10 }, "transcript_ack"),
         (ControlToNode::Ping, "ping"),
@@ -229,6 +248,9 @@ fn stream_login_and_queue_messages_round_trip() {
 
     let exited = round_trip(&StreamMessage::TerminalExited { terminal_id: id() });
     assert_eq!(exited["type"], "terminal_exited");
+
+    let resources = round_trip(&StreamMessage::NodeResources { node_id: id(), sample: sample() });
+    assert_eq!(resources["type"], "node_resources");
 
     let removed = round_trip(&StreamMessage::NodeRemoved { node_id: id() });
     assert_eq!(removed["type"], "node_removed");

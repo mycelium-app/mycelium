@@ -5,10 +5,12 @@ use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeSummary, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
+use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
+
+const WATCH_LEASE_SECONDS: u32 = 30;
 
 pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<Json<Vec<NodeSummary>>> {
     Ok(Json(node_summaries(&state, None).await?))
@@ -71,6 +73,20 @@ pub async fn revoke(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
     state.publish(None, StreamMessage::NodeRemoved { node_id: id });
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn watch(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<NodeResources>> {
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(id).fetch_one(&state.pool).await?;
+
+    if !exists {
+        return Err(ApiError::not_found("That node"));
+    }
+
+    if !state.hub.is_online(id) || !state.hub.send(id, ControlToNode::Watch { seconds: WATCH_LEASE_SECONDS }) {
+        return Err(node_offline());
+    }
+
+    Ok(Json(state.hub.resources_of(id)))
 }
 
 pub async fn start_login(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<StartLoginRequest>) -> ApiResult<Json<StartLoginResponse>> {

@@ -151,6 +151,7 @@ Device codes (one flow for nodes and for desktop clients):
 Nodes:
 - `GET /api/v1/nodes` → nodes with `online` (linked and past its `hello`), `draining`, agents and logins. A node lists the conversations whose agent session is running on it as `sessions`, republished when one starts or closes. A node and each agent carry `update_available` (the newer version) only when the control plane has seen a newer release; a failed check keeps the last known version.
 - `POST /api/v1/nodes/{id}/drain` `{draining}`, `DELETE /api/v1/nodes/{id}` revokes.
+- `POST /api/v1/nodes/{id}/watch` → `{latest, history}`: asks the node to sample for the next 30 seconds and returns its newest sample (`null` until one arrives) and the last 200 CPU points `[{at_ms, cpu_percent}]`. A client calls it when a node's page opens and every 15 seconds while the page stays open; the samples follow as `node_resources`. 404 for an unknown node, 409 `node_offline`. A sample is `{at_ms, available, cpu_percent, cores, load: [1, 5, 15 minutes], memory_total_bytes, memory_available_bytes, swap_total_bytes, swap_free_bytes, disks: [{mount, total_bytes, free_bytes}], processes: [{pid, name, command, cpu_percent, memory_bytes, agent, conversation_id?, cwd?}], ports: [{port, address, pid?, process?, conversation_id?, cwd?}]}`. `available` is false on a node that cannot read `/proc` (only Linux is read); `cpu_percent` of a process counts one core as 100. `command` is the program name only, never its arguments.
 - `POST /api/v1/nodes/{id}/logins` `{agent, method}` → `{login_id}`; starts the agent's own sign-in on
   the node. Output streams as `login_output`; `POST /api/v1/logins/{login_id}/input` `{text}` writes to
   it; `DELETE /api/v1/logins/{login_id}` stops it.
@@ -186,7 +187,7 @@ History:
 Live:
 - `GET /api/v1/stream` (WebSocket, cookie or client token). The server sends one JSON object per
   message: `conversation` (the row), `event` (`{conversation_id, seq, kind, payload}`), `queue`,
-  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `login_output` (`{login_id, data}`), `terminal_output` (`{terminal_id, data}`, base64 bytes), `terminal_exited` (`{terminal_id}`, also sent when the terminal is stopped or its node disconnects or is revoked), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
+  `node`, `node_removed` (`{node_id}`, sent when a node is revoked), `node_resources` (`{node_id, sample}`), `login_output` (`{login_id, data}`), `terminal_output` (`{terminal_id, data}`, base64 bytes), `terminal_exited` (`{terminal_id}`, also sent when the terminal is stopped or its node disconnects or is revoked), `login_finished` (`{login_id, ok}`; `ok` is false when the sign-in is stopped, or its node disconnects or is revoked), `device` (`{user_code, kind: "node"|"client", label, hostname, state: "pending"|"approved"|"denied"|"expired"|"consumed", result_id: null|uuid}`, sent to everyone signed in whenever a device code is created, approved, denied, expires or is exchanged; `result_id` is the node or client token id once consumed). A node is published with `node` (`online` false) as soon as its credential is issued at token exchange, before the daemon first connects. Clients drop the node on `node_removed`, and reconnect and refetch. A request that carries an `Origin` header must match `MYCELIUM_PUBLIC_URL`'s origin, otherwise 403 `origin_not_allowed`; clients that send none (desktop, tests) are accepted.
 
 Memory:
 - `GET /api/v1/memories?query=` (newest first, or full-text matches when `query` is given), `PATCH /memories/{id}` `{text}`, `DELETE /memories/{id}`. Any signed-in user manages them.
@@ -299,6 +300,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Node link opened, `hello` (agents), `logins`, link closed or silent for 90s | `node` | everyone |
 | Drain on or off | `node` | everyone |
 | Revoke | `node_removed`, plus `login_finished` for its sign-ins | everyone |
+| Node `resources` sample | `node_resources` (`{node_id, sample}`) | everyone |
 | Sign-in output | `login_output` | starter |
 | Sign-in ends: node reports it, `DELETE /logins/{id}`, node disconnects or is revoked | `login_finished` | starter |
 | Terminal output | `terminal_output` | opener |
@@ -320,7 +322,7 @@ Silent on purpose, because no client shows them: user, web session and client to
 `last_used_at`), `nodes.last_seen_at` refreshed by `pong` (clients show `online`, which is published),
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
-`POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /logins/{id}/input` and
+`POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /nodes/{id}/watch` (the samples follow as `node_resources`), `POST /logins/{id}/input` and
 `POST /conversations/{id}/terminal` (the output follows as `terminal_output`), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
@@ -359,6 +361,7 @@ Node to control plane:
 | `terminal_exited` | `terminal_id` |
 | `transcript` | `path, offset, data` (base64; the bytes at `offset`) |
 | `workflow` | `conversation_id, run_id, line` (the journal line as JSON; no `seq`) |
+| `resources` | `sample` (see `POST /nodes/{id}/watch`; sent every 3 seconds while a watch lease lasts) |
 | `pong` | |
 
 Control plane to node:
@@ -381,6 +384,7 @@ Control plane to node:
 | `resize_terminal` | `terminal_id, cols, rows` |
 | `stop_terminal` | `terminal_id` |
 | `transcript_ack` | `path, bytes` |
+| `watch` | `seconds` (a lease: the node samples every 3 seconds until it runs out, and does nothing when nobody holds one; asking again extends it) |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
 

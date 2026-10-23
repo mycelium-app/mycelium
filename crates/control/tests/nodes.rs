@@ -1,8 +1,26 @@
 mod common;
 
 use common::Server;
-use mycelium_proto::link::NodeToControl;
+use mycelium_proto::link::{ControlToNode, ListeningPort, NodeToControl, ResourceSample};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
+
+fn sample(at_ms: i64, cpu_percent: f32) -> ResourceSample {
+    ResourceSample {
+        at_ms,
+        available: true,
+        cpu_percent,
+        cores: 4,
+        load: [0.5, 0.4, 0.3],
+        memory_total_bytes: 8,
+        memory_available_bytes: 4,
+        swap_total_bytes: 0,
+        swap_free_bytes: 0,
+        disks: vec![],
+        processes: vec![],
+        ports: vec![ListeningPort { port: 3000, address: "0.0.0.0".into(), pid: None, process: Some("node".into()), conversation_id: None, cwd: None }],
+    }
+}
 
 #[tokio::test]
 async fn a_node_can_be_renamed_and_the_new_name_is_listed() {
@@ -167,4 +185,73 @@ async fn a_node_reporting_live_sessions_when_it_connects_lists_them_and_loses_th
     drop(link);
     node_with_sessions(&mut stream, id, vec![]).await;
     assert!(node_sessions(&server, id).await.is_empty());
+}
+
+#[tokio::test]
+async fn watching_a_node_asks_it_to_sample_for_a_while() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/watch", link.id))).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body, json!({"latest": null, "history": []}));
+    assert_eq!(link.next().await, ControlToNode::Watch { seconds: 30 });
+}
+
+#[tokio::test]
+async fn a_sample_from_the_node_is_streamed_and_kept_with_its_recent_history() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+
+    link.send(NodeToControl::Resources { sample: sample(1000, 10.0) }).await;
+    link.send(NodeToControl::Resources { sample: sample(4000, 30.0) }).await;
+
+    let streamed = stream.until(|message| matches!(&message, StreamMessage::NodeResources { sample, .. } if sample.at_ms == 4000).then_some(message)).await;
+    assert_eq!(streamed, StreamMessage::NodeResources { node_id: link.id, sample: sample(4000, 30.0) });
+
+    let (_, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/watch", link.id))).await;
+    assert_eq!(body["latest"]["ports"][0]["port"], 3000);
+    assert_eq!(body["history"], json!([{"at_ms": 1000, "cpu_percent": 10.0}, {"at_ms": 4000, "cpu_percent": 30.0}]));
+}
+
+#[tokio::test]
+async fn a_node_that_leaves_takes_its_samples_with_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (id, token) = (link.id, link.token.clone());
+    link.send(NodeToControl::Resources { sample: sample(1000, 10.0) }).await;
+    drop(link);
+
+    common::eventually("the node going offline", || async {
+        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{id}/watch"))).await;
+
+        (status == 409).then_some(body)
+    })
+    .await;
+
+    let mut again = server.connect_node(id, &token).await;
+    again.hello(vec![]).await;
+    common::eventually("the node coming back", || async {
+        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{id}/watch"))).await;
+
+        (status == 200).then_some(body)
+    })
+    .await;
+    let (_, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{id}/watch"))).await;
+
+    assert_eq!(body, json!({"latest": null, "history": []}));
+}
+
+#[tokio::test]
+async fn watching_an_offline_or_unknown_node_is_refused_with_a_reason() {
+    let server = Server::start().await;
+    let (offline, _) = server.join("node", "laptop").await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{offline}/watch"))).await;
+    assert_eq!((status, body["error"].as_str()), (409, Some("node_offline")));
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/nodes/{}/watch", uuid::Uuid::new_v4()))).await;
+    assert_eq!((status, body["error"].as_str()), (404, Some("not_found")));
 }

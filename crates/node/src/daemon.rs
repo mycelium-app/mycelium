@@ -5,6 +5,7 @@ use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
+use crate::resources::Watcher;
 use crate::terminal::{TerminalManager, find_on_path, user_shell};
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
@@ -24,6 +25,8 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
+
+const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
 
 type CommandSource = Arc<dyn Fn(AgentId) -> Vec<String> + Send + Sync>;
 type LoginCommandSource = Arc<dyn Fn(AgentId, &str) -> Option<Vec<String>> + Send + Sync>;
@@ -75,6 +78,7 @@ pub struct Daemon {
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
     logins: LoginManager,
     terminals: TerminalManager,
+    watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
 }
@@ -92,6 +96,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
+        watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
         connected: AtomicBool::new(false),
@@ -106,6 +111,19 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     tokio::spawn(follow_transcripts(daemon.clone()));
 
     run_link(daemon, out_rx).await
+}
+
+fn watched_disks(projects_root: &Path) -> Vec<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = PathBuf::from("/");
+    let on_root = |path: &Path| std::fs::metadata(path).ok().zip(std::fs::metadata("/").ok()).is_some_and(|(left, right)| left.dev() == right.dev());
+
+    if projects_root.exists() && !on_root(projects_root) {
+        return vec![root, projects_root.to_path_buf()];
+    }
+
+    vec![root]
 }
 
 async fn follow_transcripts(daemon: Arc<Daemon>) {
@@ -221,6 +239,9 @@ impl Daemon {
                     };
                     let _ = out.send(message);
                 });
+            }
+            ControlToNode::Watch { seconds } => {
+                self.watcher.extend(Duration::from_secs(seconds.into()));
             }
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);

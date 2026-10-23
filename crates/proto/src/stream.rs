@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::NodeSummary;
+use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -16,6 +17,10 @@ pub enum StreamMessage {
     Node(NodeSummary),
     NodeRemoved {
         node_id: Uuid,
+    },
+    NodeResources {
+        node_id: Uuid,
+        sample: ResourceSample,
     },
     LoginOutput {
         login_id: Uuid,

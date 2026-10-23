@@ -39,6 +39,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /auth/logout",
     "DELETE /api/v1/sessions/{id}",
     "POST /api/v1/nodes/{id}/logins",
+    "POST /api/v1/nodes/{id}/watch",
     "POST /api/v1/logins/{login_id}/input",
     "POST /api/v1/conversations/{id}/cancel",
     "POST /api/v1/conversations/{id}/terminal",
@@ -607,7 +608,7 @@ async fn a_conversation_streams_every_step_of_a_turn() {
     event_of(&mut stream, id, EventKind::PermissionResolved).await;
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
     event_of(&mut stream, id, EventKind::TurnEnd).await;
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Review).await;
 
@@ -715,7 +716,7 @@ async fn a_queued_message_sent_when_the_turn_ends_is_streamed() {
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "second"}))).await;
     let mut stream = server.user.stream().await;
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
 
     let sent = stream
         .until(|message| match message {

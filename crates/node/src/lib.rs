@@ -8,6 +8,7 @@ pub mod instructions;
 pub mod join;
 pub mod link;
 pub mod login;
+pub mod resources;
 pub mod session;
 pub mod status;
 pub mod terminal;

@@ -205,7 +205,7 @@ async fn live_conversations_are_indexed_by_user_message_and_by_assistant_turn() 
         link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}) }).await;
     }
 
-    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 3, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
     link.barrier(conversation.id, 4).await;
 
     let by_prompt = search(&server, "zebra").await;

@@ -84,7 +84,7 @@ async fn the_first_prompt_is_sent_once_the_session_has_started_and_the_turn_ends
     assert_eq!(text, "Fix the flaky test\nthen run it");
 
     link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 3, update: json!({"sessionUpdate": "agent_message_chunk"}) }).await;
-    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 4, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
 
     let review = stream.conversation_with_status("review").await;
     assert_eq!(review.id, conversation.id);
@@ -202,7 +202,7 @@ async fn answering_a_permission_the_turn_already_ended_without_does_not_resume_t
     let mut link = server.online_node("laptop").await;
     let id = waiting_for_permission(&server, &mut link).await;
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "cancelled".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 6, stop_reason: "cancelled".into(), usage: None }).await;
     link.barrier(id, 7).await;
     assert_eq!(status_of(&server, id).await, "review");
 
@@ -277,7 +277,7 @@ async fn a_send_now_whose_cancel_never_landed_does_not_release_the_queue_after_a
     assert_eq!(status, 204);
     assert_eq!(returned.next().await, ControlToNode::Cancel { conversation_id: id });
 
-    returned.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into() }).await;
+    returned.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
     returned.barrier(id, 4).await;
 
     assert_eq!(status_of(&server, id).await, "review");
@@ -299,10 +299,10 @@ async fn a_prompt_sent_while_a_turn_runs_is_queued_and_sent_when_the_turn_ends()
     let texts: Vec<&str> = waiting.iter().map(|item| item["text"].as_str().unwrap()).collect();
     assert_eq!(texts, vec!["second", "third"]);
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
     assert_eq!(link.expect_prompt().await.1, "second");
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
     assert_eq!(link.expect_prompt().await.1, "third");
 
     assert!(queue(&server, id).await.is_empty());
@@ -365,7 +365,7 @@ async fn send_now_cancels_the_running_turn_then_sends_that_message_first() {
 
     assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
     assert_eq!(link.expect_prompt().await.1, "urgent");
 
     let remaining = queue(&server, id).await;
@@ -383,7 +383,7 @@ async fn send_now_on_an_idle_conversation_just_sends_it() {
     prompt(&server, id, "queued").await;
     let queued = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
     link.barrier(id, 4).await;
     assert_eq!(queue(&server, id).await.len(), 1);
 
@@ -404,7 +404,7 @@ async fn stopping_a_turn_holds_the_queue_until_the_person_decides() {
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
 
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
     link.barrier(id, 4).await;
 
     assert_eq!(status_of(&server, id).await, "review");
@@ -900,7 +900,7 @@ async fn forking_a_conversation_the_agent_cannot_fork_starts_a_session_that_is_t
     link.start_session(parent, "acp-1").await;
     link.expect_prompt().await;
     link.send(NodeToControl::AcpUpdate { conversation_id: parent, seq: 1, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Fixed the race in restore"}}}) }).await;
-    link.send(NodeToControl::TurnEnd { conversation_id: parent, seq: 2, stop_reason: "end_turn".into() }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: parent, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
     common::eventually("the turn to end", || async { (status_of(&server, parent).await == "review").then_some(()) }).await;
 
     let (status, fork) = start_side(&server, parent, json!({"kind": "fork", "text": "Now do the Android side"})).await;

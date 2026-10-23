@@ -536,7 +536,9 @@ impl SessionState {
 
                 let stop_reason = result.get("stopReason").and_then(Value::as_str).unwrap_or("end_turn").to_string();
 
-                self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason })
+                let usage = result.get("usage").filter(|usage| usage.is_object()).cloned();
+
+                self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason, usage })
             }
             Pending::Other => Vec::new(),
         }
@@ -891,7 +893,19 @@ mod tests {
 
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "cancelled"}}));
 
-        assert_eq!(actions, [Action::Emit(6, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 6, stop_reason: "cancelled".into() })]);
+        assert_eq!(actions, [Action::Emit(6, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 6, stop_reason: "cancelled".into(), usage: None })]);
+    }
+
+    #[test]
+    fn a_prompt_response_carries_the_usage_the_agent_reports() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into() });
+        let id = sent_frames(&prompt)[0]["id"].clone();
+
+        let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 7, "totalTokens": 12}}}));
+
+        assert_eq!(actions, [Action::Emit(6, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 6, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 5, "outputTokens": 7, "totalTokens": 12})) })]);
     }
 
     #[test]
