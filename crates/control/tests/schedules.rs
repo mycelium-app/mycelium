@@ -257,6 +257,87 @@ async fn a_schedule_can_be_deleted_and_only_by_its_owner_and_its_runs_go_with_it
     assert_eq!((runs(&server).await.len(), server.user.json(server.user.get("/api/v1/schedules")).await.1), (0, json!([])));
 }
 
+async fn edit_schedule(server: &Server, id: Uuid, body: Value) -> (u16, Value) {
+    server.user.json(server.user.patch(&format!("/api/v1/schedules/{id}")).json(&body)).await
+}
+
+#[tokio::test]
+async fn editing_the_prompt_and_cron_changes_them_and_moves_the_next_run() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let id = weekly(&server, link.id, "new").await;
+    let before = schedule(&server, id).await;
+
+    let (status, edited) = edit_schedule(&server, id, json!({"prompt": " Check the backups ", "cron": "*/5 * * * *", "each_run": "same", "time_zone": "Europe/London"})).await;
+
+    assert_eq!(status, 200, "{edited}");
+    assert_eq!((edited["prompt"].clone(), edited["cron"].clone(), edited["each_run"].clone(), edited["time_zone"].clone()), (json!("Check the backups"), json!("*/5 * * * *"), json!("same"), json!("Europe/London")));
+
+    let next: chrono::DateTime<chrono::Utc> = edited["next_run_at"].as_str().unwrap().parse().unwrap();
+    let was: chrono::DateTime<chrono::Utc> = before["next_run_at"].as_str().unwrap().parse().unwrap();
+
+    assert!(next < was && next <= chrono::Utc::now() + chrono::Duration::minutes(5));
+    assert_eq!(schedule(&server, id).await["prompt"], json!("Check the backups"));
+}
+
+#[tokio::test]
+async fn editing_only_the_prompt_leaves_the_rest_as_it_was() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let id = weekly(&server, link.id, "new").await;
+    let before = schedule(&server, id).await;
+
+    let (status, edited) = edit_schedule(&server, id, json!({"prompt": "Go"})).await;
+
+    assert_eq!(status, 200, "{edited}");
+    assert_eq!((edited["cron"].clone(), edited["next_run_at"].clone(), edited["paused"].clone()), (before["cron"].clone(), before["next_run_at"].clone(), json!(false)));
+}
+
+#[tokio::test]
+async fn an_edit_with_an_invalid_cron_or_time_zone_or_empty_prompt_is_refused_and_changes_nothing() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let id = weekly(&server, link.id, "new").await;
+    let before = schedule(&server, id).await;
+
+    for (body, error) in [
+        (json!({"cron": "every monday"}), "cron_invalid"),
+        (json!({"cron": "0 6 31 2 *"}), "cron_never_runs"),
+        (json!({"time_zone": "Mars/Olympus"}), "time_zone_invalid"),
+        (json!({"prompt": " "}), "prompt_required"),
+    ] {
+        let (status, refused) = edit_schedule(&server, id, body.clone()).await;
+        assert_eq!((status, refused["error"].clone()), (400, json!(error)), "{body}");
+    }
+
+    assert_eq!(schedule(&server, id).await, before);
+}
+
+#[tokio::test]
+async fn pausing_with_an_edit_body_still_keeps_the_next_run() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let id = weekly(&server, link.id, "new").await;
+    let before = schedule(&server, id).await;
+
+    let (status, paused) = edit_schedule(&server, id, json!({"paused": true})).await;
+
+    assert_eq!((status, paused["paused"].clone(), paused["next_run_at"].clone()), (200, json!(true), before["next_run_at"].clone()));
+}
+
+#[tokio::test]
+async fn another_users_schedule_cannot_be_edited() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let id = weekly(&server, link.id, "new").await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.patch(&format!("/api/v1/schedules/{id}")).json(&json!({"prompt": "Mine now"}))).await;
+
+    assert_eq!(status, 404);
+    assert_eq!(schedule(&server, id).await["prompt"], json!("Update and test dependencies"));
+}
+
 async fn propose(server: &Server, link: &common::NodeLink, conversation: Uuid, arguments: Value) -> Value {
     let anonymous = server.anonymous();
     let request = anonymous

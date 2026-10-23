@@ -88,6 +88,16 @@ fn parse_zone(name: &str) -> ApiResult<Tz> {
     name.trim().parse::<Tz>().map_err(|_| ApiError::bad_request("time_zone_invalid", "Enter a time zone from the IANA list, for example Europe/London."))
 }
 
+fn require_prompt(prompt: &str) -> ApiResult<&str> {
+    let prompt = prompt.trim();
+
+    if prompt.is_empty() {
+        return Err(ApiError::bad_request("prompt_required", "Enter the prompt to run on this schedule."));
+    }
+
+    Ok(prompt)
+}
+
 pub fn preset_cron(preset: &str) -> Option<String> {
     let preset = preset.trim().to_lowercase();
 
@@ -167,12 +177,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateScheduleRequest>) -> ApiResult<(StatusCode, Json<Schedule>)> {
-    let prompt = request.prompt.trim();
-
-    if prompt.is_empty() {
-        return Err(ApiError::bad_request("prompt_required", "Enter the prompt to run on this schedule."));
-    }
-
+    let prompt = require_prompt(&request.prompt)?;
     let zone = match request.time_zone.as_deref() {
         Some(name) => {
             let zone = parse_zone(name)?;
@@ -224,12 +229,26 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     reject_proposed(&found)?;
 
-    let next_run_at = next_run_after(&found.cron, parse_zone(&found.time_zone)?, chrono::Utc::now())?;
+    let prompt = match request.prompt.as_deref() {
+        Some(prompt) => require_prompt(prompt)?,
+        None => &found.prompt,
+    };
+    let cron = request.cron.as_deref().map(str::trim).unwrap_or(&found.cron);
+    let zone = parse_zone(request.time_zone.as_deref().unwrap_or(&found.time_zone))?;
+    let each_run = request.each_run.map(|each_run| enum_text(&each_run)).unwrap_or_else(|| found.each_run.clone());
+    let paused = request.paused.unwrap_or(found.paused);
+    let schedule_moved = cron != found.cron || zone.name() != found.time_zone;
+    let next_run_at = next_run_after(cron, zone, chrono::Utc::now())?;
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "update schedules set paused = $2, next_run_at = case when $2 then next_run_at else $3 end where id = $1 returning {SCHEDULE_COLUMNS}",
+        "update schedules set paused = $2, prompt = $3, cron = $4, each_run = $5, time_zone = $6, next_run_at = case when $2 and not $7 then next_run_at else $8 end where id = $1 returning {SCHEDULE_COLUMNS}",
     )))
     .bind(id)
-    .bind(request.paused)
+    .bind(paused)
+    .bind(prompt)
+    .bind(cron)
+    .bind(each_run)
+    .bind(zone.name())
+    .bind(schedule_moved)
     .bind(next_run_at)
     .fetch_one(&state.pool)
     .await?;
