@@ -595,8 +595,8 @@ Each conversation has a Git panel on its right-hand rail, beside Details and Ter
 sheet on phones). The control plane relays a `git` request to the node over the link, like the file listing, and the node
 runs `git -C <folder>` with arguments, never through a shell: `GET /conversations/{id}/git/status`, `git/log?limit=`,
 `git/diff?path=&staged=` (untracked files diff against `/dev/null`, output cut at 200 KB with a `truncated` flag) and
-`POST git/stage`, `git/unstage`, `git/stage-all`, `git/commit`, `git/fetch` and `git/undo` (`reset --soft HEAD~1`). Calls
-time out after 10 seconds (fetch 60), an offline node is a 409 `node_offline`, an empty commit message is a 400, and git's
+`POST git/stage`, `git/unstage`, `git/stage-all`, `git/commit` `{message, amend?, signoff?, no_verify?}` (an amend may keep the last message), `git/fetch`, `git/pull` `{rebase?}`, `git/push` `{force?}` (`--force-with-lease`; a branch with no upstream is pushed to `origin`, or the only remote, with `--set-upstream`) and `git/undo` (`reset --soft HEAD~1`, answering with the undone commit's message). Calls
+time out after 10 seconds (fetch, pull and push 60), an offline node is a 409 `node_offline`, an empty commit message is a 400, and git's
 own error text comes back as a 409 `git_failed`. `GET git/graph?skip=&limit=` (default and most 200) returns commits of every
 branch in topological order with parents and structured refs, `GET git/show?hash=` a commit's patch, `GET git/branches` local and
 remote branches by recency with author, date and subject, and `POST git/switch` `{branch, create?, track?}` runs `git switch`
