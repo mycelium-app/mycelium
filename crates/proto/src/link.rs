@@ -204,6 +204,13 @@ pub struct CommitOptions {
     pub no_verify: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RowRange {
+    pub path: String,
+    pub from: u32,
+    pub to: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GitCommand {
@@ -222,6 +229,8 @@ pub enum GitCommand {
     },
     Diff { path: String, staged: bool },
     ScopeDiff { scope: String },
+    ChangesLayout,
+    ChangesRows { ranges: Vec<RowRange> },
     Stage { paths: Vec<String> },
     Unstage { paths: Vec<String> },
     StageAll,

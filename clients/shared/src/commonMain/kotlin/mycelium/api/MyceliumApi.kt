@@ -491,6 +491,12 @@ class MyceliumApi(
     suspend fun gitDiff(id: String, path: String, staged: Boolean): GitDiff =
         call("/conversations/$id/git/diff") { client.get(it) { authorise(); parameter("path", path); parameter("staged", staged) } }.body()
 
+    suspend fun gitChangesLayout(id: String): ChangesLayout =
+        call("/conversations/$id/git/changes-layout") { client.get(it) { authorise() } }.body()
+
+    suspend fun gitChangesRows(id: String, ranges: List<RowRange>): ChangesRows =
+        call("/conversations/$id/git/changes-rows") { client.post(it) { authorise(); json(RowsRequest(ranges)) } }.body()
+
     suspend fun gitStage(id: String, paths: List<String>) {
         call("/conversations/$id/git/stage") { client.post(it) { authorise(); json(GitPathsRequest(paths)) } }
     }

@@ -139,6 +139,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/git/stack", get(git::stack))
         .route("/api/v1/conversations/{id}/git/switch", post(git::switch))
         .route("/api/v1/conversations/{id}/git/diff", get(git::diff))
+        .route("/api/v1/conversations/{id}/git/changes-layout", get(git::changes_layout))
+        .route("/api/v1/conversations/{id}/git/changes-rows", post(git::changes_rows))
         .route("/api/v1/conversations/{id}/git/stage", post(git::stage))
         .route("/api/v1/conversations/{id}/git/unstage", post(git::unstage))
         .route("/api/v1/conversations/{id}/git/stage-all", post(git::stage_all))

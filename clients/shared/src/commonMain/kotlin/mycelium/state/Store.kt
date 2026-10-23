@@ -55,6 +55,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     val walkthroughScopes: StateFlow<Map<String, WalkthroughScope>> = mutableWalkthroughScopes.asStateFlow()
     private val mutableDiffTabs = MutableStateFlow<Map<String, DiffTabs>>(emptyMap())
     val diffTabs: StateFlow<Map<String, DiffTabs>> = mutableDiffTabs.asStateFlow()
+    private val mutableChangesFile = MutableStateFlow<Map<String, String>>(emptyMap())
+    val changesFile: StateFlow<Map<String, String>> = mutableChangesFile.asStateFlow()
     private val mutableWalkthroughNotes = MutableStateFlow<Map<String, List<WalkthroughNote>>>(emptyMap())
     val walkthroughNotes: StateFlow<Map<String, List<WalkthroughNote>>> = mutableWalkthroughNotes.asStateFlow()
 
@@ -428,6 +430,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
     fun focusDiffTab(conversationId: String, key: String?) {
         mutableDiffTabs.update { it + (conversationId to (it[conversationId] ?: DiffTabs()).copy(active = key)) }
+    }
+
+    fun revealedInDiffTab(conversationId: String, key: String) {
+        mutableDiffTabs.update { it + (conversationId to (it[conversationId] ?: DiffTabs()).revealed(key)) }
+    }
+
+    fun viewingChangesFile(conversationId: String, path: String?) {
+        mutableChangesFile.update { if (path == null) it - conversationId else it + (conversationId to path) }
     }
 
     fun closeDiffTab(conversationId: String, key: String) {

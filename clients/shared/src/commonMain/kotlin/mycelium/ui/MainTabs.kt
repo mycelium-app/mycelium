@@ -13,12 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,14 +25,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
-import mycelium.api.Conversation
-import mycelium.state.DiffTab
-import mycelium.state.FileDiff
-import mycelium.state.Store
-import mycelium.state.ToolStatus
-import mycelium.state.parseUnifiedDiff
-import mycelium.state.splitCommitDiff
 
 class MainTab(val key: String, val title: String, val closeLabel: String? = null)
 
@@ -77,53 +64,6 @@ fun MainTabStrip(tabs: List<MainTab>, selected: String, onSelect: (String) -> Un
 
                 if (tab.closeLabel != null) {
                     MyButton({ onClose(tab.key) }, icon = MyIcon.Close, description = tab.closeLabel, size = ButtonSize.Sm, muted = true)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DiffTabView(store: Store, conversation: Conversation, tab: DiffTab, modifier: Modifier = Modifier) {
-    val colors = MyTheme.colors
-    var loaded by remember(tab.key) { mutableStateOf<List<FileDiff>?>(null) }
-    var truncated by remember(tab.key) { mutableStateOf(false) }
-    var failed by remember(tab.key) { mutableStateOf(false) }
-
-    LaunchedEffect(tab.key, conversation.id) {
-        failed = false
-
-        try {
-            if (tab.hash != null) {
-                val shown = store.api.gitShow(conversation.id, tab.hash)
-                loaded = splitCommitDiff(shown.diff)
-                truncated = shown.truncated
-            } else if (tab.path != null) {
-                val shown = store.api.gitDiff(conversation.id, tab.path, tab.staged)
-                loaded = if (shown.diff.isBlank()) emptyList() else listOf(parseUnifiedDiff(tab.path, shown.diff))
-                truncated = shown.truncated
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            failed = true
-        }
-    }
-
-    Column(modifier.fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-        val files = loaded
-
-        when {
-            failed -> Label("Could not load this diff. Close the tab and open it again.", color = colors.textMuted)
-            files == null -> Label("Loading the diff", color = colors.textMuted)
-            files.isEmpty() -> Label("There are no text changes to show.", color = colors.textMuted)
-            else -> {
-                for (file in files) {
-                    DiffCard(file, ToolStatus.Done)
-                }
-
-                if (truncated) {
-                    Label("The diff is cut at 200 KB.", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
             }
         }

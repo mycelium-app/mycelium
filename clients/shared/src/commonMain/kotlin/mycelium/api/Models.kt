@@ -1029,6 +1029,38 @@ data class GitCommit(val hash: String, val author: String, val date: String, val
 data class GitDiff(val diff: String, val truncated: Boolean)
 
 @Serializable
+data class ChangedFile(
+    val path: String,
+    val staged: Boolean,
+    val unstaged: Boolean,
+    val untracked: Boolean,
+    val added: Int,
+    val removed: Int,
+    val rows: Int,
+    val hunks: List<Int> = emptyList(),
+    val truncated: Boolean = false,
+    val fingerprint: String,
+)
+
+@Serializable
+data class ChangesLayout(val files: List<ChangedFile>)
+
+@Serializable
+data class RowRange(val path: String, val from: Int, val to: Int)
+
+@Serializable
+data class RowsRequest(val ranges: List<RowRange>)
+
+@Serializable
+data class WireRow(val k: String, val o: Int? = null, val n: Int? = null, val t: String)
+
+@Serializable
+data class RowsChunk(val path: String, val from: Int, val fingerprint: String, val rows: List<WireRow>)
+
+@Serializable
+data class ChangesRows(val ranges: List<RowsChunk>)
+
+@Serializable
 data class GitPathsRequest(val paths: List<String>)
 
 @Serializable

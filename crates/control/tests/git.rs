@@ -5,7 +5,7 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::get;
 use common::{NodeLink, Server, serve};
-use mycelium_proto::link::{CommitOptions, ControlToNode, GitCommand, NodeToControl};
+use mycelium_proto::link::{CommitOptions, ControlToNode, GitCommand, NodeToControl, RowRange};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -340,4 +340,28 @@ async fn git_town_sync_and_propose_are_run_by_the_node_and_its_output_is_returne
 
     assert_eq!(sync, (200, json!({"output": "synced"})));
     assert_eq!((propose.0, propose.1["message"].clone()), (409, json!("conflict in a.txt")));
+}
+
+#[tokio::test]
+async fn the_changes_layout_and_row_ranges_are_relayed_to_the_node_and_capped() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let layout = user.json(user.get(&format!("/api/v1/conversations/{id}/git/changes-layout"))).await;
+        let rows = user.json(user.post(&format!("/api/v1/conversations/{id}/git/changes-rows")).json(&json!({"ranges": [{"path": "a.rs", "from": 0, "to": 50}]}))).await;
+        let many: Vec<Value> = (0..65).map(|_| json!({"path": "a.rs", "from": 0, "to": 1})).collect();
+        let capped = user.json(user.post(&format!("/api/v1/conversations/{id}/git/changes-rows")).json(&json!({"ranges": many}))).await;
+
+        [layout, rows, capped].map(|(status, _)| status)
+    });
+
+    let mut commands = Vec::new();
+
+    for _ in 0..2 {
+        commands.push(answer_next(&mut link, true, json!({}), None).await.1);
+    }
+
+    assert_eq!(commands, vec![GitCommand::ChangesLayout, GitCommand::ChangesRows { ranges: vec![RowRange { path: "a.rs".into(), from: 0, to: 50 }] }]);
+    assert_eq!(asking.await.unwrap(), [200, 200, 400]);
 }

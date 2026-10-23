@@ -18,7 +18,7 @@ import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.api.Walkthrough
 import mycelium.state.Store
-import mycelium.state.fileDiffTab
+import mycelium.state.changesTab
 import mycelium.api.Me
 import mycelium.ui.Route
 import mycelium.ui.Shell
@@ -92,7 +92,8 @@ class WalkthroughRenderTest {
                 path.endsWith("/uncovered") -> "[]"
                 path.endsWith("/reads") -> "[]"
                 path.endsWith("/walkthrough") -> RenderWalkthrough
-                path.endsWith("/git/diff") -> """{"diff":"$RenderDiff","truncated":false}"""
+                path.endsWith("/git/changes-layout") -> """{"files":[{"path":"src/restore/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"added":3,"removed":2,"rows":6,"hunks":[0],"fingerprint":"f1"}]}"""
+                path.endsWith("/git/changes-rows") -> """{"ranges":[{"path":"src/restore/Screen.tsx","from":0,"fingerprint":"f1","rows":[{"k":"h","t":"@@ -1,5 +1,5 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = 2"},{"k":"c","o":2,"n":2,"t":"const retry = useRetry(RESTORE_BACKOFF_MS)"},{"k":"d","o":3,"t":"const failed = 1"},{"k":"a","n":3,"t":"const failed = 2"}]}]}"""
                 path.endsWith("/conversations") -> "[$chat]"
                 path.endsWith("/conversations/c1") -> chat
                 path.endsWith("/nodes") || path.endsWith("/events") || path.endsWith("/queue") -> "[]"
@@ -107,7 +108,7 @@ class WalkthroughRenderTest {
         runBlocking { store.refresh() }
 
         if (diffOpen) {
-            store.openDiffTab("c1", fileDiffTab("src/restore/Screen.tsx", false))
+            store.openDiffTab("c1", changesTab("src/restore/Screen.tsx"))
         }
 
         val file = renderAt(name, true, false, interact = { scene ->

@@ -1,3 +1,4 @@
+use crate::changes;
 use base64::Engine;
 use mycelium_proto::link::{CommitOptions, GitCommand, GitCredentials};
 use serde_json::{Value, json};
@@ -37,6 +38,8 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Switch { branch, create, track } => switch(cwd, &branch, create, track.as_deref()),
         GitCommand::Diff { path, staged } => diff(cwd, &path, staged),
         GitCommand::ScopeDiff { scope } => scope_diff(cwd, &scope),
+        GitCommand::ChangesLayout => changes::layout(cwd),
+        GitCommand::ChangesRows { ranges } => changes::rows(cwd, &ranges),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
         GitCommand::Unstage { paths } => changed(cwd, &["restore", "--staged", "--"], &paths),
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
@@ -55,7 +58,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
     }
 }
 
-fn git(cwd: &Path, args: &[&str], accepted: &[i32]) -> Result<Vec<u8>, String> {
+pub(crate) fn git(cwd: &Path, args: &[&str], accepted: &[i32]) -> Result<Vec<u8>, String> {
     git_with_env(cwd, args, accepted, &[])
 }
 
@@ -234,7 +237,7 @@ fn town(cwd: &Path, program: &Path, args: &[&str]) -> Result<Value, String> {
     Ok(json!({"output": combined}))
 }
 
-fn status(cwd: &Path) -> Result<Value, String> {
+pub(crate) fn status(cwd: &Path) -> Result<Value, String> {
     let porcelain = git(cwd, &["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"], &[])?;
     let unstaged = counts(&git(cwd, &["diff", "--numstat", "-z"], &[])?);
     let staged = counts(&git(cwd, &["diff", "--cached", "--numstat", "-z"], &[])?);

@@ -231,7 +231,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Hairline()
 
                     if (activeDiff != null) {
-                        key(activeDiff.key) { DiffTabView(store, conversation, activeDiff, Modifier.weight(1f)) }
+                        key(activeDiff.key) {
+                            if (activeDiff.hash != null) CommitTabView(store, conversation, activeDiff, Modifier.weight(1f)) else ChangesTabView(store, conversation, activeDiff, Modifier.weight(1f))
+                        }
 
                         return@Column
                     }

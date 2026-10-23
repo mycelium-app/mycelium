@@ -1,6 +1,8 @@
 package mycelium.desktop
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
@@ -37,7 +39,13 @@ private const val Status = """{"branch":"main","ahead":0,"behind":0,"files":[
 {"path":"src/restore/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"additions":1,"deletions":1},
 {"path":"src/restore/strings.ts","staged":false,"unstaged":true,"untracked":false,"additions":2,"deletions":0}]}"""
 
-private const val FileDiffJson = """{"diff":"@@ -1 +1 @@\n-const title = 1\n+const title = 2\n","truncated":false}"""
+private const val LayoutJson = """{"files":[
+{"path":"src/restore/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"added":1,"removed":1,"rows":3,"hunks":[0],"fingerprint":"a"},
+{"path":"src/restore/strings.ts","staged":false,"unstaged":true,"untracked":false,"added":2,"removed":0,"rows":3,"hunks":[0],"fingerprint":"b"}]}"""
+
+private const val RowsJson = """{"ranges":[
+{"path":"src/restore/Screen.tsx","from":0,"fingerprint":"a","rows":[{"k":"h","t":"@@ -1 +1 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = 2"}]},
+{"path":"src/restore/strings.ts","from":0,"fingerprint":"b","rows":[{"k":"h","t":"@@ -1 +1,2 @@"},{"k":"a","n":1,"t":"const word = 3"},{"k":"a","n":2,"t":"const word = 4"}]}]}"""
 
 @OptIn(ExperimentalTestApi::class)
 class DiffTabsTest {
@@ -53,7 +61,8 @@ class DiffTabsTest {
             requests += path
             val reply = when {
                 path.endsWith("/git/status") -> Status
-                path.endsWith("/git/diff") -> FileDiffJson
+                path.endsWith("/git/changes-layout") -> LayoutJson
+                path.endsWith("/git/changes-rows") -> RowsJson
                 path.endsWith("/git/log") || path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
                 path.endsWith("/walkthrough") || path.endsWith("/goal") -> "null"
                 path.endsWith("/conversations") -> "[$Chat]"
@@ -84,16 +93,27 @@ class DiffTabsTest {
     }
 
     @Test
-    fun openingAFilesDiffFromTheGitPanelOpensATabInTheMainViewAndTheListStaysPut() {
+    fun openingAFileFromTheGitPanelOpensTheChangesTabInTheMainViewAndTheListStaysPut() {
         show()
         openGit()
 
         openFile("src/restore/Screen.tsx")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("const title = 2").assertIsDisplayed()
+        rule.onNodeWithText("const word = 3").assertIsDisplayed()
         rule.onNodeWithContentDescription("Show the changes to src/restore/strings.ts").assertIsDisplayed()
         rule.onNodeWithText("Conversation").assertIsDisplayed()
+    }
+
+    @Test
+    fun theFileShownInChangesIsMarkedInTheGitPanelList() {
+        show()
+        openGit()
+        openFile("src/restore/Screen.tsx")
+
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Show the changes to src/restore/Screen.tsx") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Shown in Changes")).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodes(hasContentDescription("Show the changes to src/restore/strings.ts") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Shown in Changes")).fetchSemanticsNodes().size)
     }
 
     @Test
@@ -101,14 +121,14 @@ class DiffTabsTest {
         show()
         openGit()
         openFile("src/restore/Screen.tsx")
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Conversation").performClick()
         assertEquals(0, rule.onAllNodesWithText("const title = 2").fetchSemanticsNodes().size)
 
         openFile("src/restore/Screen.tsx")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("const title = 2").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(1, rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -116,11 +136,11 @@ class DiffTabsTest {
         show()
         openGit()
         openFile("src/restore/Screen.tsx")
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Close diff of src/restore/Screen.tsx").performClick()
+        rule.onNodeWithContentDescription("Close Changes").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("Main view tabs").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("const title = 2").fetchSemanticsNodes().size)
     }
@@ -130,10 +150,10 @@ class DiffTabsTest {
         show()
         openGit()
         openFile("src/restore/Screen.tsx")
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNode(hasText("Screen.tsx") and hasAnyAncestor(hasContentDescription("Main view tabs"))).performMouseInput { moveTo(center); press(MouseButton.Tertiary); release(MouseButton.Tertiary) }
+        rule.onNode(hasText("Changes") and hasAnyAncestor(hasContentDescription("Main view tabs"))).performMouseInput { moveTo(center); press(MouseButton.Tertiary); release(MouseButton.Tertiary) }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/restore/Screen.tsx").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isEmpty() }
     }
 }

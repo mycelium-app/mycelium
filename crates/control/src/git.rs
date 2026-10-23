@@ -8,7 +8,7 @@ use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::link::{CommitOptions, GitCommand};
+use mycelium_proto::link::{CommitOptions, GitCommand, RowRange};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -21,6 +21,7 @@ const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_LOG_LIMIT: u32 = 50;
 const DEFAULT_GRAPH_LIMIT: u32 = 200;
 const MOST_LOG_ENTRIES: u32 = 200;
+const MOST_ROW_RANGES: usize = 64;
 
 #[derive(Deserialize)]
 pub struct LogQuery {
@@ -51,6 +52,11 @@ pub struct DiffQuery {
     path: String,
     #[serde(default)]
     staged: bool,
+}
+
+#[derive(Deserialize)]
+pub struct RowsRequest {
+    ranges: Vec<RowRange>,
 }
 
 #[derive(Deserialize)]
@@ -187,6 +193,18 @@ pub async fn switch(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
 pub async fn diff(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<DiffQuery>) -> ApiResult<Json<Value>> {
     run(&state, &user, id, GitCommand::Diff { path: query.path, staged: query.staged }).await
+}
+
+pub async fn changes_layout(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::ChangesLayout).await
+}
+
+pub async fn changes_rows(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<RowsRequest>) -> ApiResult<Json<Value>> {
+    if request.ranges.len() > MOST_ROW_RANGES {
+        return Err(ApiError::bad_request("too_many_ranges", "Ask for fewer ranges at a time."));
+    }
+
+    run(&state, &user, id, GitCommand::ChangesRows { ranges: request.ranges }).await
 }
 
 pub async fn stage(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PathsRequest>) -> ApiResult<Json<Value>> {

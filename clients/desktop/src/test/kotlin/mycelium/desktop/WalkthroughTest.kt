@@ -71,7 +71,8 @@ class WalkthroughTest {
                 path.endsWith("/notes") -> String(request.body.toByteArray()).replaceFirst("{", "{\"id\":\"n1\",\"sent\":false,")
                 path.endsWith("/walkthrough") -> walkthrough
                 path.endsWith("/git/status") -> """{"branch":"main","ahead":0,"behind":0,"files":[{"path":"src/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"additions":1,"deletions":1}]}"""
-                path.endsWith("/git/diff") -> """{"diff":"@@ -1 +1 @@\n-const title = 1\n+const title = 2\n","truncated":false}"""
+                path.endsWith("/git/changes-layout") -> """{"files":[{"path":"src/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"added":1,"removed":1,"rows":3,"hunks":[0],"fingerprint":"f1"}]}"""
+                path.endsWith("/git/changes-rows") -> """{"ranges":[{"path":"src/Screen.tsx","from":0,"fingerprint":"f1","rows":[{"k":"h","t":"@@ -1 +1 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = 2"}]}]}"""
                 path.endsWith("/goal") -> "null"
                 path.endsWith("/nodes") -> "[]"
                 path.endsWith("/conversations") -> "[$Chat]"
@@ -301,7 +302,7 @@ class WalkthroughTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show the changes to src/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Show the changes to src/Screen.tsx").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close diff of src/Screen.tsx").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("const title = 2").assertIsDisplayed()
         rule.onNodeWithContentDescription("Dismiss walkthrough").assertIsDisplayed()
         rule.onNodeWithText("Walkthrough").performClick()

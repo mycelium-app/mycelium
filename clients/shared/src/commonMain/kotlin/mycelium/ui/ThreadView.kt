@@ -411,7 +411,7 @@ private fun highlightedTokens(language: String, code: String): List<Token> {
 
 
 @Composable
-private fun highlighted(language: String, code: String): AnnotatedString {
+internal fun highlighted(language: String, code: String): AnnotatedString {
     val colors = MyTheme.colors
 
     return remember(language, code, colors) {

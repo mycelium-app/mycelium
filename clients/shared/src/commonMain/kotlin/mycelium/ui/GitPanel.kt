@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,10 +54,10 @@ import mycelium.state.DiffTab
 import mycelium.state.Store
 import mycelium.state.ToolStatus
 import mycelium.state.changeRows
+import mycelium.state.changesTab
 import mycelium.state.commitDiffTab
 import mycelium.state.commitProblem
 import mycelium.state.diffIsStaged
-import mycelium.state.fileDiffTab
 import mycelium.state.firstChange
 import mycelium.state.fullyStaged
 import mycelium.state.parseUnifiedDiff
@@ -68,7 +69,7 @@ private const val ShortHashLength = 7
 
 private const val GraphPage = 200
 
-private const val DiskPollMillis = 2_000L
+internal const val DiskPollMillis = 2_000L
 
 @Composable
 fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier, onOpenDiff: ((DiffTab) -> Unit)? = null) {
@@ -94,6 +95,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     var skipHooks by remember(id) { mutableStateOf(false) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
     val files = status?.files.orEmpty()
+    val shownPath = if (onOpenDiff != null) store.changesFile.collectAsState().value[id] else null
 
     suspend fun refresh() {
         status = store.api.gitStatus(id)
@@ -233,7 +235,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     onSelect = { selectedCommit = it },
                     onOpen = { commit ->
                         if (onOpenDiff != null) {
-                            onOpenDiff(commitDiffTab(commit.hash, commit.subject))
+                            onOpenDiff(commitDiffTab(commit.hash))
                         } else {
                             openCommit = commit
                             commitDiff = null
@@ -260,9 +262,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 if (tab == GitTab.Changes) {
                     ChangesList(
                         files = files,
+                        shownPath = shownPath,
                         onViewDiff = { file ->
                             if (onOpenDiff != null) {
-                                onOpenDiff(fileDiffTab(file.path, diffIsStaged(file)))
+                                onOpenDiff(changesTab(file.path))
                             } else {
                                 viewing = file
                                 diff = null
@@ -373,7 +376,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 }
 
 @Composable
-private fun ChangesList(files: List<GitFile>, onViewDiff: (GitFile) -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
+private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
     val colors = MyTheme.colors
     val additions = files.sumOf { it.additions }
     val deletions = files.sumOf { it.deletions }
@@ -408,13 +411,13 @@ private fun ChangesList(files: List<GitFile>, onViewDiff: (GitFile) -> Unit, onS
                 Icon(MyIcon.Folder, colors.textMuted, Tokens.Size.IconSm)
                 Label(row.path, style = Tokens.Type.Ui, color = colors.textMuted, maxLines = 1)
             }
-            is ChangeRow.Change -> ChangeItem(row, onOpen = { onViewDiff(row.file) }, onToggle = { onToggle(row.file) })
+            is ChangeRow.Change -> ChangeItem(row, shownPath == row.file.path, onOpen = { onViewDiff(row.file) }, onToggle = { onToggle(row.file) })
         }
     }
 }
 
 @Composable
-private fun ChangeItem(row: ChangeRow.Change, onOpen: () -> Unit, onToggle: () -> Unit) {
+private fun ChangeItem(row: ChangeRow.Change, shown: Boolean, onOpen: () -> Unit, onToggle: () -> Unit) {
     val colors = MyTheme.colors
     val file = row.file
     val staged = fullyStaged(file)
@@ -429,7 +432,7 @@ private fun ChangeItem(row: ChangeRow.Change, onOpen: () -> Unit, onToggle: () -
             Modifier
                 .weight(1f)
                 .heightIn(min = rowHeight())
-                .pressable(onClick = onOpen, description = "Show the changes to ${file.path}", shape = ControlShape)
+                .pressable(onClick = onOpen, description = "Show the changes to ${file.path}", shape = ControlShape, selected = shown, stateDescription = if (shown) "Shown in Changes" else null)
                 .padding(horizontal = Tokens.Space.S1),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
