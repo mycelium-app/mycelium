@@ -13,6 +13,11 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
+import mycelium.api.CreateScheduleRequest
+import mycelium.api.CreateTaskRequest
+import mycelium.api.Schedule
+import mycelium.api.ScheduleRun
+import mycelium.api.Task
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
 import mycelium.api.EventKinds
@@ -110,6 +115,71 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
 
         return project
+    }
+
+    suspend fun refreshBoard() {
+        val projects = api.projects()
+        val worktrees = api.worktrees()
+        val tasks = api.tasks()
+
+        mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }, worktrees = worktrees.associateBy { w -> w.id }, tasks = tasks.associateBy { t -> t.id }) }
+    }
+
+    suspend fun createTask(request: CreateTaskRequest): Task {
+        val task = api.createTask(request)
+
+        mutableState.update { it.copy(tasks = it.tasks + (task.id to task)) }
+
+        return task
+    }
+
+    suspend fun startTask(task: Task): Conversation {
+        val conversation = api.startTask(task.id)
+
+        mutableState.update { it.copy(tasks = it.tasks - task.id, conversations = it.conversations + (conversation.id to conversation)) }
+
+        return conversation
+    }
+
+    suspend fun deleteTask(task: Task) {
+        api.deleteTask(task.id)
+
+        mutableState.update { it.copy(tasks = it.tasks - task.id) }
+    }
+
+    suspend fun refreshSchedules() {
+        val schedules = api.schedules()
+        val runs = api.scheduleRuns()
+
+        mutableState.update { it.copy(schedules = schedules.associateBy { s -> s.id }, scheduleRuns = runs) }
+    }
+
+    suspend fun createSchedule(request: CreateScheduleRequest): Schedule {
+        val schedule = api.createSchedule(request)
+
+        mutableState.update { it.copy(schedules = it.schedules + (schedule.id to schedule)) }
+
+        return schedule
+    }
+
+    suspend fun pauseSchedule(schedule: Schedule, paused: Boolean) {
+        val changed = api.pauseSchedule(schedule.id, paused)
+
+        mutableState.update { it.copy(schedules = it.schedules + (changed.id to changed)) }
+    }
+
+    suspend fun runSchedule(schedule: Schedule): ScheduleRun {
+        val run = api.runSchedule(schedule.id)
+
+        refreshSchedules()
+
+        return run
+    }
+
+    suspend fun deleteSchedule(schedule: Schedule) {
+        api.deleteSchedule(schedule.id)
+
+        mutableState.update { it.copy(schedules = it.schedules - schedule.id, scheduleRuns = it.scheduleRuns.filter { run -> run.scheduleId != schedule.id }) }
     }
 
     suspend fun open(conversationId: String) {

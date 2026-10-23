@@ -45,6 +45,8 @@ enum class MyIcon(vararg val paths: String) {
     Working("M21 12a9 9 0 1 1-6.2-8.56"),
     Check("M20 6 9 17l-5-5"),
     Laptop(rect(3f, 4f, 18f, 12f, 2f), "M2 20h20"),
+    List("M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"),
+    Calendar(rect(3f, 4f, 18f, 17f, 2f), "M3 10h18M8 2v4M16 2v4"),
     Server(rect(2f, 3f, 20f, 8f, 2f), rect(2f, 13f, 20f, 8f, 2f), "M6 7h.01M6 17h.01"),
     Desktop(rect(2f, 3f, 20f, 13f, 2f), "M8 21h8M12 16v5"),
     Cloud("M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9Z"),

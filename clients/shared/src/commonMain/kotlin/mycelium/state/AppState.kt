@@ -8,6 +8,10 @@ import mycelium.api.EventKinds
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.api.Repository
+import mycelium.api.Schedule
+import mycelium.api.ScheduleRun
+import mycelium.api.Task
+import mycelium.api.Worktree
 import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 
@@ -23,6 +27,10 @@ data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
     val projects: Map<String, Project> = emptyMap(),
+    val worktrees: Map<String, Worktree> = emptyMap(),
+    val tasks: Map<String, Task> = emptyMap(),
+    val schedules: Map<String, Schedule> = emptyMap(),
+    val scheduleRuns: List<ScheduleRun> = emptyList(),
     val events: Map<String, List<Event>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),

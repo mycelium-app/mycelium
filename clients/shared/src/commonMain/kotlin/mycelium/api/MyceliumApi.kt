@@ -196,6 +196,35 @@ class MyceliumApi(
 
     suspend fun worktrees(): List<Worktree> = call("/worktrees") { client.get(it) { authorise() } }.body()
 
+    suspend fun tasks(): List<Task> = call("/tasks") { client.get(it) { authorise() } }.body()
+
+    suspend fun createTask(request: CreateTaskRequest): Task =
+        call("/tasks") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun startTask(id: String): Conversation =
+        call("/tasks/$id/start") { client.post(it) { authorise() } }.body()
+
+    suspend fun deleteTask(id: String) {
+        call("/tasks/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun schedules(): List<Schedule> = call("/schedules") { client.get(it) { authorise() } }.body()
+
+    suspend fun createSchedule(request: CreateScheduleRequest): Schedule =
+        call("/schedules") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun pauseSchedule(id: String, paused: Boolean): Schedule =
+        call("/schedules/$id") { client.patch(it) { authorise(); json(PatchScheduleRequest(paused)) } }.body()
+
+    suspend fun runSchedule(id: String): ScheduleRun =
+        call("/schedules/$id/run") { client.post(it) { authorise() } }.body()
+
+    suspend fun deleteSchedule(id: String) {
+        call("/schedules/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun scheduleRuns(): List<ScheduleRun> = call("/schedule-runs") { client.get(it) { authorise() } }.body()
+
     suspend fun issues(query: String = ""): Issues =
         call("/issues") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
 

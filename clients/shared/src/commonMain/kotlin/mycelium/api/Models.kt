@@ -208,6 +208,76 @@ data class Worktree(
 )
 
 @Serializable
+data class Task(
+    val id: String,
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val cwd: String,
+    @SerialName("project_id") val projectId: String? = null,
+    val branch: String? = null,
+    val title: String,
+    val prompt: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateTaskRequest(
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val title: String,
+    val cwd: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    val branch: String? = null,
+    val prompt: String? = null,
+)
+
+@Serializable
+data class Schedule(
+    val id: String,
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val cwd: String,
+    @SerialName("project_id") val projectId: String? = null,
+    val prompt: String,
+    val cron: String,
+    @SerialName("each_run") val eachRun: String,
+    val paused: Boolean,
+    @SerialName("next_run_at") val nextRunAt: String,
+    @SerialName("last_run_at") val lastRunAt: String? = null,
+    @SerialName("last_conversation_id") val lastConversationId: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateScheduleRequest(
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val prompt: String,
+    val cron: String,
+    @SerialName("each_run") val eachRun: String,
+    val cwd: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+)
+
+@Serializable
+data class PatchScheduleRequest(val paused: Boolean)
+
+@Serializable
+data class ScheduleRun(
+    val id: String,
+    @SerialName("schedule_id") val scheduleId: String,
+    @SerialName("ran_at") val ranAt: String,
+    val outcome: String,
+    val reason: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+)
+
+object EachRun {
+    const val New = "new"
+    const val Same = "same"
+}
+
+@Serializable
 data class Issue(
     @SerialName("forge_id") val forgeId: String,
     val repository: String,

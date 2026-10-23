@@ -38,3 +38,25 @@ fun ago(iso: String, now: Instant = Clock.System.now()): String = relativeTime(i
 fun projectName(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').ifEmpty { cwd }
 
 fun isLaptop(os: String): Boolean = os.lowercase().let { it.contains("mac") || it.contains("darwin") || it.contains("windows") }
+
+fun until(iso: String, now: Instant = Clock.System.now()): String {
+    val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val remaining: Duration = then - now
+
+    return when {
+        remaining.inWholeSeconds < 60 -> "in under a minute"
+        remaining.inWholeMinutes < 60 -> "in ${remaining.inWholeMinutes}m"
+        remaining.inWholeHours < 24 -> "in ${remaining.inWholeHours}h"
+        else -> "in ${remaining.inWholeDays}d"
+    }
+}
+
+fun elapsed(iso: String, now: Instant = Clock.System.now()): String {
+    val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val total = (now - then).inWholeSeconds.coerceAtLeast(0)
+
+    return when {
+        total < 3600 -> "${total / 60}m ${(total % 60).toString().padStart(2, '0')}s"
+        else -> "${total / 3600}h ${((total % 3600) / 60).toString().padStart(2, '0')}m"
+    }
+}
