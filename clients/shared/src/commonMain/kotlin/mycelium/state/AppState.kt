@@ -231,7 +231,7 @@ fun inGroupFilter(conversation: Conversation, filter: String): Boolean = when (f
 }
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
-    val active = conversations.filter { it.archivedAt == null && !it.isChat && inGroupFilter(it, filter) }
+    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isSubagent && inGroupFilter(it, filter) }
     val activeIds = active.map { it.id }.toSet()
 
     return active.filter { it.parentId == null || it.parentId !in activeIds }
@@ -252,12 +252,14 @@ data class SidebarRow(val conversation: Conversation, val depth: Int, val sideCh
 
 fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversation>, collapsed: Set<String>, depth: Int = 0): List<SidebarRow> =
     parents.flatMap { parent ->
-        val children = conversations.filter { it.archivedAt == null && it.parentId == parent.id }
-        val sideChats = children.filter { !it.isSubagent }.sortedByDescending { it.updatedAt } + children.filter { it.isSubagent }.sortedBy { it.createdAt }
+        val sideChats = conversations.filter { it.archivedAt == null && it.parentId == parent.id && !it.isSubagent }.sortedByDescending { it.updatedAt }
         val shown = if (parent.id in collapsed) emptyList() else sidebarRows(sideChats, conversations, collapsed, depth + 1)
 
         listOf(SidebarRow(parent, depth, sideChats.size)) + shown
     }
+
+fun subagentsOf(conversations: Collection<Conversation>, parentId: String): List<Conversation> =
+    conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedBy { it.createdAt }
 
 internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
     val current = this[conversationId] ?: return this

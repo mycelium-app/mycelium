@@ -1,6 +1,5 @@
 package mycelium.desktop
 
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -68,21 +67,28 @@ class SubagentChatsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, SubagentPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Empty) } }
     }
 
+    private fun openSubagentsOfTheParent() {
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Review the change, ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Review the change, ", substring = true).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open subagents").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Open subagents").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @Test
-    fun aSubagentSitsUnderItsConversationInTheSidebarAndIsNamedAsOne() {
+    fun aSubagentStaysOutOfTheSidebarAndIsListedBesideItsConversation() {
         shell()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Check the build", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        openSubagentsOfTheParent()
 
-        rule.onNodeWithContentDescription("Check the build, ", substring = true).assertIsDisplayed()
-        assertEquals(1, rule.onAllNodesWithContentDescription("subagent", substring = true).fetchSemanticsNodes().size)
-        rule.onNodeWithContentDescription("Collapse side chats of Review the change").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithContentDescription(", subagent", substring = true).fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test
     fun anOpenedSubagentHasNoComposerAndLinksBackToItsConversation() {
         shell()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Check the build", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        openSubagentsOfTheParent()
 
         rule.onNodeWithContentDescription("Check the build, ", substring = true).performClick()
 

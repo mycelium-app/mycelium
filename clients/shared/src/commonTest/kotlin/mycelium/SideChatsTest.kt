@@ -11,10 +11,10 @@ import kotlinx.coroutines.test.runTest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
-import mycelium.state.isSubagent
 import mycelium.state.sideChatOf
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
+import mycelium.state.subagentsOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -52,12 +52,19 @@ class SideChatsTest {
     }
 
     @Test
-    fun subagentsSitUnderTheirParentOldestFirstAfterItsOtherSideChats() {
-        fun subagent(id: String, createdAt: String) = chat(id, "parent").copy(sideKind = "subagent", createdAt = createdAt, updatedAt = "2026-10-22T12:00:00Z")
-        val all = listOf(chat("parent"), subagent("late", "2026-10-22T10:05:00Z"), chat("side", "parent", updatedAt = "2026-10-22T09:00:00Z"), subagent("early", "2026-10-22T10:01:00Z"))
+    fun subagentsStayOutOfTheSidebarEvenWhenTheirParentIsArchived() {
+        fun subagent(id: String, parentId: String) = chat(id, parentId).copy(sideKind = "subagent")
+        val all = listOf(chat("parent"), subagent("helper", "parent"), chat("side", "parent"), chat("gone", archivedAt = "2026-10-22T11:00:00Z"), subagent("orphan", "gone"))
 
-        assertEquals(listOf("parent", "side", "early", "late"), sidebarRows(listOf(all[0]), all, emptySet()).map { it.conversation.id })
-        assertEquals(listOf(false, false, true, true), sidebarRows(listOf(all[0]), all, emptySet()).map { it.conversation.isSubagent })
+        assertEquals(listOf("parent", "side"), sidebarRows(sidebarSections(all).flatMap { it.rows }, all, emptySet()).map { it.conversation.id })
+    }
+
+    @Test
+    fun aConversationsSubagentsAreListedOldestFirst() {
+        fun subagent(id: String, createdAt: String) = chat(id, "parent").copy(sideKind = "subagent", createdAt = createdAt)
+        val all = listOf(chat("parent"), subagent("late", "2026-10-22T10:05:00Z"), chat("side", "parent"), subagent("early", "2026-10-22T10:01:00Z"), subagent("elsewhere", "2026-10-22T10:02:00Z").copy(parentId = "other"))
+
+        assertEquals(listOf("early", "late"), subagentsOf(all, "parent").map { it.id })
     }
 
     @Test

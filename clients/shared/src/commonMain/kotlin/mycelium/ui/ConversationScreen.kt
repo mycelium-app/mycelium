@@ -62,6 +62,7 @@ import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import mycelium.state.turnIsOpen
+import mycelium.state.subagentsOf
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
 import mycelium.state.projectName
@@ -360,6 +361,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
+                            SidePanel.Subagents -> SubagentsPanel(subagentsOf(state.conversations.values, id), onOpenConversation)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             null -> Unit
@@ -376,6 +378,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
+                SidePanel.Subagents -> SubagentsList(subagentsOf(state.conversations.values, id), onOpenConversation)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 null -> Unit
@@ -545,7 +548,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Terminal, Git }
+private enum class SidePanel { Details, Subagents, Terminal, Git }
 
 @Composable
 private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
@@ -559,6 +562,7 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
+            MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
         }
@@ -576,6 +580,45 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
             InspectorContent(conversation, node, groupName)
+        }
+    }
+}
+
+@Composable
+private fun SubagentsPanel(subagents: List<Conversation>, onOpen: (String) -> Unit) {
+    Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents" }) {
+        Bar {
+            BarTitle("Subagents")
+        }
+
+        Column(Modifier.weight(1f).verticalScrollWithBar().padding(vertical = Tokens.Space.S2)) {
+            SubagentsList(subagents, onOpen)
+        }
+    }
+}
+
+@Composable
+private fun SubagentsList(subagents: List<Conversation>, onOpen: (String) -> Unit) {
+    val colors = MyTheme.colors
+
+    if (subagents.isEmpty()) {
+        Label("This conversation has no subagents.", Modifier.padding(horizontal = Tokens.Space.S3), color = colors.textMuted)
+    }
+
+    subagents.forEach { subagent ->
+        val status = statusSectionName(subagent.status)
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .pressable({ onOpen(subagent.id) }, shape = BlockShape, description = "${subagent.title}, $status")
+                .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(iconOf(subagent.status), colors.textMuted, Tokens.Size.IconSm)
+            Label(subagent.title, Modifier.weight(1f), maxLines = 1)
+            Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
     }
 }
