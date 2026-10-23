@@ -200,6 +200,25 @@ private fun AppearanceSettings() {
             }
         }
 
+        val display = appearance.display
+
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+            DisplayChoice("Text size", TextSize.entries, display.textSize, { it.label }) { appearance.onDisplay(display.copy(textSize = it)) }
+            DisplayChoice("Density", RowDensity.entries, display.density, { it.label }) { appearance.onDisplay(display.copy(density = it)) }
+            DisplayChoice("Chat width", ChatWidth.entries, display.chatWidth, { it.label }) { appearance.onDisplay(display.copy(chatWidth = it)) }
+            DisplayChoice("Code size", CodeSize.entries, display.codeSize, { it.label }) { appearance.onDisplay(display.copy(codeSize = it)) }
+            DisplayChoice("Reduce motion", MotionSetting.entries, display.reducedMotion, { it.label }) { appearance.onDisplay(display.copy(reducedMotion = it)) }
+            DisplayChoice("Times", TimestampStyle.entries, display.timestamps, { it.label }) { appearance.onDisplay(display.copy(timestamps = it)) }
+        }
+    }
+}
+
+@Composable
+private fun <T> DisplayChoice(title: String, options: List<T>, chosen: T, label: (T) -> String, onChoose: (T) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label(title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        Segmented(options.map(label), label(chosen), { picked -> onChoose(options.first { label(it) == picked }) }, groupLabel = title)
     }
 }
 
@@ -220,25 +239,6 @@ private fun AccountSettings(store: Store, me: Me, controlPlane: String, onSignOu
                 Label(me.email, style = Tokens.Type.Meta, color = colors.textMuted)
                 Label(listOfNotNull("Control plane $controlPlane", serverVersion?.let { "version $it" }).joinToString(" · "), style = Tokens.Type.Meta, color = colors.textMuted)
             }
-        val display = appearance.display
-
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-            DisplayChoice("Text size", TextSize.entries, display.textSize, { it.label }) { appearance.onDisplay(display.copy(textSize = it)) }
-            DisplayChoice("Density", RowDensity.entries, display.density, { it.label }) { appearance.onDisplay(display.copy(density = it)) }
-            DisplayChoice("Chat width", ChatWidth.entries, display.chatWidth, { it.label }) { appearance.onDisplay(display.copy(chatWidth = it)) }
-            DisplayChoice("Code size", CodeSize.entries, display.codeSize, { it.label }) { appearance.onDisplay(display.copy(codeSize = it)) }
-            DisplayChoice("Reduce motion", MotionSetting.entries, display.reducedMotion, { it.label }) { appearance.onDisplay(display.copy(reducedMotion = it)) }
-            DisplayChoice("Times", TimestampStyle.entries, display.timestamps, { it.label }) { appearance.onDisplay(display.copy(timestamps = it)) }
-        }
-    }
-}
-
-@Composable
-private fun <T> DisplayChoice(title: String, options: List<T>, chosen: T, label: (T) -> String, onChoose: (T) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-        Label(title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-
-        Segmented(options.map(label), label(chosen), { picked -> onChoose(options.first { label(it) == picked }) }, groupLabel = title)
             MyButton(onSignOut, text = "Sign out", icon = MyIcon.Logout, variant = ButtonVariant.Outline)
         }
 

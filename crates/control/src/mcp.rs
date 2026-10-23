@@ -140,7 +140,6 @@ fn tool_definitions() -> Value {
                 "required": ["steps"],
             },
         },
-    ])
         {
             "name": "get_instructions",
             "description": "Read the current text and revision of one layer of the person's agent instructions (the AGENTS.md files). Call it before propose_instructions_edit: the proposal must be made on that revision. Without a layer it reads this conversation's group layer, or the global layer when the conversation has no group.",
@@ -165,6 +164,7 @@ fn tool_definitions() -> Value {
                 "required": ["text", "base_revision", "reason"],
             },
         },
+    ])
 }
 
 pub fn tools_instructions() -> String {
