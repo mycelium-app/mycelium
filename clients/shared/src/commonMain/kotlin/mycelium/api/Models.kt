@@ -155,6 +155,57 @@ data class DrainRequest(val draining: Boolean)
 data class UpdateNodeRequest(val name: String? = null, val icon: String? = null)
 
 @Serializable
+data class DiskUsage(
+    val mount: String,
+    @SerialName("total_bytes") val totalBytes: Long,
+    @SerialName("free_bytes") val freeBytes: Long,
+)
+
+@Serializable
+data class ProcessUsage(
+    val pid: Int,
+    val name: String,
+    val command: String = "",
+    @SerialName("cpu_percent") val cpuPercent: Double,
+    @SerialName("memory_bytes") val memoryBytes: Long,
+    val agent: Boolean = false,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val cwd: String? = null,
+)
+
+@Serializable
+data class ListeningPort(
+    val port: Int,
+    val address: String,
+    val pid: Int? = null,
+    val process: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val cwd: String? = null,
+)
+
+@Serializable
+data class ResourceSample(
+    @SerialName("at_ms") val atMs: Long,
+    val available: Boolean,
+    @SerialName("cpu_percent") val cpuPercent: Double = 0.0,
+    val cores: Int = 0,
+    val load: List<Double> = emptyList(),
+    @SerialName("memory_total_bytes") val memoryTotalBytes: Long = 0,
+    @SerialName("memory_available_bytes") val memoryAvailableBytes: Long = 0,
+    @SerialName("swap_total_bytes") val swapTotalBytes: Long = 0,
+    @SerialName("swap_free_bytes") val swapFreeBytes: Long = 0,
+    val disks: List<DiskUsage> = emptyList(),
+    val processes: List<ProcessUsage> = emptyList(),
+    val ports: List<ListeningPort> = emptyList(),
+)
+
+@Serializable
+data class CpuPoint(@SerialName("at_ms") val atMs: Long, @SerialName("cpu_percent") val cpuPercent: Double)
+
+@Serializable
+data class NodeResources(val latest: ResourceSample? = null, val history: List<CpuPoint> = emptyList())
+
+@Serializable
 data class Memory(
     val id: String,
     val text: String,
@@ -524,6 +575,8 @@ sealed interface StreamMessage {
 
     data class NodeRemoved(val nodeId: String) : StreamMessage
 
+    data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
+
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
 
     data class LoginFinished(val loginId: String, val ok: Boolean) : StreamMessage
@@ -549,6 +602,10 @@ fun parseStreamMessage(text: String): StreamMessage? {
         )
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
+        "node_resources" -> StreamMessage.NodeResourcesSampled(
+            element.requireString("node_id"),
+            MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),
+        )
         "login_output" -> StreamMessage.LoginOutput(element.requireString("login_id"), element.requireString("data"))
         "login_finished" -> StreamMessage.LoginFinished(
             loginId = element.requireString("login_id"),

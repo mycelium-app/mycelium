@@ -83,6 +83,8 @@ sealed interface Route {
 
     data object Nodes : Route
 
+    data class Node(val id: String) : Route
+
     data object Tasks : Route
 
     data object Schedules : Route
@@ -216,7 +218,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
             is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
-            Route.Nodes -> NodesScreen(store, state, platform)
+            Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
+            is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
             Route.Schedules -> SchedulesScreen(store, state)
             Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
@@ -265,7 +268,7 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
             SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
             SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
-            SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes) { onRoute(Route.Nodes) }
+            SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes || route is Route.Node) { onRoute(Route.Nodes) }
             SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
             SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
         }

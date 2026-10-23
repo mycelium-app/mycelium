@@ -20,6 +20,7 @@ import mycelium.api.ScheduleRun
 import mycelium.api.Task
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
+import mycelium.api.NodeResources
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
@@ -101,6 +102,22 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         val nodes = api.nodes()
 
         mutableState.update { it.copy(conversations = conversations.associateBy { c -> c.id }, nodes = nodes.associateBy { n -> n.id }) }
+    }
+
+    suspend fun watchNode(id: String) {
+        val watched = try {
+            api.watchNode(id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return
+        }
+
+        mutableState.update {
+            val held = it.resources[id]
+
+            it.copy(resources = it.resources + (id to NodeResources(watched.latest ?: held?.latest, watched.history.ifEmpty { held?.history.orEmpty() })))
+        }
     }
 
     suspend fun refreshProjects() {

@@ -5,6 +5,8 @@ import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.EventKinds
+import mycelium.api.CpuPoint
+import mycelium.api.NodeResources
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.api.Repository
@@ -16,6 +18,7 @@ import mycelium.api.QueuedPrompt
 import mycelium.api.StreamMessage
 
 const val TerminalChunkLimit = 1024
+const val ResourceHistoryLimit = 200
 
 data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyList()) {
     fun unseen(consumed: Int): List<String> = chunks.takeLast((received - consumed).coerceIn(0, chunks.size))
@@ -26,6 +29,7 @@ data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyL
 data class AppState(
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
+    val resources: Map<String, NodeResources> = emptyMap(),
     val projects: Map<String, Project> = emptyMap(),
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
@@ -73,7 +77,15 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 
-    is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId)
+    is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId, resources = state.resources - message.nodeId)
+
+    is StreamMessage.NodeResourcesSampled -> {
+        val held = state.resources[message.nodeId] ?: NodeResources()
+        val point = CpuPoint(message.sample.atMs, message.sample.cpuPercent)
+        val history = if (held.history.any { it.atMs == point.atMs }) held.history else (held.history + point).takeLast(ResourceHistoryLimit)
+
+        state.copy(resources = state.resources + (message.nodeId to NodeResources(message.sample, history)))
+    }
 
     is StreamMessage.LoginOutput ->
         state.copy(loginOutput = state.loginOutput + (message.loginId to state.loginOutput[message.loginId].orEmpty() + message.data))
@@ -87,6 +99,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.TerminalExited ->
         state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
 }
+
+fun AppState.conversationTitle(id: String?): String? = id?.let { conversations[it]?.title }
 
 fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
     projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }

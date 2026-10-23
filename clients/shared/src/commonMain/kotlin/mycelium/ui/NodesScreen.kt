@@ -59,7 +59,7 @@ fun joinCommands(method: String, controlPlane: String): List<Pair<String, String
 }
 
 @Composable
-fun NodesScreen(store: Store, state: AppState, platform: Platform) {
+fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (String) -> Unit = {}) {
     val api = store.api
     val sessions = remember { mutableStateMapOf<String, LoginSession>() }
     var joinOpen by remember { mutableStateOf(false) }
@@ -98,6 +98,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform) {
                     finished = sessions[node.id]?.let { state.finishedLogins[it.loginId] },
                     confirmingRevoke = revoking == node.id,
                     platform = platform,
+                    onOpen = { onOpenNode(node.id) },
                     onLogin = { agent, account ->
                         store.act {
                             val started = api.startLogin(node.id, agent, loginMethodFor(agent), account)
@@ -155,6 +156,7 @@ private fun NodeGroup(
     finished: Boolean?,
     confirmingRevoke: Boolean,
     platform: Platform,
+    onOpen: () -> Unit,
     onLogin: (String, String?) -> Unit,
     onLoginInput: (String) -> Unit,
     onLoginClose: () -> Unit,
@@ -192,7 +194,7 @@ private fun NodeGroup(
                 MyButton(::save, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
                 MyButton({ renaming = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
             } else {
-                Label(node.name, Modifier.semantics { heading() }, Tokens.Type.UiStrong, maxLines = 1)
+                Label(node.name, Modifier.semantics { heading() }.pressable(onOpen, description = "Open ${node.name}", shape = ControlShape).padding(horizontal = Tokens.Space.S1), Tokens.Type.UiStrong, maxLines = 1)
             }
 
             when {

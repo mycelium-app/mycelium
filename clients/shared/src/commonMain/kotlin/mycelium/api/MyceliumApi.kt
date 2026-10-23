@@ -133,6 +133,8 @@ class MyceliumApi(
         call("/nodes/$id/drain") { client.post(it) { authorise(); json(DrainRequest(draining)) } }
     }
 
+    suspend fun watchNode(id: String): NodeResources = call("/nodes/$id/watch") { client.post(it) { authorise() } }.body()
+
     suspend fun updateNode(id: String, request: UpdateNodeRequest) {
         call("/nodes/$id") { client.patch(it) { authorise(); json(request) } }
     }
