@@ -206,6 +206,35 @@ data class CpuPoint(@SerialName("at_ms") val atMs: Long, @SerialName("cpu_percen
 data class NodeResources(val latest: ResourceSample? = null, val history: List<CpuPoint> = emptyList())
 
 @Serializable
+data class ActivityRow(
+    val key: String,
+    val name: String,
+    val turns: Long = 0,
+    @SerialName("reported_turns") val reportedTurns: Long = 0,
+    @SerialName("working_ms") val workingMs: Long = 0,
+    @SerialName("input_tokens") val inputTokens: Long = 0,
+    @SerialName("output_tokens") val outputTokens: Long = 0,
+    @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
+    @SerialName("cache_write_tokens") val cacheWriteTokens: Long = 0,
+    @SerialName("cost_usd") val costUsd: Double? = null,
+) {
+    val tokens: Long get() = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+}
+
+@Serializable
+data class Activity(
+    val range: String,
+    val totals: ActivityRow,
+    val days: List<ActivityRow> = emptyList(),
+    val conversations: List<ActivityRow> = emptyList(),
+    val nodes: List<ActivityRow> = emptyList(),
+    val agents: List<ActivityRow> = emptyList(),
+    val projects: List<ActivityRow> = emptyList(),
+    val models: List<ActivityRow> = emptyList(),
+    @SerialName("unreported_agents") val unreportedAgents: List<String> = emptyList(),
+)
+
+@Serializable
 data class Memory(
     val id: String,
     val text: String,

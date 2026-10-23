@@ -95,6 +95,8 @@ sealed interface Route {
 
     data object Archive : Route
 
+    data object Activity : Route
+
     data object Settings : Route
 }
 
@@ -225,6 +227,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
             Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+            Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Settings -> SettingsScreen(store, me, store.api.baseUrl, onSignOut)
         }
     }
@@ -313,6 +316,7 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             MyButton({ onRoute(Route.Issues) }, text = "Issues", icon = MyIcon.Issue, muted = true, selected = route == Route.Issues)
             Box(Modifier.weight(1f))
             MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
+            MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
             MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
     }

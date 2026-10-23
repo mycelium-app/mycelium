@@ -24,10 +24,11 @@ fun formatBytes(bytes: Long): String {
         return "$bytes B"
     }
 
-    val tenths = (value * 10).roundToInt()
-
-    return if (tenths >= 1000 || tenths % 10 == 0) "${(tenths + 5) / 10} ${units[unit]}" else "${tenths / 10}.${tenths % 10} ${units[unit]}"
+    return "${withOneDecimal((value * 10).roundToInt())} ${units[unit]}"
 }
+
+internal fun withOneDecimal(tenths: Int): String =
+    if (tenths >= 1000 || tenths % 10 == 0) "${(tenths + 5) / 10}" else "${tenths / 10}.${tenths % 10}"
 
 fun percentOf(part: Long, whole: Long): Int = if (whole <= 0) 0 else ((part.toDouble() / whole) * 100).roundToInt().coerceIn(0, 100)
 

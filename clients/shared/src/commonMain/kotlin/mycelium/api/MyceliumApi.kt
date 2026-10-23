@@ -127,6 +127,9 @@ class MyceliumApi(
         call("/sessions/$id") { client.delete(it) { authorise(); if (confirmCurrent) parameter("confirm_current", "true") } }
     }
 
+    suspend fun activity(range: String, nodeId: String? = null): Activity =
+        call("/activity") { client.get(it) { authorise(); parameter("range", range); if (nodeId != null) parameter("node_id", nodeId) } }.body()
+
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
 
     suspend fun drainNode(id: String, draining: Boolean) {
