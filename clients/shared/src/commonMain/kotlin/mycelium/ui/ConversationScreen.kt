@@ -47,6 +47,7 @@ import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
+import mycelium.state.isChat
 import mycelium.state.buildThread
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
@@ -96,7 +97,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    val node = state.nodes[conversation.nodeId]
+    val chat = conversation.isChat
+    val node = if (chat) null else state.nodes[conversation.nodeId]
+    val sideKind = { kind: String -> if (chat) "side" else kind }
     val thread = remember(state.events[id]) { buildThread(state.events[id].orEmpty()) }
     val sending = state.sending[id].orEmpty()
     val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
@@ -105,16 +108,23 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val annotate = remember(id) {
         AnnotateActions(
             onAttach = { added -> annotations = annotations + added },
-            onAsk = { quote, question -> store.act { onOpenConversation(api.startSideChat(id, "btw", messageWithAnnotations(listOf(Annotation(quote, "")), question)).id) } },
+            onAsk = { quote, question -> store.act { onOpenConversation(api.startSideChat(id, sideKind("btw"), messageWithAnnotations(listOf(Annotation(quote, "")), question)).id) } },
         )
     }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate) {
+    val generatedActions = GeneratedUiActions(
+        onSendMessage = { text -> store.send(id, text) },
+        onSideChat = { text -> store.act { onOpenConversation(api.startSideChat(id, sideKind("btw"), text).id) } },
+        canOpenFiles = !chat,
+    )
+
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions) {
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 ConversationHeader(
                     conversation = conversation,
                     node = node,
+                    chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
@@ -132,7 +142,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 val walkthrough = state.walkthroughs[id]
 
-                if (walkthrough != null) {
+                if (walkthrough != null && !chat) {
                     TabRow(listOf(ConversationTab, WalkthroughTab), tab, { tab = it }, groupLabel = "Conversation sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
                     Hairline()
 
@@ -183,8 +193,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         }
                     },
                     onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
-                    onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, kind, text.ifEmpty { null }).id) } },
-                    goal = GoalControls(
+                    onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
+                    goal = if (chat) null else GoalControls(
                         goal = state.goals[id],
                         onSet = { text, budget -> store.act { store.setGoal(id, text, budget) } },
                         onPause = { store.act { store.pauseGoal(id, true) } },
@@ -194,7 +204,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 )
             }
 
-            if (!compact) {
+            if (!compact && !chat) {
                 when (panel) {
                     SidePanel.Details -> Inspector(conversation, node)
                     SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
@@ -207,7 +217,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    if (compact && panel != null) {
+    if (compact && !chat && panel != null) {
         BottomSheet(onDismiss = { panel = null }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node)
@@ -233,6 +243,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 private fun ConversationHeader(
     conversation: Conversation,
     node: NodeSummary?,
+    chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
@@ -278,14 +289,16 @@ private fun ConversationHeader(
             }
         }
 
-        if (compact) {
+        if (compact && chat) {
+            Box(Modifier.weight(0.001f))
+        } else if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
             MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
             MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(
-                projectName(conversation.cwd) + if (node != null) "  ·" else "",
+                if (chat) conversation.model.orEmpty() else projectName(conversation.cwd) + if (node != null) "  ·" else "",
                 style = Tokens.Type.Meta,
                 color = colors.textMuted,
                 maxLines = 1,

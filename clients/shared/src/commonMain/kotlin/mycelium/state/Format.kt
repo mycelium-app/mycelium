@@ -7,6 +7,7 @@ import kotlin.time.Instant
 fun agentName(agent: String): String = when (agent) {
     "claude" -> "Claude Code"
     "codex" -> "Codex"
+    "chat" -> "Chat"
     else -> agent
 }
 

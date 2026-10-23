@@ -141,7 +141,7 @@ fun statusSectionName(status: ConversationStatus): String = when (status) {
 }
 
 fun sidebarSections(conversations: Collection<Conversation>): List<SidebarSection> {
-    val active = conversations.filter { it.archivedAt == null }
+    val active = conversations.filter { it.archivedAt == null && !it.isChat }
     val activeIds = active.map { it.id }.toSet()
 
     return active

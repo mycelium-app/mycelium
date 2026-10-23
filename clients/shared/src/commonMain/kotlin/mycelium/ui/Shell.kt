@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,8 @@ import mycelium.state.Store
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.heading
 import mycelium.api.ConversationStatus
+import mycelium.state.isChat
+import mycelium.state.chatSections
 import mycelium.state.projectName
 import mycelium.state.relativeTime
 import androidx.compose.foundation.focusable
@@ -78,6 +81,8 @@ sealed interface Route {
     data class Chat(val id: String) : Route
 
     data object New : Route
+
+    data object NewChat : Route
 
     data class NewIn(val projectId: String) : Route
 
@@ -219,6 +224,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+            Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) })
             is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
             Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
             is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -261,44 +267,89 @@ private fun EmptyMain(state: AppState, onNew: () -> Unit) {
     }
 }
 
+private const val WorkspacesMode = "Workspaces"
+private const val ChatsMode = "Chats"
+
 @Composable
 private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
     val sections = sidebarSections(state.conversations.values)
+    val chats = chatSections(state.conversations.values)
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
+    val openedMode = when {
+        route == Route.NewChat -> ChatsMode
+        route is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
+        else -> null
+    }
+
+    LaunchedEffect(openedMode) {
+        if (openedMode != null) {
+            mode = openedMode
+        }
+    }
 
     Column(modifier.background(colors.bgPanel)) {
+        TabRow(listOf(WorkspacesMode, ChatsMode), mode, { mode = it }, groupLabel = "Sidebar mode", modifier = Modifier.padding(horizontal = Tokens.Space.S1_5))
+
+        Hairline()
+
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
-            SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
-            SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
-            SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes || route is Route.Node) { onRoute(Route.Nodes) }
-            SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
-            SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
+            if (mode == ChatsMode) {
+                SidebarLink("New chat", MyIcon.Plus, selected = route == Route.NewChat) { onRoute(Route.NewChat) }
+            } else {
+                SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
+                SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+                SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes || route is Route.Node) { onRoute(Route.Nodes) }
+                SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+                SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
+            }
         }
 
         Hairline()
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
-            item(key = "label") {
-                Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
-            }
+            if (mode == ChatsMode) {
+                for (section in chats) {
+                    item(key = "chats-${section.name}") {
+                        Label(section.name, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, colors.textMuted)
+                    }
 
-            for (section in sections) {
-                item(key = "section-${section.status}") {
-                    SectionHeading(section)
+                    items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
+                        ConversationRow(
+                            row.conversation,
+                            null,
+                            selected = row.conversation.id == (route as? Route.Chat)?.id,
+                            onClick = { onRoute(Route.Chat(row.conversation.id)) },
+                            depth = row.depth,
+                            sideChats = row.sideChats,
+                            expanded = row.conversation.id !in collapsed,
+                            onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
+                        )
+                    }
+                }
+            } else {
+                item(key = "label") {
+                    Label("Conversations", Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
                 }
 
-                items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
-                    ConversationRow(
-                        row.conversation,
-                        state.nodes[row.conversation.nodeId],
-                        selected = row.conversation.id == (route as? Route.Chat)?.id,
-                        onClick = { onRoute(Route.Chat(row.conversation.id)) },
-                        depth = row.depth,
-                        sideChats = row.sideChats,
-                        expanded = row.conversation.id !in collapsed,
-                        onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
-                    )
+                for (section in sections) {
+                    item(key = "section-${section.status}") {
+                        SectionHeading(section)
+                    }
+
+                    items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
+                        ConversationRow(
+                            row.conversation,
+                            state.nodes[row.conversation.nodeId],
+                            selected = row.conversation.id == (route as? Route.Chat)?.id,
+                            onClick = { onRoute(Route.Chat(row.conversation.id)) },
+                            depth = row.depth,
+                            sideChats = row.sideChats,
+                            expanded = row.conversation.id !in collapsed,
+                            onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
+                        )
+                    }
                 }
             }
         }
