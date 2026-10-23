@@ -89,6 +89,7 @@ const SILENT_ROUTES: &[&str] = &[
     "DELETE /api/v1/instruction-source",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
+    "PUT /api/v1/walkthroughs/{id}/reads/{step}",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {

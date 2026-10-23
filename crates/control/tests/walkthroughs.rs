@@ -135,3 +135,89 @@ async fn a_call_that_does_not_come_from_a_conversation_is_refused() {
 
     assert_eq!(result["isError"], true);
 }
+
+#[tokio::test]
+async fn sections_and_their_icons_are_stored_on_each_step_and_unknown_icons_are_dropped() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let arguments = json!({"steps": [
+        {"title": "Retry once", "section": "Retry logic", "icon": "logic", "files": [{"path": "a.rs", "diff": "+a"}]},
+        {"title": "Cover it", "section": " Tests ", "icon": "sparkles", "files": [{"path": "b.rs", "diff": "+b"}]},
+        {"title": "Loose end", "files": [{"path": "c.rs", "diff": "+c"}]},
+    ]});
+
+    call(&server, &link.token, Some(conversation.id), arguments).await;
+
+    let stored = latest(&server, conversation.id).await;
+    assert_eq!((stored["steps"][0]["section"].clone(), stored["steps"][0]["icon"].clone()), (json!("Retry logic"), json!("logic")));
+    assert_eq!((stored["steps"][1]["section"].clone(), stored["steps"][1]["icon"].clone()), (json!("Tests"), Value::Null));
+    assert_eq!(stored["steps"][2]["section"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_tool_description_tells_agents_to_group_steps_into_sections_and_mark_one_key_change() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let anonymous = server.anonymous();
+
+    let (_, tools) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))).await;
+
+    let tool = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "walkthrough").unwrap().clone();
+    let description = tool["description"].as_str().unwrap();
+    assert!(description.contains("named sections") && description.contains("exactly one step as the key change"));
+    assert!(tool["inputSchema"]["properties"]["steps"]["items"]["properties"]["icon"]["enum"].as_array().unwrap().contains(&json!("tests")));
+}
+
+async fn stored_id(server: &Server, conversation: Uuid) -> Uuid {
+    latest(server, conversation).await["id"].as_str().unwrap().parse().unwrap()
+}
+
+#[tokio::test]
+async fn read_steps_are_remembered_for_the_person_and_marking_twice_changes_nothing() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+
+    let (empty_status, empty) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
+    assert_eq!((empty_status, empty), (200, json!([])));
+
+    for step in [1, 1, 0] {
+        let (status, _) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reads/{step}"))).await;
+        assert_eq!(status, 204);
+    }
+
+    let (_, reads) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
+    assert_eq!(reads, json!([0, 1]));
+}
+
+#[tokio::test]
+async fn a_step_the_walkthrough_does_not_have_is_refused_with_the_range_to_choose_from() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+
+    let (status, body) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/reads/2"))).await;
+
+    assert_eq!(status, 400);
+    assert!(body["message"].as_str().unwrap().contains("Choose a step from 0 to 1"), "{body}");
+}
+
+#[tokio::test]
+async fn only_the_owner_can_read_or_mark_a_walkthroughs_steps() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (read_status, _) = other.json(other.get(&format!("/api/v1/walkthroughs/{id}/reads"))).await;
+    let (mark_status, _) = other.json(other.put(&format!("/api/v1/walkthroughs/{id}/reads/0"))).await;
+
+    assert_eq!((read_status, mark_status), (404, 404));
+}

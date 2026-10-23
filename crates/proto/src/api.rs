@@ -838,6 +838,10 @@ pub struct WalkthroughFile {
 pub struct WalkthroughStep {
     pub title: String,
     pub key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub explanation: String,
     pub files: Vec<WalkthroughFile>,
 }
