@@ -40,8 +40,8 @@ import mycelium.state.loginMethodName
 data class LoginSession(val loginId: String, val agent: String)
 
 fun loginMethodFor(agent: String): String = when (agent) {
-    "codex" -> "device-auth"
-    else -> "token"
+    "codex" -> "device_auth"
+    else -> "oauth_token"
 }
 
 fun firstUrl(text: String): String? = Regex("https?://[^\\s\"'<>]+").find(text)?.value
