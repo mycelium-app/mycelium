@@ -1,6 +1,10 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -410,10 +414,38 @@ private fun QueuedMessages(
     onRemove: (String) -> Unit,
 ) {
     val colors = MyTheme.colors
+    var expanded by remember { mutableStateOf(true) }
     var editing by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
+    val touch = LocalTouch.current
 
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" }) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = Tokens.Space.S1, end = Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MyButton(
+                { expanded = !expanded },
+                text = "Queued",
+                description = if (expanded) "Collapse queued messages" else "Expand queued messages",
+                size = ButtonSize.Sm,
+                muted = true,
+                trailingIcon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
+            )
+            Box(Modifier.weight(1f))
+
+            if (queue.isNotEmpty()) {
+                MyButton({ queue.forEach { onRemove(it.id) } }, text = "Clear all", size = ButtonSize.Sm, muted = true)
+            }
+        }
+
+        if (!expanded) {
+            Hairline()
+
+            return@Column
+        }
+
         for (text in sending) {
             Row(
                 Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
@@ -428,9 +460,19 @@ private fun QueuedMessages(
             Hairline()
         }
 
-        for (item in queue) {
+        for ((index, item) in queue.withIndex()) {
+            val source = remember { MutableInteractionSource() }
+            val hovered by source.collectIsHoveredAsState()
+            var focused by remember { mutableStateOf(false) }
+            val showActions = touch || hovered || focused || editing == item.id
+
             Row(
-                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = rowHeight())
+                    .hoverable(source)
+                    .onFocusChanged { focused = it.hasFocus }
+                    .padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -439,11 +481,17 @@ private fun QueuedMessages(
                     MyButton({ onEdit(item.id, draft.trim()); editing = null }, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
                     MyButton({ editing = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
                 } else {
-                    Icon(MyIcon.Clock, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Queued" })
+                    Box(Modifier.semantics { contentDescription = if (index == 0) "Next message" else "Queued" }) {
+                        Dot(if (index == 0) colors.statusAttention else colors.textFaint, hollow = index != 0)
+                    }
+
                     Label(item.text, Modifier.weight(1f), maxLines = 1)
-                    MyButton({ onSendNow(item.id) }, text = "Send now", size = ButtonSize.Sm, muted = true)
-                    MyButton({ draft = item.text; editing = item.id }, icon = MyIcon.Pencil, description = "Edit queued message", size = ButtonSize.Sm, muted = true)
-                    MyButton({ onRemove(item.id) }, icon = MyIcon.Close, description = "Remove queued message", size = ButtonSize.Sm, muted = true)
+
+                    Row(Modifier.alpha(if (showActions) 1f else 0f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        MyButton({ onRemove(item.id) }, icon = MyIcon.Close, description = "Remove queued message", size = ButtonSize.Sm, muted = true)
+                        MyButton({ draft = item.text; editing = item.id }, icon = MyIcon.Pencil, description = "Edit queued message", size = ButtonSize.Sm, muted = true)
+                        MyButton({ onSendNow(item.id) }, text = "Send now", size = ButtonSize.Sm, muted = true)
+                    }
                 }
             }
 
