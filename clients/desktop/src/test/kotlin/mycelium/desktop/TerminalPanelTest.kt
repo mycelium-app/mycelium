@@ -2,6 +2,9 @@ package mycelium.desktop
 
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -79,5 +82,22 @@ class TerminalPanelTest {
         repeat(10) { scene.render(it * 16_000_000L + 10_000_000_000L) }
         scene.close()
         waitFor(null, "the terminal to stop") { requests.contains("DELETE /api/v1/terminals/t1") }
+    }
+
+    @Test
+    fun whenTheShellExitsThePanelAsksToClose() {
+        val conversation = MyceliumJson.decodeFromString(Conversation.serializer(), ConversationJson)
+        val store = store()
+        var state by mutableStateOf(AppState())
+        var closed = false
+        val scene = ImageComposeScene(600, 700, Density(1f)) {
+            MyceliumTheme(true) { TerminalPanel(store, state, conversation, Modifier.width(440.dp).fillMaxHeight(), onExited = { closed = true }) }
+        }
+
+        waitFor(scene, "the terminal to start") { requests.any { it == "POST /api/v1/conversations/c1/terminal" } }
+        repeat(5) { scene.render(it * 16_000_000L + 1_000_000_000L) }
+        state = AppState(exitedTerminals = setOf("t1"))
+        waitFor(scene, "the panel to ask to close") { closed }
+        scene.close()
     }
 }

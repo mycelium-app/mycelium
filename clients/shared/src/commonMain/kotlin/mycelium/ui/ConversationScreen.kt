@@ -317,7 +317,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
-                            SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize()) }
+                            SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             null -> Unit
                         }
@@ -333,7 +333,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
-                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet)) }
+                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 null -> Unit
             }

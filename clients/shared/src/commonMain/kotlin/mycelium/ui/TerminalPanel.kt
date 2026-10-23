@@ -77,7 +77,7 @@ import mycelium.state.xtermRgb
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier) {
+fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, modifier: Modifier = Modifier, onExited: () -> Unit = {}) {
     val colors = MyTheme.colors
 
     Column(modifier.background(colors.bgPanel)) {
@@ -86,12 +86,12 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
             Label("tmux  ·  ${projectName(conversation.cwd)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
 
-        TerminalView(store, state, conversation, Modifier.weight(1f).fillMaxWidth())
+        TerminalView(store, state, conversation, Modifier.weight(1f).fillMaxWidth(), onExited)
     }
 }
 
 @Composable
-private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier) {
+private fun TerminalView(store: Store, state: AppState, conversation: Conversation, modifier: Modifier, onExited: () -> Unit) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
     val density = LocalDensity.current
@@ -116,6 +116,12 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     val id = terminalId
     val exited = id != null && id in state.exitedTerminals
     val feed = id?.let { state.terminalOutput[it] }
+
+    LaunchedEffect(exited) {
+        if (exited) {
+            onExited()
+        }
+    }
 
     LaunchedEffect(emulator, columns > 0 && rows > 0) {
         if (columns > 0 && rows > 0 && terminalId == null) {
@@ -212,13 +218,13 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
             }
         }
 
-        if (failure != null || exited) {
+        if (failure != null) {
             Row(
                 Modifier.fillMaxWidth().background(colors.bgChrome).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Label(failure ?: "The terminal closed. Open it again to carry on.", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted)
+                Label(failure.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted)
                 MyButton({ attempt++ }, text = "Open again", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             }
         }
