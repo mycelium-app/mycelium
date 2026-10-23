@@ -718,7 +718,7 @@ private fun CommandCard(call: ThreadItem.ToolCall) {
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Label(call.argument, Modifier.weight(1f), Tokens.Type.Code)
+            BasicText(highlighted("bash", call.argument), Modifier.weight(1f), style = Tokens.Type.Code.themed())
 
             when (call.status) {
                 ToolStatus.Running -> StatusMark("Running", Tone.Working, MyIcon.Working)
