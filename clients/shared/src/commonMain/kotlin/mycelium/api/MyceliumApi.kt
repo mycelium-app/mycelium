@@ -403,6 +403,18 @@ class MyceliumApi(
 
     suspend fun gitDiff(id: String, path: String, staged: Boolean): GitDiff =
         call("/conversations/$id/git/diff") { client.get(it) { authorise(); parameter("path", path); parameter("staged", staged) } }.body()
+    suspend fun gitGraph(id: String, skip: Int = 0, limit: Int = 200): List<GraphCommit> =
+        call("/conversations/$id/git/graph") { client.get(it) { authorise(); parameter("skip", skip); parameter("limit", limit) } }.body()
+
+    suspend fun gitShow(id: String, hash: String): GitDiff =
+        call("/conversations/$id/git/show") { client.get(it) { authorise(); parameter("hash", hash) } }.body()
+
+    suspend fun gitBranches(id: String): GitBranches = call("/conversations/$id/git/branches") { client.get(it) { authorise() } }.body()
+
+    suspend fun gitSwitch(id: String, branch: String, create: Boolean = false, track: String? = null) {
+        call("/conversations/$id/git/switch") { client.post(it) { authorise(); json(GitSwitchRequest(branch, create, track)) } }
+    }
+
 
     suspend fun gitStage(id: String, paths: List<String>) {
         call("/conversations/$id/git/stage") { client.post(it) { authorise(); json(GitPathsRequest(paths)) } }

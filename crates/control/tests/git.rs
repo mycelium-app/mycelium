@@ -39,6 +39,39 @@ async fn git_status_is_read_by_the_node_in_the_conversations_folder() {
 }
 
 #[tokio::test]
+async fn git_graph_show_branches_and_switch_carry_their_arguments_to_the_node() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let graph = user.json(user.get(&format!("/api/v1/conversations/{id}/git/graph?skip=200"))).await;
+        let show = user.json(user.get(&format!("/api/v1/conversations/{id}/git/show?hash=abc1234"))).await;
+        let branches = user.json(user.get(&format!("/api/v1/conversations/{id}/git/branches"))).await;
+        let switch = user.json(user.post(&format!("/api/v1/conversations/{id}/git/switch")).json(&json!({"branch": " topic ", "create": true, "track": "origin/topic"}))).await;
+        let blank = user.json(user.post(&format!("/api/v1/conversations/{id}/git/switch")).json(&json!({"branch": " "}))).await;
+
+        [graph, show, branches, switch, blank].map(|(status, _)| status)
+    });
+
+    let mut commands = Vec::new();
+
+    for _ in 0..4 {
+        commands.push(answer_next(&mut link, true, json!({}), None).await.1);
+    }
+
+    assert_eq!(
+        commands,
+        vec![
+            GitCommand::Graph { limit: 200, skip: 200 },
+            GitCommand::Show { hash: "abc1234".into() },
+            GitCommand::Branches,
+            GitCommand::Switch { branch: "topic".into(), create: true, track: Some("origin/topic".into()) },
+        ]
+    );
+    assert_eq!(asking.await.unwrap(), [200, 200, 200, 200, 400]);
+}
+
+#[tokio::test]
 async fn git_log_diff_and_stage_carry_their_arguments_to_the_node() {
     let server = Server::start().await;
     let (mut link, id) = conversation_on(&server).await;

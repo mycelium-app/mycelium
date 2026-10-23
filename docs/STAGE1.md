@@ -386,7 +386,7 @@ Silent on purpose, because no client shows them: user, web session and client to
 transcript chunks (no client endpoint or message), the node's `ack`s and prompt acknowledgements,
 send-now and unacknowledged-prompt bookkeeping, and the routes `POST /auth/logout`,
 `POST /nodes/{id}/logins` (the output follows as `login_output`), `POST /nodes/{id}/watch` (the samples follow as `node_resources`), `POST /nodes/{id}/processes/{pid}/stop` (the process leaves the next `node_resources` sample), `POST /logins/{id}/input` and
-`POST /conversations/{id}/terminal` (the output follows as `terminal_output`), `POST /conversations/{id}/attachments` (the answer names the stored file, and the message that carries it publishes), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo}` (the answer is the response, and the git panel reloads its status after each), `PUT /walkthroughs/{id}/reads/{step}` (the page marks the step checked itself), `POST /terminals/{id}/input` and
+`POST /conversations/{id}/terminal` (the output follows as `terminal_output`), `POST /conversations/{id}/attachments` (the answer names the stored file, and the message that carries it publishes), the git routes `POST /conversations/{id}/git/{stage,unstage,stage-all,commit,fetch,undo,switch}` (the answer is the response, and the git panel reloads its status after each), `PUT /walkthroughs/{id}/reads/{step}` (the page marks the step checked itself), `POST /terminals/{id}/input` and
 `POST /terminals/{id}/resize` (the terminal answers with output), `POST /conversations/{id}/cancel` (the turn ends with `turn_end` from the node), and the memory routes
 `POST /mcp`, `PATCH /memories/{id}` and `DELETE /memories/{id}` (the Memories settings page loads its list when opened), and the forge routes
 `PUT /me/time-zone`, and `POST /forges` and `DELETE /forges/{id}` (the Forges settings page replaces its list from the answer), and `POST /projects` (the Projects page adds the answer), and the task and schedule routes that only change those lists (`POST` and `DELETE /tasks`, `POST`, `PATCH` and `DELETE /schedules`: the Tasks and Schedules pages replace their lists from the answer). `POST /tasks/{id}/start` and `POST /schedules/{id}/run` publish the new conversation as any start does, and a scheduled run does too.
@@ -594,8 +594,12 @@ runs `git -C <folder>` with arguments, never through a shell: `GET /conversation
 `git/diff?path=&staged=` (untracked files diff against `/dev/null`, output cut at 200 KB with a `truncated` flag) and
 `POST git/stage`, `git/unstage`, `git/stage-all`, `git/commit`, `git/fetch` and `git/undo` (`reset --soft HEAD~1`). Calls
 time out after 10 seconds (fetch 60), an offline node is a 409 `node_offline`, an empty commit message is a 400, and git's
-own error text comes back as a 409 `git_failed`. The panel has Changes (files under Tracked and Untracked, by folder, with
-line counts and a checkbox that stages or unstages; selecting a file shows its diff in place of the list) and History tabs,
+own error text comes back as a 409 `git_failed`. `GET git/graph?skip=&limit=` (default and most 200) returns commits of every
+branch in topological order with parents and structured refs, `GET git/show?hash=` a commit's patch, `GET git/branches` local and
+remote branches by recency with author, date and subject, and `POST git/switch` `{branch, create?, track?}` runs `git switch`
+(never a stash: git refuses when changes would be overwritten and says so). The panel has Changes (files under Tracked and Untracked, by folder, with
+line counts and a checkbox that stages or unstages; selecting a file shows its diff in place of the list) History and Graph tabs (lanes
+drawn on the client from parent hashes; the footer's branch name opens a searchable branch picker),
 with the branch, ahead and behind counts, Fetch, the commit message, Commit and Undo at the bottom. It refreshes when it
 opens, after every action and when the conversation's status changes. Not done: a diff of every file at once (View diff
 opens the first changed file), unstaging in a repository with no commits, discarding changes, and branch switching.

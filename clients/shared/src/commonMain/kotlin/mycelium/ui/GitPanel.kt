@@ -33,10 +33,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
+import mycelium.api.GitBranches
 import mycelium.api.GitCommit
 import mycelium.api.GitDiff
 import mycelium.api.GitFile
 import mycelium.api.GitStatus
+import mycelium.api.GraphCommit
+import mycelium.state.BranchEntry
+import mycelium.state.splitCommitDiff
 import mycelium.state.ChangeRow
 import mycelium.state.Store
 import mycelium.state.ToolStatus
@@ -48,9 +52,11 @@ import mycelium.state.firstChange
 import mycelium.state.fullyStaged
 import mycelium.state.parseUnifiedDiff
 
-private enum class GitTab { Changes, History }
+private enum class GitTab { Changes, History, Graph }
 
 private const val ShortHashLength = 7
+
+private const val GraphPage = 200
 
 @Composable
 fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier) {
@@ -60,6 +66,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     var status by remember(id) { mutableStateOf<GitStatus?>(null) }
     var log by remember(id) { mutableStateOf<List<GitCommit>>(emptyList()) }
     var tab by remember(id) { mutableStateOf(GitTab.Changes) }
+    var graph by remember(id) { mutableStateOf<List<GraphCommit>>(emptyList()) }
+    var graphComplete by remember(id) { mutableStateOf(false) }
+    var graphLoading by remember(id) { mutableStateOf(false) }
+    var selectedCommit by remember(id) { mutableStateOf<String?>(null) }
+    var openCommit by remember(id) { mutableStateOf<GraphCommit?>(null) }
+    var commitDiff by remember(id) { mutableStateOf<GitDiff?>(null) }
+    var branches by remember(id) { mutableStateOf<GitBranches?>(null) }
     var viewing by remember(id) { mutableStateOf<GitFile?>(null) }
     var diff by remember(id) { mutableStateOf<GitDiff?>(null) }
     var message by remember(id) { mutableStateOf("") }
@@ -69,6 +82,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     suspend fun refresh() {
         status = store.api.gitStatus(id)
         log = store.api.gitLog(id)
+
+        if (tab == GitTab.Graph) {
+            val page = store.api.gitGraph(id)
+
+            graph = page
+            graphComplete = page.size < GraphPage
+        }
     }
 
     fun run(block: suspend () -> Unit) {
@@ -90,11 +110,21 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         run { refresh() }
     }
 
+    LaunchedEffect(id, tab) {
+        if (tab == GitTab.Graph && graph.isEmpty()) {
+            run { refresh() }
+        }
+    }
+
     Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Git" }) {
         Bar {
             val open = viewing
+            val commit = openCommit
 
-            if (open != null) {
+            if (commit != null) {
+                MyButton({ openCommit = null; commitDiff = null }, icon = MyIcon.Back, description = "Back to the graph", muted = true)
+                Label(commit.subject, Modifier.weight(1f), Tokens.Type.Ui, maxLines = 1)
+            } else if (open != null) {
                 MyButton({ viewing = null; diff = null }, icon = MyIcon.Back, description = "Back to the changes", muted = true)
                 Label(open.path, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
             } else {
@@ -107,7 +137,28 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         val open = viewing
         val shown = diff
 
-        if (open != null) {
+        val commit = openCommit
+        val shownCommit = commitDiff
+
+        if (commit != null) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Label("${commit.hash.take(ShortHashLength)} · ${commit.author} · ${ago(commit.date)}", Modifier.padding(Tokens.Space.S3), Tokens.Type.Meta, colors.textMuted)
+
+                if (shownCommit == null) {
+                    Label("Loading the commit", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+                } else if (shownCommit.diff.isBlank()) {
+                    Label("There are no text changes to show.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+                } else {
+                    for (file in splitCommitDiff(shownCommit.diff)) {
+                        DiffCard(file, ToolStatus.Done)
+                    }
+
+                    if (shownCommit.truncated) {
+                        Label("The diff is cut at 200 KB.", Modifier.padding(Tokens.Space.S3), Tokens.Type.Meta, colors.textMuted)
+                    }
+                }
+            }
+        } else if (open != null) {
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 if (shown == null) {
                     Label("Loading the diff", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
@@ -123,14 +174,44 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             }
         } else {
             Segmented(
-                listOf("Changes (${files.size})", "History"),
-                if (tab == GitTab.Changes) "Changes (${files.size})" else "History",
-                { tab = if (it == "History") GitTab.History else GitTab.Changes },
+                listOf("Changes (${files.size})", "History", "Graph"),
+                when (tab) {
+                    GitTab.Changes -> "Changes (${files.size})"
+                    GitTab.History -> "History"
+                    GitTab.Graph -> "Graph"
+                },
+                { tab = when (it) { "History" -> GitTab.History; "Graph" -> GitTab.Graph; else -> GitTab.Changes } },
                 "Git view",
                 Modifier.padding(Tokens.Space.S2),
             )
 
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+            if (tab == GitTab.Graph) {
+                GitGraphTab(
+                    commits = graph,
+                    selected = selectedCommit,
+                    onSelect = { selectedCommit = it },
+                    onOpen = { commit ->
+                        openCommit = commit
+                        commitDiff = null
+                        run { commitDiff = store.api.gitShow(id, commit.hash) }
+                    },
+                    hasMore = !graphComplete && !graphLoading,
+                    onMore = {
+                        graphLoading = true
+                        run {
+                            try {
+                                val page = store.api.gitGraph(id, skip = graph.size)
+
+                                graph = graph + page
+                                graphComplete = page.size < GraphPage
+                            } finally {
+                                graphLoading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            } else Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 if (tab == GitTab.Changes) {
                     ChangesList(
                         files = files,
@@ -170,6 +251,22 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     }
                 },
                 onUndo = { run { store.api.gitUndo(id); refresh() } },
+                branches = branches,
+                onOpenBranches = {
+                    branches = null
+                    run { branches = store.api.gitBranches(id) }
+                },
+                onSwitch = { entry ->
+                    run {
+                        when (entry) {
+                            is BranchEntry.Local -> if (!entry.current) store.api.gitSwitch(id, entry.branch.name)
+                            is BranchEntry.Remote -> store.api.gitSwitch(id, entry.localName, create = true, track = entry.branch.name)
+                            is BranchEntry.Create -> store.api.gitSwitch(id, entry.name, create = true)
+                        }
+
+                        refresh()
+                    }
+                },
             )
         }
     }
@@ -314,16 +411,35 @@ fun CommitArea(
     onFetch: () -> Unit,
     onCommit: () -> Unit,
     onUndo: () -> Unit,
+    branches: GitBranches? = null,
+    onOpenBranches: () -> Unit = {},
+    onSwitch: (BranchEntry) -> Unit = {},
 ) {
     val colors = MyTheme.colors
+    var picking by remember { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
     val focused = source.collectIsFocusedAsState()
 
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
-                Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+                Row(
+                    Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(min = touchMin(Tokens.Size.ControlMd))
+                        .pressable({ picking = true; onOpenBranches() }, description = "Switch branch, current branch ${status?.branch.orEmpty()}", shape = ControlShape)
+                        .padding(horizontal = Tokens.Space.S1),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                    Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+                    Icon(MyIcon.ChevronDown, colors.textMuted, Tokens.Size.IconSm)
+
+                    if (picking) {
+                        BranchPicker(branches, onSwitch = { picking = false; onSwitch(it) }, onDismiss = { picking = false })
+                    }
+                }
 
                 if (status != null && status.ahead > 0) {
                     Label("${status.ahead} ahead", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)

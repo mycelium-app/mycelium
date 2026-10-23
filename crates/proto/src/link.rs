@@ -199,6 +199,16 @@ impl std::fmt::Debug for GitCredentials {
 pub enum GitCommand {
     Status,
     Log { limit: u32 },
+    Graph { limit: u32, skip: u32 },
+    Show { hash: String },
+    Branches,
+    Switch {
+        branch: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        create: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+    },
     Diff { path: String, staged: bool },
     Stage { paths: Vec<String> },
     Unstage { paths: Vec<String> },

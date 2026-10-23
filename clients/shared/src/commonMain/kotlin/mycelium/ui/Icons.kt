@@ -69,6 +69,7 @@ enum class MyIcon(vararg val paths: String) {
     Info(circle(12f, 12f, 9f), "M12 11v5M12 8h.01"),
     Layers("m12 3 9 5-9 5-9-5Z", "m3 13 9 5 9-5"),
     File("M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6"),
+    Tag("M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42Z", circle(7.5f, 7.5f, 1f)),
     Branch("M6 3v12", circle(18f, 6f, 3f), circle(6f, 18f, 3f), "M18 9a9 9 0 0 1-9 9"),
     Diff("M12 3v8M8 7h8M8 17h8"),
     Person(circle(12f, 8f, 4f), "M4 21a8 8 0 0 1 16 0"),

@@ -16,11 +16,31 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_LOG_LIMIT: u32 = 50;
+const DEFAULT_GRAPH_LIMIT: u32 = 200;
 const MOST_LOG_ENTRIES: u32 = 200;
 
 #[derive(Deserialize)]
 pub struct LogQuery {
     limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct GraphQuery {
+    limit: Option<u32>,
+    skip: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct ShowQuery {
+    hash: String,
+}
+
+#[derive(Deserialize)]
+pub struct SwitchRequest {
+    branch: String,
+    #[serde(default)]
+    create: bool,
+    track: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +98,30 @@ pub async fn log(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     let limit = query.limit.unwrap_or(DEFAULT_LOG_LIMIT).clamp(1, MOST_LOG_ENTRIES);
 
     run(&state, &user, id, GitCommand::Log { limit }).await
+}
+
+pub async fn graph(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<GraphQuery>) -> ApiResult<Json<Value>> {
+    let limit = query.limit.unwrap_or(DEFAULT_GRAPH_LIMIT).clamp(1, MOST_LOG_ENTRIES);
+
+    run(&state, &user, id, GitCommand::Graph { limit, skip: query.skip.unwrap_or(0) }).await
+}
+
+pub async fn show(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<ShowQuery>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::Show { hash: query.hash }).await
+}
+
+pub async fn branches(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::Branches).await
+}
+
+pub async fn switch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SwitchRequest>) -> ApiResult<Json<Value>> {
+    let branch = request.branch.trim().to_string();
+
+    if branch.is_empty() {
+        return Err(ApiError::bad_request("branch_required", "Enter a branch name."));
+    }
+
+    run(&state, &user, id, GitCommand::Switch { branch, create: request.create, track: request.track }).await
 }
 
 pub async fn diff(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<DiffQuery>) -> ApiResult<Json<Value>> {

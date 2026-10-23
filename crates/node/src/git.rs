@@ -28,6 +28,10 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
     match command {
         GitCommand::Status => status(cwd),
         GitCommand::Log { limit } => log(cwd, limit),
+        GitCommand::Graph { limit, skip } => graph(cwd, limit, skip),
+        GitCommand::Show { hash } => show(cwd, &hash),
+        GitCommand::Branches => branches(cwd),
+        GitCommand::Switch { branch, create, track } => switch(cwd, &branch, create, track.as_deref()),
         GitCommand::Diff { path, staged } => diff(cwd, &path, staged),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
         GitCommand::Unstage { paths } => changed(cwd, &["restore", "--staged", "--"], &paths),
@@ -252,6 +256,113 @@ fn log(cwd: &Path, limit: u32) -> Result<Value, String> {
         .collect();
 
     Ok(json!(commits))
+}
+
+fn graph(cwd: &Path, limit: u32, skip: u32) -> Result<Value, String> {
+    let limit = limit.to_string();
+    let skip = skip.to_string();
+    let output = match git(
+        cwd,
+        &["log", "--all", "--topo-order", "--decorate=full", "--format=%H%x00%P%x00%an%x00%aI%x00%D%x00%s", "-n", &limit, "--skip", &skip],
+        &[],
+    ) {
+        Ok(output) => output,
+        Err(message) if message.contains("does not have any commits") => Vec::new(),
+        Err(message) => return Err(message),
+    };
+
+    let commits: Vec<Value> = String::from_utf8_lossy(&output)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\0');
+            let hash = parts.next()?;
+            let parents: Vec<&str> = parts.next()?.split_whitespace().collect();
+            let author = parts.next()?;
+            let date = parts.next()?;
+            let refs: Vec<Value> = parts.next()?.split(", ").filter(|name| !name.is_empty()).filter_map(graph_ref).collect();
+
+            Some(json!({"hash": hash, "parents": parents, "author": author, "date": date, "refs": refs, "subject": parts.next()?}))
+        })
+        .collect();
+
+    Ok(json!(commits))
+}
+
+fn graph_ref(decoration: &str) -> Option<Value> {
+    if decoration == "HEAD" {
+        return Some(json!({"name": "HEAD", "kind": "head", "current": true}));
+    }
+
+    if let Some(branch) = decoration.strip_prefix("HEAD -> refs/heads/") {
+        return Some(json!({"name": branch, "kind": "branch", "current": true}));
+    }
+
+    if let Some(tag) = decoration.strip_prefix("tag: refs/tags/") {
+        return Some(json!({"name": tag, "kind": "tag", "current": false}));
+    }
+
+    if let Some(branch) = decoration.strip_prefix("refs/heads/") {
+        return Some(json!({"name": branch, "kind": "branch", "current": false}));
+    }
+
+    let remote = decoration.strip_prefix("refs/remotes/")?;
+
+    if remote.ends_with("/HEAD") {
+        return None;
+    }
+
+    Some(json!({"name": remote, "kind": "remote", "current": false}))
+}
+
+fn show(cwd: &Path, hash: &str) -> Result<Value, String> {
+    if hash.len() < 4 || !hash.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err(format!("{hash} is not a commit."));
+    }
+
+    let output = git(cwd, &["show", "--format=", "--no-color", "--patch", hash, "--"], &[])?;
+    let truncated = output.len() > MOST_DIFF_BYTES;
+    let kept = if truncated { &output[..MOST_DIFF_BYTES] } else { &output[..] };
+
+    Ok(json!({"diff": String::from_utf8_lossy(kept), "truncated": truncated}))
+}
+
+fn branches(cwd: &Path) -> Result<Value, String> {
+    let current = git(cwd, &["branch", "--show-current"], &[])?;
+    let listing = git(
+        cwd,
+        &["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(authorname)%00%(committerdate:iso-strict)%00%(contents:subject)", "refs/heads", "refs/remotes"],
+        &[],
+    )?;
+    let text = String::from_utf8_lossy(&listing);
+    let mut local = Vec::new();
+    let mut remote = Vec::new();
+
+    for line in text.lines() {
+        let mut parts = line.split('\0');
+        let (Some(refname), Some(author), Some(date), Some(subject)) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+
+        if let Some(name) = refname.strip_prefix("refs/heads/") {
+            local.push(json!({"name": name, "author": author, "date": date, "subject": subject}));
+        } else if let Some(name) = refname.strip_prefix("refs/remotes/").filter(|name| !name.ends_with("/HEAD")) {
+            remote.push(json!({"name": name, "author": author, "date": date, "subject": subject}));
+        }
+    }
+
+    Ok(json!({"current": String::from_utf8_lossy(&current).trim(), "local": local, "remote": remote}))
+}
+
+fn switch(cwd: &Path, branch: &str, create: bool, track: Option<&str>) -> Result<Value, String> {
+    git(cwd, &["check-ref-format", "--branch", branch], &[]).map_err(|_| format!("{branch} is not a valid branch name."))?;
+
+    let output = match (create, track) {
+        (true, Some(remote_branch)) => git(cwd, &["switch", "-c", branch, "--track", remote_branch], &[])?,
+        (true, None) => git(cwd, &["switch", "-c", branch], &[])?,
+        (false, _) => git(cwd, &["switch", branch], &[])?,
+    };
+
+    Ok(json!({"output": String::from_utf8_lossy(&output)}))
 }
 
 fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value, String> {
@@ -567,6 +678,120 @@ mod tests {
 
         assert_eq!(run(dir.path(), GitCommand::Log { limit: 10 }).unwrap().as_array().unwrap().len(), 1);
         assert_eq!(file(&run(dir.path(), GitCommand::Status).unwrap(), "a.txt")["staged"], true);
+    }
+
+    fn branchy_repository() -> tempfile::TempDir {
+        let dir = repository();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "first");
+        git(dir.path(), &["switch", "-c", "feature"], &[]).unwrap();
+        write(&dir, "b.txt", "feature\n");
+        commit_all(&dir, "on feature");
+        git(dir.path(), &["switch", "main"], &[]).unwrap();
+        write(&dir, "c.txt", "main\n");
+        commit_all(&dir, "on main");
+        git(dir.path(), &["merge", "--no-ff", "feature", "-m", "merge feature"], &[]).unwrap();
+        git(dir.path(), &["tag", "v1"], &[]).unwrap();
+
+        dir
+    }
+
+    #[test]
+    fn the_graph_lists_every_branch_with_parents_and_structured_refs() {
+        let dir = branchy_repository();
+        git(dir.path(), &["branch", "side", "HEAD~1"], &[]).unwrap();
+
+        let graph = run(dir.path(), GitCommand::Graph { limit: 10, skip: 0 }).unwrap();
+        let commits = graph.as_array().unwrap();
+        let tip = &commits[0];
+
+        assert_eq!(commits.len(), 4);
+        assert_eq!(tip["subject"], "merge feature");
+        assert_eq!(tip["parents"].as_array().unwrap().len(), 2);
+        assert_eq!(tip["refs"], json!([{"name": "main", "kind": "branch", "current": true}, {"name": "v1", "kind": "tag", "current": false}]));
+        assert!(commits.iter().any(|commit| commit["refs"] == json!([{"name": "feature", "kind": "branch", "current": false}])));
+        assert!(commits.iter().any(|commit| commit["subject"] == "first" && commit["parents"] == json!([])));
+    }
+
+    #[test]
+    fn the_graph_pages_with_skip_and_is_empty_without_commits() {
+        let dir = branchy_repository();
+
+        let page = run(dir.path(), GitCommand::Graph { limit: 2, skip: 2 }).unwrap();
+
+        assert_eq!(page.as_array().unwrap().len(), 2);
+        assert_eq!(run(repository().path(), GitCommand::Graph { limit: 10, skip: 0 }).unwrap(), json!([]));
+    }
+
+    #[test]
+    fn showing_a_commit_returns_its_patch_and_refuses_anything_that_is_not_a_hash() {
+        let dir = branchy_repository();
+        let hash = run(dir.path(), GitCommand::Graph { limit: 10, skip: 0 }).unwrap()[1]["hash"].as_str().unwrap().to_string();
+
+        let shown = run(dir.path(), GitCommand::Show { hash }).unwrap();
+
+        assert!(shown["diff"].as_str().unwrap().contains("diff --git"));
+        assert!(run(dir.path(), GitCommand::Show { hash: "--output=x".into() }).is_err());
+    }
+
+    fn switch_to(dir: &tempfile::TempDir, branch: &str, create: bool, track: Option<&str>) -> Result<Value, String> {
+        run(dir.path(), GitCommand::Switch { branch: branch.into(), create, track: track.map(String::from) })
+    }
+
+    #[test]
+    fn branches_list_local_and_remote_with_the_current_one_named() {
+        let origin = bare_origin_with_a_commit();
+        let clone = clone_of(&origin);
+        git(clone.path(), &["branch", "local-only"], &[]).unwrap();
+
+        let branches = run(clone.path(), GitCommand::Branches).unwrap();
+        let names = |key: &str| branches[key].as_array().unwrap().iter().map(|branch| branch["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+        assert_eq!(branches["current"], "main");
+        assert!(names("local").contains(&"local-only".to_string()));
+        assert_eq!(names("remote"), vec!["origin/main"]);
+        assert_eq!(branches["local"][0]["subject"], "first");
+    }
+
+    #[test]
+    fn switching_moves_to_an_existing_branch_and_creating_makes_a_new_one() {
+        let dir = branchy_repository();
+
+        switch_to(&dir, "feature", false, None).unwrap();
+        assert_eq!(run(dir.path(), GitCommand::Branches).unwrap()["current"], "feature");
+
+        switch_to(&dir, "fresh", true, None).unwrap();
+        assert_eq!(run(dir.path(), GitCommand::Branches).unwrap()["current"], "fresh");
+        assert!(switch_to(&dir, "bad name", true, None).is_err());
+        assert!(switch_to(&dir, "-c", false, None).is_err());
+    }
+
+    #[test]
+    fn a_remote_only_branch_is_created_tracking_its_remote() {
+        let origin = bare_origin_with_a_commit();
+        let clone = clone_of(&origin);
+        git(clone.path(), &["push", "origin", "main:topic"], &[]).unwrap();
+        git(clone.path(), &["fetch"], &[]).unwrap();
+
+        switch_to(&clone, "topic", true, Some("origin/topic")).unwrap();
+
+        assert_eq!(git(clone.path(), &["rev-parse", "--abbrev-ref", "topic@{upstream}"], &[]).unwrap(), b"origin/topic\n");
+    }
+
+    #[test]
+    fn switching_with_changes_that_would_be_overwritten_is_refused_and_keeps_them() {
+        let dir = branchy_repository();
+        switch_to(&dir, "feature", false, None).unwrap();
+        write(&dir, "c.txt", "feature version\n");
+        commit_all(&dir, "diverge c");
+        switch_to(&dir, "main", false, None).unwrap();
+        write(&dir, "c.txt", "uncommitted\n");
+
+        let refused = switch_to(&dir, "feature", false, None).unwrap_err();
+
+        assert!(refused.contains("c.txt"), "{refused}");
+        assert_eq!(run(dir.path(), GitCommand::Branches).unwrap()["current"], "main");
+        assert_eq!(std::fs::read_to_string(dir.path().join("c.txt")).unwrap(), "uncommitted\n");
     }
 
     #[test]
