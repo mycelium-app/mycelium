@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import mycelium.state.GeneratedUiLanguage
 import mycelium.state.CalloutKind
+import mycelium.state.Token
 import mycelium.state.ColumnAlign
 import mycelium.state.TokenKind
 import mycelium.state.highlight
@@ -114,6 +115,8 @@ fun ThreadView(
             state.scrollToItem(0)
         }
     }
+    val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
+
 
     suspend fun showTopOf(target: Int) {
         state.animateScrollToItem(target)
@@ -161,7 +164,7 @@ fun ThreadView(
                     )
                 } else {
                     CompositionLocalProvider(LocalImageJump provides jumpToImage) {
-                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == items.indexOfLast { it is ThreadItem.Failure }) onRetry else null)
+                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null)
                     }
                 }
             }
@@ -373,6 +376,22 @@ private fun calloutTone(kind: CalloutKind): CalloutTone {
         CalloutKind.Caution -> CalloutTone(colors.statusFailed, MyIcon.Failed)
     }
 }
+private const val HighlightedCodeLimit = 256
+
+private val highlightedCode = LinkedHashMap<Pair<String, String>, List<Token>>()
+
+private fun highlightedTokens(language: String, code: String): List<Token> {
+    val key = language to code
+    val tokens = highlightedCode.remove(key) ?: highlight(language, code)
+    highlightedCode[key] = tokens
+
+    if (highlightedCode.size > HighlightedCodeLimit) {
+        highlightedCode.remove(highlightedCode.keys.first())
+    }
+
+    return tokens
+}
+
 
 @Composable
 private fun highlighted(language: String, code: String): AnnotatedString {
@@ -381,7 +400,7 @@ private fun highlighted(language: String, code: String): AnnotatedString {
     return remember(language, code, colors) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = colors.text)) {
-                for (token in highlight(language, code)) {
+                for (token in highlightedTokens(language, code)) {
                     val color = when (token.kind) {
                         TokenKind.Plain -> colors.text
                         TokenKind.Keyword -> colors.statusWorking

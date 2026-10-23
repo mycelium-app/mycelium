@@ -80,10 +80,70 @@ sealed interface ThreadItem {
 
 private const val MaxDiffSide = 400
 
-fun buildThread(events: List<Event>): List<ThreadItem> {
-    val items = mutableListOf<ThreadItem>()
+fun buildThread(events: List<Event>): List<ThreadItem> = ThreadBuilder().build(events)
 
-    for (event in events.sortedBy { it.seq }) {
+class ThreadBuilder {
+    private val items = mutableListOf<ThreadItem>()
+    private var folded = 0
+    private var firstFolded: Event? = null
+    private var lastFolded: Event? = null
+    private var built: List<ThreadItem> = emptyList()
+
+    fun build(events: List<Event>): List<ThreadItem> {
+        if (!extendsFolded(events)) {
+            items.clear()
+            folded = 0
+            firstFolded = null
+            lastFolded = null
+            built = emptyList()
+        }
+
+        if (folded > 0 && folded == events.size) {
+            return built
+        }
+
+        val fresh = if (folded == 0) events.sortedBy { it.seq } else events.subList(folded, events.size)
+
+        for (event in fresh) {
+            fold(event)
+        }
+
+        val inOrder = folded > 0 || fresh.indices.all { fresh[it] === events[it] }
+
+        if (inOrder) {
+            folded = events.size
+            firstFolded = events.firstOrNull()
+            lastFolded = events.lastOrNull()
+        }
+
+        val thoughtsEnded = items.mapIndexed { index, item -> if (item is ThreadItem.Thought && index < items.lastIndex) item.copy(finished = true) else item }
+
+        built = withSameImagesMarked(thoughtsEnded)
+
+        return built
+    }
+
+    private fun extendsFolded(events: List<Event>): Boolean {
+        if (folded == 0 || events.size < folded || events[0] !== firstFolded || events[folded - 1] !== lastFolded) {
+            return false
+        }
+
+        var previous = lastFolded?.seq ?: return false
+
+        for (index in folded until events.size) {
+            val seq = events[index].seq
+
+            if (seq <= previous) {
+                return false
+            }
+
+            previous = seq
+        }
+
+        return true
+    }
+
+    private fun fold(event: Event) {
         val payload = event.payload as? JsonObject ?: JsonObject(emptyMap())
         val key = "e${event.seq}"
 
@@ -97,10 +157,6 @@ fun buildThread(events: List<Event>): List<ThreadItem> {
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
         }
     }
-
-    val thoughtsEnded = items.mapIndexed { index, item -> if (item is ThreadItem.Thought && index < items.lastIndex) item.copy(finished = true) else item }
-
-    return withSameImagesMarked(thoughtsEnded)
 }
 
 private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMessage {

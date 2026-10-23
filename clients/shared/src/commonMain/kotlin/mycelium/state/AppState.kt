@@ -141,8 +141,15 @@ fun projectsOfRepository(projects: Collection<Project>, repository: Repository):
 
 fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
 
-fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> =
-    (existing + incoming).associateBy { it.seq }.values.sortedBy { it.seq }
+fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
+    val appends = incoming.zipWithNext().all { (a, b) -> a.seq < b.seq } && (existing.isEmpty() || incoming.isEmpty() || existing.last().seq < incoming.first().seq)
+
+    if (appends) {
+        return existing + incoming
+    }
+
+    return (existing + incoming).associateBy { it.seq }.values.sortedBy { it.seq }
+}
 
 fun statusRank(status: ConversationStatus): Int = when (status) {
     ConversationStatus.Input -> 0

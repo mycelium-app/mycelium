@@ -53,7 +53,7 @@ import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.isChat
-import mycelium.state.buildThread
+import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import kotlinx.serialization.json.JsonPrimitive
@@ -145,7 +145,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val chat = conversation.isChat
     val node = if (chat) null else state.nodes[conversation.nodeId]
     val sideKind = { kind: String -> if (chat) "side" else kind }
-    val thread = remember(state.events[id]) { buildThread(state.events[id].orEmpty()) }
+    val threadBuilder = remember(id) { ThreadBuilder() }
+    val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
     val sending = state.sending[id].orEmpty()
     val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
     val delivering = sending.take(if (goesStraight) 1 else 0)
