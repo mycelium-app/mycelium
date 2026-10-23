@@ -464,6 +464,14 @@ with the design system's tokens and sizes, in dark and light:
 - New conversation: node, agent, folder.
 - Nodes: list, join commands (shell, Nix, NixOS), logins with sign-in output, drain, revoke.
 - Past conversations: archived and done.
+- Tasks, under Nodes in the sidebar: a board of lanes Needs input, To do, Running, To review and Done. A task is a
+  conversation placed by its status (Failed waits in To review), plus the backlog tasks in To do, which Start turns into a
+  conversation. Each lane collapses to a strip, Done starts collapsed, and the collapsed lanes are remembered per client.
+  One filter (text, project, node, agent) applies to every lane. A card shows the agent, model, project and worktree branch,
+  a timer while running, Stop on a running agent, and the pending permission request's options on a conversation that needs input.
+- Schedules, under Tasks in the sidebar: the schedules with when (Every, Daily, Weekly or a cron expression, in UTC), what each
+  run does (new conversation or the same one), the next run, Run now, Pause or Resume and Delete, and the last runs with the
+  conversation each produced or why it was skipped.
 
 ## Packaging and release
 

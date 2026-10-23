@@ -82,6 +82,10 @@ sealed interface Route {
 
     data object Nodes : Route
 
+    data object Tasks : Route
+
+    data object Schedules : Route
+
     data object Projects : Route
 
     data object Issues : Route
@@ -211,6 +215,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
         is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
         Route.Nodes -> NodesScreen(store, state, platform)
+        Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
+        Route.Schedules -> SchedulesScreen(store, state)
         Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
         Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
         Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
@@ -256,6 +262,8 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
             SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
             SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
             SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes) { onRoute(Route.Nodes) }
+            SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+            SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
         }
 
         Hairline()
