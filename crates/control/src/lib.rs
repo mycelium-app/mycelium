@@ -86,6 +86,7 @@ fn router(state: AppState) -> Router {
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
         .route("/api/v1/activity", get(activity::get))
+        .route("/api/v1/activity/conversations", get(activity::per_conversation))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}", delete(sessions::end))
         .route("/api/v1/device", post(device::start))

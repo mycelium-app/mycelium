@@ -178,3 +178,34 @@ async fn the_hourly_series_runs_from_the_start_of_the_range_to_the_current_hour_
     assert!(week_hours.len() > 6 * 24 && week_hours.len() <= 7 * 24);
     assert_eq!(week_hours.last().unwrap()["key"], hours.last().unwrap()["key"]);
 }
+
+#[tokio::test]
+async fn per_conversation_usage_lists_every_conversation_with_turns_and_all_time_totals() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let busy = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, busy, 1, Some(usage(100, 50, 0, 0)), Some(0.10), Some("claude-opus-5-5")).await;
+    let silent = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, silent, 1, None, None, None).await;
+
+    let (status, rows) = server.user.json(server.user.get("/api/v1/activity/conversations")).await;
+
+    assert_eq!(status, 200, "{rows}");
+    let row = |id: Uuid| rows.as_array().unwrap().iter().find(|row| row["key"] == json!(id.to_string())).unwrap().clone();
+    assert_eq!((row(busy)["turns"].clone(), row(busy)["input_tokens"].clone(), row(busy)["cost_usd"].clone()), (json!(1), json!(100), json!(0.10)));
+    assert_eq!((row(silent)["turns"].clone(), row(silent)["reported_turns"].clone()), (json!(1), json!(0)));
+}
+
+#[tokio::test]
+async fn per_conversation_usage_does_not_show_another_persons_conversations() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mine = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, mine, 1, Some(usage(1, 1, 0, 0)), None, None).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (_, rows) = other.json(other.get("/api/v1/activity/conversations")).await;
+
+    assert_eq!(rows, json!([]));
+}
+

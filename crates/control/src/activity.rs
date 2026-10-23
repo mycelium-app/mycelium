@@ -193,3 +193,18 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Query(query): Qu
 
     Ok(Json(Activity { range: range.to_string(), totals, days: series.collect(), hours, conversations, nodes, agents, projects, models, unreported_agents }))
 }
+
+pub async fn per_conversation(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ActivityRow>>> {
+    let rows = sqlx::query_as::<_, TotalsRow>(
+        "select u.conversation_id::text as key, '' as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
+                coalesce(sum(u.working_ms), 0)::bigint as working_ms, coalesce(sum(u.input_tokens), 0)::bigint as input_tokens,
+                coalesce(sum(u.output_tokens), 0)::bigint as output_tokens, coalesce(sum(u.cache_read_tokens), 0)::bigint as cache_read_tokens,
+                coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd, coalesce(bool_or(u.cost_estimated), false) as cost_estimated
+         from usage_turns u where u.owner = $1 group by u.conversation_id",
+    )
+    .bind(user.id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(TotalsRow::to_proto).collect()))
+}
