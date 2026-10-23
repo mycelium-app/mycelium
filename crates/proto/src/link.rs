@@ -202,6 +202,12 @@ pub enum GitCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials: Option<GitCredentials>,
     },
+    Undo {
+        branch: String,
+        previous: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch_before: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -38,6 +38,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
         GitCommand::Apply { branch, head, patch, bundle, credentials } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref()),
+        GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
         GitCommand::Clone { .. } | GitCommand::Register | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
     }
 }
@@ -384,6 +385,7 @@ fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>
 
     let previous = String::from_utf8_lossy(&git(cwd, &["symbolic-ref", "--short", "-q", "HEAD"], &[1])?).trim().to_string();
     let previous = if previous.is_empty() { String::from_utf8_lossy(&git(cwd, &["rev-parse", "HEAD"], &[]).unwrap_or_default()).trim().to_string() } else { previous };
+    let branch_before = if existing { Some(String::from_utf8_lossy(&git(cwd, &["rev-parse", &branch_ref], &[])?).trim().to_string()) } else { None };
     git(cwd, &["checkout", "--quiet", "-B", branch, head], &[])?;
 
     let bytes = engine.decode(patch).map_err(|_| "The snapshot of unsaved work was damaged in transit.".to_string())?;
@@ -408,7 +410,32 @@ fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>
         }
     }
 
-    Ok(json!({"branch": branch, "head": head, "applied_files": applied_files}))
+    Ok(json!({"branch": branch, "head": head, "applied_files": applied_files, "previous": previous, "branch_before": branch_before}))
+}
+
+fn undo(cwd: &Path, branch: &str, previous: &str, branch_before: Option<&str>) -> Result<Value, String> {
+    if previous.is_empty() || previous.starts_with('-') || branch.starts_with('-') || branch_before.is_some_and(|sha| sha.starts_with('-')) {
+        return Err("There is nothing to go back to: the branch the folder was on is unknown.".to_string());
+    }
+
+    git(cwd, &["reset", "--hard", "--quiet"], &[])?;
+    git(cwd, &["clean", "-fdq"], &[])?;
+
+    match branch_before {
+        Some(sha) if previous == branch => {
+            git(cwd, &["checkout", "--quiet", "-B", branch, sha], &[])?;
+        }
+        Some(sha) => {
+            git(cwd, &["checkout", "--quiet", previous], &[])?;
+            git(cwd, &["branch", "-f", branch, sha], &[])?;
+        }
+        None => {
+            git(cwd, &["checkout", "--quiet", previous], &[])?;
+            git(cwd, &["branch", "-D", branch], &[])?;
+        }
+    }
+
+    Ok(json!({"branch": previous}))
 }
 
 #[cfg(test)]
@@ -737,6 +764,72 @@ mod tests {
         assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
         assert!(git(target.path(), &["rev-parse", "--verify", "-q", "refs/heads/feature/new"], &[1]).unwrap().is_empty());
         assert_eq!(std::fs::read_to_string(target.path().join("a.txt")).unwrap(), "one\n");
+    }
+
+    fn moved_from_unpushed_work(source: &tempfile::TempDir, target: &tempfile::TempDir, branch: &str) -> Value {
+        git(source.path(), &["checkout", "--quiet", "-B", branch], &[]).unwrap();
+        write(source, "b.txt", "committed here\n");
+        commit_all(source, "unpushed");
+        write(source, "a.txt", "changed\n");
+        write(source, "deep/new.txt", "untracked\n");
+        let snapshot = run(source.path(), GitCommand::Snapshot { session_id: None }).unwrap();
+
+        run(target.path(), moved(&snapshot)).unwrap()
+    }
+
+    fn undo_of(applied: &Value, branch: &str) -> GitCommand {
+        GitCommand::Undo { branch: branch.into(), previous: applied["previous"].as_str().unwrap().into(), branch_before: applied["branch_before"].as_str().map(str::to_string) }
+    }
+
+    #[test]
+    fn undoing_a_move_onto_a_new_branch_leaves_the_folder_as_it_was() {
+        let origin = bare_origin_with_a_commit();
+        let source = clone_of(&origin);
+        let target = clone_of(&origin);
+        let head_before = git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap();
+
+        let applied = moved_from_unpushed_work(&source, &target, "feature/moves");
+        run(target.path(), undo_of(&applied, "feature/moves")).unwrap();
+
+        assert!(git(target.path(), &["status", "--porcelain", "--untracked-files=all"], &[]).unwrap().is_empty());
+        assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
+        assert_eq!(git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap(), head_before);
+        assert!(git(target.path(), &["rev-parse", "--verify", "-q", "refs/heads/feature/moves"], &[1]).unwrap().is_empty());
+        assert!(!target.path().join("deep").exists() && !target.path().join("b.txt").exists());
+        assert_eq!(std::fs::read_to_string(target.path().join("a.txt")).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn undoing_a_move_onto_the_branch_the_folder_was_on_puts_that_branch_back_where_it_was() {
+        let origin = bare_origin_with_a_commit();
+        let source = clone_of(&origin);
+        let target = clone_of(&origin);
+        let head_before = git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap();
+
+        let applied = moved_from_unpushed_work(&source, &target, "main");
+        assert_ne!(git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap(), head_before);
+        run(target.path(), undo_of(&applied, "main")).unwrap();
+
+        assert!(git(target.path(), &["status", "--porcelain", "--untracked-files=all"], &[]).unwrap().is_empty());
+        assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
+        assert_eq!(git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap(), head_before);
+        assert!(!target.path().join("deep").exists() && !target.path().join("b.txt").exists());
+    }
+
+    #[test]
+    fn undoing_a_move_keeps_an_existing_branch_at_its_old_tip_and_returns_to_the_branch_before() {
+        let origin = bare_origin_with_a_commit();
+        let source = clone_of(&origin);
+        let target = clone_of(&origin);
+        git(target.path(), &["branch", "feature/moves"], &[]).unwrap();
+        let tip_before = git(target.path(), &["rev-parse", "feature/moves"], &[]).unwrap();
+
+        let applied = moved_from_unpushed_work(&source, &target, "feature/moves");
+        run(target.path(), undo_of(&applied, "feature/moves")).unwrap();
+
+        assert!(git(target.path(), &["status", "--porcelain", "--untracked-files=all"], &[]).unwrap().is_empty());
+        assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
+        assert_eq!(git(target.path(), &["rev-parse", "feature/moves"], &[]).unwrap(), tip_before);
     }
 
     #[test]

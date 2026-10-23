@@ -372,14 +372,72 @@ async fn an_agent_that_cannot_resume_on_the_other_node_puts_the_conversation_bac
     next_command(&mut moving.target).await;
     next_command(&mut moving.target).await;
     moving.target.send(NodeToControl::SessionFailed { conversation_id: moving.conversation, seq: 4, message: "The agent could not resume the session: no such session".into() }).await;
+    assert_eq!(next_command(&mut moving.target).await, ControlToNode::CloseSession { conversation_id: moving.conversation });
+    answer_next(&mut moving.target, Ok(json!({}))).await;
     let failed = progress(&moving, "failed").await;
 
     let message = failed["message"].as_str().unwrap();
     assert!(message.contains("could not resume on build") && message.contains("no such session") && message.contains("Choose Move to try again"), "{message}");
-    assert_eq!(next_command(&mut moving.target).await, ControlToNode::CloseSession { conversation_id: moving.conversation });
     let conversation = moving.server.conversation(moving.conversation).await;
     assert_eq!((conversation["node_id"].clone(), conversation["cwd"].clone(), conversation["status"].clone()), (json!(moving.source.id), json!(SOURCE_PATH), json!("review")));
     assert_eq!(moving.server.events(moving.conversation).await, events_before);
+}
+
+#[tokio::test]
+async fn an_agent_that_cannot_resume_on_the_other_node_has_the_applied_work_undone_there() {
+    let mut moving = start(true, false).await;
+    mirror_transcript(&mut moving).await;
+    request_move(&moving, false).await;
+
+    answer_next(&mut moving.source, Ok(snapshot())).await;
+    answer_next(&mut moving.target, Ok(json!({"applied_files": 1, "previous": "main", "branch_before": null}))).await;
+    next_command(&mut moving.target).await;
+    next_command(&mut moving.target).await;
+    next_command(&mut moving.target).await;
+    moving.target.send(NodeToControl::SessionFailed { conversation_id: moving.conversation, seq: 4, message: "The agent could not resume the session: no such session".into() }).await;
+    assert_eq!(next_command(&mut moving.target).await, ControlToNode::CloseSession { conversation_id: moving.conversation });
+
+    let (cwd, command) = answer_next(&mut moving.target, Ok(json!({}))).await;
+    assert_eq!((cwd.as_str(), command), (TARGET_PATH, GitCommand::Undo { branch: "feature/moves".into(), previous: "main".into(), branch_before: None }));
+    let failed = progress(&moving, "failed").await;
+
+    let message = failed["message"].as_str().unwrap();
+    assert!(message.contains("Nothing has changed") && message.contains("still on laptop"), "{message}");
+}
+
+#[tokio::test]
+async fn a_transcript_that_cannot_be_copied_has_the_applied_work_undone_on_the_other_node() {
+    let mut moving = start(true, false).await;
+    request_move(&moving, false).await;
+
+    let mut lost = snapshot();
+    lost["transcript"] = Value::Null;
+    answer_next(&mut moving.source, Ok(lost)).await;
+    answer_next(&mut moving.target, Ok(json!({"applied_files": 1, "previous": "main", "branch_before": "0123456789abcdef0123456789abcdef01234500"}))).await;
+
+    let (cwd, command) = answer_next(&mut moving.target, Ok(json!({}))).await;
+    assert_eq!((cwd.as_str(), command), (TARGET_PATH, GitCommand::Undo { branch: "feature/moves".into(), previous: "main".into(), branch_before: Some("0123456789abcdef0123456789abcdef01234500".into()) }));
+    let failed = progress(&moving, "failed").await;
+
+    let message = failed["message"].as_str().unwrap();
+    assert!(message.contains("was not found on its node") && message.contains("Nothing has changed"), "{message}");
+}
+
+#[tokio::test]
+async fn when_the_undo_fails_the_message_says_what_was_left_on_the_other_node() {
+    let mut moving = start(true, false).await;
+    request_move(&moving, false).await;
+
+    let mut lost = snapshot();
+    lost["transcript"] = Value::Null;
+    answer_next(&mut moving.source, Ok(lost)).await;
+    answer_next(&mut moving.target, Ok(json!({"applied_files": 1, "previous": "main", "branch_before": null}))).await;
+    answer_next(&mut moving.target, Err("git could not reset")).await;
+    let failed = progress(&moving, "failed").await;
+
+    let message = failed["message"].as_str().unwrap();
+    assert!(!message.contains("Nothing has changed"), "{message}");
+    assert!(message.contains("build") && message.contains(TARGET_PATH) && message.contains("feature/moves") && message.contains("git reset --hard") && message.contains("git clean -fd") && message.contains("git checkout main"), "{message}");
 }
 
 #[tokio::test]

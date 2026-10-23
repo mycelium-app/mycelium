@@ -42,7 +42,7 @@ pub struct CommitRequest {
 
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
-        GitCommand::Fetch | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } => FETCH_TIMEOUT,
+        GitCommand::Fetch | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
         _ => GIT_TIMEOUT,
     };

@@ -282,6 +282,8 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         _ => target_project.path.clone(),
     };
 
+    let target_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(target_node_id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
+
     let apply = GitCommand::Apply {
         branch: snapshot["branch"].as_str().unwrap_or_default().to_string(),
         head: snapshot["head"].as_str().unwrap_or_default().to_string(),
@@ -289,94 +291,115 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
         bundle: snapshot["bundle"].as_str().map(str::to_string),
         credentials: Some(forge.git_credentials().map_err(|error| reason(error.message()))?),
     };
-    relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
+    let applied = relay(state, target_node_id, target_project.path.clone(), apply).await.map_err(|error| reason(error.message()))?;
 
-    if let Some(session_id) = &source.acp_session_id {
-        copy_transcript(state, source, target_node_id, session_id, &snapshot["transcript"], &target_cwd).await.map_err(|text| reason(&text))?;
-    }
+    let rest = async {
+        let reason = |text: &str| text.to_string();
 
-    let agent: AgentId = parse_enum(&source.agent).map_err(|error| reason(error.message()))?;
-    let target_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(target_node_id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
-    let last_event = sqlx::query_scalar::<_, i64>("select coalesce(max(id), 0) from events where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
 
-    let started = if progress.fork {
-        let title = format!("{} (fork)", source.title);
-        let forked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, archived_at) values ($1, $2, $3, $4, $5, 'done', $6, $7, now())
-             returning {CONVERSATION_COLUMNS}",
-        )))
-        .bind(owner)
-        .bind(target_node_id)
-        .bind(&source.agent)
-        .bind(&target_cwd)
-        .bind(&title)
-        .bind(&source.account)
-        .bind(target_project.id)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|error| reason(ApiError::from(error).message()))?;
-
-        let natively = agent == AgentId::Claude && source.acp_session_id.is_some();
-        let instructions = instructions::session_layer(state, forked.id).await.map_err(|error| reason(error.message()))?;
-        state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions });
-
-        match wait_for_session(state, target_node_id, forked.id, &target_name).await {
-            Ok(()) => {
-                let shown = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(forked.id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
-                state.publish(Some(owner), StreamMessage::Conversation(shown.to_proto().map_err(|error| reason(error.message()))?));
-
-                Ok(forked.id)
-            }
-            Err(text) => {
-                state.hub.send(target_node_id, ControlToNode::CloseSession { conversation_id: forked.id });
-                let _ = state.remove_session(target_node_id, forked.id).await;
-                let _ = sqlx::query("delete from conversations where id = $1").bind(forked.id).execute(&state.pool).await;
-
-                Err(text)
-            }
+        if let Some(session_id) = &source.acp_session_id {
+            copy_transcript(state, source, target_node_id, session_id, &snapshot["transcript"], &target_cwd).await.map_err(|text| reason(&text))?;
         }
-    } else {
-        let after = highest_node_seq(&state.pool, conversation_id).await.map_err(|error| reason(ApiError::from(error).message()))?;
-        state.hub.send(target_node_id, ControlToNode::ContinueSequence { conversation_id, after });
 
-        sqlx::query("update conversations set node_id = $2, cwd = $3, project_id = $4, updated_at = now() where id = $1").bind(conversation_id).bind(target_node_id).bind(&target_cwd).bind(target_project.id).execute(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
-        let instructions = instructions::session_layer(state, conversation_id).await.map_err(|error| reason(error.message()))?;
-        state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions });
+        let agent: AgentId = parse_enum(&source.agent).map_err(|error| reason(error.message()))?;
+        let last_event = sqlx::query_scalar::<_, i64>("select coalesce(max(id), 0) from events where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
 
-        match wait_for_session(state, target_node_id, conversation_id, &target_name).await {
-            Ok(()) => {
-                state.hub.send(source.node_id, ControlToNode::CloseSession { conversation_id });
-                let _ = state.remove_session(source.node_id, conversation_id).await;
+        let started = if progress.fork {
+            let title = format!("{} (fork)", source.title);
+            let forked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+                "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, archived_at) values ($1, $2, $3, $4, $5, 'done', $6, $7, now())
+                 returning {CONVERSATION_COLUMNS}",
+            )))
+            .bind(owner)
+            .bind(target_node_id)
+            .bind(&source.agent)
+            .bind(&target_cwd)
+            .bind(&title)
+            .bind(&source.account)
+            .bind(target_project.id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|error| reason(ApiError::from(error).message()))?;
 
-                Ok(conversation_id)
-            }
-            Err(text) => {
-                state.hub.send(target_node_id, ControlToNode::CloseSession { conversation_id });
-                let _ = state.remove_session(target_node_id, conversation_id).await;
-                let _ = sqlx::query("delete from events where conversation_id = $1 and id > $2").bind(conversation_id).bind(last_event).execute(&state.pool).await;
-                let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-                    "update conversations set node_id = $2, cwd = $3, project_id = $4, status = $5, updated_at = $6 where id = $1 returning {CONVERSATION_COLUMNS}",
-                )))
-                .bind(conversation_id)
-                .bind(source.node_id)
-                .bind(&source.cwd)
-                .bind(source_project.id)
-                .bind(&source.status)
-                .bind(source.updated_at)
-                .fetch_one(&state.pool)
-                .await;
+            let natively = agent == AgentId::Claude && source.acp_session_id.is_some();
+            let instructions = instructions::session_layer(state, forked.id).await.map_err(|error| reason(error.message()))?;
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions });
 
-                match restored.map_err(ApiError::from).and_then(|restored| restored.to_proto()) {
-                    Ok(proto) => state.publish(Some(owner), StreamMessage::Conversation(proto)),
-                    Err(error) => tracing::warn!("could not put conversation {conversation_id} back after a failed move: {}", error.message()),
+            match wait_for_session(state, target_node_id, forked.id, &target_name).await {
+                Ok(()) => {
+                    let shown = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(forked.id).fetch_one(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
+                    state.publish(Some(owner), StreamMessage::Conversation(shown.to_proto().map_err(|error| reason(error.message()))?));
+
+                    Ok(forked.id)
                 }
+                Err(text) => {
+                    state.hub.send(target_node_id, ControlToNode::CloseSession { conversation_id: forked.id });
+                    let _ = state.remove_session(target_node_id, forked.id).await;
+                    let _ = sqlx::query("delete from conversations where id = $1").bind(forked.id).execute(&state.pool).await;
 
-                Err(text)
+                    Err(text)
+                }
             }
-        }
+        } else {
+            let after = highest_node_seq(&state.pool, conversation_id).await.map_err(|error| reason(ApiError::from(error).message()))?;
+            state.hub.send(target_node_id, ControlToNode::ContinueSequence { conversation_id, after });
+
+            sqlx::query("update conversations set node_id = $2, cwd = $3, project_id = $4, updated_at = now() where id = $1").bind(conversation_id).bind(target_node_id).bind(&target_cwd).bind(target_project.id).execute(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
+            let instructions = instructions::session_layer(state, conversation_id).await.map_err(|error| reason(error.message()))?;
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions });
+
+            match wait_for_session(state, target_node_id, conversation_id, &target_name).await {
+                Ok(()) => {
+                    state.hub.send(source.node_id, ControlToNode::CloseSession { conversation_id });
+                    let _ = state.remove_session(source.node_id, conversation_id).await;
+
+                    Ok(conversation_id)
+                }
+                Err(text) => {
+                    state.hub.send(target_node_id, ControlToNode::CloseSession { conversation_id });
+                    let _ = state.remove_session(target_node_id, conversation_id).await;
+                    let _ = sqlx::query("delete from events where conversation_id = $1 and id > $2").bind(conversation_id).bind(last_event).execute(&state.pool).await;
+                    let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+                        "update conversations set node_id = $2, cwd = $3, project_id = $4, status = $5, updated_at = $6 where id = $1 returning {CONVERSATION_COLUMNS}",
+                    )))
+                    .bind(conversation_id)
+                    .bind(source.node_id)
+                    .bind(&source.cwd)
+                    .bind(source_project.id)
+                    .bind(&source.status)
+                    .bind(source.updated_at)
+                    .fetch_one(&state.pool)
+                    .await;
+
+                    match restored.map_err(ApiError::from).and_then(|restored| restored.to_proto()) {
+                        Ok(proto) => state.publish(Some(owner), StreamMessage::Conversation(proto)),
+                        Err(error) => tracing::warn!("could not put conversation {conversation_id} back after a failed move: {}", error.message()),
+                    }
+
+                    Err(text)
+                }
+            }
+        };
+
+        started
+    }
+    .await;
+
+    let Err(text) = rest else {
+        return rest;
     };
 
-    started.map_err(|text| reason(&text))
+    let undo = GitCommand::Undo {
+        branch: snapshot["branch"].as_str().unwrap_or_default().to_string(),
+        previous: applied["previous"].as_str().unwrap_or_default().to_string(),
+        branch_before: applied["branch_before"].as_str().map(str::to_string),
+    };
+    let previous = applied["previous"].as_str().unwrap_or("its previous branch");
+
+    match relay(state, target_node_id, target_project.path.clone(), undo).await {
+        Ok(_) => Err(reason(&text)),
+        Err(error) => Err(format!("{text} The work from {source_name} could not be removed from the project folder on {target_name}: {}. In {}, run git reset --hard, then git clean -fd, then git checkout {previous}, and delete the branch {} if it did not exist there before. The conversation is still on {source_name}.", error.message(), target_project.path, snapshot["branch"].as_str().unwrap_or_default())),
+    }
 }
 
 async fn copy_transcript(state: &AppState, source: &ConversationRow, target_node_id: Uuid, session_id: &str, saved: &serde_json::Value, target_cwd: &str) -> Result<(), String> {
