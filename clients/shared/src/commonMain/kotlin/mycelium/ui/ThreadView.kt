@@ -91,6 +91,7 @@ fun ThreadView(
     onStopWorkflow: () -> Unit,
     modifier: Modifier = Modifier,
     onSuggest: (String) -> Unit = {},
+    onRetry: (() -> Unit)? = null,
 ) {
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -156,7 +157,7 @@ fun ThreadView(
                     )
                 } else {
                     CompositionLocalProvider(LocalImageJump provides jumpToImage) {
-                        ThreadRow(item, onAnswer, onStopWorkflow)
+                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == items.indexOfLast { it is ThreadItem.Failure }) onRetry else null)
                     }
                 }
             }
@@ -179,7 +180,7 @@ fun ThreadView(
 }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
@@ -193,7 +194,13 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Plan -> PlanCard(item)
         is ThreadItem.Permission -> PermissionCard(item, onAnswer)
         is ThreadItem.TurnEnd -> Unit
-        is ThreadItem.Failure -> StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.semantics { contentDescription = "Error: ${item.message}" })
+        is ThreadItem.Failure -> Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
+
+            if (onRetry != null) {
+                MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry this conversation")
+            }
+        }
         is ThreadItem.Workflow -> WorkflowCard(item.progress, onStopWorkflow)
     }
 }

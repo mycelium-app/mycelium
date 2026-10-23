@@ -412,7 +412,7 @@ async fn stopping_a_turn_holds_the_queue_until_the_person_decides() {
 }
 
 #[tokio::test]
-async fn a_failed_session_marks_the_conversation_failed_and_refuses_prompts() {
+async fn a_failed_session_marks_the_conversation_failed_and_a_message_to_it_retries_the_session_first() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let mut stream = server.user.stream().await;
@@ -427,8 +427,101 @@ async fn a_failed_session_marks_the_conversation_failed_and_refuses_prompts() {
     assert_eq!(error["kind"], "error");
     assert_eq!(error["payload"]["message"], "agent exited with code 1");
 
-    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "again"}))).await;
-    assert_eq!((status, body["error"].as_str()), (409, Some("session_failed")));
+    assert_eq!(prompt(&server, id, "again").await, 204);
+
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, .. } => assert_eq!((conversation_id, resume.as_deref()), (id, Some("acp-1"))),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    assert_eq!(link.expect_prompt().await.1, "again");
+    assert_eq!(status_of(&server, id).await, "working");
+}
+
+async fn failed_conversation(server: &Server, link: &mut NodeLink) -> Uuid {
+    let id = started_conversation(server, link, None).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "This node already runs 4 conversations, its limit.".into() }).await;
+    common::eventually("the conversation to fail", || async { (status_of(server, id).await == "failed").then_some(()) }).await;
+
+    id
+}
+
+#[tokio::test]
+async fn retrying_a_failed_conversation_starts_its_session_again_and_delivers_what_was_queued() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = failed_conversation(&server, &mut link).await;
+    sqlx::query("insert into queued_prompts (conversation_id, position, text) values ($1, 1, 'waiting')").bind(id).execute(&server.pool).await.unwrap();
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    assert_eq!(status, 204);
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, .. } => assert_eq!((conversation_id, resume.as_deref()), (id, Some("acp-1"))),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    assert_eq!(link.expect_prompt().await.1, "waiting");
+}
+
+#[tokio::test]
+async fn retrying_a_failed_conversation_that_never_started_asks_for_a_new_session_in_the_same_folder() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.send(NodeToControl::SessionFailed { conversation_id: conversation.id, seq: 1, message: "limit".into() }).await;
+    common::eventually("the conversation to fail", || async { (status_of(&server, conversation.id).await == "failed").then_some(()) }).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{}/retry", conversation.id))).await;
+
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, cwd, .. } => assert_eq!((conversation_id, resume, cwd.as_str()), (conversation.id, None, "/work/app")),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    assert_eq!(status_of(&server, conversation.id).await, "done");
+}
+
+#[tokio::test]
+async fn retrying_while_the_node_is_offline_says_to_start_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = failed_conversation(&server, &mut link).await;
+    let node = link.id;
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|candidate| candidate["id"] == json!(node) && candidate["online"] == false).then_some(())
+    })
+    .await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (409, Some("node_offline"), Some("This node is offline. Start it, then try again.")));
+    assert_eq!(status_of(&server, id).await, "failed");
+}
+
+#[tokio::test]
+async fn retrying_a_conversation_whose_node_was_removed_says_to_start_a_new_one() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = failed_conversation(&server, &mut link).await;
+    sqlx::query("update nodes set revoked_at = now() where id = $1").bind(link.id).execute(&server.pool).await.unwrap();
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("node_removed")));
+}
+
+#[tokio::test]
+async fn another_person_cannot_retry_a_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = failed_conversation(&server, &mut link).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    assert_eq!((status, status_of(&server, id).await.as_str()), (404, "failed"));
 }
 
 #[tokio::test]

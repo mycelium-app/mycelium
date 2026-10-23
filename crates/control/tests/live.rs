@@ -35,6 +35,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/conversations/{id}",
     "POST /api/v1/conversations/{id}/opened",
     "POST /api/v1/conversations/{id}/prompt",
+    "POST /api/v1/conversations/{id}/retry",
     "PATCH /api/v1/conversations/{id}/queue/{queue_id}",
     "DELETE /api/v1/conversations/{id}/queue/{queue_id}",
     "POST /api/v1/conversations/{id}/queue/{queue_id}/send-now",
@@ -60,8 +61,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/git/commit",
     "POST /api/v1/conversations/{id}/git/fetch",
     "POST /api/v1/conversations/{id}/git/undo",
-    "POST /api/v1/terminals/{terminal_id}/input",
     "POST /api/v1/conversations/{id}/git/switch",
+    "POST /api/v1/terminals/{terminal_id}/input",
     "POST /api/v1/terminals/{terminal_id}/resize",
     "POST /api/v1/forges",
     "DELETE /api/v1/forges/{id}",
@@ -751,6 +752,20 @@ async fn a_title_the_agent_predicts_is_streamed_for_an_unrenamed_conversation_an
     announce_title(&mut link, id, 2, "Share the restore strings").await;
     let streamed = conversation_where(&mut stream, id, |conversation| conversation.title_user_set).await;
     assert_eq!(streamed.title, "Restore work");
+}
+
+#[tokio::test]
+async fn retrying_a_failed_conversation_streams_it_as_no_longer_failed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "limit".into() }).await;
+    let mut stream = server.user.stream().await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Failed).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
 }
 
 #[tokio::test]

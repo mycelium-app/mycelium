@@ -88,7 +88,14 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     let attachments = attachments::confirm(&state, user.id, &request.attachments).await?;
     let mut tx = state.pool.begin().await?;
-    let row = lock_owned(&mut tx, id, user.id).await?;
+    let mut row = lock_owned(&mut tx, id, user.id).await?;
+
+    if row.status == "failed" && !chats::is_chat(&row) {
+        tx.commit().await?;
+        retry_failed(&state, user.id, id).await?;
+        tx = state.pool.begin().await?;
+        row = lock_owned(&mut tx, id, user.id).await?;
+    }
 
     if chats::is_chat(&row) {
         drop(tx);
@@ -105,10 +112,6 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
     }
 
-    if row.status == "failed" {
-        return Err(ApiError::conflict("session_failed", "This conversation's session failed. Start a new conversation to continue."));
-    }
-
     sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1")
         .bind(id)
         .bind(text)
@@ -122,6 +125,44 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     publish_queue(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn retry(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    find_owned(&state.pool, id, user.id).await?;
+    retry_failed(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, owner).await?;
+
+    if row.status != "failed" {
+        return Ok(());
+    }
+
+    let node_usable = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(row.node_id).fetch_one(&mut *tx).await?;
+
+    if !node_usable {
+        return Err(ApiError::conflict("node_removed", "This conversation's node was removed, so its session cannot start again. Start a new conversation on another node."));
+    }
+
+    if !state.hub.is_online(row.node_id) {
+        return Err(node_offline());
+    }
+
+    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+    tx.commit().await?;
+
+    state.remove_session(row.node_id, id).await?;
+    state.add_session(row.node_id, id).await?;
+    let instructions = instructions::session_layer(state, id).await?;
+    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions });
+    state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
+    pump(state, id, true).await?;
+
+    Ok(())
 }
 
 pub async fn queue(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<QueuedPrompt>>> {
@@ -228,7 +269,7 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
         .ok_or_else(|| ApiError::not_found("That permission request"))?;
 
     if row.status == "failed" {
-        return Err(ApiError::conflict("session_failed", "This conversation's session failed. Start a new conversation to continue."));
+        return Err(ApiError::conflict("session_failed", "This conversation's session failed, so it is not waiting for an answer. Retry the conversation to continue."));
     }
 
     let answered = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'permission_resolved' and payload->>'request_id' = $2)")

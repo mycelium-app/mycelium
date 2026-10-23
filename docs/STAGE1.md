@@ -183,6 +183,7 @@ Conversations:
   starts the ACP session, and `prompt`, if given, is the first message.
 - `GET /api/v1/conversations/{id}`, `PATCH` `{title?, archived?, account?, use_default_account?}` (409 `account_locked` once the conversation has a session), `POST /{id}/opened` marks review as done, `DELETE` (204) removes an archived conversation for good (404 for another person's, 409 `not_archived` unless archived). Its events, queued messages, search entries, goal, walkthroughs and usage records go with it, so Activity totals no longer count its turns; its side chats are deleted too; attachments no message of the owner still carries are removed, and shared ones stay. The node is told to close its session, and `conversation_removed` is streamed for the conversation and each side chat.
 - `GET /api/v1/conversations/{id}/events?after=<seq>&limit=500`.
+- `POST /{id}/retry` (204, owner only) starts a failed conversation's session again: status returns to `done`, the node is asked to `session/load` the conversation's ACP session (a new session in the same folder when it never had one) and anything queued is delivered. 409 `node_offline` while the node is offline, 409 `node_removed` when it was revoked. A conversation that is not failed is left alone. `POST /{id}/prompt` on a failed conversation retries first and then sends.
 - `POST /{id}/prompt` `{text, attachments?}`: sent now if idle, otherwise appended to the queue. `attachments` are the objects `POST /{id}/attachments` returned (`{sha256, name, media_type, size}`); `text` may be empty when there are attachments (400 `attachment_missing` for one never uploaded to this owner, 400 `too_many_attachments` over 10, 413 `attachments_too_large` over 40 MB together). The `user_message` event payload carries `attachments`, and so does each queued prompt.
 - `POST /{id}/attachments?name=<file name>` with the raw bytes as the body and the media type as `Content-Type` → `{sha256, name, media_type, size}` (201). Stored once per SHA-256 however often it is uploaded; 413 `attachment_too_large` over 20 MB, 400 `attachment_empty`.
 - `GET /api/v1/attachments/{sha256}`: the bytes, to the person who uploaded them only (404 otherwise). Images are served inline with their media type, everything else as `application/octet-stream` with `Content-Disposition: attachment`; `Cache-Control: private, max-age=31536000, immutable`, an `ETag` of the hash, `nosniff` and `Content-Security-Policy: sandbox`.
@@ -376,6 +377,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Permission answered | `event` permission_resolved, `conversation` working | owner |
 | `turn_end` | `event`, `conversation` review | owner |
 | `session_failed`, or `hello` finding a running conversation without a session | `event` error, `conversation` failed | owner |
+| Retry of a failed conversation | `conversation` (no longer failed) | owner |
 | Opened | `conversation` done | owner |
 | Message queued, edited, removed, sent now | `queue` | owner |
 
@@ -414,10 +416,10 @@ Node to control plane:
 | `acp_update` | `conversation_id, seq, update` |
 | `permission_request` | `conversation_id, seq, request_id, request` |
 | `turn_end` | `conversation_id, seq, stop_reason, usage?` (`usage` is the ACP prompt response's `usage` object when the agent sends one: `inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`) |
+| `session_closed` | `conversation_id` (the node closed an idle session to make room, so the next message starts it again with `session/load`) |
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
 | `logins` | `logins: [{agent, account?, method, state}]` |
-| `session_closed` | `conversation_id` (the node closed an idle session to make room, so the next message starts it again with `session/load`) |
 | `instructions_held` | `revision, unmanaged: [label]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
@@ -458,7 +460,7 @@ Control plane to node:
 
 The control plane keeps every sent `prompt` as unacknowledged until `prompt_received` arrives with its `prompt_id` (or the turn ends or the session fails). After a `hello`, it sends again the unacknowledged prompts of sessions the node reports live, and forgets those of sessions it does not. A `session_started` for the `acp_session_id` the conversation already holds sets mode and model only where they are empty. The node ignores a `prompt_id` it has already received (the ids it has written are persisted in the session directory) and answers a repeat with `prompt_received` again. Failures the node emits itself (a refused start, an unreachable keeper) take the next free `seq` for the conversation, tracked in the session directory, never a fixed value.
 
-An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
+An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`, retry it first) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
 
 A node reports one `logins` entry per account: the agent's default home plus one per folder under `<state_dir>/accounts/<agent>/<name>`, each named by the email found in that folder's own config (`.claude.json` for Claude Code, the `auth.json` identity token for Codex), else by the folder name. The node runs an agent as an account by setting `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to that folder, for both `start_session` and `start_login`; `account` on `start_login` signs in to (and creates, if new) that account's folder. Each `logins` report replaces the node's previous list. Usage left per account is not reported: neither agent exposes it through a documented interface.
 

@@ -367,6 +367,10 @@ class MyceliumApi(
         call("/conversations/$id/move") { client.delete(it) { authorise() } }
     }
 
+    suspend fun retryConversation(id: String) {
+        call("/conversations/$id/retry") { client.post(it) { authorise() } }
+    }
+
     suspend fun deleteConversation(id: String) {
         call("/conversations/$id") { client.delete(it) { authorise() } }
     }

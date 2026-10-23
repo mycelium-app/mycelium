@@ -183,6 +183,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onArchived()
                         }
                     },
+                    onRetry = { store.act { api.retryConversation(id) } },
                     onDelete = {
                         store.act {
                             api.deleteConversation(id)
@@ -210,6 +211,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onStopWorkflow = { store.act { api.cancel(id) } },
                     modifier = Modifier.weight(1f),
                     onSuggest = ::send,
+                    onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
                 )
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
@@ -312,6 +314,7 @@ private fun ConversationHeader(
     onGit: () -> Unit,
     onRename: (String) -> Unit,
     onArchive: () -> Unit,
+    onRetry: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -386,6 +389,10 @@ private fun ConversationHeader(
                 Tag("Archived")
             } else {
                 StatusMark(statusSectionName(conversation.status), toneOf(conversation.status), iconOf(conversation.status))
+
+                if (conversation.status == ConversationStatus.Failed) {
+                    MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry ${conversation.title}")
+                }
             }
 
             Box(Modifier.weight(1f))
