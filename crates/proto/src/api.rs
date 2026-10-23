@@ -67,6 +67,8 @@ pub struct NodeSummary {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
     pub hostname: String,
     pub os: String,
     pub arch: String,
@@ -101,9 +103,13 @@ pub struct UpdateNodeRequest {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
 }
 
 pub const NODE_ICONS: &[&str] = &["server", "laptop", "desktop", "cloud", "terminal", "chip"];
+
+pub const NODE_COLOURS: &[&str] = &["blue", "violet", "amber", "rose", "green"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartLoginRequest {

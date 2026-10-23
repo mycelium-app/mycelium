@@ -5,7 +5,7 @@ use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
+use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_COLOURS, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
@@ -40,10 +40,15 @@ pub async fn update(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
         return Err(ApiError::bad_request("unknown_icon", format!("{icon} is not a node icon. Choose one of {}.", NODE_ICONS.join(", "))));
     }
 
-    let updated = sqlx::query("update nodes set name = coalesce($2, name), icon = coalesce($3, icon) where id = $1 and revoked_at is null")
+    if let Some(colour) = request.colour.as_deref().filter(|colour| !NODE_COLOURS.contains(colour)) {
+        return Err(ApiError::bad_request("unknown_colour", format!("{colour} is not a node colour. Choose one of {}.", NODE_COLOURS.join(", "))));
+    }
+
+    let updated = sqlx::query("update nodes set name = coalesce($2, name), icon = coalesce($3, icon), colour = coalesce($4, colour) where id = $1 and revoked_at is null")
         .bind(id)
         .bind(name)
         .bind(&request.icon)
+        .bind(&request.colour)
         .execute(&state.pool)
         .await;
 

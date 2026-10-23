@@ -107,6 +107,22 @@ async fn a_node_icon_can_be_chosen_from_the_set_and_anything_else_is_refused() {
     assert_eq!(nodes[0]["name"], "pi");
 }
 
+#[tokio::test]
+async fn a_node_colour_can_be_chosen_from_the_set_and_anything_else_is_refused() {
+    let server = Server::start().await;
+    let (id, _) = server.join("node", "pi").await;
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/nodes/{id}")).json(&json!({"colour": "rose"}))).await;
+    assert_eq!(status, 204);
+
+    let (refused, body) = server.user.json(server.user.patch(&format!("/api/v1/nodes/{id}")).json(&json!({"colour": "teal"}))).await;
+    assert_eq!(refused, 400);
+    assert_eq!(body["message"], "teal is not a node colour. Choose one of blue, violet, amber, rose, green.");
+
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    assert_eq!(nodes[0]["colour"], "rose");
+}
+
 async fn node_sessions(server: &Server, node_id: uuid::Uuid) -> Vec<String> {
     let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
     let node = nodes.as_array().unwrap().iter().find(|node| node["id"] == json!(node_id)).unwrap();
