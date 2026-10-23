@@ -434,7 +434,22 @@ private fun LazyListScope.conversationRows(
 
     if (title != null) {
         item(key = "heading-$title") {
-            Label(title, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, MyTheme.colors.textMuted)
+            if (title == PinnedName) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = Tokens.Space.S2)
+                        .heightIn(min = rowHeight())
+                        .padding(horizontal = Tokens.Space.S2),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(MyIcon.Pin, MyTheme.colors.textMuted, Tokens.Size.IconMd)
+                    Label(title, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
+                }
+            } else {
+                Label(title, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, MyTheme.colors.textMuted)
+            }
         }
     }
 
