@@ -58,21 +58,21 @@ fun MemoriesSettings(store: Store) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        Bar {
-            BarTitle("Memories")
-
-            if (!touch) {
-                Box(Modifier.weight(1f))
-            }
-
+        if (touch) {
             TextInput(
                 query,
                 { query = it },
                 label = "Search memories",
                 placeholder = "Search memories",
                 showLabel = false,
-                modifier = if (touch) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn),
+                modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S4),
             )
+        } else {
+            Bar {
+                BarTitle("Memories")
+                Box(Modifier.weight(1f))
+                TextInput(query, { query = it }, label = "Search memories", placeholder = "Search memories", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn))
+            }
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {

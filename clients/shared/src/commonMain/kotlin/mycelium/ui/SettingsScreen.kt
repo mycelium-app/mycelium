@@ -12,17 +12,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
@@ -34,38 +35,69 @@ import mycelium.state.Store
 import mycelium.ClientVersion
 import mycelium.api.Me
 
-enum class SettingsSection(val label: String, val icon: MyIcon) {
+enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
-    Accounts("Accounts", MyIcon.Person),
+    Accounts("Accounts", MyIcon.Person, "Agent logins and usage"),
     Agents("Agents", MyIcon.ClaudeMark),
-    Instructions("Instructions", MyIcon.File),
+    Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
-    Sessions("Sessions", MyIcon.Key),
+    Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
     ChatModels("Chat models", MyIcon.Chip),
     Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
-    Account("Account", MyIcon.Settings),
+    Account("Account", MyIcon.Settings, "Sign out and version"),
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit) {
-    var section by remember { mutableStateOf(SettingsSection.Appearance) }
+    var section by remember { mutableStateOf<SettingsSection?>(null) }
     val touch = LocalTouch.current
+    val opened = section
+
+    BackHandler(enabled = touch && opened != null) { section = null }
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            BarTitle("Settings")
+            if (touch && opened != null) {
+                MyButton({ section = null }, icon = MyIcon.Back, description = "Back to settings", muted = true)
+                Label(opened.label, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
+            } else {
+                BarTitle("Settings")
+            }
         }
 
         if (touch) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                for (entry in SettingsSection.entries) {
-                    MyButton({ section = entry }, text = entry.label, muted = entry != section, selected = entry == section)
+            if (opened == null) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
+                    for (entry in SettingsSection.entries) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = rowHeight())
+                                .pressable({ section = entry }, role = Role.Button, shape = BlockShape)
+                                .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2),
+                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(entry.icon, MyTheme.colors.textMuted)
+
+                            Column(Modifier.weight(1f)) {
+                                Label(entry.label, maxLines = 1)
+                                entry.summary?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+                            }
+
+                            Icon(MyIcon.ChevronRight, MyTheme.colors.textFaint, Tokens.Size.IconSm)
+                        }
+
+                        Hairline()
+                    }
+                }
+            } else {
+                CompositionLocalProvider(LocalOpenList provides null) {
+                    SettingsContent(opened, store, me, controlPlane, onSignOut, Modifier.weight(1f))
                 }
             }
-
-            Hairline()
-            SettingsContent(section, store, me, controlPlane, onSignOut, Modifier.weight(1f))
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
@@ -74,8 +106,8 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> 
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = rowHeight())
-                                .pressable({ section = entry }, role = Role.Tab, selected = entry == section, shape = BlockShape)
-                                .semantics { selected = entry == section }
+                                .pressable({ section = entry }, role = Role.Tab, selected = entry == (section ?: SettingsSection.Appearance), shape = BlockShape)
+                                .semantics { selected = entry == (section ?: SettingsSection.Appearance) }
                                 .padding(horizontal = Tokens.Space.S2),
                             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                             verticalAlignment = Alignment.CenterVertically,
@@ -87,7 +119,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, onSignOut: () -> 
                 }
 
                 VerticalHairline()
-                SettingsContent(section, store, me, controlPlane, onSignOut, Modifier.weight(1f))
+                SettingsContent(section ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, Modifier.weight(1f))
             }
         }
     }
