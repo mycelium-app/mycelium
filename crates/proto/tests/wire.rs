@@ -75,6 +75,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::GitResult { request_id: id(), ok: false, output: Value::Null, error: Some("fatal".into()) }, "git_result"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into() }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
+        (NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec!["Claude Code: /h/.claude/CLAUDE.md".into()] }, "instructions_held"),
         (NodeToControl::Pong, "pong"),
     ];
 
@@ -90,7 +91,8 @@ fn every_control_message_round_trips_under_its_tag() {
     config.insert("effort".to_string(), json!("high"));
     let cases = vec![
         (ControlToNode::Ack { conversation_id: id(), seq: 9 }, "ack"),
-        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), account: None }, "start_session"),
+        (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), account: None, instructions: None }, "start_session"),
+        (ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) }, "instructions"),
         (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into() }, "prompt"),
         (ControlToNode::Cancel { conversation_id: id() }, "cancel"),
         (ControlToNode::PermissionResponse { conversation_id: id(), request_id: "r".into(), outcome: json!({"outcome": "selected", "optionId": "allow"}) }, "permission_response"),
@@ -130,7 +132,7 @@ fn git_commands_are_tagged_snake_case() {
 
 #[test]
 fn start_session_omits_resume_when_absent_and_accepts_it_missing() {
-    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, account: None };
+    let message = ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: None, account: None, instructions: None };
     let json = round_trip(&message);
 
     assert!(json.get("resume").is_none());
@@ -295,6 +297,9 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         agents: vec![],
         logins: vec![],
         sessions: vec![id()],
+        instructions_revision: None,
+        instructions_unmanaged: vec![],
+        sessions_on_older_instructions: 0,
     });
 
     assert_eq!(json["online"], true);

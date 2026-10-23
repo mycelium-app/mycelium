@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
 use crate::store::{CONVERSATION_COLUMNS, append_event, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
@@ -46,7 +47,8 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 
     if !state.hub.has_session(node_id, conversation_id) {
         state.add_session(node_id, conversation_id).await?;
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, account });
+        let instructions = instructions::session_layer(state, conversation_id).await?;
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, account, instructions });
     }
 
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone() });

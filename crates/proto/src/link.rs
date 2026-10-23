@@ -91,6 +91,10 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    InstructionsHeld {
+        revision: String,
+        unmanaged: Vec<String>,
+    },
     Pong,
 }
 
@@ -144,6 +148,13 @@ pub enum ControlToNode {
         resume: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instructions: Option<String>,
+    },
+    Instructions {
+        revision: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        global: Option<String>,
     },
     Prompt {
         conversation_id: Uuid,

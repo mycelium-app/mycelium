@@ -174,6 +174,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::InstructionsHeld { revision, unmanaged } => {
+            sqlx::query("update nodes set instructions_revision = $2, instructions_unmanaged = $3 where id = $1").bind(node_id).bind(revision).bind(unmanaged).execute(&state.pool).await?;
+
+            publish_node(state, node_id).await
+        }
         NodeToControl::Pong => {
             sqlx::query("update nodes set last_seen_at = now() where id = $1").bind(node_id).execute(&state.pool).await?;
 
@@ -225,6 +230,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
         state.hub.send(node_id, ControlToNode::Prompt { conversation_id: prompt.conversation_id, prompt_id: prompt.prompt_id, text: prompt.text });
     }
 
+    crate::instructions::push_to(state, node_id).await?;
     publish_node(state, node_id).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")

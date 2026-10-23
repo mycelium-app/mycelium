@@ -78,6 +78,10 @@ impl Client {
         self.authorised(self.http.post(format!("{}{path}", self.base)))
     }
 
+    pub fn put(&self, path: &str) -> reqwest::RequestBuilder {
+        self.authorised(self.http.put(format!("{}{path}", self.base)))
+    }
+
     pub fn patch(&self, path: &str) -> reqwest::RequestBuilder {
         self.authorised(self.http.patch(format!("{}{path}", self.base)))
     }

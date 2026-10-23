@@ -81,6 +81,12 @@ pub struct NodeSummary {
     pub logins: Vec<LoginInfo>,
     #[serde(default)]
     pub sessions: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions_revision: Option<String>,
+    #[serde(default)]
+    pub instructions_unmanaged: Vec<String>,
+    #[serde(default)]
+    pub sessions_on_older_instructions: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -370,7 +376,69 @@ pub struct Project {
     pub path: String,
     pub forge_id: Option<Uuid>,
     pub repository: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchProjectRequest {
+    #[serde(default)]
+    pub group_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Group {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InstructionVersion {
+    pub id: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InstructionLayer {
+    pub layer: String,
+    pub name: String,
+    pub path: Option<String>,
+    pub text: String,
+    pub version: Option<InstructionVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InstructionSource {
+    pub forge_id: Uuid,
+    pub repository: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Instructions {
+    pub source: Option<InstructionSource>,
+    pub revision: Option<String>,
+    pub layers: Vec<InstructionLayer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveInstructionsRequest {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetInstructionSourceRequest {
+    pub forge_id: Uuid,
+    pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

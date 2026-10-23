@@ -189,11 +189,13 @@ struct NodeRow {
     draining: bool,
     last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
     icon: Option<String>,
+    instructions_revision: Option<String>,
+    instructions_unmanaged: Vec<String>,
 }
 
 pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<Vec<NodeSummary>> {
     let nodes = sqlx::query_as::<_, NodeRow>(
-        "select id, name, hostname, os, arch, version, address, draining, last_seen_at, icon from nodes
+        "select id, name, hostname, os, arch, version, address, draining, last_seen_at, icon, instructions_revision, instructions_unmanaged from nodes
          where revoked_at is null and ($1::uuid is null or id = $1) order by name",
     )
     .bind(only)
@@ -212,9 +214,16 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
     .fetch_all(&state.pool)
     .await?;
 
+    let current_revision = crate::instructions::current_revision(state).await?;
     let mut summaries = Vec::new();
 
     for node in nodes {
+        let sessions = state.hub.sessions_of(node.id);
+        let older = match &current_revision {
+            Some(revision) => sqlx::query_scalar::<_, i64>("select count(*) from conversations where id = any($1) and instructions_revision is distinct from $2").bind(&sessions).bind(revision).fetch_one(&state.pool).await?,
+            None => 0,
+        };
+
         let mut node_agents = Vec::new();
 
         for (_, agent, version, available) in agents.iter().filter(|row| row.0 == node.id) {
@@ -244,7 +253,10 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             last_seen_at: node.last_seen_at,
             agents: node_agents,
             logins: node_logins,
-            sessions: state.hub.sessions_of(node.id),
+            sessions,
+            instructions_revision: node.instructions_revision,
+            instructions_unmanaged: node.instructions_unmanaged,
+            sessions_on_older_instructions: older as u32,
         });
     }
 

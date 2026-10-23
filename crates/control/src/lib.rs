@@ -3,10 +3,12 @@ mod boot;
 mod config;
 mod conversations;
 mod git;
+mod groups;
 mod device;
 mod error;
 mod forges;
 mod imports;
+mod instructions;
 mod issues;
 mod link;
 mod mcp;
@@ -32,7 +34,7 @@ pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK,
 
 use anyhow::Result;
 use axum::Router;
-use axum::routing::{any, delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post, put};
 use state::AppState;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -118,6 +120,13 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
+        .route("/api/v1/projects/{id}", patch(projects::patch))
+        .route("/api/v1/groups", get(groups::list).post(groups::create))
+        .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
+        .route("/api/v1/instructions", get(instructions::get))
+        .route("/api/v1/instructions/pull", post(instructions::pull))
+        .route("/api/v1/instructions/{layer}", put(instructions::save))
+        .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/{id}", delete(tasks::delete))

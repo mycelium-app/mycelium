@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::instructions;
 use crate::nodes::node_offline;
 use crate::projects;
 use crate::state::AppState;
@@ -113,7 +114,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account) values ($1, $2, $3, $4, $5, $6, $7)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id) values ($1, $2, $3, $4, $5, $6, $7, $8)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -124,6 +125,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     .bind(&title)
     .bind(enum_text(&status))
     .bind(account)
+    .bind(project.as_ref().map(|project| project.id))
     .fetch_one(&mut *tx)
     .await?;
 
@@ -133,7 +135,8 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
 
     tx.commit().await?;
 
-    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None, account: account.map(str::to_string) });
+    let instructions = instructions::session_layer(state, row.id).await?;
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None, account: account.map(str::to_string), instructions });
 
     if !started {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;

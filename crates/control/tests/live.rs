@@ -58,6 +58,14 @@ const SILENT_ROUTES: &[&str] = &[
     "PATCH /api/v1/schedules/{id}",
     "DELETE /api/v1/schedules/{id}",
     "POST /api/v1/mcp",
+    "POST /api/v1/groups",
+    "PATCH /api/v1/groups/{id}",
+    "DELETE /api/v1/groups/{id}",
+    "PATCH /api/v1/projects/{id}",
+    "PUT /api/v1/instructions/{layer}",
+    "POST /api/v1/instructions/pull",
+    "PUT /api/v1/instruction-source",
+    "DELETE /api/v1/instruction-source",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
 ];
@@ -69,7 +77,7 @@ fn routes_that_change_state() -> BTreeSet<String> {
     for line in source.lines().filter(|line| line.contains(".route(\"")) {
         let path = line.split('"').nth(1).unwrap();
 
-        for (needle, method) in [("post(", "POST"), ("patch(", "PATCH"), ("delete(", "DELETE")] {
+        for (needle, method) in [("post(", "POST"), ("patch(", "PATCH"), ("delete(", "DELETE"), ("put(", "PUT")] {
             if line.contains(needle) {
                 routes.insert(format!("{method} {path}"));
             }

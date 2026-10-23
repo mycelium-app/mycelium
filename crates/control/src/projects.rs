@@ -1,17 +1,18 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
+use crate::groups;
 use crate::git::relay;
 use crate::nodes::node_offline;
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateProjectRequest, ForgeKind, Project};
+use mycelium_proto::api::{CreateProjectRequest, ForgeKind, PatchProjectRequest, Project};
 use mycelium_proto::link::{GitCommand, GitCredentials};
 use uuid::Uuid;
 
-const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, created_at";
+const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, created_at";
 const PROJECTS_FOLDER: &str = "projects";
 
 #[derive(sqlx::FromRow)]
@@ -22,12 +23,13 @@ pub struct ProjectRow {
     pub path: String,
     pub forge_id: Option<Uuid>,
     pub repository: Option<String>,
+    pub group_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl ProjectRow {
     pub fn to_proto(self) -> Project {
-        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, created_at: self.created_at }
+        Project { id: self.id, node_id: self.node_id, name: self.name, path: self.path, forge_id: self.forge_id, repository: self.repository, group_id: self.group_id, created_at: self.created_at }
     }
 }
 
@@ -37,7 +39,7 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     row.ok_or_else(|| ApiError::not_found("That project"))
 }
 
-fn valid_repository(repository: &str) -> bool {
+pub fn valid_repository(repository: &str) -> bool {
     let segments: Vec<&str> = repository.split('/').collect();
 
     segments.len() >= 2 && segments.iter().all(|segment| !segment.is_empty() && *segment != "." && *segment != ".." && segment.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')))
@@ -103,4 +105,19 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
         Err(cause) => Err(cause.into()),
     }
+}
+
+pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchProjectRequest>) -> ApiResult<Json<Project>> {
+    if let Some(group_id) = request.group_id {
+        groups::find_owned(&state, group_id, user.id).await?;
+    }
+
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set group_id = $3 where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+        .bind(id)
+        .bind(user.id)
+        .bind(request.group_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    row.map(|row| Json(row.to_proto())).ok_or_else(|| ApiError::not_found("That project"))
 }

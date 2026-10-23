@@ -46,11 +46,32 @@ fn tool_definitions() -> Value {
             "description": "Store a short, confirmed finding in the shared memory so later conversations on any node can recall it.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"text": {"type": "string", "description": "What to remember."}},
+                "properties": {
+                    "text": {"type": "string", "description": "What to remember."},
+                    "scope": {"type": "string", "enum": ["global", "group"], "description": "global (default) is recalled in every conversation. group is recalled only in conversations whose project is in the same group."},
+                },
                 "required": ["text"],
             },
         },
     ])
+}
+
+async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {
+    let claimed = headers.get("x-mycelium-conversation").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<Uuid>().ok());
+
+    match claimed {
+        Some(conversation_id) => Ok(sqlx::query_as::<_, (Uuid, String)>("select id, title from conversations where id = $1 and node_id = $2").bind(conversation_id).bind(node_id).fetch_optional(&state.pool).await?),
+        None => Ok(None),
+    }
+}
+
+async fn group_scope_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<String>> {
+    let Some((conversation_id, _)) = claimed_conversation(state, headers, node_id).await? else {
+        return Ok(None);
+    };
+    let group = sqlx::query_scalar::<_, Option<Uuid>>("select p.group_id from conversations c join projects p on p.id = c.project_id where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.flatten();
+
+    Ok(group.map(|group_id| format!("group:{group_id}")))
 }
 
 pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
@@ -76,7 +97,9 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         return Ok(failure(&id, INVALID_PARAMS, "recall needs a query, a string."));
                     };
                     let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_RECALL_LIMIT).clamp(1, MAX_RECALL_LIMIT);
-                    let rows = search(&state.pool, Some(query), Some(&["global".to_string()]), limit).await?;
+                    let group_scope = group_scope_of(&state, &headers, node.id).await?;
+                    let visible: Vec<String> = ["global".to_string()].into_iter().chain(group_scope).collect();
+                    let rows = search(&state.pool, Some(query), Some(&visible), limit).await?;
 
                     if rows.is_empty() {
                         reply(&id, tool_text("No memories match that query.", false))
@@ -97,20 +120,22 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     }
 
                     let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node.id).fetch_one(&state.pool).await?;
-                    let claimed = headers.get("x-mycelium-conversation").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<Uuid>().ok());
-                    let conversation = match claimed {
-                        Some(conversation_id) => {
-                            sqlx::query_as::<_, (Uuid, String)>("select id, title from conversations where id = $1 and node_id = $2").bind(conversation_id).bind(node.id).fetch_optional(&state.pool).await?
-                        }
-                        None => None,
-                    };
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?;
                     let source = match &conversation {
                         Some((conversation_id, title)) if title.trim().is_empty() => conversation_id.to_string(),
                         Some((_, title)) => title.clone(),
                         None => "unknown conversation".to_string(),
                     };
-                    let memory_id = sqlx::query_scalar::<_, Uuid>("insert into memories (text, created_by, conversation_id) values ($1, $2, $3) returning id")
+                    let scopes = match arguments.get("scope").and_then(Value::as_str) {
+                        Some("group") => match group_scope_of(&state, &headers, node.id).await? {
+                            Some(scope) => vec![scope],
+                            None => return Ok(reply(&id, tool_text("Nothing was stored. This conversation's project is not in a group, so remember it without a scope to share it with every conversation.", true))),
+                        },
+                        _ => vec!["global".to_string()],
+                    };
+                    let memory_id = sqlx::query_scalar::<_, Uuid>("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning id")
                         .bind(text)
+                        .bind(&scopes)
                         .bind(format!("{node_name}/{source}"))
                         .bind(conversation.map(|(conversation_id, _)| conversation_id))
                         .fetch_one(&state.pool)

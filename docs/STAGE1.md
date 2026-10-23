@@ -10,8 +10,7 @@ conversation list by status, live threads with queued messages, stop, permission
 per-node agent logins, the transcript copy, live workflow progress for Claude Code, rename and
 archive, a web client and a desktop client, install by script, Nix or NixOS.
 
-Out until later stages: moving conversations, the git hub, tmux sessions, managed AGENTS.md,
-groups, memory, search, iOS and iPad, goals, schedules, tickets, walkthroughs.
+Out until later stages: moving conversations, the git hub, tmux sessions, memory, search, iOS and iPad, goals, schedules, tickets, walkthroughs.
 
 ## Repository
 
@@ -97,7 +96,7 @@ events           id bigserial pk, conversation_id, seq bigint, kind text, payloa
                  unique(conversation_id, seq)
 queued_prompts   id uuid pk, conversation_id, position int, text text, created_at
 transcripts      node_id, path text, bytes bigint, updated_at, pk(node_id, path)
-projects         id uuid pk, owner uuid, node_id uuid, name text, path text, forge_id uuid null, repository text null,
+projects         id uuid pk, owner uuid, node_id uuid, name text, path text, forge_id uuid null, repository text null, group_id uuid null,
                  created_at, unique(node_id, path)
 worktrees        id uuid pk, project_id uuid, branch text, path text, issue_number bigint null, created_at, unique(project_id, branch)
 tasks            id uuid pk, owner uuid, node_id uuid, agent text, cwd text, project_id uuid null, branch text null, title text, prompt text null,
@@ -105,6 +104,10 @@ tasks            id uuid pk, owner uuid, node_id uuid, agent text, cwd text, pro
 schedules        id uuid pk, owner uuid, node_id uuid, agent text, cwd text, project_id uuid null, prompt text, cron text,
                  each_run text ('new'|'same'), paused bool, next_run_at, last_run_at null, last_conversation_id null, created_at
 schedule_runs    id uuid pk, schedule_id uuid, ran_at, outcome text ('started'|'skipped'), reason text null, conversation_id uuid null
+groups           id uuid pk, owner uuid, name text, created_at, unique(owner, name)
+instruction_versions  id text pk (commit SHA with a source, else 40 hex characters), seq bigserial, layer text ('global' or a group id), group_id uuid null,
+                 text text, author uuid null, created_at
+instruction_source    singleton row: forge_id uuid, repository text, path text
 forges           id uuid pk, owner uuid, kind text ('github'|'gitlab'), base_url text, account text, token text,
                  organisations text[], created_at, unique(owner, base_url, account)
 ```
@@ -201,6 +204,15 @@ Projects:
 - `GET /api/v1/schedules` → `[{id, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, next_run_at, last_run_at, last_conversation_id, created_at}]`. `POST /api/v1/schedules` `{node_id, agent, prompt, cron, each_run: "new"|"same", project_id?, cwd?}` (201; 400 `prompt_required`, `cron_invalid`, `cron_never_runs`, `cwd_required`, `project_not_on_node`). `cron` is five fields, evaluated in UTC. `PATCH /api/v1/schedules/{id}` `{paused}` pauses it, or resumes it with the next run counted from now. `POST /api/v1/schedules/{id}/run` runs it now without moving `next_run_at` (201 with the run). `DELETE /api/v1/schedules/{id}`. `GET /api/v1/schedule-runs` → the caller's 50 latest runs, `[{id, schedule_id, ran_at, outcome, reason, conversation_id}]`.
 - `GET /api/v1/worktrees` → `[{id, project_id, branch, path, issue_number, created_at}]` for the caller's projects.
 
+Groups and instructions:
+- `GET /api/v1/groups` → the caller's groups `[{id, name, created_at}]`. `POST /api/v1/groups` `{name}` (201; 400 `name_required` or `name_invalid`, which allows up to 40 letters, numbers, dots, dashes and underscores; 409 `group_exists`). `PATCH /api/v1/groups/{id}` `{name}` renames. `DELETE /api/v1/groups/{id}` leaves its projects ungrouped; memories stored in its scope stay in the list.
+- `PATCH /api/v1/projects/{id}` `{group_id}` puts a project in one of the caller's groups, or takes it out when `group_id` is null (404 for another person's project or group). Projects carry `group_id`.
+- `GET /api/v1/instructions` → `{source: {forge_id, repository, path} | null, revision, layers: [{layer, name, path, text, version: {id, created_at} | null}]}`. `layer` is `global` or a group id; `revision` is the id of the newest version of any layer. `path` is the layer's file in the source repository, null without a source.
+- `PUT /api/v1/instructions/{layer}` `{text}` saves the layer as a new version and pushes to every node; saving the text the layer already holds changes nothing. Without a source the version id is a 40-character hash held in Postgres only. With a source the save is a commit through the forge's contents API (GitHub `PUT /repos/{r}/contents/{path}`, GitLab `/projects/{id}/repository/files/{path}`) and the version id is the commit SHA; a file that changed on the forge since it was read answers 409 `forge_file_changed` and nothing is saved.
+- `POST /api/v1/instructions/pull` reads every layer's file from the source and records a version, with the commit SHA as its id, for each that differs from the latest (409 `no_source`). A file the repository does not have leaves the layer as it was.
+- `PUT /api/v1/instruction-source` `{forge_id, repository: "owner/name", path?}` sets the source (path defaults to `AGENTS.md`; 400 `repository_invalid` or `path_invalid`); `DELETE /api/v1/instruction-source` clears it and keeps the versions. The source is one for the whole control plane and uses the forge of the person who set it.
+- The global layer is the file at `path`. A group's layer is its sibling with the group name before the extension: `AGENTS.md` and group `slop` give `AGENTS.slop.md` (`docs/AGENTS.md` gives `docs/AGENTS.slop.md`). Renaming a group does not move the file already committed.
+
 Issues:
 - `GET /api/v1/issues?q=` → `{issues: [{forge_id, repository, number, title, url, body}], failures: [{forge_id, message}]}`: the open issues of every forge repository the caller has set up as a project (a repository set up on several nodes is fetched once). `q` is passed to the forge in its own syntax: GitHub's issue search (added to `repo:<name> is:issue is:open`), GitLab's `search` parameter. A forge that fails is reported in `failures`.
 - `POST /api/v1/projects/{id}/issues/{number}/workspace` `{agent}` → the conversation (201). The control plane fetches the issue, has the node create a worktree on `issue/<number>-<title slug>` (reused when the issue already has one) and starts a conversation there, titled `#<number> <title>`, whose first prompt is `Work on issue #<number>: <title>`, the link and the body. 404 for an issue the forge does not have, 409 `project_without_forge` for a project that was only a folder.
@@ -216,8 +228,35 @@ memory attributed to `<node>/<conversation title>`; `recall` runs a Postgres ful
 global memories. The node passes the server to the agent at `session/new`, `session/load` and
 `session/resume` when the agent advertises `mcpCapabilities.http`, with the node token and the
 conversation id as headers, and starts Claude with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` so its own
-memory is off. Settings has a Memories page to search, edit and delete. Groups do not exist yet, so
-every memory is global.
+memory is off. Settings has a Memories page to search, edit and delete.
+
+A project can belong to a group (see Groups and instructions), and a conversation started from a
+project carries `project_id`. Memory scopes are `global` and `group:<group id>`. `recall` searches
+`global` plus the scope of the group of the conversation's project (the node's
+`x-mycelium-conversation` header names the conversation). `remember` takes an optional `scope`:
+`global` (the default) or `group`, which stores into the project's group scope and is refused, with
+a plain message, when the conversation's project has no group.
+
+### Instructions
+
+One global instructions file plus one layer per group, each saved as versions. The control plane
+sends `instructions {revision, global?}` to a node whenever any layer is saved or pulled and after
+each `hello`. `revision` is the newest version id; `global` is the global layer's text. The node
+writes the global text, behind the line `<!-- Managed by Mycelium. Changes made here are overwritten. -->`,
+to the file each installed agent reads for user-level instructions, in the agent's default home and
+in the home of every account on the node: `<home>/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+for Claude Code, `<home>/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`) for Codex. A file that exists
+without that first line is never touched: the node lists it in `instructions_unmanaged` and delivers nothing there.
+The node answers `instructions_held {revision, unmanaged: [label]}`; `GET /nodes` carries `instructions_revision`,
+`instructions_unmanaged` and `sessions_on_older_instructions`, the running sessions whose
+conversation started on a revision other than the newest.
+
+A group's layer reaches a conversation whose project is in the group without touching the project's git
+tree: `start_session` carries `instructions` (the layer's text) and the node appends it to the system
+prompt through `_meta.systemPrompt.append` on `session/new`, `session/load` and `session/resume`, which
+`claude-agent-acp` reads. The node sends it for Claude Code only: Codex has no documented per-session
+equivalent, so a group layer does not reach Codex conversations. The control plane records the revision a
+conversation started with when it sends `start_session`.
 
 ### Forges
 
@@ -313,6 +352,7 @@ Node to control plane:
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
 | `logins` | `logins: [{agent, account?, method, state}]` |
+| `instructions_held` | `revision, unmanaged: [label]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
 | `terminal_output` | `terminal_id, data` (base64; raw bytes from the PTY) |
@@ -326,7 +366,8 @@ Control plane to node:
 | type | fields |
 |---|---|
 | `ack` | `conversation_id, seq` |
-| `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?` |
+| `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?, instructions?` |
+| `instructions` | `revision, global?` |
 | `prompt` | `conversation_id, prompt_id, text` |
 | `cancel` | `conversation_id` |
 | `permission_response` | `conversation_id, request_id, outcome` (ACP `RequestPermissionOutcome`) |

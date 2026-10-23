@@ -2,6 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::Json;
+use base64::Engine;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use futures_util::future::join_all;
@@ -38,7 +39,14 @@ pub struct ForgeRow {
 pub enum ForgeError {
     Rejected,
     Unreachable,
+    Conflict,
     Failed(u16),
+}
+
+pub struct ForgeFile {
+    pub text: String,
+    pub commit: String,
+    blob: String,
 }
 
 impl ForgeError {
@@ -48,6 +56,7 @@ impl ForgeError {
         match self {
             ForgeError::Rejected => ApiError::bad_request("forge_token_rejected", format!("{name} did not accept this token. Check that it has not expired and can read your account, then try again.")),
             ForgeError::Unreachable => ApiError::bad_request("forge_unreachable", format!("Mycelium could not reach {base_url}. Check the address and try again.")),
+            ForgeError::Conflict => ApiError::conflict("forge_file_changed", format!("The file changed on {name} since Mycelium last read it. Pull the latest version, then make your edit again.")),
             ForgeError::Failed(status) => ApiError::bad_request("forge_failed", format!("{name} answered with status {status}. Try again in a moment.")),
         }
     }
@@ -91,12 +100,17 @@ impl ForgeApi {
         }
     }
 
-    pub async fn get(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
-        let request = http.get(format!("{}{path}", self.api_url())).timeout(FORGE_TIMEOUT).header("user-agent", "mycelium");
-        let request = match self.kind {
+    fn authorised(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let request = request.timeout(FORGE_TIMEOUT).header("user-agent", "mycelium");
+
+        match self.kind {
             ForgeKind::Github => request.bearer_auth(&self.token).header("accept", "application/vnd.github+json").header("x-github-api-version", "2022-11-28"),
             ForgeKind::Gitlab => request.header("private-token", &self.token),
-        };
+        }
+    }
+
+    pub async fn get(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
+        let request = self.authorised(http.get(format!("{}{path}", self.api_url())));
         let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
         let status = response.status();
 
@@ -182,6 +196,86 @@ impl ForgeApi {
 }
 
 impl ForgeApi {
+    pub async fn file(&self, http: &reqwest::Client, repository: &str, path: &str) -> Result<Option<ForgeFile>, ForgeError> {
+        let body = match self.kind {
+            ForgeKind::Github => self.get(http, &format!("/repos/{repository}/contents/{}", encode_segments(path))).await,
+            ForgeKind::Gitlab => {
+                let project = self.get(http, &format!("/projects/{}", encode_path(repository))).await?;
+                let branch = project["default_branch"].as_str().unwrap_or("main");
+
+                self.get(http, &format!("/projects/{}/repository/files/{}?ref={}", encode_path(repository), encode_path(path), encode_path(branch))).await
+            }
+        };
+        let body = match body {
+            Ok(body) => body,
+            Err(ForgeError::Failed(404)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let encoded: String = body["content"].as_str().unwrap_or_default().chars().filter(|character| !character.is_whitespace()).collect();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| ForgeError::Failed(200))?;
+        let text = String::from_utf8(bytes).map_err(|_| ForgeError::Failed(200))?;
+        let commit = match self.kind {
+            ForgeKind::Github => {
+                let commits = self.get(http, &format!("/repos/{repository}/commits?per_page=1&path={}", encode_segments(path))).await?;
+
+                commits[0]["sha"].as_str().ok_or(ForgeError::Failed(200))?.to_string()
+            }
+            ForgeKind::Gitlab => body["last_commit_id"].as_str().ok_or(ForgeError::Failed(200))?.to_string(),
+        };
+
+        Ok(Some(ForgeFile { text, commit, blob: body["sha"].as_str().unwrap_or_default().to_string() }))
+    }
+
+    pub async fn write_file(&self, http: &reqwest::Client, repository: &str, path: &str, text: &str, message: &str, existing: Option<&ForgeFile>) -> Result<String, ForgeError> {
+        let (method, url, body) = match self.kind {
+            ForgeKind::Github => {
+                let mut body = serde_json::json!({"message": message, "content": base64::engine::general_purpose::STANDARD.encode(text)});
+
+                if let Some(existing) = existing {
+                    body["sha"] = Value::String(existing.blob.clone());
+                }
+
+                (reqwest::Method::PUT, format!("/repos/{repository}/contents/{}", encode_segments(path)), body)
+            }
+            ForgeKind::Gitlab => {
+                let project = self.get(http, &format!("/projects/{}", encode_path(repository))).await?;
+                let branch = project["default_branch"].as_str().unwrap_or("main");
+                let mut body = serde_json::json!({"branch": branch, "content": text, "commit_message": message});
+                let method = if existing.is_some() { reqwest::Method::PUT } else { reqwest::Method::POST };
+
+                if let Some(existing) = existing {
+                    body["last_commit_id"] = Value::String(existing.commit.clone());
+                }
+
+                (method, format!("/projects/{}/repository/files/{}", encode_path(repository), encode_path(path)), body)
+            }
+        };
+        let request = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body);
+        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let status = response.status();
+
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err(ForgeError::Rejected);
+        }
+
+        if matches!(status.as_u16(), 400 | 409 | 422) {
+            return Err(ForgeError::Conflict);
+        }
+
+        if !status.is_success() {
+            return Err(ForgeError::Failed(status.as_u16()));
+        }
+
+        match self.kind {
+            ForgeKind::Github => {
+                let answer: Value = response.json().await.map_err(|_| ForgeError::Failed(status.as_u16()))?;
+
+                answer["commit"]["sha"].as_str().map(str::to_string).ok_or(ForgeError::Failed(status.as_u16()))
+            }
+            ForgeKind::Gitlab => self.file(http, repository, path).await?.map(|file| file.commit).ok_or(ForgeError::Failed(status.as_u16())),
+        }
+    }
+
     pub async fn issues(&self, http: &reqwest::Client, repository: &str, query: &str) -> Result<Vec<Issue>, ForgeError> {
         let path = match self.kind {
             ForgeKind::Github => {
@@ -233,7 +327,11 @@ impl ForgeApi {
 }
 
 fn encode_path(repository: &str) -> String {
-    repository.replace('/', "%2F")
+    url::form_urlencoded::byte_serialize(repository.as_bytes()).collect::<String>().replace('+', "%20")
+}
+
+fn encode_segments(path: &str) -> String {
+    path.split('/').map(encode_path).collect::<Vec<_>>().join("/")
 }
 
 pub fn display_name(kind: ForgeKind) -> &'static str {
