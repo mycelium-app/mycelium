@@ -9,6 +9,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
+import mycelium.ui.verticalScrollWithBar
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -69,6 +73,7 @@ class InstructionsTest {
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/instructions") -> document
                 path.endsWith("/extensions") -> ExtensionsJson
+                path.endsWith("/instruction-proposals") -> "[]"
                 path.endsWith("/groups") && request.method == HttpMethod.Get -> GroupsJson
                 path.endsWith("/projects") -> ProjectsJson
                 path.endsWith("/forges") -> "[]"
@@ -81,7 +86,7 @@ class InstructionsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { InstructionsSettings(store) } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.verticalScrollWithBar()) { InstructionsSettings(store) } } }
     }
 
     @Test
@@ -108,6 +113,16 @@ class InstructionsTest {
     }
 
     @Test
+    fun anUnmanagedFileCanBeHandedToMyceliumWhichKeepsTheOriginalAsABackup() {
+        show()
+
+        rule.onNodeWithText("Your file is kept as CLAUDE.md.bak.").assertExists()
+        rule.onNodeWithContentDescription("Let Mycelium manage this CLAUDE.md on willow").performClick()
+
+        requestTo(HttpMethod.Post, "/nodes/n1/instructions/take-over")
+    }
+
+    @Test
     fun eachNodeShowsTheVersionItHoldsAndItsSessionsOnAnOlderVersion() {
         show()
 
@@ -129,7 +144,7 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithContentDescription("Global instructions").performClick()
-        rule.onNodeWithText("Save and commit").performClick()
+        rule.onNodeWithText("Save and commit").performScrollTo().performClick()
 
         val saved = requestTo(HttpMethod.Put, "/instructions/global")
         assertEquals("""{"text":"## Diffs"}""", saved.third)
@@ -220,11 +235,10 @@ class InstructionsTest {
         rule.waitForIdle()
 
         val editor = rule.onNodeWithContentDescription("Edit slop instructions").onParent().getUnclippedBoundsInRoot()
-        val rootHeight = rule.onRoot().getUnclippedBoundsInRoot().bottom
 
         val editorHeight = editor.bottom - editor.top
 
-        assertTrue(editorHeight <= maxOf(320.dp, rootHeight * 0.6f), "editor is $editorHeight")
+        assertTrue(editorHeight in 320.dp..800.dp, "editor is $editorHeight")
 
         for (before in listOf(rule.onNodeWithText("Folders in slop"), rule.onNodeWithText("Projects in slop"), rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Change repository"), rule.onNodeWithText("Node"))) {
             assertTrue(before.getUnclippedBoundsInRoot().bottom <= editor.top, "a control sits below the editor")

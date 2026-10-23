@@ -401,6 +401,17 @@ fun InstructionsSettings(store: Store) {
                     for (file in node.instructionsUnmanaged) {
                         Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
                     }
+
+                        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1)) {
+                            MyButton(
+                                { attempt { store.api.takeOverInstructions(node.id) } },
+                                text = "Let Mycelium manage this",
+                                description = "Let Mycelium manage this ${file.substringAfterLast('/')} on ${node.name}",
+                                variant = ButtonVariant.Outline,
+                                size = ButtonSize.Sm,
+                            )
+                            Label("Your file is kept as ${file.substringAfterLast('/')}.bak.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        }
                 }
 
                 Hairline()
