@@ -9,8 +9,9 @@ use axum::http::StatusCode;
 use futures_util::future::join_all;
 use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Issue, PullRequest, PullRequestState, Repositories, Repository};
 use mycelium_proto::link::GitCredentials;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -96,6 +97,15 @@ impl ForgeRow {
             created_at: self.created_at,
         })
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchPullRequest {
+    pub number: i64,
+    pub label: String,
+    pub title: String,
+    pub url: String,
+    pub state: &'static str,
 }
 
 #[derive(Clone)]
@@ -464,6 +474,63 @@ impl ForgeApi {
         linked.retain(|request| seen.insert(request.number));
 
         Ok(linked)
+    }
+
+    pub async fn branch_pull_requests(&self, http: &reqwest::Client, repository: &str) -> Result<HashMap<String, BranchPullRequest>, ForgeError> {
+        let path = match self.kind {
+            ForgeKind::Github => format!("/repos/{repository}/pulls?state=all&sort=updated&direction=desc&per_page={PAGE_SIZE}"),
+            ForgeKind::Gitlab => format!("/projects/{}/merge_requests?state=all&order_by=updated_at&sort=desc&per_page={PAGE_SIZE}", encode_path(repository)),
+        };
+        let body = self.get(http, &path).await?;
+        let mut found: HashMap<String, BranchPullRequest> = HashMap::new();
+
+        for item in body.as_array().into_iter().flatten() {
+            let Some((branch, request)) = self.to_branch_pull_request(repository, item) else {
+                continue;
+            };
+            let replaces = found.get(&branch).is_none_or(|kept| kept.state != "open" && kept.state != "draft" && (request.state == "open" || request.state == "draft"));
+
+            if replaces {
+                found.insert(branch, request);
+            }
+        }
+
+        Ok(found)
+    }
+
+    fn to_branch_pull_request(&self, repository: &str, item: &Value) -> Option<(String, BranchPullRequest)> {
+        let draft = item["draft"].as_bool().unwrap_or(false);
+
+        Some(match self.kind {
+            ForgeKind::Github => {
+                let from_fork = item["head"]["repo"]["full_name"].as_str().is_some_and(|source| !source.eq_ignore_ascii_case(repository));
+
+                if from_fork {
+                    return None;
+                }
+
+                let number = item["number"].as_i64()?;
+                let state = match (item["merged_at"].is_null(), item["state"].as_str(), draft) {
+                    (false, _, _) => "merged",
+                    (true, Some("open"), true) => "draft",
+                    (true, Some("open"), false) => "open",
+                    _ => "closed",
+                };
+
+                (item["head"]["ref"].as_str()?.to_string(), BranchPullRequest { number, label: format!("PR #{number}"), title: item["title"].as_str()?.to_string(), url: item["html_url"].as_str()?.to_string(), state })
+            }
+            ForgeKind::Gitlab => {
+                let number = item["iid"].as_i64()?;
+                let state = match (item["state"].as_str(), draft) {
+                    (Some("opened"), true) => "draft",
+                    (Some("opened"), false) => "open",
+                    (Some("merged"), _) => "merged",
+                    _ => "closed",
+                };
+
+                (item["source_branch"].as_str()?.to_string(), BranchPullRequest { number, label: format!("MR !{number}"), title: item["title"].as_str()?.to_string(), url: item["web_url"].as_str()?.to_string(), state })
+            }
+        })
     }
 
     pub async fn create_repository(&self, http: &reqwest::Client, account: &str, repository: &str) -> Result<(), ForgeError> {

@@ -467,6 +467,8 @@ class MyceliumApi(
 
     suspend fun gitBranches(id: String): GitBranches = call("/conversations/$id/git/branches") { client.get(it) { authorise() } }.body()
 
+    suspend fun gitStack(id: String): GitStack = call("/conversations/$id/git/stack") { client.get(it) { authorise() } }.body()
+
     suspend fun gitSwitch(id: String, branch: String, create: Boolean = false, track: String? = null) {
         call("/conversations/$id/git/switch") { client.post(it) { authorise(); json(GitSwitchRequest(branch, create, track)) } }
     }
@@ -503,6 +505,14 @@ class MyceliumApi(
     }
 
     suspend fun gitUndo(id: String): GitUndone = call("/conversations/$id/git/undo") { client.post(it) { authorise() } }.body()
+
+    suspend fun gitTownSync(id: String) {
+        call("/conversations/$id/git/town/sync") { client.post(it) { authorise() } }
+    }
+
+    suspend fun gitTownPropose(id: String) {
+        call("/conversations/$id/git/town/propose") { client.post(it) { authorise() } }
+    }
 
     suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =
         call("/conversations/$id/events") {

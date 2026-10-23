@@ -1,6 +1,8 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::forges::{self, ForgeApi};
 use crate::nodes::node_offline;
+use crate::projects;
 use crate::state::AppState;
 use crate::store::find_owned;
 use axum::Json;
@@ -8,12 +10,13 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::link::{CommitOptions, GitCommand};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+const TOWN_TIMEOUT: Duration = Duration::from_secs(300);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_LOG_LIMIT: u32 = 50;
 const DEFAULT_GRAPH_LIMIT: u32 = 200;
@@ -81,6 +84,7 @@ pub struct PushRequest {
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
         GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
+        GitCommand::TownSync | GitCommand::TownPropose => TOWN_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
         _ => GIT_TIMEOUT,
     };
@@ -130,6 +134,45 @@ pub async fn show(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 
 pub async fn branches(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     run(&state, &user, id, GitCommand::Branches).await
+}
+
+pub async fn stack(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let mut answer = relay(&state, row.node_id, row.cwd, GitCommand::Stack).await?;
+
+    attach_pull_requests(&state, &user, row.project_id, &mut answer).await;
+
+    Ok(Json(answer))
+}
+
+async fn attach_pull_requests(state: &AppState, user: &AuthUser, project_id: Option<Uuid>, answer: &mut Value) {
+    let found = pull_requests_of(state, user, project_id).await;
+    let available = found.is_ok();
+    let requests = found.as_ref().ok();
+
+    for row in answer["branches"].as_array_mut().into_iter().flatten() {
+        let request = requests.and_then(|requests| row["name"].as_str().and_then(|name| requests.get(name)));
+
+        row["pull_request"] = request.map(|request| json!(request)).unwrap_or(Value::Null);
+    }
+
+    answer["pull_requests_available"] = json!(available);
+
+    if let Err(Some(problem)) = found {
+        answer["pull_requests_problem"] = json!(problem);
+    }
+}
+
+async fn pull_requests_of(state: &AppState, user: &AuthUser, project_id: Option<Uuid>) -> Result<std::collections::HashMap<String, forges::BranchPullRequest>, Option<String>> {
+    let project_id = project_id.ok_or(None)?;
+    let project = projects::find_owned(state, project_id, user.id).await.map_err(|_| None)?;
+    let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.as_deref()) else {
+        return Err(None);
+    };
+    let forge = forges::find_owned(state, forge_id, user.id).await.map_err(|_| None)?;
+    let api = ForgeApi::from_row(&forge).map_err(|_| None)?.cached(&state.forge_cache);
+
+    api.branch_pull_requests(&state.http, repository).await.map_err(|error| Some(error.into_api(api.kind, &api.base_url).message().to_string()))
 }
 
 pub async fn switch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SwitchRequest>) -> ApiResult<Json<Value>> {
@@ -184,4 +227,12 @@ pub async fn push(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 
 pub async fn undo(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     run(&state, &user, id, GitCommand::UndoLastCommit).await
+}
+
+pub async fn town_sync(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::TownSync).await
+}
+
+pub async fn town_propose(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::TownPropose).await
 }

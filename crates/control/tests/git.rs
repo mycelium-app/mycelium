@@ -1,6 +1,10 @@
 mod common;
 
-use common::{NodeLink, Server};
+use axum::Json;
+use axum::Router;
+use axum::http::StatusCode;
+use axum::routing::get;
+use common::{NodeLink, Server, serve};
 use mycelium_proto::link::{CommitOptions, ControlToNode, GitCommand, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -211,4 +215,129 @@ async fn another_user_cannot_run_git_in_a_conversation() {
 
     assert_eq!(other.json(other.get(&format!("/api/v1/conversations/{id}/git/status"))).await.0, 404);
     assert_eq!(other.json(other.post(&format!("/api/v1/conversations/{id}/git/stage-all"))).await.0, 404);
+}
+
+fn stack_answer() -> Value {
+    json!({"current": "one", "main": "main", "inferred": false, "git_town_available": true, "branches": [
+        {"name": "main", "parent": null, "depth": 0, "current": false, "main": true, "ahead": 0, "behind": 0, "has_upstream": true, "pushed": true, "needs_sync": false, "subject": "Base"},
+        {"name": "one", "parent": "main", "depth": 1, "current": true, "main": false, "ahead": 2, "behind": 0, "has_upstream": true, "pushed": true, "needs_sync": false, "subject": "One"},
+        {"name": "two", "parent": "one", "depth": 2, "current": false, "main": false, "ahead": 1, "behind": 0, "has_upstream": false, "pushed": false, "needs_sync": false, "subject": "Two"},
+        {"name": "three", "parent": "two", "depth": 3, "current": false, "main": false, "ahead": 1, "behind": 0, "has_upstream": false, "pushed": false, "needs_sync": false, "subject": "Three"},
+    ]})
+}
+
+fn pull(number: i64, title: &str, branch: &str, state: &str, draft: bool, merged: bool, repository: &str) -> Value {
+    json!({"number": number, "title": title, "state": state, "draft": draft, "merged_at": if merged { json!("2026-10-01T10:00:00Z") } else { Value::Null }, "html_url": format!("https://forge.example/acme-org/acme-backups/pull/{number}"), "head": {"ref": branch, "repo": {"full_name": repository}}})
+}
+
+async fn fake_github(pulls: Value) -> String {
+    let router = Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}/pulls", get(move || { let pulls = pulls.clone(); async move { Json(pulls) } }));
+
+    serve(router).await
+}
+
+async fn conversation_in_forge_project(server: &Server, github: &str) -> (NodeLink, Uuid) {
+    let mut link = server.online_node("laptop").await;
+    let (_, forge) = server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": "github", "base_url": github, "token": "ghp_0123456789abcdefghijklmnopqrstuvwxyz"}))).await;
+    let body = json!({"node_id": link.id, "forge_id": forge["id"], "repository": "acme-org/acme-backups"});
+    let user = server.user.clone();
+    let cloning = tokio::spawn(async move { user.json(user.post("/api/v1/projects").json(&body)).await });
+
+    answer_next(&mut link, true, json!({"path": "/work/backups"}), None).await;
+    let (status, project) = cloning.await.unwrap();
+    assert_eq!(status, 201, "{project}");
+
+    let created = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    sqlx::query("update conversations set project_id = $1 where id = $2").bind(project["id"].as_str().unwrap().parse::<Uuid>().unwrap()).bind(created.id).execute(&server.pool).await.unwrap();
+
+    (link, created.id)
+}
+
+async fn ask_stack(server: &Server, link: &mut NodeLink, id: Uuid) -> (u16, Value) {
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move { user.json(user.get(&format!("/api/v1/conversations/{id}/git/stack"))).await });
+    let (_, command) = answer_next(link, true, stack_answer(), None).await;
+
+    assert_eq!(command, GitCommand::Stack);
+
+    asking.await.unwrap()
+}
+
+#[tokio::test]
+async fn the_stack_of_a_conversation_without_a_forge_project_has_no_pull_request_information() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+
+    let (status, stack) = ask_stack(&server, &mut link, id).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(stack["pull_requests_available"], false);
+    assert_eq!(stack["pull_requests_problem"], Value::Null);
+    assert_eq!(stack["branches"][1]["pull_request"], Value::Null);
+}
+
+#[tokio::test]
+async fn each_branch_of_the_stack_gets_the_pull_request_of_its_name_preferring_an_open_one_and_ignoring_forks() {
+    let server = Server::start().await;
+    let pulls = json!([
+        pull(14, "Rework one again", "one", "closed", false, true, "acme-org/acme-backups"),
+        pull(12, "Rework one", "one", "open", false, false, "acme-org/acme-backups"),
+        pull(13, "Sketch two", "two", "open", true, false, "acme-org/acme-backups"),
+        pull(15, "A fork's three", "three", "open", false, false, "someone/acme-backups"),
+        pull(9, "Old base", "main", "closed", false, false, "acme-org/acme-backups"),
+    ]);
+    let (mut link, id) = conversation_in_forge_project(&server, &fake_github(pulls).await).await;
+
+    let (status, stack) = ask_stack(&server, &mut link, id).await;
+
+    assert_eq!(status, 200, "{stack}");
+    assert_eq!(stack["pull_requests_available"], true);
+    assert_eq!(stack["branches"][1]["pull_request"], json!({"number": 12, "label": "PR #12", "title": "Rework one", "url": "https://forge.example/acme-org/acme-backups/pull/12", "state": "open"}));
+    assert_eq!((stack["branches"][2]["pull_request"]["number"].clone(), stack["branches"][2]["pull_request"]["state"].clone()), (json!(13), json!("draft")));
+    assert_eq!(stack["branches"][3]["pull_request"], Value::Null);
+    assert_eq!(stack["branches"][0]["pull_request"]["state"], "closed");
+}
+
+#[tokio::test]
+async fn a_forge_that_cannot_answer_leaves_the_stack_without_pull_requests_and_says_why() {
+    let server = Server::start().await;
+    let failing = Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}/pulls", get(|| async { StatusCode::INTERNAL_SERVER_ERROR }));
+    let (mut link, id) = conversation_in_forge_project(&server, &serve(failing).await).await;
+
+    let (status, stack) = ask_stack(&server, &mut link, id).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(stack["pull_requests_available"], false);
+    assert!(stack["pull_requests_problem"].as_str().is_some_and(|problem| !problem.is_empty()), "{stack}");
+    assert_eq!(stack["branches"].as_array().unwrap().len(), 4);
+}
+
+#[tokio::test]
+async fn git_town_sync_and_propose_are_run_by_the_node_and_its_output_is_returned() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let sync = user.json(user.post(&format!("/api/v1/conversations/{id}/git/town/sync"))).await;
+        let propose = user.json(user.post(&format!("/api/v1/conversations/{id}/git/town/propose"))).await;
+
+        [sync, propose]
+    });
+
+    let (_, first) = answer_next(&mut link, true, json!({"output": "synced"}), None).await;
+    let (_, second) = answer_next(&mut link, false, Value::Null, Some("conflict in a.txt")).await;
+
+    assert_eq!((first, second), (GitCommand::TownSync, GitCommand::TownPropose));
+
+    let [sync, propose] = asking.await.unwrap();
+
+    assert_eq!(sync, (200, json!({"output": "synced"})));
+    assert_eq!((propose.0, propose.1["message"].clone()), (409, json!("conflict in a.txt")));
 }

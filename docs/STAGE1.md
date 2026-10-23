@@ -610,8 +610,8 @@ time out after 10 seconds (fetch, pull and push 60), an offline node is a 409 `n
 own error text comes back as a 409 `git_failed`. `GET git/graph?skip=&limit=` (default and most 200) returns commits of every
 branch in topological order with parents and structured refs, `GET git/show?hash=` a commit's patch, `GET git/branches` local and
 remote branches by recency with author, date and subject, and `POST git/switch` `{branch, create?, track?}` runs `git switch`
-(never a stash: git refuses when changes would be overwritten and says so). The panel has Changes (files under Tracked and Untracked, by folder, with
-line counts and a checkbox that stages or unstages; selecting a file shows its diff in place of the list) History and Graph tabs (lanes
+(never a stash: git refuses when changes would be overwritten and says so). `GET git/stack` answers the current branch's stack from main down through its children, read from Git Town's `git-town-branch.<branch>.parent` config with `git-town.main-branch` (or `main-branch` in `.git-town.toml`, or the older `main-branch-name`), or inferred from which local branches contain which with `inferred: true`; each branch has its counts against its parent, `pushed`, `needs_sync`, last subject and, from the project's forge by head branch, its pull or merge request; `git_town_available` says whether `git-town` is on the node's PATH, and `POST git/town/sync` and `git/town/propose` run `git-town sync --stack` and `git-town propose` (300 seconds, its own output as the 409 text on failure). The panel has Changes (files under Tracked and Untracked, by folder, with
+line counts and a checkbox that stages or unstages; selecting a file shows its diff in place of the list) History, Graph and Stack tabs (lanes
 drawn on the client from parent hashes; the footer's branch name opens a searchable branch picker),
 with the branch, ahead and behind counts, Fetch, the commit message, Commit and Undo at the bottom. It refreshes when it
 opens, after every action and when the conversation's status changes. Not done: a diff of every file at once (View diff

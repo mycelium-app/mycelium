@@ -44,6 +44,7 @@ import mycelium.api.GitBranches
 import mycelium.api.GitCommit
 import mycelium.api.GitDiff
 import mycelium.api.GitFile
+import mycelium.api.GitStack
 import mycelium.api.GitStatus
 import mycelium.api.GraphCommit
 import mycelium.state.BranchEntry
@@ -61,7 +62,7 @@ import mycelium.state.fullyStaged
 import mycelium.state.parseUnifiedDiff
 import mycelium.state.splitCommitDiff
 
-private enum class GitTab { Changes, History, Graph }
+private enum class GitTab { Changes, History, Graph, Stack }
 
 private const val ShortHashLength = 7
 
@@ -84,6 +85,8 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     var openCommit by remember(id) { mutableStateOf<GraphCommit?>(null) }
     var commitDiff by remember(id) { mutableStateOf<GitDiff?>(null) }
     var branches by remember(id) { mutableStateOf<GitBranches?>(null) }
+    var stack by remember(id) { mutableStateOf<GitStack?>(null) }
+    var townWorking by remember(id) { mutableStateOf<String?>(null) }
     var viewing by remember(id) { mutableStateOf<GitFile?>(null) }
     var diff by remember(id) { mutableStateOf<GitDiff?>(null) }
     var message by remember(id) { mutableStateOf("") }
@@ -147,6 +150,12 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         }
     }
 
+    LaunchedEffect(id, tab, status?.branch, status?.ahead, status?.behind) {
+        if (tab == GitTab.Stack) {
+            run { stack = store.api.gitStack(id) }
+        }
+    }
+
     Column(modifier.background(colors.bgPanel).semantics { contentDescription = "Git" }) {
         Bar {
             val open = viewing
@@ -205,13 +214,14 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             }
         } else {
             Segmented(
-                listOf("Changes (${files.size})", "History", "Graph"),
+                listOf("Changes (${files.size})", "History", "Graph", "Stack"),
                 when (tab) {
                     GitTab.Changes -> "Changes (${files.size})"
                     GitTab.History -> "History"
                     GitTab.Graph -> "Graph"
+                    GitTab.Stack -> "Stack"
                 },
-                { tab = when (it) { "History" -> GitTab.History; "Graph" -> GitTab.Graph; else -> GitTab.Changes } },
+                { tab = when (it) { "History" -> GitTab.History; "Graph" -> GitTab.Graph; "Stack" -> GitTab.Stack; else -> GitTab.Changes } },
                 "Git view",
                 Modifier.padding(Tokens.Space.S2),
             )
@@ -267,8 +277,41 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                             }
                         },
                     )
-                } else {
+                } else if (tab == GitTab.History) {
                     History(log)
+                } else {
+                    GitStackTab(
+                        stack = stack,
+                        working = townWorking,
+                        onSwitch = { branch -> run { store.api.gitSwitch(id, branch); refresh(); stack = store.api.gitStack(id) } },
+                        onSync = {
+                            run {
+                                townWorking = "Syncing the stack"
+
+                                try {
+                                    store.api.gitTownSync(id)
+                                } finally {
+                                    townWorking = null
+                                }
+
+                                refresh()
+                                stack = store.api.gitStack(id)
+                            }
+                        },
+                        onPropose = {
+                            run {
+                                townWorking = "Proposing the branch"
+
+                                try {
+                                    store.api.gitTownPropose(id)
+                                } finally {
+                                    townWorking = null
+                                }
+
+                                stack = store.api.gitStack(id)
+                            }
+                        },
+                    )
                 }
             }
 

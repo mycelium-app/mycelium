@@ -212,6 +212,7 @@ pub enum GitCommand {
     Graph { limit: u32, skip: u32 },
     Show { hash: String },
     Branches,
+    Stack,
     Switch {
         branch: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -239,6 +240,8 @@ pub enum GitCommand {
         force: bool,
     },
     UndoLastCommit,
+    TownSync,
+    TownPropose,
     Clone {
         url: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
