@@ -15,6 +15,7 @@ import mycelium.state.AppState
 import mycelium.state.BoardFilter
 import mycelium.state.Lane
 import mycelium.state.boardCards
+import mycelium.state.waitingOn
 import mycelium.state.collapsedLanes
 import mycelium.state.elapsed
 import mycelium.state.pendingPermission
