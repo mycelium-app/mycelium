@@ -1,7 +1,9 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -37,6 +39,8 @@ private const val NodesJson = """[{"id":"$NodeId","name":"laptop","hostname":"la
 private const val ArchivedJson = """[{"id":"c1","owner":"u","node_id":"$NodeId","agent":"claude","cwd":"/home/sam/projects/okapi","title":"Plan the rollout","status":"done",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":"2026-10-22T10:00:00Z"}]"""
 
+private const val UsageJson = """[{"key":"c1","name":"","turns":3,"reported_turns":3,"input_tokens":1000,"output_tokens":500,"cost_usd":0.5,"cost_estimated":true}]"""
+
 private object NoPlatform : Platform {
     override val originUrl: String? = null
     override val signsInThroughTheBrowser = false
@@ -57,7 +61,7 @@ class PastConversationsTest {
     private val importFinishes = CompletableDeferred<Unit>()
     private val deleted = mutableListOf<String>()
 
-    private fun store(current: String = "[]"): Store {
+    private fun store(usage: String = UsageJson, current: String = "[]"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -69,6 +73,7 @@ class PastConversationsTest {
             }
 
             val body = when {
+                path.endsWith("/activity/conversations") -> usage
                 path.endsWith("/imports") && request.method == HttpMethod.Post -> {
                     importFinishes.await()
                     """{"imported":3,"skipped":0}"""
@@ -96,6 +101,55 @@ class PastConversationsTest {
 
         rule.onNodeWithText("Project").assertExists()
         rule.onNodeWithText("okapi").assertExists()
+    }
+
+    @Test
+    fun historyShowsTurnsTokensAndAnEstimatedCostForEachConversation() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+
+        rule.onNodeWithText("Turns").assertExists()
+        rule.onNodeWithText("Tokens").assertExists()
+        rule.onNodeWithText("Cost").assertExists()
+        rule.onNodeWithText("3").assertExists()
+        rule.onNodeWithText("1.5k").assertExists()
+        rule.onNodeWithText("~$0.50 (estimated)").assertExists()
+    }
+
+    @Test
+    fun historySaysNotReportedForAConversationWithNoUsage() {
+        val store = store(usage = "[]")
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+
+        rule.onAllNodesWithText("Not reported").assertCountEquals(2)
+    }
+
+    @Test
+    fun deletingFromHistoryAsksFirstNamingWhatIsLostThenRemovesTheRow() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+
+        rule.onNodeWithContentDescription("Delete Plan the rollout").performClick()
+        rule.onNodeWithText("Delete Plan the rollout?").assertExists()
+        rule.onNodeWithText("Its messages and attachments are removed. This cannot be undone.").assertExists()
+        assertEquals(emptyList(), deleted)
+
+        rule.onNodeWithText("Delete conversation").performClick()
+
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Open Plan the rollout").fetchSemanticsNodes().isEmpty() }
+        assertEquals(listOf("/api/v1/conversations/c1"), deleted)
+    }
+
+    @Test
+    fun cancellingTheDeleteKeepsTheConversation() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+
+        rule.onNodeWithContentDescription("Delete Plan the rollout").performClick()
+        rule.onNodeWithText("Cancel").performClick()
+
+        rule.onNodeWithContentDescription("Open Plan the rollout").assertExists()
+        assertEquals(emptyList(), deleted)
     }
 
     @Test

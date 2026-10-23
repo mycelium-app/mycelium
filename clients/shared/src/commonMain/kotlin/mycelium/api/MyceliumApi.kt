@@ -137,6 +137,8 @@ class MyceliumApi(
     suspend fun activity(range: String, nodeId: String? = null): Activity =
         call("/activity") { client.get(it) { authorise(); parameter("range", range); if (nodeId != null) parameter("node_id", nodeId) } }.body()
 
+    suspend fun conversationUsage(): List<ActivityRow> = call("/activity/conversations") { client.get(it) { authorise() } }.body()
+
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
 
     suspend fun drainNode(id: String, draining: Boolean) {
@@ -307,8 +309,6 @@ class MyceliumApi(
     suspend fun runSchedule(id: String): ScheduleRun =
         call("/schedules/$id/run") { client.post(it) { authorise() } }.body()
 
-    suspend fun deleteSchedule(id: String) {
-        call("/schedules/$id") { client.delete(it) { authorise() } }
     suspend fun confirmSchedule(id: String, request: ConfirmScheduleRequest): Schedule =
         call("/schedules/$id/confirm") { client.post(it) { authorise(); json(request) } }.body()
 
@@ -316,13 +316,15 @@ class MyceliumApi(
         call("/schedules/$id/decline") { client.post(it) { authorise() } }
     }
 
+    suspend fun deleteSchedule(id: String) {
+        call("/schedules/$id") { client.delete(it) { authorise() } }
     }
-
-    suspend fun scheduleRuns(): List<ScheduleRun> = call("/schedule-runs") { client.get(it) { authorise() } }.body()
 
     suspend fun setTimeZone(timeZone: String) {
         call("/me/time-zone") { client.put(it) { authorise(); json(SetTimeZoneRequest(timeZone)) } }
     }
+
+    suspend fun scheduleRuns(): List<ScheduleRun> = call("/schedule-runs") { client.get(it) { authorise() } }.body()
 
     suspend fun issues(query: String = ""): Issues =
         call("/issues") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()
@@ -354,6 +356,14 @@ class MyceliumApi(
     suspend fun patchConversation(id: String, request: PatchConversationRequest): Conversation =
         call("/conversations/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
+    suspend fun retryConversation(id: String) {
+        call("/conversations/$id/retry") { client.post(it) { authorise() } }
+    }
+
+    suspend fun deleteConversation(id: String) {
+        call("/conversations/$id") { client.delete(it) { authorise() } }
+    }
+
     suspend fun startSideChat(id: String, kind: String, text: String?): Conversation =
         call("/conversations/$id/side") { client.post(it) { authorise(); json(StartSideChatRequest(kind, text)) } }.body()
 
@@ -365,14 +375,6 @@ class MyceliumApi(
 
     suspend fun cancelMove(id: String) {
         call("/conversations/$id/move") { client.delete(it) { authorise() } }
-    }
-
-    suspend fun retryConversation(id: String) {
-        call("/conversations/$id/retry") { client.post(it) { authorise() } }
-    }
-
-    suspend fun deleteConversation(id: String) {
-        call("/conversations/$id") { client.delete(it) { authorise() } }
     }
 
     suspend fun goal(id: String): Goal? = call("/conversations/$id/goal") { client.get(it) { authorise() } }.body()
@@ -405,8 +407,6 @@ class MyceliumApi(
     suspend fun gitLog(id: String, limit: Int = 50): List<GitCommit> =
         call("/conversations/$id/git/log") { client.get(it) { authorise(); parameter("limit", limit) } }.body()
 
-    suspend fun gitDiff(id: String, path: String, staged: Boolean): GitDiff =
-        call("/conversations/$id/git/diff") { client.get(it) { authorise(); parameter("path", path); parameter("staged", staged) } }.body()
     suspend fun gitGraph(id: String, skip: Int = 0, limit: Int = 200): List<GraphCommit> =
         call("/conversations/$id/git/graph") { client.get(it) { authorise(); parameter("skip", skip); parameter("limit", limit) } }.body()
 
@@ -419,6 +419,8 @@ class MyceliumApi(
         call("/conversations/$id/git/switch") { client.post(it) { authorise(); json(GitSwitchRequest(branch, create, track)) } }
     }
 
+    suspend fun gitDiff(id: String, path: String, staged: Boolean): GitDiff =
+        call("/conversations/$id/git/diff") { client.get(it) { authorise(); parameter("path", path); parameter("staged", staged) } }.body()
 
     suspend fun gitStage(id: String, paths: List<String>) {
         call("/conversations/$id/git/stage") { client.post(it) { authorise(); json(GitPathsRequest(paths)) } }

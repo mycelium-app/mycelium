@@ -811,6 +811,8 @@ sealed interface StreamMessage {
 
     data class EventAppended(val event: Event) : StreamMessage
 
+    data class ConversationRemoved(val conversationId: String) : StreamMessage
+
     data class QueueChanged(val conversationId: String, val queue: List<QueuedPrompt>) : StreamMessage
 
     data class MoveChanged(val progress: MoveProgress) : StreamMessage
@@ -821,15 +823,13 @@ sealed interface StreamMessage {
 
     data class WalkthroughChanged(val walkthrough: Walkthrough) : StreamMessage
 
-    data class NodeChanged(val node: NodeSummary) : StreamMessage
-
     data class ScheduleChanged(val schedule: Schedule) : StreamMessage
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
-    data class NodeRemoved(val nodeId: String) : StreamMessage
+    data class NodeChanged(val node: NodeSummary) : StreamMessage
 
-    data class ConversationRemoved(val conversationId: String) : StreamMessage
+    data class NodeRemoved(val nodeId: String) : StreamMessage
 
     data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
 
@@ -848,6 +848,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
 
     return when (type) {
         "conversation" -> StreamMessage.ConversationChanged(MyceliumJson.decodeFromJsonElement(Conversation.serializer(), element))
+        "conversation_removed" -> StreamMessage.ConversationRemoved(element.requireString("conversation_id"))
         "event" -> StreamMessage.EventAppended(MyceliumJson.decodeFromJsonElement(Event.serializer(), element))
         "queue" -> StreamMessage.QueueChanged(
             conversationId = element.requireString("conversation_id"),
@@ -860,15 +861,14 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "goal" -> StreamMessage.GoalChanged(MyceliumJson.decodeFromJsonElement(Goal.serializer(), element))
         "goal_cleared" -> StreamMessage.GoalCleared(element.requireString("conversation_id"))
         "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
-        "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
+        "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(
             element.requireString("node_id"),
             MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),
         )
-        "conversation_removed" -> StreamMessage.ConversationRemoved(element.requireString("conversation_id"))
         "login_output" -> StreamMessage.LoginOutput(element.requireString("login_id"), element.requireString("data"))
         "login_finished" -> StreamMessage.LoginFinished(
             loginId = element.requireString("login_id"),

@@ -191,6 +191,15 @@ fun Modifier.pressable(
         }
 }
 
+@Composable
+fun Modifier.hoverHighlight(): Modifier {
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    val colors = MyTheme.colors
+
+    return this.hoverable(source).drawBehind { if (hovered) drawRect(colors.bgHover) }
+}
+
 enum class ButtonVariant { Ghost, Outline, Primary, Danger }
 
 enum class ButtonSize { Sm, Md, Lg }

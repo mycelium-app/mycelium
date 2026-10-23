@@ -23,9 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.BasicText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import mycelium.api.ActivityRow
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -34,9 +39,29 @@ import mycelium.api.SearchHit
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.agentName
+import mycelium.state.formatCost
+import mycelium.state.formatTokens
 import mycelium.state.relativeTime
 
 private const val SearchDebounceMillis = 250L
+
+private val ActionWidth = 176.dp
+
+private val PastHeaders = listOf("Conversation", "Project", "Agent", "Node", "Last active", "Turns", "Tokens", "Cost", "")
+
+private val PastColumns = listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(min = ActionWidth, max = ActionWidth))
+
+private val TouchColumns = listOf(ColumnSpec(flexible = true), ColumnSpec(min = ActionWidth, max = ActionWidth))
+
+fun usageCells(usage: ActivityRow?): List<String> {
+    val reported = usage != null && usage.reportedTurns > 0
+
+    return listOf(
+        (usage?.turns ?: 0).toString(),
+        if (reported) formatTokens(usage!!.tokens) else "Not reported",
+        if (usage?.costUsd == null) "Not reported" else formatCost(usage.costUsd) + if (usage.costEstimated) " (estimated)" else "",
+    )
+}
 
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
@@ -60,9 +85,12 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     var archived by remember { mutableStateOf<List<Conversation>>(emptyList()) }
     var filter by remember { mutableStateOf(PastFilter.All) }
     var query by remember { mutableStateOf("") }
+    var usage by remember { mutableStateOf<Map<String, ActivityRow>>(emptyMap()) }
+    var deleting by remember { mutableStateOf<Conversation?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { archived = store.api.conversations(archived = true) }
+        store.act { usage = store.api.conversationUsage().associateBy { it.key } }
     }
 
     var hits by remember { mutableStateOf<List<SearchHit>?>(null) }
@@ -93,6 +121,37 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     val rows = pastConversations(state.conversations.values, archived, filter, query)
 
     val touch = LocalTouch.current
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val bodyStyle = Tokens.Type.Ui.themed()
+    val headerStyle = Tokens.Type.MetaStrong.themed()
+    val pastCells = { row: Conversation -> listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)) + usageCells(usage[row.id]) }
+    val naturalWidths = remember(rows, state.nodes, usage, touch, bodyStyle, headerStyle) {
+        if (touch) {
+            listOf(0.dp, ActionWidth)
+        } else {
+            val widest = { texts: List<String>, style: TextStyle -> with(density) { (texts.maxOfOrNull { measurer.measure(it, style).size.width } ?: 0).toDp() } }
+            val cells = rows.map(pastCells)
+
+            listOf(0.dp) + PastHeaders.drop(1).dropLast(1).mapIndexed { column, header ->
+                widest(listOf(header), headerStyle).coerceAtLeast(widest(cells.map { it[column] }, bodyStyle))
+            } + ActionWidth
+        }
+    }
+
+    deleting?.let { doomed ->
+        DeleteConversationDialog(
+            doomed.title,
+            onDismiss = { deleting = null },
+            onConfirm = {
+                deleting = null
+                store.act {
+                    store.api.deleteConversation(doomed.id)
+                    archived = archived.filter { it.id != doomed.id }
+                }
+            },
+        )
+    }
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -157,101 +216,84 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
             Label(searchProblem.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), color = colors.textMuted)
         }
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            if (!touch) {
-                item(key = "columns") {
-                    TableRow(header = true, "Conversation", "Project", "Agent", "Node", "Last active", "")
-                }
-            }
-
-            if (rows.isEmpty()) {
-                item(key = "empty") {
-                    Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
-                }
-            }
-
-            items(rows, key = { it.id }) { row ->
-                val isArchived = row.archivedAt != null
-
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = rowHeight())
-                        .padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(
-                        Modifier
-                            .weight(if (touch) 1f else 3f)
-                            .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
-                            .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                            Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
-
-                            if (isArchived) {
-                                Tag("Archived")
+        FixedWidthColumns(if (touch) TouchColumns else PastColumns, naturalWidths, Modifier.weight(1f)) {
+            LazyColumn(Modifier.fillMaxWidth()) {
+                if (!touch) {
+                    item(key = "columns") {
+                        ContentRow(Modifier.fillMaxWidth().semantics { contentDescription = "Columns" }) {
+                            for (title in PastHeaders) {
+                                Label(title, style = Tokens.Type.MetaStrong, color = colors.textMuted, maxLines = 1)
                             }
                         }
 
-                        if (touch) {
-                            Label(
-                                listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
-                                style = Tokens.Type.Meta,
-                                color = colors.textMuted,
-                                maxLines = 1,
+                        Hairline()
+                    }
+                }
+
+                if (rows.isEmpty()) {
+                    item(key = "empty") {
+                        Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+                    }
+                }
+
+                items(rows, key = { it.id }) { row ->
+                    val isArchived = row.archivedAt != null
+
+                    ContentRow(Modifier.fillMaxWidth().hoverHighlight()) {
+                        Column(
+                            Modifier
+                                .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
+                                .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
+
+                                if (isArchived) {
+                                    Tag("Archived")
+                                }
+                            }
+
+                            if (touch) {
+                                Label(
+                                    (listOf(projectName(row.cwd), agentName(row.agent), state.nodes[row.nodeId]?.name.orEmpty(), relativeTime(row.updatedAt)) + usageCells(usage[row.id]).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
+                                    style = Tokens.Type.Meta,
+                                    color = colors.textMuted,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+
+                        if (!touch) {
+                            for (cell in pastCells(row)) {
+                                Label(cell, color = colors.textMuted, maxLines = 1)
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                            if (isArchived) {
+                                MyButton({ deleting = row }, text = "Delete", size = ButtonSize.Sm, muted = true, description = "Delete ${row.title}")
+                            }
+
+                            MyButton(
+                                onClick = {
+                                    store.act {
+                                        val updated = store.api.patchConversation(row.id, PatchConversationRequest(archived = !isArchived))
+                                        archived = if (isArchived) archived.filter { it.id != row.id } else archived + updated
+                                        store.refresh()
+                                    }
+                                },
+                                text = if (isArchived) "Restore" else "Archive",
+                                size = ButtonSize.Sm,
+                                muted = true,
+                                description = "${if (isArchived) "Restore" else "Archive"} ${row.title}",
                             )
                         }
                     }
 
-                    if (!touch) {
-                        Label(projectName(row.cwd), Modifier.weight(1.4f), color = colors.textMuted, maxLines = 1)
-                        Label(agentName(row.agent), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
-                        Label(state.nodes[row.nodeId]?.name.orEmpty(), Modifier.weight(1.2f), color = colors.textMuted, maxLines = 1)
-                        Label(relativeTime(row.updatedAt), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
-                    }
-
-                    Box(if (touch) Modifier else Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                        MyButton(
-                            onClick = {
-                                store.act {
-                                    val updated = store.api.patchConversation(row.id, PatchConversationRequest(archived = !isArchived))
-                                    archived = if (isArchived) archived.filter { it.id != row.id } else archived + updated
-                                    store.refresh()
-                                }
-                            },
-                            text = if (isArchived) "Restore" else "Archive",
-                            size = ButtonSize.Sm,
-                            muted = true,
-                            description = "${if (isArchived) "Restore" else "Archive"} ${row.title}",
-                        )
-                    }
+                    Hairline()
                 }
-
-                Hairline()
             }
         }
-    }
-}
-
-@Composable
-private fun TableRow(header: Boolean, vararg cells: String) {
-    val colors = MyTheme.colors
-    val weights = listOf(3f, 1.4f, 1.2f, 1.2f, 1f, 1f)
-
-    Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S4).semantics { contentDescription = "Columns" },
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            cells.forEachIndexed { index, cell ->
-                Label(cell, Modifier.weight(weights[index]), if (header) Tokens.Type.MetaStrong else Tokens.Type.Ui, colors.textMuted, maxLines = 1)
-            }
-        }
-
-        Hairline()
     }
 }
