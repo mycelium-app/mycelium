@@ -48,6 +48,15 @@ class GeneratedUiTest {
     }
 
     @Test
+    fun aProgressBarIsAShareOfItsMaximumAndShowsAPercentageUnlessToldOtherwise() {
+        assertEquals(UiNode.Progress("Steps", 0.375f, "3 of 8 steps"), parseGeneratedUi("""{"type":"progress","label":"Steps","value":3,"max":8,"display":"3 of 8 steps"}"""))
+        assertEquals(UiNode.Progress("Upload", 0.42f, "42%"), parseGeneratedUi("""{"type":"progress","label":"Upload","value":42}"""))
+        assertEquals(UiNode.Progress("Over", 1f, "100%"), parseGeneratedUi("""{"type":"progress","label":"Over","value":12,"max":10}"""))
+        assertNull(parseGeneratedUi("""{"type":"progress","label":"Broken","value":1,"max":0}"""))
+        assertNull(parseGeneratedUi("""{"type":"progress","label":"Words","value":"half"}"""))
+    }
+
+    @Test
     fun invalidShapesAreRejected() {
         assertNull(parseGeneratedUi("not json"))
         assertNull(parseGeneratedUi("[]"))

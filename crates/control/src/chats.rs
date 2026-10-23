@@ -26,6 +26,7 @@ Components, each an object with a \"type\":
 - {\"type\":\"heading\",\"text\":\"...\"} and {\"type\":\"text\",\"text\":\"...\"}.
 - {\"type\":\"table\",\"columns\":[\"...\"],\"rows\":[[\"...\"]]}.
 - {\"type\":\"bar_chart\",\"title\":\"...\",\"bars\":[{\"label\":\"...\",\"value\":12,\"display\":\"12 ms\"}]}.
+- {\"type\":\"progress\",\"label\":\"...\",\"value\":3,\"max\":8,\"display\":\"3 of 8 steps\"}; max defaults to 100 and display to the percentage.
 - {\"type\":\"button\",\"label\":\"...\",\"action\":{...}} where the action is {\"type\":\"send_message\",\"text\":\"...\"}, which sends the text as the person's next message, or {\"type\":\"side_chat\",\"text\":\"...\"}, which opens a linked chat started with that text.
 A button label says what happens when it is pressed.";
 

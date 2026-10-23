@@ -1,6 +1,10 @@
 package mycelium.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -63,6 +67,14 @@ class GeneratedUiTest {
 
         rule.onNodeWithContentDescription("Hours. Full: 4.1 h. Incremental: 9.2 h").assertExists()
         rule.onNodeWithText("9.2 h").assertIsDisplayed()
+    }
+
+    @Test
+    fun aProgressBarIsAnnouncedWithItsLabelValueAndRange() {
+        thread(reply("""{"type":"progress","label":"Migrated tables","value":3,"max":8,"display":"3 of 8"}"""))
+
+        rule.onNodeWithContentDescription("Migrated tables: 3 of 8").assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0.375f, 0f..1f)))
+        rule.onNodeWithText("3 of 8", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test

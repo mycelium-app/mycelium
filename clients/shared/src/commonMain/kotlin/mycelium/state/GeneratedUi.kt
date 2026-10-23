@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlin.math.roundToInt
 
 const val GeneratedUiLanguage = "mycelium-ui"
 
@@ -34,6 +35,8 @@ sealed interface UiNode {
     data class Table(val columns: List<String>, val rows: List<List<String>>) : UiNode
 
     data class BarChart(val title: String?, val bars: List<UiBar>) : UiNode
+
+    data class Progress(val label: String, val share: Float, val display: String) : UiNode
 
     data class Button(val label: String, val action: UiAction) : UiNode
 }
@@ -65,6 +68,7 @@ private fun node(element: JsonElement, depth: Int): UiNode? {
         "text" -> fields.text("text")?.let { UiNode.Text(it) }
         "table" -> table(fields)
         "bar_chart" -> chart(fields)
+        "progress" -> progress(fields)
         "button" -> button(fields)
         else -> null
     }
@@ -93,6 +97,20 @@ private fun chart(fields: JsonObject): UiNode.BarChart? {
     } ?: return null
 
     return UiNode.BarChart(fields.text("title"), bars)
+}
+
+private fun progress(fields: JsonObject): UiNode.Progress? {
+    val label = fields.text("label") ?: return null
+    val value = (fields["value"] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: return null
+    val max = (fields["max"] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: 100.0
+
+    if (max <= 0) {
+        return null
+    }
+
+    val share = (value / max).coerceIn(0.0, 1.0)
+
+    return UiNode.Progress(label, share.toFloat(), fields.text("display") ?: "${(share * 100).roundToInt()}%")
 }
 
 private fun button(fields: JsonObject): UiNode.Button? {

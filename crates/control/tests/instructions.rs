@@ -681,7 +681,7 @@ async fn generated_ui_is_on_by_default_and_a_new_session_gets_the_schema_with_th
 
     assert_eq!(extensions, json!({"generated_ui": true, "rich_markdown": true, "mycelium_tools": true}));
     assert!(prompt.starts_with("When an interface helps"), "{prompt}");
-    assert!(prompt.contains("mycelium-ui") && prompt.contains("\"type\":\"bar_chart\"") && prompt.contains("\"type\":\"open_file\""), "{prompt}");
+    assert!(prompt.contains("mycelium-ui") && prompt.contains("\"type\":\"bar_chart\"") && prompt.contains("\"type\":\"progress\"") && prompt.contains("\"type\":\"open_file\""), "{prompt}");
 }
 
 #[tokio::test]

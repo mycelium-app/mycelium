@@ -19,8 +19,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.state.MarkdownBlock
@@ -81,6 +83,23 @@ fun GeneratedUi(node: UiNode) {
                         Label(bar.display, Modifier.widthIn(min = 60.dp), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
                     }
                 }
+            }
+        }
+
+        is UiNode.Progress -> Column(
+            Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+                contentDescription = "${node.label}: ${node.display}"
+                progressBarRangeInfo = ProgressBarRangeInfo(node.share, 0f..1f)
+            },
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Label(node.label, Modifier.weight(1f), maxLines = 1)
+                Label(node.display, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            }
+
+            Box(Modifier.fillMaxWidth().height(Tokens.Space.S2).background(colors.bgPanel, ControlShape)) {
+                Box(Modifier.fillMaxWidth(node.share).fillMaxHeight().background(colors.accent, ControlShape))
             }
         }
 
