@@ -132,6 +132,7 @@ object Tokens {
         val DiffFile: Dp = 30.dp
         val CommandOutput: Dp = 240.dp
         val InstructionsEditor: Dp = 240.dp
+        val InstructionsEditorCap: Dp = 320.dp
         val TableCell: Dp = 320.dp
         val IconSm: Dp = 14.dp
         val IconMd: Dp = 16.dp

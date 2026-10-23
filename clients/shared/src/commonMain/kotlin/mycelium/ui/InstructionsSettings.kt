@@ -20,6 +20,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -156,40 +158,7 @@ fun InstructionsSettings(store: Store) {
         }
 
         if (layer != null) {
-            Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
-                Row(
-                    Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                    Label(layer.version?.let { "${shortVersion(it.id)} · ${relativeTime(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                }
-
-                BasicTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
-                    cursorBrush = SolidColor(colors.text),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = Tokens.Size.InstructionsEditor)
-                        .padding(Tokens.Space.S3)
-                        .semantics { contentDescription = "Edit ${layer.name} instructions" },
-                )
-            }
-
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
-                MyButton(
-                    { attempt { store.api.saveInstructions(layer.layer, draft); document = store.api.instructions() } },
-                    text = if (source != null) "Save and commit" else "Save",
-                    variant = ButtonVariant.Outline,
-                )
-
-                if (source != null) {
-                    MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
-                }
-
                 MyButton(
                     {
                         choosingSource = !choosingSource
@@ -304,32 +273,6 @@ fun InstructionsSettings(store: Store) {
             }
         }
 
-        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp))) {
-            ContentRow(header = true) {
-                Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                Label("Holds", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                Label("Sessions on an older version", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-            }
-
-            Hairline()
-
-            for (node in state.nodes.values.sortedBy { it.name }) {
-                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(vertical = Tokens.Space.S1)) {
-                    ContentRow(minHeight = 0.dp) {
-                        Label(node.name, maxLines = 1)
-                        Label(heldVersion(node), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(olderSessions(node), color = colors.textMuted)
-                    }
-
-                    for (file in node.instructionsUnmanaged) {
-                        Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
-                    }
-                }
-
-                Hairline()
-            }
-        }
-
         if (layer != null && layer.layer != GlobalLayer) {
             val folders = state.groups[layer.layer]?.folders.orEmpty()
 
@@ -434,6 +377,74 @@ fun InstructionsSettings(store: Store) {
                 }
                 ExtensionSwitch("Mycelium tools", "Tells agents they run inside Mycelium and when to use its recall, remember, walkthrough, propose_task and ask_question tools. Added to Claude Code and Codex sessions.", held.myceliumTools) {
                     attempt { extensions = store.api.saveExtensions(held.copy(myceliumTools = !held.myceliumTools)) }
+                }
+            }
+        }
+
+        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp))) {
+            ContentRow(header = true) {
+                Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("Holds", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("Sessions on an older version", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+            }
+
+            Hairline()
+
+            for (node in state.nodes.values.sortedBy { it.name }) {
+                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(vertical = Tokens.Space.S1)) {
+                    ContentRow(minHeight = 0.dp) {
+                        Label(node.name, maxLines = 1)
+                        Label(heldVersion(node), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
+                        Label(olderSessions(node), color = colors.textMuted)
+                    }
+
+                    for (file in node.instructionsUnmanaged) {
+                        Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
+                    }
+                }
+
+                Hairline()
+            }
+        }
+
+        if (layer != null) {
+            val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+            val editorCap = maxOf(Tokens.Size.InstructionsEditorCap, viewportHeight * 0.6f)
+
+            Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
+                Row(
+                    Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
+                    Label(layer.version?.let { "${shortVersion(it.id)} · ${relativeTime(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                }
+
+                Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
+                        cursorBrush = SolidColor(colors.text),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Tokens.Size.InstructionsEditor)
+                            .padding(Tokens.Space.S3)
+                            .semantics { contentDescription = "Edit ${layer.name} instructions" },
+                    )
+                }
+            }
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
+                MyButton(
+                    { attempt { store.api.saveInstructions(layer.layer, draft); document = store.api.instructions() } },
+                    text = if (source != null) "Save and commit" else "Save",
+                    variant = ButtonVariant.Outline,
+                )
+
+                if (source != null) {
+                    MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
                 }
             }
         }

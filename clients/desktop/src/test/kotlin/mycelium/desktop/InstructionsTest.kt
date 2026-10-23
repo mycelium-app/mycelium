@@ -1,9 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onParent
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -23,6 +27,7 @@ import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val NodesJson = """[
 {"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
@@ -54,7 +59,7 @@ class InstructionsTest {
         return requests.toList().first { it.first == method && it.second.endsWith(pathEnd) }
     }
 
-    private fun show() {
+    private fun show(document: String = DocumentJson) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -62,7 +67,7 @@ class InstructionsTest {
             val body = when {
                 path.endsWith("/conversations") -> "[]"
                 path.endsWith("/nodes") -> NodesJson
-                path.endsWith("/instructions") -> DocumentJson
+                path.endsWith("/instructions") -> document
                 path.endsWith("/extensions") -> ExtensionsJson
                 path.endsWith("/groups") && request.method == HttpMethod.Get -> GroupsJson
                 path.endsWith("/projects") -> ProjectsJson
@@ -204,5 +209,27 @@ class InstructionsTest {
         rule.onNodeWithText("Teaches agents to answer", substring = true).assertExists()
         rule.onNodeWithText("Added to Claude Code and Codex sessions and to chats.", substring = true).assertExists()
         rule.onNodeWithText("recall, remember, walkthrough", substring = true).assertExists()
+    }
+
+    @Test
+    fun theEditorIsCappedForALongFileAndEveryOtherControlComesBeforeIt() {
+        val longText = (1..300).joinToString("\\n") { "line $it" }
+        show(DocumentJson.replace("## Diffs", longText).replace("Use British English.", longText))
+
+        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
+        rule.waitForIdle()
+
+        val editor = rule.onNodeWithContentDescription("Edit slop instructions").onParent().getUnclippedBoundsInRoot()
+        val rootHeight = rule.onRoot().getUnclippedBoundsInRoot().bottom
+
+        val editorHeight = editor.bottom - editor.top
+
+        assertTrue(editorHeight <= maxOf(320.dp, rootHeight * 0.6f), "editor is $editorHeight")
+
+        for (before in listOf(rule.onNodeWithText("Folders in slop"), rule.onNodeWithText("Projects in slop"), rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Change repository"), rule.onNodeWithText("Node"))) {
+            assertTrue(before.getUnclippedBoundsInRoot().bottom <= editor.top, "a control sits below the editor")
+        }
+
+        assertTrue(rule.onNodeWithText("Save and commit").getUnclippedBoundsInRoot().top >= editor.bottom)
     }
 }
