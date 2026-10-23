@@ -63,58 +63,60 @@ fun ModelProvidersSettings(store: Store) {
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Label("Chat models", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Label("Provider", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Key", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Models", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("", Modifier.weight(2f))
-            }
-
-            Hairline()
-
-            for (provider in providers) {
-                val kindName = ProviderKinds.entries.first { it.value == provider.kind }.key
-
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(2f)) {
-                        Label(provider.name, maxLines = 1)
-                        Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                    }
-
-                    Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
-                    Label(provider.models.joinToString(", ").ifEmpty { "No models found" }, Modifier.weight(3f), color = colors.textMuted)
-
-                    Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
-                        MyButton(
-                            { store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } } },
-                            text = "Refresh",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            description = "Refresh the models of ${provider.name}",
-                        )
-                        MyButton(
-                            {
-                                store.act {
-                                    store.api.deleteModelProvider(provider.id)
-                                    providers = providers.filter { it.id != provider.id }
-                                }
-                            },
-                            text = "Remove",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            description = "Remove ${provider.name}",
-                        )
-                    }
+            TableCard {
+                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Provider", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Key", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Models", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("", Modifier.weight(2f))
                 }
 
                 Hairline()
+
+                for (provider in providers) {
+                    val kindName = ProviderKinds.entries.first { it.value == provider.kind }.key
+
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(2f)) {
+                            Label(provider.name, maxLines = 1)
+                            Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                        }
+
+                        Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
+                        Label(provider.models.joinToString(", ").ifEmpty { "No models found" }, Modifier.weight(3f), color = colors.textMuted)
+
+                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
+                            MyButton(
+                                { store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } } },
+                                text = "Refresh",
+                                size = ButtonSize.Sm,
+                                variant = ButtonVariant.Outline,
+                                description = "Refresh the models of ${provider.name}",
+                            )
+                            MyButton(
+                                {
+                                    store.act {
+                                        store.api.deleteModelProvider(provider.id)
+                                        providers = providers.filter { it.id != provider.id }
+                                    }
+                                },
+                                text = "Remove",
+                                size = ButtonSize.Sm,
+                                variant = ButtonVariant.Outline,
+                                description = "Remove ${provider.name}",
+                            )
+                        }
+                    }
+
+                    Hairline()
+                }
             }
         }
 
