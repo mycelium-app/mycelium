@@ -51,16 +51,24 @@ impl FromRequestParts<AppState> for AuthUser {
 
         if let Some(token) = bearer(&parts.headers).and_then(|value| value.strip_prefix("myc_client_")) {
             let row = sqlx::query_as::<_, (Uuid, String, String, Uuid)>(
-                "update client_tokens set last_used_at = now(), address = $2 from users
-                 where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and users.id = client_tokens.user_id
-                 returning users.id, users.email, users.name, client_tokens.id",
+                "select users.id, users.email, users.name, client_tokens.id from client_tokens join users on users.id = client_tokens.user_id
+                 where client_tokens.token_hash = $1 and client_tokens.revoked_at is null",
             )
             .bind(hash_token(token))
-            .bind(&address)
             .fetch_optional(&state.pool)
             .await?;
+            let (id, email, name, session) = row.ok_or_else(ApiError::unauthorised)?;
 
-            return row.map(|(id, email, name, session)| AuthUser { id, email, name, session: Some(session) }).ok_or_else(ApiError::unauthorised);
+            sqlx::query(
+                "update client_tokens set last_used_at = now(), address = $2
+                 where id = $1 and (last_used_at is null or last_used_at < now() - interval '1 minute' or address is distinct from $2)",
+            )
+            .bind(session)
+            .bind(&address)
+            .execute(&state.pool)
+            .await?;
+
+            return Ok(AuthUser { id, email, name, session: Some(session) });
         }
 
         let token = cookie(&parts.headers, SESSION_COOKIE).ok_or_else(ApiError::unauthorised)?;

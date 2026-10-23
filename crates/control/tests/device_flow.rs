@@ -137,6 +137,27 @@ async fn a_desktop_client_gets_a_client_token_that_authenticates_as_the_approver
 }
 
 #[tokio::test]
+async fn a_client_token_records_its_use_at_most_once_a_minute() {
+    let server = Server::start().await;
+    let (id, token) = server.join("client", "desktop").await;
+    let anonymous = server.anonymous();
+    let me = || anonymous.get("/api/v1/me").header("authorization", format!("Bearer {token}"));
+    let used = || async { sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>("select last_used_at from client_tokens where id = $1").bind(id).fetch_one(&server.pool).await.unwrap() };
+
+    anonymous.json(me()).await;
+    let first = used().await.unwrap();
+    anonymous.json(me()).await;
+
+    assert_eq!(used().await, Some(first));
+
+    sqlx::query("update client_tokens set last_used_at = now() - interval '2 minutes' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+    let stale = used().await.unwrap();
+    anonymous.json(me()).await;
+
+    assert!(used().await.unwrap() > stale);
+}
+
+#[tokio::test]
 async fn tokens_are_stored_only_as_hashes() {
     let server = Server::start().await;
     let (id, token) = server.join("node", "laptop").await;

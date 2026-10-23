@@ -227,7 +227,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             publish_node(state, node_id).await
         }
         NodeToControl::Pong => {
-            sqlx::query("update nodes set last_seen_at = now() where id = $1").bind(node_id).execute(&state.pool).await?;
+            sqlx::query("update nodes set last_seen_at = now() where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '30 seconds')").bind(node_id).execute(&state.pool).await?;
 
             Ok(())
         }
