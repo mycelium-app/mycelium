@@ -439,39 +439,48 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
     val rows = listOf(table.header) + table.rows
     val styles = listOf(Tokens.Type.UiStrong.themed()) + List(table.rows.size) { Tokens.Type.Prose.themed() }
     val marked = rows.mapIndexed { index, row -> row.map { inlineText(it, colors.text) to styles[index] } }
-    val widths = table.header.indices.map { column ->
+    val natural = table.header.indices.map { column ->
         val widest = marked.maxOf { row -> measurer.measure(row[column].first, row[column].second).size.width }
 
-        with(density) { minOf(widest.toDp() + Tokens.Space.S3 * 2, Tokens.Size.TableCell) }
+        with(density) { widest.toDp() + Tokens.Space.S3 * 2 }
     }
 
-    Box(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, BlockShape).horizontalScroll(rememberScrollState())) {
-        Column {
-            marked.forEachIndexed { index, row ->
-                if (index > 0) {
-                    Hairline(Modifier.width(widths.fold(0.dp) { total, width -> total + width }))
-                }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val capped = natural.map { minOf(it, Tokens.Size.TableCell) }
+        val spare = maxWidth - capped.fold(0.dp) { total, width -> total + width }
+        val wanted = natural.zip(capped) { full, cap -> full - cap }.fold(0.dp) { total, width -> total + width }
+        val widths = natural.zip(capped) { full, cap ->
+            if (spare > 0.dp && wanted > 0.dp) cap + minOf(full - cap, spare * ((full - cap) / wanted)) else cap
+        }
 
-                Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
-                    row.forEachIndexed { column, (text, style) ->
-                        val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
+        Box(Modifier.border(Tokens.Size.Hairline, colors.border, BlockShape).horizontalScroll(rememberScrollState())) {
+            Column {
+                marked.forEachIndexed { index, row ->
+                    if (index > 0) {
+                        Hairline(Modifier.width(widths.fold(0.dp) { total, width -> total + width }))
+                    }
 
-                        Box(
-                            Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                            contentAlignment = when (align) {
-                                ColumnAlign.Start -> Alignment.TopStart
-                                ColumnAlign.Center -> Alignment.TopCenter
-                                ColumnAlign.End -> Alignment.TopEnd
-                            },
-                        ) {
-                            BasicText(
-                                text,
-                                style = style.copy(textAlign = when (align) {
-                                    ColumnAlign.Start -> TextAlign.Start
-                                    ColumnAlign.Center -> TextAlign.Center
-                                    ColumnAlign.End -> TextAlign.End
-                                }),
-                            )
+                    Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
+                        row.forEachIndexed { column, (text, style) ->
+                            val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
+
+                            Box(
+                                Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                                contentAlignment = when (align) {
+                                    ColumnAlign.Start -> Alignment.TopStart
+                                    ColumnAlign.Center -> Alignment.TopCenter
+                                    ColumnAlign.End -> Alignment.TopEnd
+                                },
+                            ) {
+                                BasicText(
+                                    text,
+                                    style = style.copy(textAlign = when (align) {
+                                        ColumnAlign.Start -> TextAlign.Start
+                                        ColumnAlign.Center -> TextAlign.Center
+                                        ColumnAlign.End -> TextAlign.End
+                                    }),
+                                )
+                            }
                         }
                     }
                 }
