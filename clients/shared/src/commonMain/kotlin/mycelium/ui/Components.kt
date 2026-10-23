@@ -503,7 +503,7 @@ fun TabRow(options: List<String>, selected: String, onSelect: (String) -> Unit, 
                 verticalArrangement = Arrangement.Center,
             ) {
                 Label(option, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
-                Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.accent else colors.bgContent))
+                Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.text else Color.Transparent))
             }
         }
     }
