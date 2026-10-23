@@ -12,6 +12,8 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     ProposeSchedule("propose_schedule", "Propose schedule", "Proposing a schedule"),
     Walkthrough("walkthrough", "Walkthrough", "Writing a walkthrough"),
     ProposeInstructionsEdit("propose_instructions_edit", "Propose instructions edit", "Proposing an instructions edit"),
+    FindConversations("find_conversations", "Find conversations", "Finding conversations"),
+    SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
 }
 
 sealed interface MyceliumCall {
@@ -44,6 +46,14 @@ sealed interface MyceliumCall {
     data class ProposeInstructionsEdit(val layer: String?, val reason: String) : MyceliumCall {
         override val tool = MyceliumTool.ProposeInstructionsEdit
     }
+
+    data class FindConversations(val query: String?, val conversations: List<String>) : MyceliumCall {
+        override val tool = MyceliumTool.FindConversations
+    }
+
+    data class SendToConversation(val target: String, val message: String, val reason: String, val proposalId: String? = null) : MyceliumCall {
+        override val tool = MyceliumTool.SendToConversation
+    }
 }
 
 private val toolName = Regex("mycelium[_.:/ -]+(${MyceliumTool.entries.joinToString("|") { it.key }})\\b", RegexOption.IGNORE_CASE)
@@ -51,6 +61,8 @@ private val recalledMemory = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val rememberedAs = Regex("^Remembered as \\S+?, shared with (.+)\\.$")
 private val proposedLayer = Regex("made for the (.+) instructions\\.")
 private val askedQuestion = Regex("^Question (\\S+) asked")
+private val foundConversation = Regex("^[0-9a-fA-F-]{36}: (.*)$")
+private val waitingToSend = Regex("^Waiting for the person to approve sending this to (.+?)(?: \\(proposal ([0-9a-fA-F-]{36})\\))?\\.$")
 private val proposedSchedule = Regex("proposed \\((.+), ([^,]+)\\)\\.")
 
 fun myceliumTool(title: String): MyceliumTool? {
@@ -127,6 +139,20 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val reason = fields.requiredString("reason", input) ?: return null
 
             MyceliumCall.ProposeInstructionsEdit(proposedLayer.find(output)?.groupValues?.get(1) ?: fields.string("layer"), reason)
+        }
+
+        MyceliumTool.FindConversations -> {
+            val conversations = output.lines().mapNotNull { foundConversation.matchEntire(it)?.groupValues?.get(1) }
+
+            MyceliumCall.FindConversations(fields.string("query")?.trim()?.ifEmpty { null }, conversations)
+        }
+
+        MyceliumTool.SendToConversation -> {
+            val message = fields.requiredString("message", input) ?: return null
+            val waiting = waitingToSend.matchEntire(output.trim())
+            val target = waiting?.groupValues?.get(1) ?: fields.string("conversation")?.trim().orEmpty()
+
+            MyceliumCall.SendToConversation(target, message, fields.string("reason")?.trim().orEmpty(), waiting?.groupValues?.get(2)?.ifEmpty { null })
         }
     }
 }

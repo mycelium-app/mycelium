@@ -57,6 +57,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
@@ -93,6 +94,7 @@ import mycelium.api.Attachment
 import mycelium.state.ThreadImage
 
 private const val ShortOutputLimit = 40
+private const val OlderLoadThreshold = 5
 
 @Composable
 fun ThreadView(
@@ -106,8 +108,12 @@ fun ThreadView(
     agent: String = "",
     dismissedPins: Set<String> = emptySet(),
     onUnpin: (String) -> Unit = {},
+    hasOlder: Boolean = false,
+    loadingOlder: Boolean = false,
+    onLoadOlder: () -> Unit = {},
 ) {
     val state = rememberLazyListState()
+    val loadOlder by rememberUpdatedState(onLoadOlder)
     val pinned = remember(items, dismissedPins) { pinnedCards(items, dismissedPins) }
     val pinnedKeys = remember(pinned) { pinned.map { it.key }.toSet() }
     val scope = rememberCoroutineScope()
@@ -119,6 +125,16 @@ fun ThreadView(
         snapshotFlow { state.isScrollInProgress }.collect { scrolling ->
             if (!scrolling) {
                 following = atNewest
+            }
+        }
+    }
+
+    LaunchedEffect(state, hasOlder, loadingOlder) {
+        if (hasOlder && !loadingOlder) {
+            snapshotFlow { state.layoutInfo.totalItemsCount > 0 && (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= state.layoutInfo.totalItemsCount - OlderLoadThreshold }.collect { nearOldest ->
+                if (nearOldest) {
+                    loadOlder()
+                }
             }
         }
     }
@@ -192,6 +208,14 @@ fun ThreadView(
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
                                 ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
+                            }
+                        }
+                    }
+
+                    if (loadingOlder) {
+                        item(key = "loading-older") {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Label("Loading earlier messages", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
                             }
                         }
                     }

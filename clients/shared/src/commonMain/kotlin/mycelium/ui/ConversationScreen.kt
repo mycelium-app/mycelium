@@ -43,6 +43,7 @@ import mycelium.state.DiffTabs
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
 import mycelium.state.attachmentProblem
+import mycelium.state.hasOlderEvents
 import mycelium.state.mediaTypeOf
 import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
@@ -200,6 +201,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onGit = { openPanel(SidePanel.Git) },
                     onRename = { title -> store.rename(conversation, title) },
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
+                    onCloseSession = { store.closeSession(conversation) },
                     onArchive = {
                         store.act {
                             api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
@@ -269,6 +271,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 ThreadView(
                     items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
+                    hasOlder = state.hasOlderEvents(id),
+                    loadingOlder = id in state.loadingOlderEvents,
+                    onLoadOlder = { store.act { store.loadOlder(id) } },
                     onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
                     onStopWorkflow = { store.act { api.cancel(id) } },
                     modifier = Modifier.weight(1f),
@@ -391,6 +396,7 @@ private fun ConversationHeader(
     onGit: () -> Unit,
     onRename: (String) -> Unit,
     onPin: () -> Unit,
+    onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onRetry: () -> Unit,
     dismissedWalkthrough: Boolean,
@@ -489,6 +495,10 @@ private fun ConversationHeader(
 
                     if (dismissedWalkthrough) {
                         MenuItem("Show walkthrough", onClick = { menuOpen = false; onShowWalkthrough() }, leading = MyIcon.Code)
+                    }
+
+                    if (!chat && !archived) {
+                        MenuItem("Close session", onClick = { menuOpen = false; onCloseSession() }, leading = MyIcon.Stop)
                     }
 
                     MenuItem(if (archived) "Restore" else "Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)

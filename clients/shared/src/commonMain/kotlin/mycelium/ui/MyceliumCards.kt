@@ -12,12 +12,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
+import mycelium.api.MessageProposal
 import mycelium.api.Task
 import mycelium.api.TaskStatuses
 import mycelium.state.AppState
@@ -34,6 +37,21 @@ class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> U
 val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
 
 fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
+
+class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit)
+
+val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
+
+fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) })
+
+@Composable
+private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
+    val sending = parsed as? MyceliumCall.SendToConversation ?: return null
+
+    val proposals = LocalMessageProposals.current?.proposals ?: return null
+
+    return sending.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.message == sending.message && it.reason == sending.reason }.maxByOrNull { it.createdAt }
+}
 
 @Composable
 private fun askedTask(parsed: MyceliumCall): Task? {
@@ -60,13 +78,17 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeSchedule -> MyIcon.Calendar
         is MyceliumCall.Walkthrough -> MyIcon.List
         is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
+        is MyceliumCall.FindConversations -> MyIcon.Search
+        is MyceliumCall.SendToConversation -> MyIcon.Send
     }
+    val proposal = proposedMessage(parsed)
     val answered = askedTask(parsed)?.status == TaskStatuses.Done
     val waiting = when (parsed) {
         is MyceliumCall.ProposeTask -> "Waiting for approval"
         is MyceliumCall.AskQuestion -> "Waiting for your answer"
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
+        is MyceliumCall.SendToConversation -> "Waiting for approval"
         else -> null
     }
 
@@ -80,6 +102,8 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 verb != null && call.awaitingApproval -> StatusMark("Waiting", Tone.Muted, MyIcon.Clock)
                 verb != null -> StatusMark("Running", Tone.Working, MyIcon.Working)
                 finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
+                finished && proposal?.state == "sent" -> StatusMark("Sent", Tone.Muted, MyIcon.Check)
+                finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && waiting != null -> StatusMark(waiting, Tone.Muted, MyIcon.Clock)
             }
         }
@@ -108,6 +132,8 @@ private fun doneHeading(parsed: MyceliumCall): String = when (parsed) {
     is MyceliumCall.AskQuestion -> "Asked a question"
     is MyceliumCall.ProposeSchedule -> "Proposed a schedule"
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
+    is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
+    is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
 }
 
@@ -184,7 +210,71 @@ private fun MyceliumBody(parsed: MyceliumCall) {
             }
         }
 
+        is MyceliumCall.FindConversations -> {
+            if (parsed.conversations.isEmpty()) {
+                Label("No conversations match.", style = Tokens.Type.Ui, color = colors.textMuted)
+            } else {
+                Collapsible(parsed.conversations, "conversations") { Label(it, style = Tokens.Type.Ui, maxLines = 2) }
+            }
+        }
+
+        is MyceliumCall.SendToConversation -> SendToConversationBody(parsed)
+
         is MyceliumCall.Walkthrough -> Collapsible(parsed.steps.mapIndexed { index, title -> "${index + 1}. $title" }, "steps") { Label(it, style = Tokens.Type.Ui, maxLines = 1) }
+    }
+}
+
+@Composable
+private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
+    val colors = MyTheme.colors
+    val proposals = LocalMessageProposals.current
+    val proposal = proposedMessage(parsed)
+    val scope = rememberCoroutineScope()
+    var running by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(proposal == null) {
+        if (proposals != null && proposal == null) {
+            proposals.refresh()
+        }
+    }
+
+    fun decide(decision: suspend (MessageProposal) -> Unit) {
+        val deciding = proposal
+
+        if (running || deciding == null) {
+            return
+        }
+
+        failure = null
+        running = true
+
+        scope.launch {
+            failure = attempt { decision(deciding) }
+            running = false
+        }
+    }
+
+    if (proposal != null) {
+        val place = listOfNotNull(proposal.targetNode.ifEmpty { null }, proposal.targetProject).joinToString(" · ")
+
+        Label(proposal.targetTitle, style = Tokens.Type.UiStrong, maxLines = 1)
+
+        if (place.isNotEmpty()) {
+            Label(place, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+        }
+    }
+
+    Label(parsed.message, style = Tokens.Type.Ui, maxLines = ExcerptLines)
+    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+
+    failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+    if (proposals != null && proposal != null && proposal.waiting) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            MyButton({ decide(proposals.approve) }, text = "Send", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+            MyButton({ decide(proposals.decline) }, text = "Don't send", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        }
     }
 }
 

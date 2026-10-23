@@ -6,18 +6,22 @@ import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
 import mycelium.api.parseStreamMessage
 import mycelium.state.Store
+import mycelium.state.hasOlderEvents
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class StoreTest {
@@ -73,7 +77,7 @@ class StoreTest {
     }
 
     @Test
-    fun openingAConversationFetchesItsWholeHistoryFromTheStart() = runTest {
+    fun openingAConversationFetchesOnlyItsNewestPage() = runTest {
         val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
             requested.update { it + request.url.toString() }
@@ -89,32 +93,82 @@ class StoreTest {
 
         store.open("c1")
 
-        assertEquals("https://mycelium.test/api/v1/conversations/c1/events?after=0&limit=500", requested.value.first())
+        assertEquals("https://mycelium.test/api/v1/conversations/c1/events?before=${Long.MAX_VALUE}&limit=500", requested.value.first())
+        assertEquals(1, requested.value.count { it.contains("/events") })
         assertEquals(listOf(1L, 2L), store.state.value.events.getValue("c1").map { it.seq })
+        assertFalse(store.state.value.hasOlderEvents("c1"))
     }
 
     @Test
-    fun aLongHistoryAppearsInOneStepRatherThanPageByPage() = runTest {
-        val shownWhenLastPageWasAsked = MutableStateFlow<Int?>(null)
-        lateinit var store: Store
+    fun loadOlderPrependsThePreviousPageAndStopsWhenNoneRemain() = runTest {
+        val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
-            val body = if (request.url.encodedPath.endsWith("/events") && request.url.parameters["after"] == "0") {
-                (1..500).joinToString(",", "[", "]") { """{"conversation_id":"c1","seq":$it,"kind":"turn_end","payload":{}}""" }
-            } else if (request.url.encodedPath.endsWith("/events")) {
-                shownWhenLastPageWasAsked.value = store.state.value.events["c1"].orEmpty().size
-                """[{"conversation_id":"c1","seq":501,"kind":"turn_end","payload":{}}]"""
+            requested.update { it + request.url.toString() }
+            val before = request.url.parameters["before"]
+            val seqs = when (before) {
+                Long.MAX_VALUE.toString() -> 6..8
+                "6" -> 3..5
+                "3" -> emptyList()
+                else -> emptyList()
+            }
+            val body = if (request.url.encodedPath.endsWith("/events")) {
+                seqs.joinToString(",", "[", "]") { """{"conversation_id":"c1","seq":$it,"kind":"turn_end","payload":{}}""" }
             } else {
                 "[]"
             }
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
-
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
         store.open("c1")
 
-        assertEquals(0, shownWhenLastPageWasAsked.value)
-        assertEquals(501, store.state.value.events.getValue("c1").size)
+        assertTrue(store.state.value.hasOlderEvents("c1"))
+
+        store.loadOlder("c1")
+
+        assertEquals((3L..8L).toList(), store.state.value.events.getValue("c1").map { it.seq })
+        assertTrue(requested.value.any { it.contains("/events?before=6&limit=500") })
+
+        store.loadOlder("c1")
+
+        assertFalse(store.state.value.hasOlderEvents("c1"))
+
+        val fetches = requested.value.size
+        store.loadOlder("c1")
+
+        assertEquals(fetches, requested.value.size)
+    }
+
+    @Test
+    fun loadOlderWhileAnotherLoadIsRunningFetchesNothingMore() = runTest {
+        val requested = MutableStateFlow(emptyList<String>())
+        val release = CompletableDeferred<Unit>()
+        val engine = MockEngine { request ->
+            requested.update { it + request.url.toString() }
+
+            if (request.url.parameters["before"] == "6") {
+                release.await()
+            }
+
+            val seqs = if (request.url.parameters["before"] == "6") 3..5 else 6..8
+            val body = if (request.url.encodedPath.endsWith("/events")) {
+                seqs.joinToString(",", "[", "]") { """{"conversation_id":"c1","seq":$it,"kind":"turn_end","payload":{}}""" }
+            } else {
+                "[]"
+            }
+
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+        store.open("c1")
+
+        val first = launch { store.loadOlder("c1") }
+        withContext(Dispatchers.Default) { withTimeout(5_000) { while (requested.value.none { it.contains("before=6") }) delay(10) } }
+        store.loadOlder("c1")
+        release.complete(Unit)
+        first.join()
+
+        assertEquals(1, requested.value.count { it.contains("before=6") })
     }
 
     @Test
@@ -122,7 +176,7 @@ class StoreTest {
         val requested = MutableStateFlow(emptyList<String>())
         val engine = MockEngine { request ->
             requested.update { it + request.url.toString() }
-            val body = if (request.url.encodedPath.endsWith("/events") && request.url.parameters["after"] == "0") {
+            val body = if (request.url.encodedPath.endsWith("/events") && request.url.parameters["before"] != null) {
                 """[{"conversation_id":"c1","seq":1,"kind":"user_message","payload":{}},{"conversation_id":"c1","seq":2,"kind":"turn_end","payload":{}}]"""
             } else if (request.url.encodedPath.endsWith("/events")) {
                 """[{"conversation_id":"c1","seq":3,"kind":"turn_end","payload":{}}]"""

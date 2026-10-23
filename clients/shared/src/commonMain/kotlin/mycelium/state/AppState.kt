@@ -9,6 +9,7 @@ import mycelium.api.Goal
 import mycelium.api.Group
 import mycelium.api.InstructionProposal
 import mycelium.api.Memory
+import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
 import mycelium.api.EventKinds
@@ -44,11 +45,14 @@ data class AppState(
     val schedules: Map<String, Schedule> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
     val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
+    val messageProposals: Map<String, MessageProposal> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
     val events: Map<String, List<Event>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
+    val loadingOlderEvents: Set<String> = emptySet(),
+    val completeHistories: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
     val moves: Map<String, MoveProgress> = emptyMap(),
     val goals: Map<String, Goal> = emptyMap(),
@@ -74,6 +78,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
             conversations = state.conversations - id,
             events = state.events - id,
             openedConversations = state.openedConversations - id,
+            loadingOlderEvents = state.loadingOlderEvents - id,
+            completeHistories = state.completeHistories - id,
             queues = state.queues - id,
             goals = state.goals - id,
             walkthroughs = state.walkthroughs - id,
@@ -120,6 +126,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.InstructionProposalChanged -> state.copy(instructionProposals = state.instructionProposals + (message.proposal.id to message.proposal))
 
+    is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
+
     is StreamMessage.MemoryChanged -> state.copy(
         memories = state.memories + (message.memory.id to message.memory),
         removedMemories = state.removedMemories - message.memory.id,
@@ -158,6 +166,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 }
 
 fun AppState.conversationTitle(id: String?): String? = id?.let { conversations[it]?.title }
+
+fun AppState.hasOlderEvents(id: String): Boolean {
+    val oldest = events[id]?.firstOrNull()?.seq ?: return false
+
+    return id !in completeHistories && oldest > 1
+}
 
 fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
     projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }

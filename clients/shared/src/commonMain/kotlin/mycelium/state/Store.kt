@@ -23,6 +23,7 @@ import mycelium.api.InstructionProposal
 import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
+import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
 import mycelium.api.MoveState
@@ -334,6 +335,24 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(instructionProposals = it.instructionProposals + (declined.id to declined)) }
     }
 
+    suspend fun refreshMessageProposals() {
+        val proposals = api.messageProposals()
+
+        mutableState.update { it.copy(messageProposals = proposals.associateBy { proposal -> proposal.id }) }
+    }
+
+    suspend fun approveMessageProposal(proposal: MessageProposal) {
+        val sent = api.approveMessageProposal(proposal.id)
+
+        mutableState.update { it.copy(messageProposals = it.messageProposals + (sent.id to sent)) }
+    }
+
+    suspend fun declineMessageProposal(proposal: MessageProposal) {
+        val declined = api.declineMessageProposal(proposal.id)
+
+        mutableState.update { it.copy(messageProposals = it.messageProposals + (declined.id to declined)) }
+    }
+
     suspend fun refreshSchedules() {
         val schedules = api.schedules()
         val runs = api.scheduleRuns()
@@ -391,21 +410,54 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(schedules = it.schedules - schedule.id, scheduleRuns = it.scheduleRuns.filter { run -> run.scheduleId != schedule.id }) }
     }
 
+    suspend fun loadOlder(conversationId: String) {
+        val oldest = state.value.events[conversationId]?.firstOrNull()?.seq ?: return
+        var claimed = false
+
+        mutableState.update {
+            claimed = conversationId !in it.loadingOlderEvents && it.hasOlderEvents(conversationId)
+
+            if (claimed) it.copy(loadingOlderEvents = it.loadingOlderEvents + conversationId) else it
+        }
+
+        if (!claimed) {
+            return
+        }
+
+        try {
+            val page = api.events(conversationId, before = oldest, limit = EventPageSize)
+
+            mutableState.update {
+                it.copy(
+                    events = it.events + (conversationId to mergeEvents(it.events[conversationId].orEmpty(), page)),
+                    completeHistories = if (page.isEmpty()) it.completeHistories + conversationId else it.completeHistories,
+                )
+            }
+        } finally {
+            mutableState.update { it.copy(loadingOlderEvents = it.loadingOlderEvents - conversationId) }
+        }
+    }
+
     suspend fun open(conversationId: String) {
-        var after = if (conversationId in state.value.openedConversations) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
+        val reopened = conversationId in state.value.openedConversations
+        var after = if (reopened) state.value.events[conversationId]?.lastOrNull()?.seq ?: 0 else 0
         mutableState.update { it.copy(openedConversations = it.openedConversations + conversationId) }
 
         val fetched = mutableListOf<mycelium.api.Event>()
 
-        while (true) {
-            val page = api.events(conversationId, after, EventPageSize)
-            fetched += page
+        if (reopened) {
+            while (true) {
+                val page = api.events(conversationId, after, EventPageSize)
+                fetched += page
 
-            if (page.size < EventPageSize) {
-                break
+                if (page.size < EventPageSize) {
+                    break
+                }
+
+                after = page.maxOf { it.seq }
             }
-
-            after = page.maxOf { it.seq }
+        } else {
+            fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = EventPageSize)
         }
 
         mutableState.update {
@@ -565,6 +617,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             val updated = api.patchConversation(conversation.id, PatchConversationRequest(pinned = pinned))
             mutableState.update { it.copy(conversations = it.conversations + (updated.id to updated)) }
         }
+    }
+
+    fun closeSession(conversation: Conversation) {
+        act { api.closeSession(conversation.id) }
     }
 
     fun act(block: suspend () -> Unit) {

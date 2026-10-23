@@ -117,4 +117,43 @@ class MyceliumToolsTest {
     fun walkthroughWithoutStepsFallsBackToTheGenericCard() {
         assertNull(myceliumCall(call("mcp__mycelium__walkthrough", """{"steps":"none"}""")))
     }
+
+    @Test
+    fun findConversationsListsWhatWasFound() {
+        val output = "11111111-1111-1111-1111-111111111111: Fix billing export (project billing, node laptop, agent claude, status working, last activity 2026-10-23T10:00:00+00:00)\n22222222-2222-2222-2222-222222222222: Plan the release (project none, node laptop, agent claude, status done, last activity 2026-10-22T10:00:00+00:00)"
+        val parsed = assertIs<MyceliumCall.FindConversations>(myceliumCall(call("mcp__mycelium__find_conversations", """{"query":"billing"}""", output)))
+
+        assertEquals("billing", parsed.query)
+        assertEquals(2, parsed.conversations.size)
+        assertEquals("Fix billing export (project billing, node laptop, agent claude, status working, last activity 2026-10-23T10:00:00+00:00)", parsed.conversations[0])
+    }
+
+    @Test
+    fun findConversationsWithoutAQueryOrMatchesHasNoneListed() {
+        val parsed = assertIs<MyceliumCall.FindConversations>(myceliumCall(call("mycelium.find_conversations", """{}""", "No conversations match that query.")))
+
+        assertNull(parsed.query)
+        assertEquals(emptyList(), parsed.conversations)
+    }
+
+    @Test
+    fun sendToConversationShowsTheTargetTheMessageAndTheReason() {
+        val output = "Waiting for the person to approve sending this to Fix billing export (proposal 22222222-2222-2222-2222-222222222222)."
+        val parsed = assertIs<MyceliumCall.SendToConversation>(myceliumCall(call("mcp__mycelium__send_to_conversation", """{"conversation":"11111111-1111-1111-1111-111111111111","message":"The schema is ready","reason":"You asked for it"}""", output)))
+
+        assertEquals(MyceliumCall.SendToConversation("Fix billing export", "The schema is ready", "You asked for it", "22222222-2222-2222-2222-222222222222"), parsed)
+    }
+
+    @Test
+    fun sendToConversationWithoutAnOutputFallsBackToTheTargetItWasGiven() {
+        val parsed = assertIs<MyceliumCall.SendToConversation>(myceliumCall(call("mcp__mycelium__send_to_conversation", """{"conversation":"Fix billing export","message":"Hi","reason":"Why"}""", status = ToolStatus.Running)))
+
+        assertEquals("Fix billing export", parsed.target)
+        assertEquals(MyceliumTool.SendToConversation, parsed.tool)
+    }
+
+    @Test
+    fun sendToConversationWithoutAMessageFallsBackToTheGenericCard() {
+        assertNull(myceliumCall(call("mcp__mycelium__send_to_conversation", """{"conversation":"Fix billing export","reason":"Why"}""")))
+    }
 }

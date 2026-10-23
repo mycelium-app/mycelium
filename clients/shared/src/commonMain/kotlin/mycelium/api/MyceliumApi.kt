@@ -306,6 +306,14 @@ class MyceliumApi(
     suspend fun declineInstructionProposal(id: String, request: DeclineInstructionProposalRequest): InstructionProposal =
         call("/instruction-proposals/$id/decline") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun messageProposals(): List<MessageProposal> = call("/message-proposals") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveMessageProposal(id: String): MessageProposal =
+        call("/message-proposals/$id/approve") { client.post(it) { authorise() } }.body()
+
+    suspend fun declineMessageProposal(id: String): MessageProposal =
+        call("/message-proposals/$id/decline") { client.post(it) { authorise() } }.body()
+
     suspend fun setInstructionSource(request: SetInstructionSourceRequest): Instructions =
         call("/instruction-source") { client.put(it) { authorise(); json(request) } }.body()
 
@@ -552,11 +560,17 @@ class MyceliumApi(
         call("/conversations/$id/git/town/propose") { client.post(it) { authorise() } }
     }
 
-    suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =
+    suspend fun events(id: String, after: Long = 0, limit: Int = 500, before: Long? = null): List<Event> =
         call("/conversations/$id/events") {
             client.get(it) {
                 authorise()
-                parameter("after", after)
+
+                if (before == null) {
+                    parameter("after", after)
+                } else {
+                    parameter("before", before)
+                }
+
                 parameter("limit", limit)
             }
         }.body()
@@ -594,6 +608,10 @@ class MyceliumApi(
 
     suspend fun cancel(id: String) {
         call("/conversations/$id/cancel") { client.post(it) { authorise() } }
+    }
+
+    suspend fun closeSession(id: String) {
+        call("/conversations/$id/close") { client.post(it) { authorise() } }
     }
 
     suspend fun answerPermission(id: String, requestId: String, optionId: String) {

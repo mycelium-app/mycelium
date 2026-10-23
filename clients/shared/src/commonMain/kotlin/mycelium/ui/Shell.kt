@@ -283,7 +283,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -501,6 +501,7 @@ private fun LazyListScope.conversationRows(
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
             onRename = { title -> store.rename(row.conversation, title) },
+            onCloseSession = { store.closeSession(row.conversation) },
             onArchive = {
                 store.act { store.api.patchConversation(row.conversation.id, PatchConversationRequest(archived = true)) }
 
@@ -548,7 +549,7 @@ private fun SectionHeading(section: SidebarSection) {
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     var menuOpen by remember { mutableStateOf(false) }
@@ -578,6 +579,11 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             MenuPopup(onDismiss = { menuOpen = false }) {
                 MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
                 MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
+
+                if (!row.isChat) {
+                    MenuItem("Close session", onClick = { menuOpen = false; onCloseSession() }, leading = MyIcon.Stop)
+                }
+
                 MenuItem("Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
             }
         }

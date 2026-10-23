@@ -60,6 +60,7 @@ class SidebarPinsTest {
     val rule = createComposeRule()
 
     private val patches = mutableListOf<Pair<String, String>>()
+    private val posts = mutableListOf<String>()
 
     private fun show(conversations: List<String>, platform: MemoryPlatform = MemoryPlatform()) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -70,6 +71,10 @@ class SidebarPinsTest {
                 patches += path to String(request.body.toByteArray())
 
                 return@MockEngine respond(conversation("w1", "Fix the build", pinnedAt = "2026-10-22T12:00:00Z"), HttpStatusCode.OK, json)
+            }
+
+            if (request.method == HttpMethod.Post) {
+                posts += path
             }
 
             val body = when {
@@ -175,6 +180,18 @@ class SidebarPinsTest {
 
         rule.waitUntil(5_000) { patches.isNotEmpty() }
         assertTrue("Ship the fix" in patches.single().second, patches.single().second)
+    }
+
+    @Test
+    fun theRowMenuClosesTheSessionOfAWorkingConversation() {
+        show(listOf(conversation("w1", "Fix the build", status = "working")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Fix the build").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Fix the build").performMouseInput { rightClick() }
+        rule.onNodeWithText("Close session").performClick()
+
+        rule.waitUntil(5_000) { "/api/v1/conversations/w1/close" in posts }
+        assertTrue(patches.isEmpty(), "closing a session must not archive the conversation")
     }
 
     @Test
