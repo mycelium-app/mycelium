@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -504,6 +505,21 @@ fun TabRow(options: List<String>, selected: String, onSelect: (String) -> Unit, 
             ) {
                 Label(option, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
                 Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.text else Color.Transparent))
+            }
+        }
+    }
+}
+
+@Composable
+fun RowMenu(title: String, content: @Composable (close: () -> Unit) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+
+    Box {
+        MyButton({ open = true }, icon = MyIcon.MoreVertical, description = "More for $title", size = ButtonSize.Sm, muted = true, selected = open)
+
+        if (open) {
+            MenuPopup(onDismiss = { open = false }) {
+                content { open = false }
             }
         }
     }

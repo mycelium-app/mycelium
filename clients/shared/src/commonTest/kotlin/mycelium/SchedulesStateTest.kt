@@ -4,7 +4,9 @@ import mycelium.api.Schedule
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
+import mycelium.state.Cadence
 import mycelium.state.WhenKind
+import mycelium.state.cadenceOf
 import mycelium.state.cronTime
 import mycelium.state.cronWithTime
 import mycelium.state.describeInWords
@@ -16,6 +18,16 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class SchedulesStateTest {
+    @Test
+    fun aScheduleBeingEditedOpensOnTheCadenceItWasSavedWith() {
+        assertEquals(Cadence(WhenKind.Every, every = "15", hours = false), cadenceOf("*/15 * * * *"))
+        assertEquals(Cadence(WhenKind.Every, every = "2", hours = true), cadenceOf("0 */2 * * *"))
+        assertEquals(Cadence(WhenKind.Daily, at = "06:30"), cadenceOf("30 6 * * *"))
+        assertEquals(Cadence(WhenKind.Weekly, at = "09:00", weekday = "Mon"), cadenceOf("0 9 * * 1"))
+        assertEquals(Cadence(WhenKind.Cron, custom = "0 9 1 * *"), cadenceOf("0 9 1 * *"))
+        assertEquals(Cadence(WhenKind.Cron, custom = "@daily"), cadenceOf("@daily"))
+    }
+
     @Test
     fun cronExpressionsReadAsTheBoardShowsThem() {
         assertEquals("Mon 06:00", describeCron("0 6 * * 1"))

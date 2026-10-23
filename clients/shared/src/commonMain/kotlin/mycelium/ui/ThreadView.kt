@@ -119,6 +119,15 @@ fun ThreadView(
             state.scrollToItem(0)
         }
     }
+    val gallery = remember(items) {
+        items.flatMap {
+            when (it) {
+                is ThreadItem.UserMessage -> it.images
+                is ThreadItem.ToolCall -> it.images
+                else -> emptyList()
+            }
+        }.filter { it.sameAs == null }
+    }
     val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
 
 
@@ -167,7 +176,7 @@ fun ThreadView(
                         onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
                     )
                 } else {
-                    CompositionLocalProvider(LocalImageJump provides jumpToImage) {
+                    CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery) {
                         ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
                     }
                 }
@@ -981,7 +990,7 @@ private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {
                     Modifier
                         .weight(1f)
                         .height(Tokens.Size.ProgressBar)
-                        .background(if (agent.finished) colors.accent else colors.statusWorking, RoundedCornerShape(Tokens.Radius.Full)),
+                        .background(if (agent.finished) colors.statusDone else colors.statusWorking, RoundedCornerShape(Tokens.Radius.Full)),
                 )
             }
         }

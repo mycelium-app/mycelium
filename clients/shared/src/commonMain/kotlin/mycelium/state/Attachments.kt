@@ -73,6 +73,17 @@ fun attachmentProblem(file: PickedFile, alreadyAttached: Int): String? = when {
     else -> null
 }
 
+private val ProjectLogoMediaTypes = setOf("image/png", "image/jpeg", "image/webp")
+
+const val MaxProjectLogoBytes = 256 * 1024
+
+fun projectLogoProblem(file: PickedFile): String? = when {
+    file.mediaType !in ProjectLogoMediaTypes -> "${file.name} is not a PNG, JPEG or WebP image. Choose another file."
+    file.bytes.isEmpty() -> "${file.name} is empty. Choose an image that has content."
+    file.bytes.size > MaxProjectLogoBytes -> "${file.name} is larger than 256 KB. Choose a smaller image."
+    else -> null
+}
+
 @OptIn(ExperimentalEncodingApi::class)
 fun decodeBase64(data: String): ByteArray? = runCatching { Base64.decode(data) }.getOrNull()
 

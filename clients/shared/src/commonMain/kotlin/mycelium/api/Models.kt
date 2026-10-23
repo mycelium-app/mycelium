@@ -375,10 +375,16 @@ data class Project(
     val repository: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("group_id") val groupId: String? = null,
+    val icon: String? = null,
+    @SerialName("avatar_sha256") val avatarSha256: String? = null,
 )
 
 @Serializable
-data class PatchProjectRequest(@SerialName("group_id") val groupId: String?)
+data class PatchProjectRequest(
+    @SerialName("group_id") val groupId: String? = null,
+    val icon: String? = null,
+    @SerialName("clear_icon") val clearIcon: Boolean = false,
+)
 
 @Serializable
 data class Group(val id: String, val name: String, val folders: List<GroupFolder> = emptyList(), @SerialName("created_at") val createdAt: String)
@@ -537,7 +543,13 @@ data class CreateScheduleRequest(
 )
 
 @Serializable
-data class PatchScheduleRequest(val paused: Boolean)
+data class PatchScheduleRequest(
+    val paused: Boolean? = null,
+    val prompt: String? = null,
+    val cron: String? = null,
+    @SerialName("each_run") val eachRun: String? = null,
+    @SerialName("time_zone") val timeZone: String? = null,
+)
 
 @Serializable
 data class ConfirmScheduleRequest(

@@ -3,6 +3,8 @@ package mycelium.desktop
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
@@ -52,12 +54,12 @@ class SidebarModeTest {
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, ModePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
 
-        rule.onNodeWithText("Projects").assertExists()
+        rule.onNodeWithContentDescription("Projects").assertExists()
         rule.onNodeWithText("Chats").performClick()
-        rule.onAllNodesWithText("Projects").assertCountEquals(0)
-        rule.onAllNodesWithText("Issues").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Projects").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Issues").assertCountEquals(0)
         rule.onNodeWithText("Workspaces").performClick()
-        rule.onNodeWithText("Issues").assertExists()
+        rule.onNodeWithContentDescription("Issues").assertExists()
     }
 
     @Test

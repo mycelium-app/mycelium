@@ -51,6 +51,17 @@ private const val NodesJson = """[
  "agents":[{"agent":"claude","version":"2.1.308","available":true}],
  "logins":[{"agent":"claude","account":"sam@example.com","method":"oauth_token","state":"expired"}]}]"""
 
+private const val CodexNodesJson = """[
+{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","address":"100.64.4.18","online":true,"draining":false,
+ "agents":[{"agent":"codex","version":"0.1.0","available":true}],
+ "logins":[{"agent":"codex","account":"sam@example.com","method":"oauth_token","state":"signed_in"}]},
+{"id":"n2","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.12","online":true,"draining":false,
+ "agents":[{"agent":"codex","version":"0.1.0","available":true}],
+ "logins":[{"agent":"codex","method":"oauth_token","state":"signed_out"}]},
+{"id":"n3","name":"orion","hostname":"orion","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.13","online":true,"draining":false,
+ "agents":[{"agent":"codex","version":"0.1.0","available":true}],
+ "logins":[{"agent":"codex","method":"oauth_token","state":"signed_out"}]}]"""
+
 private const val SessionsJson = """[
 {"id":"s1","kind":"browser","label":"Firefox on Linux","hostname":"","address":"100.64.4.18","last_used_at":"2026-10-23T10:00:00Z","current":true},
 {"id":"s2","kind":"client","label":"Desktop app","hostname":"willow","address":"100.64.4.18","last_used_at":"2026-10-23T09:00:00Z","current":false}]"""
@@ -75,7 +86,7 @@ class AccountsAndSessionsTest {
     private val requests = mutableListOf<HttpRequestData>()
     private val bodies = mutableListOf<String>()
 
-    private fun store(): Store {
+    private fun store(nodesJson: String = NodesJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             requests += request
@@ -88,7 +99,7 @@ class AccountsAndSessionsTest {
                     respond("""{"login_id":"l1"}""", HttpStatusCode.OK, json)
                 }
                 path.endsWith("/sessions") -> respond(SessionsJson, HttpStatusCode.OK, json)
-                path.endsWith("/nodes") -> respond(NodesJson, HttpStatusCode.OK, json)
+                path.endsWith("/nodes") -> respond(nodesJson, HttpStatusCode.OK, json)
                 else -> respond("[]", HttpStatusCode.OK, json)
             }
         }
@@ -124,6 +135,20 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("work@acme.example").assertExists()
         assertEquals(2, rule.onAllNodesWithText("willow").fetchSemanticsNodes().size)
         rule.onNodeWithText("atlas: expired").assertExists()
+    }
+
+    @Test
+    fun signedOutLoginsAreOneLineOfNodesWithASignInEachNotAccountRows() {
+        val store = store(CodexNodesJson)
+        rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
+
+        assertEquals(1, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
+        rule.onNodeWithText("Signed out on atlas, orion").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("Account name not reported").fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Sign in Codex on orion").performClick()
+
+        rule.waitUntil { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
     }
 
     @Test

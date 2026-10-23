@@ -51,6 +51,9 @@ import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.Me
 import mycelium.api.NodeSummary
+import mycelium.api.PatchConversationRequest
+import mycelium.api.Project
+import androidx.compose.foundation.shape.CircleShape
 import mycelium.state.AllGroups
 import mycelium.state.Choice
 import mycelium.state.AppState
@@ -89,6 +92,8 @@ import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
 import mycelium.state.clockTime
 import mycelium.state.isLaptop
+import mycelium.state.agentAccounts
+import mycelium.state.chatAccountFirst
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
 import mycelium.state.statusSectionName
@@ -326,6 +331,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         store.act { store.refreshGroups() }
     }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
+    var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }
     var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
     var lastOpened by remember { mutableStateOf(mapOf(WorkspacesMode to Route.New, ChatsMode to Route.NewChat)) }
     val openedMode = when (route) {
@@ -395,24 +401,36 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             }
         }
 
+        if (usageOpen) {
+            val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
+
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5))
+        }
+
         Hairline()
 
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val appearance = LocalAppearance.current
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val labelled = mode != WorkspacesMode || maxWidth >= FooterLabelsWidth
 
-            if (mode == WorkspacesMode) {
-                MyButton({ onRoute(Route.Projects) }, text = "Projects", icon = MyIcon.Folder, muted = true, selected = route == Route.Projects)
-                MyButton({ onRoute(Route.Issues) }, text = "Issues", icon = MyIcon.Issue, muted = true, selected = route == Route.Issues)
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = barHeight()).padding(horizontal = Tokens.Space.S1),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val appearance = LocalAppearance.current
+
+                if (mode == WorkspacesMode) {
+                    MyButton({ onRoute(Route.Projects) }, text = "Projects".takeIf { labelled }, icon = MyIcon.Folder, description = "Projects", muted = true, selected = route == Route.Projects)
+                    MyButton({ onRoute(Route.Issues) }, text = "Issues".takeIf { labelled }, icon = MyIcon.Issue, description = "Issues", muted = true, selected = route == Route.Issues)
+                }
+
+                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, text = "Usage".takeIf { labelled }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen)
+
+                Box(Modifier.weight(1f))
+                MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
+                MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
+                MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
             }
-
-            Box(Modifier.weight(1f))
-            MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
-            MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
-            MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
         }
     }
 }
@@ -457,6 +475,7 @@ private fun LazyListScope.conversationRows(
         ConversationRow(
             row.conversation,
             if (withNode) state.nodes[row.conversation.nodeId] else null,
+            row.conversation.projectId?.let { state.projects[it] },
             selected = row.conversation.id == (route as? Route.Chat)?.id,
             onClick = { onRoute(Route.Chat(row.conversation.id)) },
             depth = row.depth,
@@ -464,6 +483,14 @@ private fun LazyListScope.conversationRows(
             expanded = row.conversation.id !in collapsed,
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
+            onRename = { title -> store.rename(row.conversation, title) },
+            onArchive = {
+                store.act { store.api.patchConversation(row.conversation.id, PatchConversationRequest(archived = true)) }
+
+                if (row.conversation.id == (route as? Route.Chat)?.id) {
+                    onRoute(if (row.conversation.isChat) Route.NewChat else Route.New)
+                }
+            },
             onCancelResume = { store.act { store.api.cancelResume(row.conversation.id) } },
         )
     }
@@ -504,10 +531,11 @@ private fun SectionHeading(section: SidebarSection) {
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     var menuOpen by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     val statusName = statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
@@ -532,6 +560,26 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
         if (menuOpen) {
             MenuPopup(onDismiss = { menuOpen = false }) {
                 MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
+                MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
+                MenuItem("Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
+            }
+        }
+
+        if (renaming) {
+            var title by remember { mutableStateOf(row.title) }
+            val save = {
+                renaming = false
+                onRename(title.trim())
+            }
+
+            Dialog(onDismiss = { renaming = false }) {
+                Label("Rename conversation", Modifier.semantics { heading() }, Tokens.Type.Title)
+                TextInput(title, { title = it }, label = "Conversation name", placeholder = "Leave empty to use the suggested title", onSubmit = save)
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                    MyButton({ renaming = false }, text = "Cancel", muted = true)
+                    MyButton(save, text = "Save", variant = ButtonVariant.Outline)
+                }
             }
         }
 
@@ -548,7 +596,28 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
+            Box {
+                ProjectIcon(project, Tokens.Size.IconSm)
+
+                val badgeSize = Tokens.Size.IconSm - Tokens.Space.S1
+                val badge = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5)
+                    .size(badgeSize)
+                    .background(colors.bgPanel, CircleShape)
+
+                when (row.status) {
+                    ConversationStatus.Working -> Icon(MyIcon.Working, colors.statusWorking, badgeSize, badge)
+                    ConversationStatus.Input, ConversationStatus.Review -> Box(badge.padding(Tokens.Space.S0_5 / 2).background(colors.statusAttention, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(MyIcon.Exclamation, colors.onAccent, badgeSize - Tokens.Space.S0_5)
+                    }
+                    ConversationStatus.Failed -> Box(badge.padding(Tokens.Space.S0_5 / 2).background(colors.statusFailed, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(MyIcon.Close, colors.onAccent, badgeSize - Tokens.Space.S0_5)
+                    }
+                    ConversationStatus.Done -> Unit
+                }
+            }
+
             Column(Modifier.weight(1f)) {
                 Label(row.title, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
@@ -562,6 +631,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             } else {
                 Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
             }
+
+            Icon(agentIcon(row.agent), if (node != null) nodeColour(node) else colors.textMuted, Tokens.Size.IconSm)
 
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
@@ -597,5 +668,9 @@ fun nodeColour(node: NodeSummary): Color {
 }
 
 private const val SidebarWidthPreference = "sidebar-width"
+
+private const val UsageOpenPreference = "usage-card-open"
+
+private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"

@@ -23,12 +23,16 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.EachRun
+import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.Cadence
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
+import mycelium.state.agentName
+import mycelium.state.cadenceOf
 import mycelium.state.cronFor
 import mycelium.state.describeCron
 import mycelium.state.eachRunName
@@ -62,7 +66,7 @@ fun SchedulesScreen(store: Store, state: AppState) {
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
-                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 280.dp))) {
+                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec())) {
                     ContentRow(header = true) {
                         Label("Prompt", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("Project", style = Tokens.Type.MetaStrong, color = colors.textMuted)
@@ -105,7 +109,7 @@ fun SchedulesScreen(store: Store, state: AppState) {
     }
 
     if (creating) {
-        NewScheduleDialog(store, state, onDismiss = { creating = false })
+        ScheduleDialog(store, state, onDismiss = { creating = false })
     }
 }
 
@@ -113,6 +117,7 @@ fun SchedulesScreen(store: Store, state: AppState) {
 private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
     val colors = MyTheme.colors
     var reviewing by remember(schedule.id) { mutableStateOf(false) }
+    var editing by remember(schedule.id) { mutableStateOf(false) }
 
     ContentRow {
         Label(schedule.prompt, maxLines = 1)
@@ -125,25 +130,25 @@ private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
         Label(eachRunName(schedule.eachRun), color = colors.textMuted, maxLines = 1)
         Label(if (schedule.proposed) "Waiting for you" else if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text, maxLines = 1)
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
+        RowMenu(schedule.prompt) { close ->
             if (schedule.proposed) {
-                MyButton({ reviewing = true }, text = "Review", description = "Review: ${schedule.prompt}", size = ButtonSize.Sm)
-                MyButton({ store.act { store.declineSchedule(schedule) } }, text = "Decline", description = "Decline: ${schedule.prompt}", size = ButtonSize.Sm, muted = true)
+                MenuItem("Review", onClick = { close(); reviewing = true }, leading = MyIcon.Review)
+                MenuItem("Decline", onClick = { close(); store.act { store.declineSchedule(schedule) } }, leading = MyIcon.Close)
             } else {
-                MyButton({ store.act { store.runSchedule(schedule) } }, text = "Run now", description = "Run now: ${schedule.prompt}", size = ButtonSize.Sm)
-                MyButton(
-                    { store.act { store.pauseSchedule(schedule, !schedule.paused) } },
-                    text = if (schedule.paused) "Resume" else "Pause",
-                    description = "${if (schedule.paused) "Resume" else "Pause"}: ${schedule.prompt}",
-                    size = ButtonSize.Sm,
-                )
-                MyButton({ store.act { store.deleteSchedule(schedule) } }, text = "Delete", description = "Delete: ${schedule.prompt}", size = ButtonSize.Sm, muted = true)
+                MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
+                MenuItem("Edit", onClick = { close(); editing = true }, leading = MyIcon.Pencil)
+                MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
+                MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
             }
         }
     }
 
     if (reviewing) {
         ProposedScheduleDialog(store, schedule, state, onDismiss = { reviewing = false })
+    }
+
+    if (editing) {
+        ScheduleDialog(store, state, schedule, onDismiss = { editing = false })
     }
 }
 
@@ -168,35 +173,49 @@ private fun RunRow(run: ScheduleRun, state: AppState) {
 }
 
 @Composable
-private fun NewScheduleDialog(store: Store, state: AppState, onDismiss: () -> Unit) {
+private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = null, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val place = remember { Place() }
-    val timeZone = LocalPlatform.current?.timeZone() ?: "UTC"
-    var prompt by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf(WhenKind.Weekly) }
-    var every by remember { mutableStateOf("1") }
-    var hours by remember { mutableStateOf(true) }
-    var at by remember { mutableStateOf("06:00") }
-    var weekday by remember { mutableStateOf(Weekdays.first()) }
-    var custom by remember { mutableStateOf("") }
-    var eachRun by remember { mutableStateOf(EachRun.New) }
+    val timeZone = editing?.timeZone ?: LocalPlatform.current?.timeZone() ?: "UTC"
+    val start = remember { editing?.let { cadenceOf(it.cron) } ?: Cadence() }
+    var prompt by remember { mutableStateOf(editing?.prompt.orEmpty()) }
+    var kind by remember { mutableStateOf(start.kind) }
+    var every by remember { mutableStateOf(start.every) }
+    var hours by remember { mutableStateOf(start.hours) }
+    var at by remember { mutableStateOf(start.at) }
+    var weekday by remember { mutableStateOf(start.weekday) }
+    var custom by remember { mutableStateOf(start.custom) }
+    var eachRun by remember { mutableStateOf(editing?.eachRun ?: EachRun.New) }
     var promptError by remember { mutableStateOf<String?>(null) }
     var whenError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
 
+    fun finish(action: suspend () -> Unit) {
+        failure = null
+        running = true
+
+        scope.launch {
+            failure = attempt {
+                action()
+                onDismiss()
+            }
+            running = false
+        }
+    }
+
     fun submit() {
         val target = place.target(state)
 
-        if (running || target == null) {
+        if (running || (editing == null && target == null)) {
             return
         }
 
         val cron = cronFor(kind, every.trim().toIntOrNull() ?: 0, hours, at, weekday, custom)
 
         promptError = if (prompt.isBlank()) "Enter the prompt to run on this schedule." else null
-        cwdError = if (target.project == null && place.cwd.isBlank()) "Enter the folder the agent should work in, for example /home/you/project." else null
+        cwdError = if (editing == null && target?.project == null && place.cwd.isBlank()) "Enter the folder the agent should work in, for example /home/you/project." else null
         whenError = if (cron == null) {
             when (kind) {
                 WhenKind.Every -> "Enter how often, as a whole number above zero."
@@ -211,6 +230,22 @@ private fun NewScheduleDialog(store: Store, state: AppState, onDismiss: () -> Un
             return
         }
 
+        if (editing != null) {
+            val changes = PatchScheduleRequest(
+                prompt = prompt.trim().takeIf { it != editing.prompt },
+                cron = cron.takeIf { it != editing.cron },
+                eachRun = eachRun.takeIf { it != editing.eachRun },
+            )
+
+            finish { store.editSchedule(editing, changes) }
+
+            return
+        }
+
+        if (target == null) {
+            return
+        }
+
         val request = CreateScheduleRequest(
             nodeId = target.node.id,
             agent = target.agent,
@@ -222,24 +257,24 @@ private fun NewScheduleDialog(store: Store, state: AppState, onDismiss: () -> Un
             timeZone = timeZone,
         )
 
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt {
-                store.createSchedule(request)
-                onDismiss()
-            }
-            running = false
-        }
+        finish { store.createSchedule(request) }
     }
 
     Dialog(onDismiss) {
-        Label("New schedule", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label(if (editing == null) "New schedule" else "Edit schedule", Modifier.semantics { heading() }, Tokens.Type.Title)
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             TextInput(prompt, { prompt = it }, label = "Prompt", placeholder = "Update and test dependencies", error = promptError)
-            PlacePicker(store, state, place, withBranch = false, cwdError = cwdError)
+
+            if (editing == null) {
+                PlacePicker(store, state, place, withBranch = false, cwdError = cwdError)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Runs in", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                    Label(state.projects[editing.projectId]?.name ?: editing.cwd)
+                    Label("${agentName(editing.agent)} on ${state.nodes[editing.nodeId]?.name.orEmpty()}", color = MyTheme.colors.textMuted)
+                }
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label("When", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
@@ -277,7 +312,7 @@ private fun NewScheduleDialog(store: Store, state: AppState, onDismiss: () -> Un
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
-            MyButton(::submit, text = "Add schedule", variant = ButtonVariant.Outline)
+            MyButton(::submit, text = if (editing == null) "Add schedule" else "Save", variant = ButtonVariant.Outline)
         }
     }
 }

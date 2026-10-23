@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.rightClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -160,6 +161,32 @@ class SidebarPinsTest {
 
         rule.waitUntil(5_000) { patches.isNotEmpty() }
         assertEquals("""{"pinned":false}""", patches.single().second)
+    }
+
+    @Test
+    fun theRowMenuRenamesAConversation() {
+        show(listOf(conversation("w1", "Fix the build")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Fix the build").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Fix the build").performMouseInput { rightClick() }
+        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Conversation name").performTextReplacement("Ship the fix")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { patches.isNotEmpty() }
+        assertTrue("Ship the fix" in patches.single().second, patches.single().second)
+    }
+
+    @Test
+    fun theRowMenuArchivesAConversation() {
+        show(listOf(conversation("w1", "Fix the build")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Fix the build").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Fix the build").performMouseInput { rightClick() }
+        rule.onNodeWithText("Archive").performClick()
+
+        rule.waitUntil(5_000) { patches.isNotEmpty() }
+        assertEquals("/api/v1/conversations/w1" to """{"archived":true}""", patches.single())
     }
 
     @Test

@@ -5,16 +5,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -32,6 +31,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import mycelium.api.Attachment
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
@@ -50,12 +50,12 @@ class AttachmentControls(
     val onRemove: (DraftAttachment) -> Unit,
 )
 
-class AttachmentDrafts {
-    var drafts by mutableStateOf(emptyList<DraftAttachment>())
+class AttachmentDrafts(initial: List<DraftAttachment> = emptyList()) {
+    var drafts by mutableStateOf(initial)
         private set
     var problem by mutableStateOf<String?>(null)
         private set
-    private var nextId = 0
+    private var nextId = (initial.maxOfOrNull { it.id } ?: -1) + 1
 
     fun add(picked: List<PickedFile>) {
         var held = drafts
@@ -89,13 +89,26 @@ class AttachmentDrafts {
 }
 
 @Composable
-fun rememberAttachmentDrafts(key: Any? = null): AttachmentDrafts = remember(key) { AttachmentDrafts() }
+fun rememberAttachmentDrafts(key: Any? = null, initial: List<DraftAttachment> = emptyList()): AttachmentDrafts = remember(key) { AttachmentDrafts(initial) }
 
 val LocalAttachmentBytes = staticCompositionLocalOf<suspend (String) -> ByteArray?> { { null } }
 
 val LocalImageJump = staticCompositionLocalOf<(String) -> Unit> { {} }
 
+val LocalImageGallery = staticCompositionLocalOf<List<ThreadImage>> { emptyList() }
+
 private fun bitmapOf(bytes: ByteArray): ImageBitmap? = runCatching { bytes.decodeToImageBitmap() }.getOrNull()
+
+@Composable
+fun rememberLoadedImage(image: ThreadImage): State<Pair<Boolean, ImageBitmap?>> {
+    val loadBytes = LocalAttachmentBytes.current
+
+    return produceState<Pair<Boolean, ImageBitmap?>>(false to null, image.sha256) {
+        val bytes = image.data?.let(::decodeBase64) ?: loadBytes(image.sha256)
+
+        value = true to bytes?.let(::bitmapOf)
+    }
+}
 
 @Composable
 fun AttachmentChips(controls: AttachmentControls) {
@@ -192,12 +205,7 @@ fun ThreadImageView(image: ThreadImage, alt: String) {
         return
     }
 
-    val loadBytes = LocalAttachmentBytes.current
-    val loaded by produceState<Pair<Boolean, ImageBitmap?>>(false to null, image.sha256) {
-        val bytes = image.data?.let(::decodeBase64) ?: loadBytes(image.sha256)
-
-        value = true to bytes?.let(::bitmapOf)
-    }
+    val loaded by rememberLoadedImage(image)
     val bitmap = loaded.second
     var enlarged by remember { mutableStateOf(false) }
 
@@ -217,13 +225,10 @@ fun ThreadImageView(image: ThreadImage, alt: String) {
     }
 
     if (enlarged && bitmap != null) {
-        Dialog(onDismissRequest = { enlarged = false }) {
-            Box(Modifier.fillMaxSize().semantics { contentDescription = "Image: $alt" }, contentAlignment = Alignment.Center) {
-                Image(bitmap, contentDescription = alt, Modifier.fillMaxSize().padding(Tokens.Space.S8), contentScale = ContentScale.Fit)
-                Box(Modifier.align(Alignment.TopEnd).padding(Tokens.Space.S3)) {
-                    MyButton({ enlarged = false }, icon = MyIcon.Close, description = "Close image", variant = ButtonVariant.Outline)
-                }
-            }
+        val gallery = LocalImageGallery.current.takeIf { list -> list.any { it.sha256 == image.sha256 } } ?: listOf(image)
+
+        Dialog(onDismissRequest = { enlarged = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            ImageViewer(gallery, gallery.indexOfFirst { it.sha256 == image.sha256 }, onClose = { enlarged = false })
         }
     }
 }

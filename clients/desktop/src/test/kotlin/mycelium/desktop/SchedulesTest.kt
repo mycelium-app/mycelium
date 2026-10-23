@@ -4,6 +4,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -83,6 +84,11 @@ class SchedulesTest {
         rule.waitUntil { rule.onAllNodesWithText("Renovate sweep").fetchSemanticsNodes().isNotEmpty() }
     }
 
+    private fun chooseFromMenu(prompt: String, item: String) {
+        rule.onNodeWithContentDescription("More for $prompt").performClick()
+        rule.onNodeWithText(item).performClick()
+    }
+
     private fun sent(method: String, suffix: String) = requests.firstOrNull { it.first == method && it.second.endsWith(suffix) }
 
     @Test
@@ -96,7 +102,8 @@ class SchedulesTest {
         rule.onNodeWithText("Fri 17:00").assertExists()
         rule.onNodeWithText("Same conversation").assertExists()
         rule.onNodeWithText("Paused").assertExists()
-        rule.onNodeWithContentDescription("Resume: Summarise the week").assertExists()
+        rule.onNodeWithContentDescription("More for Summarise the week").performClick()
+        rule.onNodeWithText("Resume").assertExists()
     }
 
     @Test
@@ -112,7 +119,7 @@ class SchedulesTest {
     fun runNowStartsTheScheduleAndReloadsTheRuns() {
         showSchedules()
 
-        rule.onNodeWithContentDescription("Run now: Renovate sweep").performClick()
+        chooseFromMenu("Renovate sweep", "Run now")
 
         rule.waitUntil { sent("POST", "/schedules/s1/run") != null }
         rule.waitUntil { requests.count { it.second.endsWith("/schedule-runs") } >= 2 }
@@ -122,7 +129,7 @@ class SchedulesTest {
     fun pausingASchedulePatchesItAsPaused() {
         showSchedules()
 
-        rule.onNodeWithContentDescription("Pause: Renovate sweep").performClick()
+        chooseFromMenu("Renovate sweep", "Pause")
 
         rule.waitUntil { sent("PATCH", "/schedules/s1") != null }
         assertEquals("""{"paused":true}""", sent("PATCH", "/schedules/s1")?.third)
@@ -132,17 +139,33 @@ class SchedulesTest {
     fun resumingAPausedScheduleSendsPausedFalse() {
         showSchedules()
 
-        rule.onNodeWithContentDescription("Resume: Summarise the week").performClick()
+        chooseFromMenu("Summarise the week", "Resume")
 
         rule.waitUntil { sent("PATCH", "/schedules/s3") != null }
         assertEquals("""{"paused":false}""", sent("PATCH", "/schedules/s3")?.third)
     }
 
     @Test
+    fun editingAScheduleShowsItsCurrentValuesAndSavesOnlyTheChangedPrompt() {
+        showSchedules()
+
+        chooseFromMenu("Renovate sweep", "Edit")
+
+        rule.onNodeWithText("Edit schedule").assertExists()
+        rule.onNodeWithContentDescription("At (UTC)").assertTextContains("06:00")
+        rule.onNodeWithContentDescription("Prompt").performTextClearance()
+        rule.onNodeWithContentDescription("Prompt").performTextInput("Renovate nightly")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil { sent("PATCH", "/schedules/s1") != null }
+        assertEquals("""{"prompt":"Renovate nightly"}""", sent("PATCH", "/schedules/s1")?.third)
+    }
+
+    @Test
     fun deletingAScheduleRemovesItFromThePage() {
         showSchedules()
 
-        rule.onNodeWithContentDescription("Delete: Check backups").performClick()
+        chooseFromMenu("Check backups", "Delete")
 
         rule.waitUntil { rule.onAllNodesWithText("Check backups").fetchSemanticsNodes().isEmpty() }
         assertTrue(sent("DELETE", "/schedules/s2") != null)
@@ -225,8 +248,9 @@ class SchedulesTest {
         rule.onNodeWithText("Waiting for you").assertExists()
         rule.onNodeWithText("Weekdays 20:00").assertExists()
         rule.onNodeWithText("Europe/London").assertExists()
-        rule.onNodeWithContentDescription("Review: Run ./deploy.sh").assertExists()
-        rule.onNodeWithContentDescription("Decline: Run ./deploy.sh").assertExists()
+        rule.onNodeWithContentDescription("More for Run ./deploy.sh").performClick()
+        rule.onNodeWithText("Review").assertExists()
+        rule.onNodeWithText("Decline").assertExists()
         assertTrue(rule.onAllNodesWithText("Run now").fetchSemanticsNodes().isEmpty())
     }
 

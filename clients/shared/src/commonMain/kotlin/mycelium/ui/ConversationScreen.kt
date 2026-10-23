@@ -22,6 +22,9 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -101,9 +104,16 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
+    val draft = store.composerDrafts[id]
+    var annotations by remember(id) { mutableStateOf(draft.annotations) }
 
-    val attached = rememberAttachmentDrafts(id)
+    val attached = rememberAttachmentDrafts(id, draft.attachments)
+
+    LaunchedEffect(id) {
+        snapshotFlow { annotations to attached.drafts }.collect { (current, files) ->
+            store.composerDrafts.update(id) { copy(annotations = current, attachments = files) }
+        }
+    }
 
     fun send(text: String) {
         store.send(id, messageWithAnnotations(annotations, store.withWalkthroughNotes(id, text)), attached.drafts.map { it.file })
@@ -283,6 +293,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     annotations = annotations,
                     onRemoveAnnotation = { removed -> annotations = annotations - removed },
                     attachments = attached.controls(),
+                    initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
+                    onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
                     modelPicker = if (chat) ModelPickerControls(providers, conversation.providerId, conversation.model) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
                     onStop = { store.act { api.cancel(id) } },
                     onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },

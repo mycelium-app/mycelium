@@ -21,6 +21,7 @@ import mycelium.api.CreateTaskRequest
 import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
 import mycelium.api.MoveState
+import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.SetGoalRequest
 import mycelium.api.ScheduleRun
@@ -48,6 +49,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     private var streaming: Job? = null
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
+
+    val composerDrafts = ComposerDrafts()
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
@@ -206,9 +209,13 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         mutableState.update { it.copy(goals = it.goals - conversationId) }
     }
 
-    suspend fun setProjectGroup(projectId: String, groupId: String?): Project {
-        val project = api.setProjectGroup(projectId, groupId)
+    suspend fun setProjectGroup(projectId: String, groupId: String?): Project = keepProject(api.setProjectGroup(projectId, groupId))
 
+    suspend fun setProjectIcon(projectId: String, icon: String?): Project = keepProject(api.setProjectIcon(projectId, icon))
+
+    suspend fun uploadProjectAvatar(projectId: String, mediaType: String, bytes: ByteArray): Project = keepProject(api.uploadProjectAvatar(projectId, mediaType, bytes))
+
+    private fun keepProject(project: Project): Project {
         mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
 
         return project
@@ -291,6 +298,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
     suspend fun pauseSchedule(schedule: Schedule, paused: Boolean) {
         val changed = api.pauseSchedule(schedule.id, paused)
+
+        mutableState.update { it.copy(schedules = it.schedules + (changed.id to changed)) }
+    }
+
+    suspend fun editSchedule(schedule: Schedule, request: PatchScheduleRequest) {
+        val changed = api.editSchedule(schedule.id, request)
 
         mutableState.update { it.copy(schedules = it.schedules + (changed.id to changed)) }
     }

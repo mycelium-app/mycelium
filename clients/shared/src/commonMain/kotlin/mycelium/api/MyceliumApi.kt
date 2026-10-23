@@ -269,6 +269,18 @@ class MyceliumApi(
     suspend fun setProjectGroup(projectId: String, groupId: String?): Project =
         call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(groupId)) } }.body()
 
+    suspend fun setProjectIcon(projectId: String, icon: String?): Project =
+        call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(icon = icon, clearIcon = icon == null)) } }.body()
+
+    suspend fun uploadProjectAvatar(projectId: String, mediaType: String, bytes: ByteArray): Project =
+        call("/projects/$projectId/avatar") {
+            client.post(it) {
+                authorise()
+                contentType(ContentType.parse(mediaType))
+                setBody(bytes)
+            }
+        }.body()
+
     suspend fun extensions(): Extensions = call("/extensions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveExtensions(extensions: Extensions): Extensions =
@@ -338,7 +350,10 @@ class MyceliumApi(
         call("/schedules") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun pauseSchedule(id: String, paused: Boolean): Schedule =
-        call("/schedules/$id") { client.patch(it) { authorise(); json(PatchScheduleRequest(paused)) } }.body()
+        call("/schedules/$id") { client.patch(it) { authorise(); json(PatchScheduleRequest(paused = paused)) } }.body()
+
+    suspend fun editSchedule(id: String, request: PatchScheduleRequest): Schedule =
+        call("/schedules/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
     suspend fun runSchedule(id: String): ScheduleRun =
         call("/schedules/$id/run") { client.post(it) { authorise() } }.body()

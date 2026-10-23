@@ -45,7 +45,7 @@ import mycelium.state.formatTokens
 
 private const val SearchDebounceMillis = 250L
 
-private val ActionWidth = 176.dp
+private val ActionWidth = 48.dp
 
 private val PastHeaders = listOf("Conversation", "Project", "Agent", "Node", "Last active", "Turns", "Tokens", "Cost", "")
 
@@ -275,24 +275,23 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
                             }
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                            if (isArchived) {
-                                MyButton({ deleting = row }, text = "Delete", size = ButtonSize.Sm, muted = true, description = "Delete ${row.title}")
-                            }
-
-                            MyButton(
+                        RowMenu(row.title) { close ->
+                            MenuItem(
+                                if (isArchived) "Restore" else "Archive",
                                 onClick = {
+                                    close()
                                     store.act {
                                         val updated = store.api.patchConversation(row.id, PatchConversationRequest(archived = !isArchived))
                                         archived = if (isArchived) archived.filter { it.id != row.id } else archived + updated
                                         store.refresh()
                                     }
                                 },
-                                text = if (isArchived) "Restore" else "Archive",
-                                size = ButtonSize.Sm,
-                                muted = true,
-                                description = "${if (isArchived) "Restore" else "Archive"} ${row.title}",
+                                leading = MyIcon.Archive,
                             )
+
+                            if (isArchived) {
+                                MenuItem("Delete", onClick = { close(); deleting = row })
+                            }
                         }
                     }
 

@@ -33,6 +33,29 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 
+data class AgentAccountSplit(val accounts: List<AgentAccount>, val signedOutNodes: List<String>)
+
+fun splitSignedOut(accounts: List<AgentAccount>): AgentAccountSplit {
+    val (signedOut, real) = accounts.partition { it.label == UnnamedAccount && it.nodes.all { node -> node.state == LoginState.SignedOut } }
+
+    return AgentAccountSplit(real, signedOut.flatMap { it.nodes.map { node -> node.nodeName } }.distinct().sorted())
+}
+
+fun chatAccountFirst(accounts: List<AgentAccount>, agent: String?, nodeName: String?, account: String?): List<Pair<AgentAccount, Boolean>> {
+    val current = accounts.firstOrNull { candidate ->
+        candidate.agent == agent && candidate.nodes.any { it.nodeName == nodeName } && (account == null || candidate.label == account)
+    }
+
+    return accounts.sortedBy { if (it == current) 0 else 1 }.map { it to (it == current) }
+}
+
+fun runsOutBeforeReset(window: UsageWindow): Boolean {
+    val runsOut = window.runsOutAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
+    val resets = window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
+
+    return runsOut < resets
+}
+
 fun accountsOn(node: NodeSummary, agent: String): List<LoginInfo> = node.logins.filter { it.agent == agent }
 
 fun switchableAccounts(node: NodeSummary?, agent: String): List<LoginInfo> = node?.let { accountsOn(it, agent) }.orEmpty().takeIf { it.size >= 2 }.orEmpty()

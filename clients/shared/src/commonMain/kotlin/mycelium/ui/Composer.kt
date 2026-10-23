@@ -19,6 +19,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -108,10 +110,18 @@ fun Composer(
     goal: GoalControls? = null,
     attachments: AttachmentControls? = null,
     modelPicker: ModelPickerControls? = null,
+    initialText: TextFieldValue = TextFieldValue(""),
+    onTextChange: (TextFieldValue) -> Unit = {},
 ) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
-    var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
+    var text by remember(conversation.id) { mutableStateOf(initialText) }
+    val reportText by rememberUpdatedState(onTextChange)
+
+    LaunchedEffect(conversation.id) {
+        snapshotFlow { text }.collect { reportText(it) }
+    }
+
     var sent by remember(conversation.id) { mutableStateOf<String?>(null) }
     val source = remember { MutableInteractionSource() }
     val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }

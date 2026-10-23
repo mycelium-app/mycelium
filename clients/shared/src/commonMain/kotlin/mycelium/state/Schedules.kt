@@ -87,4 +87,36 @@ fun cronFor(kind: WhenKind, every: Int, hours: Boolean, at: String, weekday: Str
     }
 }
 
+data class Cadence(
+    val kind: WhenKind = WhenKind.Weekly,
+    val every: String = "1",
+    val hours: Boolean = true,
+    val at: String = "06:00",
+    val weekday: String = Weekdays.first(),
+    val custom: String = "",
+)
+
+fun cadenceOf(cron: String): Cadence {
+    val fields = cron.trim().split(Regex("\\s+"))
+
+    if (fields.size != 5) {
+        return Cadence(WhenKind.Cron, custom = cron)
+    }
+
+    val (minute, hour, dayOfMonth, month, dayOfWeek) = fields
+    val calendar = dayOfMonth == "*" && month == "*"
+    val everyMinutes = minute.removePrefix("*/").takeIf { minute.startsWith("*/") }?.toIntOrNull()
+    val everyHours = hour.removePrefix("*/").takeIf { hour.startsWith("*/") }?.toIntOrNull()
+    val at = time(minute, hour)
+    val day = dayOfWeek.toIntOrNull()?.let { number -> Weekdays.getOrNull((number + 6) % 7) }
+
+    return when {
+        calendar && dayOfWeek == "*" && everyMinutes != null && hour == "*" -> Cadence(WhenKind.Every, every = everyMinutes.toString(), hours = false)
+        calendar && dayOfWeek == "*" && minute == "0" && everyHours != null -> Cadence(WhenKind.Every, every = everyHours.toString(), hours = true)
+        calendar && dayOfWeek == "*" && at != null -> Cadence(WhenKind.Daily, at = at)
+        calendar && day != null && at != null -> Cadence(WhenKind.Weekly, at = at, weekday = day)
+        else -> Cadence(WhenKind.Cron, custom = cron)
+    }
+}
+
 fun eachRunName(eachRun: String): String = if (eachRun == EachRun.Same) "Same conversation" else "New conversation"

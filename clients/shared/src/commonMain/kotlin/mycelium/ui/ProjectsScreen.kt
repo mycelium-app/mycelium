@@ -231,6 +231,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
                             ContentRow {
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
                                     Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
                                     Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                                     repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
@@ -291,7 +292,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                 }
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                                    if (setUp.isNotEmpty() && state.groups.isNotEmpty()) {
+                                    if (setUp.isNotEmpty()) {
                                         ProjectGroupMenu(store, state, setUp, repository.fullName)
                                     }
 
@@ -314,6 +315,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                             val folder = row.folder
                             ContentRow {
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    ProjectIcon(folder, Tokens.Size.IconMd)
                                     Label(folder.name, maxLines = 1)
                                     Label("updated ${timestamp(row.updatedAt, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                                 }
@@ -325,9 +327,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                 }
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                                    if (state.groups.isNotEmpty()) {
-                                        ProjectGroupMenu(store, state, listOf(folder), folder.name)
-                                    }
+                                    ProjectGroupMenu(store, state, listOf(folder), folder.name)
 
                                     MyButton(
                                         { onNewConversation(folder.id) },

@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.LoginState
+import mycelium.api.NodeSummary
 import mycelium.state.AgentAccount
 import mycelium.state.usageProjection
 import mycelium.state.windowName
@@ -31,6 +32,7 @@ import mycelium.state.agentAccounts
 import mycelium.state.agentName
 import mycelium.state.loginMethodName
 import mycelium.state.newAccountName
+import mycelium.state.splitSignedOut
 
 @Composable
 fun AccountsSettings(store: Store) {
@@ -40,6 +42,12 @@ fun AccountsSettings(store: Store) {
     val agents = (accounts.map { it.agent } + state.nodes.values.flatMap { node -> node.agents.filter { it.available }.map { it.agent } }).distinct()
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     var menuFor by remember { mutableStateOf<String?>(null) }
+    val startSignIn: (NodeSummary, String) -> Unit = { node, agent ->
+        store.act {
+            val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
+            signIn = LoginSession(started.loginId, agent)
+        }
+    }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
         if (accounts.isEmpty()) {
@@ -47,43 +55,56 @@ fun AccountsSettings(store: Store) {
         }
 
         for (agent in agents) {
+            val split = splitSignedOut(accounts.filter { it.agent == agent })
+            val signInNodes = state.nodes.values.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }.sortedBy { it.name }
+
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 200.dp))) {
-                    ContentRow(header = true) {
-                        Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Signed in on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Method", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    }
-
-                    Hairline()
-
-                    for (account in accounts.filter { it.agent == agent }) {
-                        ContentRow(Modifier.padding(vertical = Tokens.Space.S1)) {
-                            Label(account.label, maxLines = 1)
-
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                                for (node in account.nodes) {
-                                    when (node.state) {
-                                        LoginState.SignedIn -> Label(node.nodeName)
-                                        LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
-                                        LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
-                                        LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
-                                    }
-                                }
-                            }
-
-                            Label(loginMethodName(account.method), color = colors.textMuted)
+                if (split.accounts.isNotEmpty()) {
+                    ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 200.dp))) {
+                        ContentRow(header = true) {
+                            Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                            Label("Signed in on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                            Label("Method", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         }
 
-                        AccountUsage(account)
-
                         Hairline()
+
+                        for (account in split.accounts) {
+                            ContentRow(Modifier.padding(vertical = Tokens.Space.S1)) {
+                                Label(account.label, maxLines = 1)
+
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                                    for (node in account.nodes) {
+                                        when (node.state) {
+                                            LoginState.SignedIn -> Label(node.nodeName)
+                                            LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
+                                            LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
+                                            LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
+                                        }
+                                    }
+                                }
+
+                                Label(loginMethodName(account.method), color = colors.textMuted)
+                            }
+
+                            AccountUsage(account)
+
+                            Hairline()
+                        }
                     }
                 }
 
-                val signInNodes = state.nodes.values.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }.sortedBy { it.name }
+                if (split.signedOutNodes.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
+                        Label("Signed out on ${split.signedOutNodes.joinToString(", ")}", color = colors.textMuted)
+
+                        for (node in signInNodes.filter { it.name in split.signedOutNodes }) {
+                            MyButton({ startSignIn(node, agent) }, text = "Sign in", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on ${node.name}")
+                        }
+                    }
+                }
 
                 if (signInNodes.isNotEmpty()) {
                     Box {
@@ -98,10 +119,7 @@ fun AccountsSettings(store: Store) {
                                         node.name,
                                         onClick = {
                                             menuFor = null
-                                            store.act {
-                                                val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
-                                                signIn = LoginSession(started.loginId, agent)
-                                            }
+                                            startSignIn(node, agent)
                                         },
                                         leading = nodeIcon(node),
                                     )

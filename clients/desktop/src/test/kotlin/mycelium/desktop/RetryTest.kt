@@ -69,6 +69,7 @@ class RetryTest {
         show(store())
 
         rule.onNodeWithContentDescription("Retry Plan the rollout").performClick()
+        rule.waitUntil(5_000) { retried.isNotEmpty() }
 
         assertEquals(listOf("/api/v1/conversations/c1/retry"), retried)
     }

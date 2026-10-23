@@ -3,7 +3,13 @@ package mycelium
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.UsageWindow
+import mycelium.state.AccountOnNode
+import mycelium.state.AgentAccount
 import mycelium.state.accountChoices
+import mycelium.state.chatAccountFirst
+import mycelium.state.UnnamedAccount
+import mycelium.state.runsOutBeforeReset
+import mycelium.state.splitSignedOut
 import mycelium.state.usageClockTime
 import mycelium.state.usageProjection
 import mycelium.state.windowName
@@ -16,6 +22,19 @@ private val Now = Instant.parse("2026-10-23T14:00:00Z")
 private fun utc(millis: Long): String = Instant.fromEpochMilliseconds(millis).toString().replace("Z", "").substring(0, 16)
 
 class AccountUsageTest {
+    @Test
+    fun signedOutLoginsWithoutANameBecomeSortedNodesAndEveryOtherAccountStays() {
+        val named = AgentAccount("codex", "sam@example.com", "oauth_token", listOf(AccountOnNode("willow", LoginState.SignedIn)))
+        val expired = AgentAccount("codex", UnnamedAccount, "oauth_token", listOf(AccountOnNode("nas", LoginState.Expired)))
+        val outOnOrion = AgentAccount("codex", UnnamedAccount, "oauth_token", listOf(AccountOnNode("orion", LoginState.SignedOut)))
+        val outOnAtlas = AgentAccount("codex", UnnamedAccount, "oauth_token", listOf(AccountOnNode("atlas", LoginState.SignedOut)))
+
+        val split = splitSignedOut(listOf(outOnOrion, named, expired, outOnAtlas))
+
+        assertEquals(listOf(named, expired), split.accounts)
+        assertEquals(listOf("atlas", "orion"), split.signedOutNodes)
+    }
+
     @Test
     fun aTimeLaterTodayIsShownAsTheClockTimeAndAnotherDayWithItsDate() {
         assertEquals("22:30", usageClockTime("2026-10-23T22:30:00Z", ::utc, Now))
@@ -67,5 +86,36 @@ class AccountUsageTest {
 
         assertEquals("9% left, weekly window", choice.description)
         assertEquals(91, choice.usedPercent)
+    }
+
+    private val Ann = AgentAccount("claude", "ann@example.com", "token", listOf(AccountOnNode("laptop", LoginState.SignedIn)))
+    private val Work = AgentAccount("claude", "work@example.com", "token", listOf(AccountOnNode("laptop", LoginState.SignedIn), AccountOnNode("atlas", LoginState.SignedIn)))
+    private val Codex = AgentAccount("codex", "ann@example.com", "token", listOf(AccountOnNode("laptop", LoginState.SignedIn)))
+
+    @Test
+    fun theAccountTheOpenChatUsesComesFirstAndIsMarked() {
+        val ordered = chatAccountFirst(listOf(Ann, Work, Codex), "claude", "atlas", "work@example.com")
+
+        assertEquals(listOf(Work to true, Ann to false, Codex to false), ordered)
+    }
+
+    @Test
+    fun aChatWithoutAnAccountMatchesTheFirstAccountForItsAgentOnItsNode() {
+        val ordered = chatAccountFirst(listOf(Ann, Work, Codex), "codex", "laptop", null)
+
+        assertEquals(listOf(Codex to true, Ann to false, Work to false), ordered)
+    }
+
+    @Test
+    fun withoutAMatchingAccountTheOrderIsUnchangedAndNothingIsMarked() {
+        assertEquals(listOf(Ann to false, Work to false), chatAccountFirst(listOf(Ann, Work), null, null, null))
+        assertEquals(listOf(Ann to false, Work to false), chatAccountFirst(listOf(Ann, Work), "claude", "elsewhere", null))
+    }
+
+    @Test
+    fun aWindowRunsOutBeforeResetOnlyWhenTheProjectedTimeIsEarlier() {
+        assertEquals(true, runsOutBeforeReset(UsageWindow("five_hour", 80.0, resetsAt = "2026-10-23T22:30:00Z", runsOutAt = "2026-10-23T18:40:00Z")))
+        assertEquals(false, runsOutBeforeReset(UsageWindow("five_hour", 80.0, resetsAt = "2026-10-23T22:30:00Z")))
+        assertEquals(false, runsOutBeforeReset(UsageWindow("five_hour", 80.0, runsOutAt = "2026-10-23T18:40:00Z")))
     }
 }

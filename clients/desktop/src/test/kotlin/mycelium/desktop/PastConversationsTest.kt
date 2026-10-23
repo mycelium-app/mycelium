@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -39,6 +40,11 @@ private const val NodesJson = """[{"id":"$NodeId","name":"laptop","hostname":"la
 private const val ArchivedJson = """[{"id":"c1","owner":"u","node_id":"$NodeId","agent":"claude","cwd":"/home/sam/projects/okapi","title":"Plan the rollout","status":"done",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":"2026-10-22T10:00:00Z"}]"""
 
+private const val TwoArchivedJson = """[{"id":"c1","owner":"u","node_id":"$NodeId","agent":"claude","cwd":"/home/sam/projects/okapi","title":"Plan the rollout","status":"done",
+"acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":"2026-10-22T10:00:00Z"},
+{"id":"c2","owner":"u","node_id":"$NodeId","agent":"claude","cwd":"","title":"Scratch notes","status":"done",
+"acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-21T10:00:00Z","updated_at":"2026-10-21T10:00:00Z","archived_at":"2026-10-21T10:00:00Z"}]"""
+
 private const val UsageJson = """[{"key":"c1","name":"","turns":3,"reported_turns":3,"input_tokens":1000,"output_tokens":500,"cost_usd":0.5,"cost_estimated":true}]"""
 
 private const val FailedJson = """[{"path":".claude/projects/-work/bad.jsonl","reason":"There is no conversation in this file."}]"""
@@ -67,7 +73,7 @@ class PastConversationsTest {
     private val deleted = mutableListOf<String>()
     private var importStarted = false
 
-    private fun store(usage: String = UsageJson, current: String = "[]"): Store {
+    private fun store(usage: String = UsageJson, current: String = "[]", archived: String = ArchivedJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -87,7 +93,7 @@ class PastConversationsTest {
                 path.endsWith("/imports/jobs") -> if (!importStarted) "[]" else if (importFinishes.isCompleted) "[" + importJob("finished", done = 3, imported = 2, failed = FailedJson) + "]" else "[" + importJob("running", done = 2) + "]"
                 path.endsWith("/imports") -> """[{"node_id":"$NodeId","agent":"claude","found":3,"imported":0}]"""
                 path.endsWith("/nodes") -> NodesJson
-                path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> ArchivedJson
+                path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> archived
                 path.endsWith("/conversations") -> current
                 else -> "{}"
             }
@@ -136,7 +142,8 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
-        rule.onNodeWithContentDescription("Delete Plan the rollout").performClick()
+        rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
+        rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Delete Plan the rollout?").assertExists()
         rule.onNodeWithText("Its messages and attachments are removed. This cannot be undone.").assertExists()
         assertEquals(emptyList(), deleted)
@@ -152,7 +159,8 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
-        rule.onNodeWithContentDescription("Delete Plan the rollout").performClick()
+        rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
+        rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Cancel").performClick()
 
         rule.onNodeWithContentDescription("Open Plan the rollout").assertExists()
@@ -171,6 +179,18 @@ class PastConversationsTest {
 
         rule.waitUntil { deleted.isNotEmpty() }
         assertEquals(listOf("/api/v1/conversations/c1"), deleted)
+    }
+
+    @Test
+    fun historyRowsWithAndWithoutAProjectPutTheNodeInTheSameColumn() {
+        val store = store(archived = TwoArchivedJson)
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+
+        rule.onNodeWithContentDescription("Open Scratch notes").assertExists()
+
+        val nodeLefts = rule.onAllNodesWithText("laptop").fetchSemanticsNodes().map { it.positionInRoot.x }
+
+        assertEquals(true, nodeLefts.groupBy { it }.values.any { it.size == 2 })
     }
 
     @Test
