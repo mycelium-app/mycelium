@@ -103,7 +103,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "walkthrough",
-            "description": "Write a diff walkthrough for this conversation when the person asks for one: the change read in order, as numbered steps. Group the steps into named sections in reading order, each with an icon, and mark exactly one step as the key change. The person reads it in a Walkthrough tab beside the conversation. Calling it again replaces the previous walkthrough.",
+            "description": "Write a diff walkthrough for this conversation when the person asks for one: the change read in order, as numbered steps. Group the steps into named sections in reading order, each with an icon, and mark exactly one step as the key change. The person reads it in a Walkthrough tab beside the conversation. Every change in the scope must be covered by a step: give a file with only its path to cover all of its changes, or split a file across steps by hunk. The call is refused with the uncovered files and hunks until every change is in a step. Calling it again replaces the previous walkthrough.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -3,7 +3,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
 use crate::state::AppState;
 use crate::store::find_owned;
-use crate::walkthrough_diff::{self, FileChange};
+use crate::walkthrough_diff::{self, Covered, FileChange};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -102,6 +102,7 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
     }
 
     let changes = scope_changes(state, conversation_id, &scope).await;
+    let mut covered = Covered::new();
 
     for (index, (step, files)) in steps.iter_mut().zip(given_files).enumerate() {
         for given in files {
@@ -115,9 +116,18 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
             };
 
             let change = changes.iter().find(|change| change.path == given.path);
-            let indexes = change.map(|change| walkthrough_diff::matching(change, &given.text)).unwrap_or_default();
+            let indexes = change.map(|change| walkthrough_diff::matching_or_all(change, &given.text)).unwrap_or_default();
+            covered.entry(given.path.clone()).or_default().extend(&indexes);
             step.files.push(walkthrough_diff::file_for(change, &given.path, &indexes));
         }
+    }
+
+    let left_out = changes.as_deref().map(|changes| walkthrough_diff::uncovered(changes, &covered)).unwrap_or_default();
+
+    if !left_out.is_empty() {
+        let listed: Vec<String> = left_out.iter().flat_map(|file| file.diff.lines().filter(|line| line.starts_with("@@")).map(|header| format!("- {}: {header}", file.path)).collect::<Vec<_>>().into_iter().chain(file.diff.lines().all(|line| !line.starts_with("@@")).then(|| format!("- {}: the whole file", file.path)))).collect();
+
+        return Ok(Err(format!("Nothing was stored. These changes are not in any step:\n{}\nAdd them to a step (a file given with only its path covers all of its changes), then call walkthrough again.", listed.join("\n"))));
     }
 
     let note = changes.is_none().then(|| "The changes in this scope could not be read from the node, so the diffs are as the agent wrote them.".to_string());
@@ -141,6 +151,24 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
 
     Ok(Json(row.map(WalkthroughRow::to_proto).transpose()?))
+}
+
+pub async fn uncovered(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughFile>>> {
+    let row = sqlx::query_as::<_, WalkthroughRow>("select w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2")
+        .bind(id)
+        .bind(user.id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("That walkthrough"))?;
+    let (conversation_id, scope) = (row.conversation_id, row.scope.clone());
+    let walkthrough = row.to_proto()?;
+    let Some(changes) = scope_changes(&state, conversation_id, &scope).await else {
+        return Ok(Json(Vec::new()));
+    };
+
+    let shown = walkthrough.steps.iter().flat_map(|step| step.files.iter()).filter(|file| !file.unchanged).map(|file| (file.path.clone(), file.diff.clone()));
+
+    Ok(Json(walkthrough_diff::uncovered(&changes, &walkthrough_diff::covered_by(&changes, shown))))
 }
 
 async fn find_owned_walkthrough(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<usize> {

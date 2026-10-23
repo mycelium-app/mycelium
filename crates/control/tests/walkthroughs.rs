@@ -450,3 +450,72 @@ async fn the_scope_is_sent_to_the_node_and_kept_with_the_walkthrough() {
     assert_eq!(asked, GitCommand::ScopeDiff { scope: "last_commit".into() });
     assert_eq!(latest(&server, conversation.id).await["scope"], "last_commit");
 }
+
+#[tokio::test]
+async fn a_walkthrough_that_leaves_changes_out_is_refused_with_the_uncovered_files_and_hunks() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let arguments = json!({"steps": [{"title": "Title", "files": [{"path": "src/Screen.tsx", "diff": "-const title = \"Restore\"\n+const title = strings.title"}]}]});
+
+    let result = call_with_diff(&server, &mut link, Some(conversation.id), arguments, SCREEN).await;
+
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("Nothing was stored."), "{text}");
+    assert!(text.contains("src/Screen.tsx: @@ -40,2 +40,3 @@ footer") && text.contains("src/strings.ts: @@ -0,0 +1 @@"), "{text}");
+    assert!(!text.contains("@@ -1,3 +1,3 @@"), "{text}");
+    assert!(text.contains("Add them to a step"), "{text}");
+    assert_eq!(latest(&server, conversation.id).await, Value::Null);
+}
+
+#[tokio::test]
+async fn a_walkthrough_that_covers_every_hunk_is_accepted() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let arguments = json!({"steps": [
+        {"title": "Title", "files": [{"path": "src/Screen.tsx", "diff": "-const title = \"Restore\"\n+const title = strings.title"}]},
+        {"title": "The rest", "files": [{"path": "src/Screen.tsx", "diff": "+const caption = strings.caption"}, {"path": "src/strings.ts"}]},
+    ]});
+
+    let result = call_with_diff(&server, &mut link, Some(conversation.id), arguments, SCREEN).await;
+
+    assert_eq!(result["isError"], false, "{result}");
+}
+
+#[tokio::test]
+async fn changes_made_after_the_walkthrough_was_stored_are_served_as_not_covered_yet() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let arguments = json!({"steps": [{"title": "Everything", "files": [{"path": "src/Screen.tsx"}, {"path": "src/strings.ts"}]}]});
+    call_with_diff(&server, &mut link, Some(conversation.id), arguments, SCREEN).await;
+    let user = server.user.clone();
+    let id = stored_id(&server, conversation.id).await;
+    let asking = tokio::spawn(async move { user.json(user.get(&format!("/api/v1/walkthroughs/{id}/uncovered"))).await });
+    let later = format!("{SCREEN}diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+added later\n");
+
+    loop {
+        if let ControlToNode::Git { request_id, .. } = link.next().await {
+            link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"diff": later, "truncated": false}), error: None }).await;
+            break;
+        }
+    }
+
+    let (status, body) = asking.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(body, json!([{"path": "src/new.ts", "diff": "@@ -0,0 +1 @@\n+added later", "unchanged": false}]));
+}
+
+#[tokio::test]
+async fn the_tool_description_says_every_change_must_be_covered() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let anonymous = server.anonymous();
+
+    let (_, tools) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))).await;
+
+    let tool = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "walkthrough").unwrap().clone();
+    assert!(tool["description"].as_str().unwrap().contains("Every change in the scope must be covered by a step"));
+}

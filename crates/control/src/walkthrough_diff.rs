@@ -1,5 +1,7 @@
 use mycelium_proto::api::WalkthroughFile;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+pub type Covered = HashMap<String, HashSet<usize>>;
 
 pub struct Hunk {
     pub header: String,
@@ -59,10 +61,8 @@ pub fn parse(diff: &str) -> Vec<FileChange> {
 }
 
 pub fn matching(change: &FileChange, agent_text: &str) -> Vec<usize> {
-    let everything = || (0..change.hunks.len()).collect::<Vec<_>>();
-
     if agent_text.trim().is_empty() {
-        return everything();
+        return (0..change.hunks.len()).collect();
     }
 
     let ranges: HashSet<&str> = agent_text.lines().filter(|line| line.starts_with("@@")).map(range_of).collect();
@@ -79,11 +79,41 @@ pub fn matching(change: &FileChange, agent_text: &str) -> Vec<usize> {
         .map(|(index, _)| index)
         .collect();
 
-    if matched.is_empty() { everything() } else { matched }
+    matched
+}
+
+pub fn matching_or_all(change: &FileChange, agent_text: &str) -> Vec<usize> {
+    let matched = matching(change, agent_text);
+
+    if matched.is_empty() { (0..change.hunks.len()).collect() } else { matched }
 }
 
 pub fn file_for(change: Option<&FileChange>, path: &str, indexes: &[usize]) -> WalkthroughFile {
     let diff = change.map(|change| indexes.iter().map(|index| change.hunks[*index].text.as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
 
     WalkthroughFile { path: path.to_string(), unchanged: diff.is_empty(), diff }
+}
+
+pub fn uncovered(changes: &[FileChange], covered: &Covered) -> Vec<WalkthroughFile> {
+    changes
+        .iter()
+        .filter_map(|change| {
+            let seen = covered.get(&change.path);
+            let left: Vec<&Hunk> = change.hunks.iter().enumerate().filter(|(index, _)| !seen.is_some_and(|seen| seen.contains(index))).map(|(_, hunk)| hunk).collect();
+
+            (!left.is_empty()).then(|| WalkthroughFile { path: change.path.clone(), diff: left.iter().map(|hunk| hunk.text.as_str()).collect::<Vec<_>>().join("\n"), unchanged: false })
+        })
+        .collect()
+}
+
+pub fn covered_by(changes: &[FileChange], files: impl Iterator<Item = (String, String)>) -> Covered {
+    let mut covered = Covered::new();
+
+    for (path, text) in files {
+        if let Some(change) = changes.iter().find(|change| change.path == path) {
+            covered.entry(path).or_default().extend(matching(change, &text));
+        }
+    }
+
+    covered
 }

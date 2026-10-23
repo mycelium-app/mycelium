@@ -115,6 +115,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
         .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
+        .route("/api/v1/walkthroughs/{id}/uncovered", get(walkthroughs::uncovered))
         .route("/api/v1/walkthroughs/{id}/reads", get(walkthroughs::reads))
         .route("/api/v1/walkthroughs/{id}/reads/{step}", put(walkthroughs::mark_read))
         .route("/api/v1/walkthroughs/{id}/dismissal", put(walkthroughs::dismiss).delete(walkthroughs::reopen))

@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import mycelium.api.Walkthrough
+import mycelium.api.WalkthroughFile
 import mycelium.api.WalkthroughStep
 import mycelium.state.Store
 import mycelium.state.ToolStatus
@@ -44,6 +45,7 @@ import mycelium.state.walkthroughDiff
 import mycelium.state.walkthroughSections
 
 private const val ReadAfterMillis = 1_500L
+private const val NotCoveredTitle = "Not covered yet"
 
 private fun sectionIcon(name: String?): MyIcon = when (name) {
     "logic" -> MyIcon.Code
@@ -60,11 +62,13 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     var selected by remember(walkthrough.id) { mutableStateOf(0) }
     var reads by remember(walkthrough.id) { mutableStateOf(emptySet<Int>()) }
     val scopes by store.walkthroughScopes.collectAsState()
-    val last = walkthrough.steps.lastIndex
+    var uncovered by remember(walkthrough.id) { mutableStateOf(emptyList<WalkthroughFile>()) }
+    val steps = walkthrough.steps + listOfNotNull(WalkthroughStep(NotCoveredTitle, section = "Not covered", explanation = "These changes are not in any step above.", files = uncovered).takeIf { uncovered.isNotEmpty() })
+    val last = steps.lastIndex
     val index = selected.coerceIn(0, maxOf(last, 0))
 
     fun markRead(step: Int) {
-        if (step in reads) {
+        if (step in reads || step >= walkthrough.steps.size) {
             return
         }
 
@@ -75,6 +79,10 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     LaunchedEffect(walkthrough.id) {
         val stored = runCatching { store.api.walkthroughReads(walkthrough.id) }.getOrDefault(emptyList())
         reads = reads + stored
+    }
+
+    LaunchedEffect(walkthrough.id) {
+        uncovered = runCatching { store.api.walkthroughUncovered(walkthrough.id) }.getOrDefault(emptyList())
     }
 
     LaunchedEffect(walkthrough.id, index) {
@@ -91,8 +99,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         move(index + 1)
     }
 
-    val steps: @Composable () -> Unit = {
-        for (section in walkthroughSections(walkthrough.steps)) {
+    val stepList: @Composable () -> Unit = {
+        for (section in walkthroughSections(steps)) {
             if (section.name != null) {
                 SectionHeader(section.name, sectionIcon(section.icon))
             }
@@ -103,15 +111,15 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         }
     }
     val detail: @Composable () -> Unit = {
-        if (walkthrough.steps.isNotEmpty()) {
+        if (steps.isNotEmpty()) {
             walkthrough.note?.let { Label(it, color = MyTheme.colors.textMuted) }
-            StepDetail(walkthrough.steps[index], index)
+            StepDetail(steps[index], index)
         }
     }
     val header: @Composable () -> Unit = {
         WalkthroughHeader(
             scope = scopes[conversationId] ?: WalkthroughScope.Branch,
-            position = stepPosition(index, walkthrough.steps.size),
+            position = stepPosition(index, steps.size),
             onPrevious = index.takeIf { it > 0 }?.let { { move(index - 1) } },
             onNext = index.takeIf { it < last }?.let { { next() } },
             onScope = { store.chooseWalkthroughScope(conversationId, it) },
@@ -139,7 +147,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     if (LocalTouch.current) {
         Column(modifier.fillMaxSize().verticalScrollWithBar().padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             header()
-            Column(stepKeys.semantics { contentDescription = "Walkthrough steps" }) { steps() }
+            Column(stepKeys.semantics { contentDescription = "Walkthrough steps" }) { stepList() }
             Hairline()
             detail()
         }
@@ -153,7 +161,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(stepKeys.width(Tokens.Size.Sidebar).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S2).semantics { contentDescription = "Walkthrough steps" }) {
-                steps()
+                stepList()
             }
 
             VerticalHairline()

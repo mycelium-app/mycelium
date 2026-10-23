@@ -45,6 +45,7 @@ class WalkthroughTest {
 
     private val requests = mutableListOf<Pair<String, String>>()
     private var reads = "[]"
+    private var uncovered = "[]"
 
     private fun show(walkthrough: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -53,6 +54,7 @@ class WalkthroughTest {
             requests += "${request.method.value} $path" to String(request.body.toByteArray())
             val reply = when {
                 path.endsWith("/reads") -> reads
+                path.endsWith("/uncovered") -> uncovered
                 path.endsWith("/walkthrough") -> walkthrough
                 path.endsWith("/goal") -> "null"
                 path.endsWith("/nodes") -> "[]"
@@ -287,5 +289,27 @@ class WalkthroughTest {
         openWalkthrough()
 
         rule.onNodeWithText("could not be read from the node", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun changesNoStepCoversAreListedInAFinalNotCoveredYetStepThatCountsInTheTotal() {
+        uncovered = """[{"path":"src/new.ts","diff":"@@ -0,0 +1 @@\n+added later","unchanged":false}]"""
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Step 1 of 5").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Step 5: Not covered yet").performClick()
+
+        rule.onNodeWithText("src/new.ts").assertIsDisplayed()
+        rule.onNodeWithText("Step 5 of 5").assertIsDisplayed()
+    }
+
+    @Test
+    fun aWalkthroughThatCoversEverythingHasNoNotCoveredYetStep() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Not covered yet", substring = true).fetchSemanticsNodes().size)
     }
 }
