@@ -142,7 +142,9 @@ fun Annotatable(content: @Composable () -> Unit) {
                     MyButton({ compose(Intent.Attach, quote) }, text = "Add to message", size = ButtonSize.Sm, muted = true)
                     MyButton({ compose(Intent.Ask, quote) }, text = "Ask in a side chat", size = ButtonSize.Sm, muted = true)
                     MyButton({ clipboard.setText(AnnotatedString(quote)); offered = null; state.clear() }, text = "Copy", size = ButtonSize.Sm, muted = true)
-                    Label("Ctrl+Shift+A adds", Modifier.padding(horizontal = Tokens.Space.S1), style = Tokens.Type.Meta, color = colors.textMuted)
+                    if (!LocalTouch.current) {
+                        Label("Ctrl+Shift+A adds", Modifier.padding(horizontal = Tokens.Space.S1), style = Tokens.Type.Meta, color = colors.textMuted)
+                    }
                 }
             }
         }
