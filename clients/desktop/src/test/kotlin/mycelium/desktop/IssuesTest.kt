@@ -113,6 +113,20 @@ class IssuesTest {
     }
 
     @Test
+    fun theLinkedPullRequestsShowTheirStateAndAnIssueTheForgeCouldNotAnswerForIsUnknown() {
+        issues = """{"issues":[
+{"forge_id":"f1","repository":"acme-org/acme-backups","number":412,"title":"Restore fails silently after a 503","url":"https://x/412","pull_requests":[]},
+{"forge_id":"f1","repository":"acme-org/acme-backups","number":398,"title":"Move restore copy into shared strings","url":"https://x/398","pull_requests":[{"number":77,"label":"MR !77","url":"https://x/77","state":"open"},{"number":70,"label":"MR !70","url":"https://x/70","state":"merged"}]},
+{"forge_id":"f1","repository":"slop/mycelium","number":5,"title":"Show the branch in the header","url":"https://x/5"}],"failures":[]}"""
+        show(store())
+
+        rule.onNodeWithText("Pull request").assertExists()
+        rule.onNodeWithText("MR !77 open").assertExists()
+        rule.onNodeWithText("MR !70 merged").assertExists()
+        rule.onAllNodesWithText("Unknown").fetchSemanticsNodes().let { assertEquals(1, it.size) }
+    }
+
+    @Test
     fun repositoryChipsShowCountsAndFilterTheTable() {
         show(store())
 

@@ -24,11 +24,13 @@ import mycelium.api.Conversation
 import mycelium.api.Issue
 import mycelium.api.Issues
 import mycelium.api.Project
+import mycelium.api.PullRequestState
 import mycelium.api.Worktree
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.issueCounts
 import mycelium.state.projectsOfIssue
+import mycelium.state.pullRequestText
 import mycelium.state.worktreesOfIssue
 
 @Composable
@@ -134,6 +136,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                         Box(Modifier.weight(0.7f))
                         Label("Issue", Modifier.weight(4f), Tokens.Type.MetaStrong, colors.textMuted)
                         Label("Worktree", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Label("Pull request", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
                         Box(Modifier.weight(1.7f))
                     }
 
@@ -168,6 +171,19 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                                         Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
                                     }
                                 }
+                            }
+                        }
+
+                        Column(Modifier.weight(2f)) {
+                            val requests = issue.pullRequests
+
+                            when {
+                                requests == null -> Label("Unknown", color = colors.textFaint)
+                                requests.isEmpty() -> Label("None", color = colors.textFaint)
+                            }
+
+                            for (request in requests.orEmpty()) {
+                                Label(pullRequestText(request), color = if (request.state == PullRequestState.Open) colors.diffAdd else colors.textMuted, maxLines = 1)
                             }
                         }
 

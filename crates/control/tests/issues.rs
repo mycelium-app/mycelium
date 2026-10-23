@@ -33,7 +33,21 @@ async fn fake_github(seen: Seen) -> String {
         }
     }
 
+    async fn timeline(Path((_, _, number)): Path<(String, String, i64)>) -> Result<Json<Value>, StatusCode> {
+        match number {
+            412 => Ok(Json(json!([
+                {"event": "labeled"},
+                {"event": "cross-referenced", "source": {"issue": {"number": 80, "html_url": "https://forge.example/acme-org/acme-backups/issues/80", "state": "open"}}},
+                {"event": "cross-referenced", "source": {"issue": {"number": 77, "html_url": "https://forge.example/acme-org/acme-backups/pull/77", "state": "open", "pull_request": {"merged_at": null}}}},
+                {"event": "cross-referenced", "source": {"issue": {"number": 70, "html_url": "https://forge.example/acme-org/acme-backups/pull/70", "state": "closed", "pull_request": {"merged_at": "2026-10-01T10:00:00Z"}}}},
+                {"event": "cross-referenced", "source": {"issue": {"number": 77, "html_url": "https://forge.example/acme-org/acme-backups/pull/77", "state": "open", "pull_request": {"merged_at": null}}}},
+            ]))),
+            _ => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    }
+
     let router = Router::new()
+        .route("/api/v3/repos/{owner}/{name}/issues/{number}/timeline", get(timeline))
         .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
         .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
         .route("/api/v3/search/issues", get(search))
@@ -54,7 +68,17 @@ async fn fake_gitlab(seen: Seen) -> String {
         Ok(Json(json!([{"iid": 5, "title": "Mirror fails", "web_url": "https://git.example/slop/mycelium/-/issues/5", "description": "It does"}])))
     }
 
+    async fn related(Path((_, iid)): Path<(String, i64)>) -> Json<Value> {
+        assert_eq!(iid, 5);
+
+        Json(json!([
+            {"iid": 77, "state": "opened", "web_url": "https://git.example/slop/mycelium/-/merge_requests/77"},
+            {"iid": 61, "state": "closed", "web_url": "https://git.example/slop/mycelium/-/merge_requests/61"},
+        ]))
+    }
+
     let router = Router::new()
+        .route("/api/v4/projects/{project}/issues/{iid}/related_merge_requests", get(related))
         .route("/api/v4/user", get(|| async { Json(json!({"username": "sam"})) }))
         .route("/api/v4/groups", get(|| async { Json(json!([])) }))
         .route("/api/v4/projects/{project}/issues", get(issues))
@@ -232,4 +256,35 @@ async fn a_workspace_needs_an_issue_that_exists_a_forge_project_and_a_project_of
     let (not_theirs, _) = start(&other, &project, 412).await;
 
     assert_eq!((missing, no_forge, error["error"].clone(), not_theirs), (404, 409, json!("project_without_forge"), 404));
+}
+
+#[tokio::test]
+async fn each_issue_lists_the_pull_requests_linked_to_it_and_one_the_forge_cannot_answer_for_is_unknown_without_hiding_the_list() {
+    let server = Server::start().await;
+    let github = connect_forge(&server, "github", &fake_github(Seen::default()).await).await;
+    let gitlab = connect_forge(&server, "gitlab", &fake_gitlab(Seen::default()).await).await;
+    let mut link = server.online_node("laptop").await;
+    clone_project(&server, &mut link, github, "acme-org/acme-backups", "/p/acme-backups").await;
+    clone_project(&server, &mut link, gitlab, "slop/mycelium", "/p/mycelium").await;
+
+    let (status, listed) = server.user.json(server.user.get("/api/v1/issues")).await;
+
+    assert_eq!(status, 200, "{listed}");
+    let issue = |number: i64| listed["issues"].as_array().unwrap().iter().find(|issue| issue["number"] == number).unwrap().clone();
+    assert_eq!(
+        issue(412)["pull_requests"],
+        json!([
+            {"number": 77, "label": "PR #77", "url": "https://forge.example/acme-org/acme-backups/pull/77", "state": "open"},
+            {"number": 70, "label": "PR #70", "url": "https://forge.example/acme-org/acme-backups/pull/70", "state": "merged"},
+        ])
+    );
+    assert_eq!(
+        issue(5)["pull_requests"],
+        json!([
+            {"number": 77, "label": "MR !77", "url": "https://git.example/slop/mycelium/-/merge_requests/77", "state": "open"},
+            {"number": 61, "label": "MR !61", "url": "https://git.example/slop/mycelium/-/merge_requests/61", "state": "closed"},
+        ])
+    );
+    assert_eq!(issue(377).get("pull_requests"), None, "an issue whose pull requests could not be read carries no answer");
+    assert_eq!(listed["failures"], json!([]));
 }

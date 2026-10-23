@@ -8,7 +8,9 @@ use crate::worktrees;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use futures_util::StreamExt;
 use futures_util::future::join_all;
+use futures_util::stream;
 use mycelium_proto::api::{CreateConversationRequest, ForgeFailure, Issues, StartWorkspaceRequest};
 use mycelium_proto::conversation::Conversation;
 use serde::Deserialize;
@@ -16,6 +18,7 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 const SLUG_LIMIT: usize = 40;
+const PULL_REQUEST_LOOKUPS: usize = 8;
 
 #[derive(Deserialize)]
 pub struct IssueQuery {
@@ -42,7 +45,15 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     let fetched = join_all(repositories.iter().map(|(forge_id, repository)| async {
         let forge = forges::find_owned(&state, *forge_id, user.id).await?;
         let api = ForgeApi::from_row(&forge)?;
-        let issues = api.issues(&state.http, repository, &query.q).await.map_err(|error| error.into_api(api.kind, &api.base_url));
+        let issues = match api.issues(&state.http, repository, &query.q).await {
+            Ok(found) => Ok(stream::iter(found)
+                .map(|mut issue| async {
+                    issue.pull_requests = api.linked_pull_requests(&state.http, &issue.repository, issue.number).await.ok();
+
+                    issue
+                }).buffered(PULL_REQUEST_LOOKUPS).collect::<Vec<_>>().await),
+            Err(error) => Err(error.into_api(api.kind, &api.base_url)),
+        };
 
         Ok::<_, ApiError>((*forge_id, issues))
     }))

@@ -6,7 +6,7 @@ use base64::Engine;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use futures_util::future::join_all;
-use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Issue, Repositories, Repository};
+use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Issue, PullRequest, PullRequestState, Repositories, Repository};
 use mycelium_proto::link::GitCredentials;
 use serde::Deserialize;
 use serde_json::Value;
@@ -329,7 +329,53 @@ impl ForgeApi {
             title: item["title"].as_str()?.to_string(),
             url: url.as_str().unwrap_or_default().to_string(),
             body: body.as_str().unwrap_or_default().to_string(),
+            pull_requests: None,
         })
+    }
+
+    pub async fn linked_pull_requests(&self, http: &reqwest::Client, repository: &str, number: i64) -> Result<Vec<PullRequest>, ForgeError> {
+        let mut linked: Vec<PullRequest> = Vec::new();
+
+        match self.kind {
+            ForgeKind::Github => {
+                let events = self.get(http, &format!("/repos/{repository}/issues/{number}/timeline?per_page={PAGE_SIZE}")).await?;
+
+                for event in events.as_array().into_iter().flatten().filter(|event| event["event"] == "cross-referenced") {
+                    let source = &event["source"]["issue"];
+                    let (Some(number), Some(url), false) = (source["number"].as_i64(), source["html_url"].as_str(), source["pull_request"].is_null()) else {
+                        continue;
+                    };
+                    let state = match (source["pull_request"]["merged_at"].is_null(), source["state"].as_str()) {
+                        (false, _) => PullRequestState::Merged,
+                        (true, Some("open")) => PullRequestState::Open,
+                        (true, _) => PullRequestState::Closed,
+                    };
+
+                    linked.push(PullRequest { number, label: format!("PR #{number}"), url: url.to_string(), state });
+                }
+            }
+            ForgeKind::Gitlab => {
+                let requests = self.get(http, &format!("/projects/{}/issues/{number}/related_merge_requests", encode_path(repository))).await?;
+
+                for request in requests.as_array().into_iter().flatten() {
+                    let (Some(number), Some(url)) = (request["iid"].as_i64(), request["web_url"].as_str()) else {
+                        continue;
+                    };
+                    let state = match request["state"].as_str() {
+                        Some("opened") => PullRequestState::Open,
+                        Some("merged") => PullRequestState::Merged,
+                        _ => PullRequestState::Closed,
+                    };
+
+                    linked.push(PullRequest { number, label: format!("MR !{number}"), url: url.to_string(), state });
+                }
+            }
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        linked.retain(|request| seen.insert(request.number));
+
+        Ok(linked)
     }
 }
 

@@ -472,8 +472,19 @@ data class Issue(
     val body: String? = null,
 )
 
+    @SerialName("pull_requests") val pullRequests: List<PullRequest>? = null,
 @Serializable
 data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
+@Serializable
+enum class PullRequestState {
+    @SerialName("open") Open,
+    @SerialName("merged") Merged,
+    @SerialName("closed") Closed,
+}
+
+@Serializable
+data class PullRequest(val number: Long, val label: String, val url: String, val state: PullRequestState)
+
 
 @Serializable
 data class StartWorkspaceRequest(val agent: String)

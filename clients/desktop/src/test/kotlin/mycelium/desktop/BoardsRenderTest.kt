@@ -155,9 +155,9 @@ private val BoardResources = """{"latest":{"at_ms":${Clock.System.now().toEpochM
 "history":[${(0..59).joinToString(",") { """{"at_ms":${Clock.System.now().toEpochMilliseconds() - (60 - it) * 10_000},"cpu_percent":${25 + (it * 7) % 30}.0}""" }}]}"""
 
 private val BoardIssues = """{"issues":[
-{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":412,"title":"Restore fails silently after a 503","url":"https://github.com/acme-org/acme-backups/issues/412"},
-{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":398,"title":"Move restore copy into shared strings","url":"https://github.com/acme-org/acme-backups/issues/398"},
-{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":377,"title":"Android restore progress jumps backwards","url":"https://github.com/acme-org/acme-backups/issues/377"}]}"""
+{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":412,"title":"Restore fails silently after a 503","url":"https://github.com/acme-org/acme-backups/issues/412","pull_requests":[]},
+{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":398,"title":"Move restore copy into shared strings","url":"https://github.com/acme-org/acme-backups/issues/398","pull_requests":[{"number":77,"label":"MR !77","url":"https://git.example/acme-org/acme-backups/-/merge_requests/77","state":"open"}]},
+{"forge_id":"$GithubId","repository":"acme-org/acme-backups","number":377,"title":"Android restore progress jumps backwards","url":"https://github.com/acme-org/acme-backups/issues/377","pull_requests":[]}]}"""
 
 private val BoardWorktrees = list(
     """{"id":"w1","project_id":"p1","branch":"issue/398-restore-strings","path":"/home/sam/projects/acme-backups-398","issue_number":398,"created_at":"${ago(days = 1)}"}""",

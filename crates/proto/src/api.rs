@@ -532,6 +532,24 @@ pub struct Issue {
     pub body: String,
 }
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_requests: Option<Vec<PullRequest>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestState {
+    Open,
+    Merged,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PullRequest {
+    pub number: i64,
+    pub label: String,
+    pub url: String,
+    pub state: PullRequestState,
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Issues {
     pub issues: Vec<Issue>,
