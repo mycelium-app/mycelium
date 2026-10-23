@@ -1,0 +1,63 @@
+package mycelium.state
+
+import mycelium.api.EachRun
+
+val Weekdays = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+enum class WhenKind(val label: String) {
+    Every("Every"),
+    Daily("Daily"),
+    Weekly("Weekly"),
+    Cron("Cron"),
+}
+
+private val WeekdayNumber = Weekdays.withIndex().associate { (index, name) -> name to index + 1 }
+
+private fun time(minute: String, hour: String): String? {
+    val minutes = minute.toIntOrNull()?.takeIf { it in 0..59 } ?: return null
+    val hours = hour.toIntOrNull()?.takeIf { it in 0..23 } ?: return null
+
+    return "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}"
+}
+
+fun describeCron(cron: String): String {
+    val fields = cron.trim().split(Regex("\\s+"))
+
+    if (fields.size != 5) {
+        return cron
+    }
+
+    val (minute, hour, dayOfMonth, month, dayOfWeek) = fields
+    val calendar = dayOfMonth == "*" && month == "*"
+    val every = minute.removePrefix("*/").takeIf { minute.startsWith("*/") }?.toIntOrNull()
+    val everyHours = hour.removePrefix("*/").takeIf { hour.startsWith("*/") }?.toIntOrNull()
+
+    return when {
+        calendar && dayOfWeek == "*" && every != null && hour == "*" -> if (every == 1) "Every minute" else "Every $every minutes"
+        calendar && dayOfWeek == "*" && minute == "0" && everyHours != null -> if (everyHours == 1) "Every hour" else "Every $everyHours hours"
+        calendar && dayOfWeek == "*" -> time(minute, hour)?.let { "Daily $it" } ?: cron
+        calendar -> {
+            val day = dayOfWeek.toIntOrNull()?.let { number -> Weekdays.getOrNull((number + 6) % 7) }
+            val at = time(minute, hour)
+
+            if (day != null && at != null) "$day $at" else cron
+        }
+        else -> cron
+    }
+}
+
+fun cronFor(kind: WhenKind, every: Int, hours: Boolean, at: String, weekday: String, custom: String): String? {
+    val parts = at.trim().split(':')
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..23 }
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..59 }
+    val clock = if (parts.size == 2 && hour != null && minute != null) "$minute $hour" else null
+
+    return when (kind) {
+        WhenKind.Every -> if (every < 1) null else if (hours) "0 */$every * * *" else "*/$every * * * *"
+        WhenKind.Daily -> clock?.let { "$it * * *" }
+        WhenKind.Weekly -> clock?.let { "$it * * ${WeekdayNumber.getValue(weekday)}" }
+        WhenKind.Cron -> custom.trim().takeIf { it.isNotEmpty() }
+    }
+}
+
+fun eachRunName(eachRun: String): String = if (eachRun == EachRun.Same) "Same conversation" else "New conversation"
