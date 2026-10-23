@@ -4,6 +4,20 @@ Design proposal, 2026-10-23. Covers the PLAN.md items "Sovereign artifacts" and 
 
 An artifact is something an agent makes for a person to look at, keep and come back to: a page, a document, a deck, an image, a file. Mycelium stores it, versions it and serves it from its own origin. Nothing depends on a third-party host. The guidance agents read and the page runtime are written for Mycelium. Neither copies Anthropic's artifact skills or prompts.
 
+## Decisions (operator, 2026-10-23)
+
+These override anything below that disagrees.
+
+- **A separate artifact host.** The control plane stays off the internet. Artifacts are served by their own container, `mycelium artifacts`, on wildcard subdomains `*.mycelium.example.com`, the way GitLab Pages serves `*.pages`. It reads artifacts the control plane stores and holds no control-plane credentials.
+- **Private by default, behind OIDC.** The artifact host has its own OIDC login, optionally against a different provider from the control plane's (the reason it is a separate container). Any signed-in user may read any artifact. The owner can make one public, which serves it to anyone without a login, and can make it private again.
+- **Types, in order:**
+  - **Build now: Design.** A canvas of artboards like Claude Design, Figma or Penpot: pages, pan and zoom, artboards an agent fills, select and move, text, shapes, sticky notes, frames, a pen, comments, and present. An agent and the person both edit it, with the chat beside it.
+  - **Build now: generic HTML pages,** the base every other type sits on. Interactive pages keep state through the artifact's data store and can be read back by the agent: the Jackdaw v2 planning board, where the person sets "your call" per row and the agent reads the choices, is the reference.
+  - **Parked: Docs** (a collaborative live editor with @Claude to write or edit; needs a real WYSIWYG editor, and the ones in outline-for-android are not good enough), **Slides** (comment on an element and send it to Claude), **Dashboard** (live data, sources panel, chat popped out over the artifact).
+  - **Unplaced: Motion.**
+  - **Later: whole apps as artifacts,** for example slop/monopoly-banker, started on demand in a micro VM with persistent storage. Ties into the micro VM item in PLAN.md. How storage and lifecycle work is open.
+- **Every artifact has a chat attached** that can be opened beside it or popped out over it, as in Claude's artifacts.
+
 ## What Anthropic ships today
 
 Researched on 2026-10-23 from Anthropic's own pages. Where only third-party coverage was found, that is stated.
