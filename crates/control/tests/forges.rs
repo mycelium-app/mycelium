@@ -240,3 +240,32 @@ async fn forges_need_a_signed_in_user() {
 
     assert_eq!(status, 401);
 }
+
+#[tokio::test]
+async fn repositories_of_every_forge_are_merged_newest_first_and_those_without_a_time_come_last() {
+    async fn github(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
+        authorised(&headers, "bearer", GITHUB_TOKEN).then(|| Json(json!([
+            {"full_name": "acme-org/old", "pushed_at": "2026-01-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"},
+            {"full_name": "acme-org/newest", "pushed_at": "2026-10-20T09:00:00Z"},
+            {"full_name": "acme-org/untimed"},
+        ]))).ok_or(StatusCode::UNAUTHORIZED)
+    }
+
+    async fn gitlab(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
+        authorised(&headers, "private", GITLAB_TOKEN).then(|| Json(json!([
+            {"path_with_namespace": "slop/middle", "last_activity_at": "2026-06-01T12:00:00.000Z"},
+            {"path_with_namespace": "slop/recent", "last_activity_at": "2026-10-10T12:00:00.000Z"},
+        ]))).ok_or(StatusCode::UNAUTHORIZED)
+    }
+
+    let server = Server::start().await;
+    let github = serve(Router::new().route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) })).route("/api/v3/user/orgs", get(|| async { Json(json!([])) })).route("/api/v3/user/repos", get(github))).await;
+    let gitlab = serve(Router::new().route("/api/v4/user", get(|| async { Json(json!({"username": "sam"})) })).route("/api/v4/groups", get(|| async { Json(json!([])) })).route("/api/v4/projects", get(gitlab))).await;
+    connect(&server, "github", &github, GITHUB_TOKEN).await;
+    connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/repositories")).await;
+    let names: Vec<&str> = listed["repositories"].as_array().unwrap().iter().map(|repository| repository["full_name"].as_str().unwrap()).collect();
+
+    assert_eq!(names, vec!["acme-org/newest", "slop/recent", "slop/middle", "acme-org/old", "acme-org/untimed"]);
+}

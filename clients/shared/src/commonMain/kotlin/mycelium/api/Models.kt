@@ -553,6 +553,7 @@ data class Repository(
     val description: String? = null,
     val private: Boolean = false,
     @SerialName("default_branch") val defaultBranch: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
 
 @Serializable

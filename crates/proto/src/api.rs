@@ -420,6 +420,8 @@ pub struct Repository {
     pub description: Option<String>,
     pub private: bool,
     pub default_branch: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

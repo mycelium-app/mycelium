@@ -1,5 +1,6 @@
 package mycelium.state
 
+import kotlin.time.Instant
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
@@ -140,6 +141,9 @@ fun projectsOfRepository(projects: Collection<Project>, repository: Repository):
     projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }
 
 fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
+
+fun lastActivity(project: Project, conversations: Collection<Conversation>): String =
+    conversations.filter { it.projectId == project.id }.map { it.updatedAt }.maxByOrNull { runCatching { Instant.parse(it) }.getOrNull() ?: Instant.DISTANT_PAST } ?: project.createdAt
 
 fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
     val appends = incoming.zipWithNext().all { (a, b) -> a.seq < b.seq } && (existing.isEmpty() || incoming.isEmpty() || existing.last().seq < incoming.first().seq)

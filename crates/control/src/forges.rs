@@ -281,6 +281,7 @@ impl ForgeApi {
                 description: item["description"].as_str().map(str::to_string),
                 private: item["private"].as_bool().unwrap_or_else(|| item["visibility"].as_str().is_some_and(|visibility| visibility != "public")),
                 default_branch: item["default_branch"].as_str().map(str::to_string),
+                updated_at: ["pushed_at", "last_activity_at", "updated_at"].iter().find_map(|field| item[field].as_str()).and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok()).map(|time| time.to_utc()),
             });
         }
 
@@ -650,6 +651,8 @@ pub async fn repositories(State(state): State<AppState>, user: AuthUser, Query(q
             }
         }
     }
+
+    result.repositories.sort_by(|first, second| second.updated_at.cmp(&first.updated_at));
 
     Ok(Json(result))
 }
