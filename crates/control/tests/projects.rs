@@ -238,6 +238,20 @@ async fn a_conversation_started_from_a_project_runs_in_the_projects_folder() {
 }
 
 #[tokio::test]
+async fn a_conversation_started_in_a_folder_inside_a_project_belongs_to_that_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    let (_, inside) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app/crates"}))).await;
+    let (_, outside) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/application"}))).await;
+
+    assert_eq!(inside["project_id"], listed[0]["id"]);
+    assert_eq!(outside["project_id"], Value::Null);
+}
+
+#[tokio::test]
 async fn a_conversation_from_a_project_needs_the_node_it_lives_on_and_a_project_of_your_own() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
