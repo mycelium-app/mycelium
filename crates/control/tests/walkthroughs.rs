@@ -221,3 +221,56 @@ async fn only_the_owner_can_read_or_mark_a_walkthroughs_steps() {
 
     assert_eq!((read_status, mark_status), (404, 404));
 }
+
+#[tokio::test]
+async fn dismissing_a_walkthrough_hides_it_until_it_is_reopened_and_is_published_each_time() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+    assert_eq!(latest(&server, conversation.id).await["dismissed"], false);
+    let mut stream = server.user.stream().await;
+
+    let (dismissed_status, _) = server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/dismissal"))).await;
+    let dismissed = stream.until(|message| match message {
+        mycelium_proto::stream::StreamMessage::Walkthrough(walkthrough) => Some(walkthrough.dismissed),
+        _ => None,
+    }).await;
+
+    assert_eq!((dismissed_status, dismissed), (204, true));
+    assert_eq!(latest(&server, conversation.id).await["dismissed"], true);
+
+    let (reopened_status, _) = server.user.json(server.user.delete(&format!("/api/v1/walkthroughs/{id}/dismissal"))).await;
+
+    assert_eq!(reopened_status, 204);
+    assert_eq!(latest(&server, conversation.id).await["dismissed"], false);
+}
+
+#[tokio::test]
+async fn a_new_walkthrough_is_shown_even_when_the_one_before_was_dismissed() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+    server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{id}/dismissal"))).await;
+
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+
+    assert_eq!(latest(&server, conversation.id).await["dismissed"], false);
+}
+
+#[tokio::test]
+async fn only_the_owner_can_dismiss_a_walkthrough() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &link.token, Some(conversation.id), steps()).await;
+    let id = stored_id(&server, conversation.id).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (status, _) = other.json(other.put(&format!("/api/v1/walkthroughs/{id}/dismissal"))).await;
+
+    assert_eq!(status, 404);
+}

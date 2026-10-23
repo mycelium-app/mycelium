@@ -906,4 +906,6 @@ pub struct Walkthrough {
     pub conversation_id: Uuid,
     pub steps: Vec<WalkthroughStep>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub dismissed: bool,
 }

@@ -243,4 +243,29 @@ class WalkthroughTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithText("Step 1 of 4").fetchSemanticsNodes().size)
     }
+
+    @Test
+    fun dismissingTheWalkthroughHidesItsTabAndSavesTheDismissal() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithContentDescription("Dismiss walkthrough").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/dismissal" } }
+        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aDismissedWalkthroughIsReopenedFromTheMoreMenu() {
+        show(Walkthrough.replace("\"steps\"", "\"dismissed\":true,\"steps\""))
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("Walkthrough").fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("More").performClick()
+        rule.onNodeWithText("Show walkthrough").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/walkthroughs/w1/dismissal" } }
+        rule.onNodeWithText("Walkthrough").assertIsDisplayed()
+    }
 }

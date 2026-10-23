@@ -404,6 +404,14 @@ class MyceliumApi(
         call("/walkthroughs/$id/reads/$step") { client.put(it) { authorise() } }
     }
 
+    suspend fun dismissWalkthrough(id: String) {
+        call("/walkthroughs/$id/dismissal") { client.put(it) { authorise() } }
+    }
+
+    suspend fun reopenWalkthrough(id: String) {
+        call("/walkthroughs/$id/dismissal") { client.delete(it) { authorise() } }
+    }
+
     suspend fun markOpened(id: String) {
         call("/conversations/$id/opened") { client.post(it) { authorise() } }
     }

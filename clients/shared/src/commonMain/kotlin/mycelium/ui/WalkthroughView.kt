@@ -115,6 +115,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
             onNext = index.takeIf { it < last }?.let { { next() } },
             onScope = { store.chooseWalkthroughScope(conversationId, it) },
             onRegenerate = { store.regenerateWalkthrough(conversationId) },
+            onDismiss = { store.setWalkthroughDismissed(conversationId, true) },
         )
     }
     val stepKeys = Modifier.onKeyEvent { event ->
@@ -164,7 +165,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
 }
 
 @Composable
-private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onRegenerate: () -> Unit) {
+private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onRegenerate: () -> Unit, onDismiss: () -> Unit) {
     var open by remember { mutableStateOf(false) }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -189,6 +190,7 @@ private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevi
         MyButton({ onPrevious?.invoke() }, icon = MyIcon.Back, description = "Previous step", muted = onPrevious == null, size = ButtonSize.Sm)
         MyButton({ onNext?.invoke() }, icon = MyIcon.Move, description = "Next step", muted = onNext == null, size = ButtonSize.Sm)
         MyButton({ onRegenerate() }, text = "Regenerate", icon = MyIcon.Refresh, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        MyButton({ onDismiss() }, text = "Dismiss", icon = MyIcon.Close, description = "Dismiss walkthrough", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
     }
 }
 

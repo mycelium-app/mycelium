@@ -367,6 +367,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         send(conversationId, regenerateWalkthroughPrompt(mutableWalkthroughScopes.value[conversationId] ?: WalkthroughScope.Branch))
     }
 
+    fun setWalkthroughDismissed(conversationId: String, dismissed: Boolean) {
+        val walkthrough = state.value.walkthroughs[conversationId] ?: return
+        mutableState.update { it.copy(walkthroughs = it.walkthroughs + (conversationId to walkthrough.copy(dismissed = dismissed))) }
+        act { if (dismissed) api.dismissWalkthrough(walkthrough.id) else api.reopenWalkthrough(walkthrough.id) }
+    }
+
     suspend fun attachmentBytes(sha256: String): ByteArray? {
         attachmentCache[sha256]?.let { return it }
 

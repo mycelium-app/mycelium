@@ -191,6 +191,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         }
                     },
                     onRetry = { store.act { api.retryConversation(id) } },
+                    dismissedWalkthrough = !chat && state.walkthroughs[id]?.dismissed == true,
+                    onShowWalkthrough = { store.setWalkthroughDismissed(id, false) },
                     onDelete = {
                         store.act {
                             api.deleteConversation(id)
@@ -199,7 +201,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     },
                 )
 
-                val walkthrough = state.walkthroughs[id]
+                val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed }
 
                 if (walkthrough != null && !chat) {
                     TabRow(listOf(ConversationTab, WalkthroughTab), tab, { tab = it }, groupLabel = "Conversation sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
@@ -324,6 +326,8 @@ private fun ConversationHeader(
     onPin: () -> Unit,
     onArchive: () -> Unit,
     onRetry: () -> Unit,
+    dismissedWalkthrough: Boolean,
+    onShowWalkthrough: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -415,6 +419,10 @@ private fun ConversationHeader(
                     }
 
                     MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
+
+                    if (dismissedWalkthrough) {
+                        MenuItem("Show walkthrough", onClick = { menuOpen = false; onShowWalkthrough() }, leading = MyIcon.Code)
+                    }
 
                     MenuItem(if (archived) "Restore" else "Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
 

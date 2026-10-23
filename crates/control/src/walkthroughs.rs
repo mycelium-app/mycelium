@@ -18,13 +18,14 @@ struct WalkthroughRow {
     conversation_id: Uuid,
     steps: Value,
     created_at: chrono::DateTime<chrono::Utc>,
+    dismissed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl WalkthroughRow {
     fn to_proto(self) -> ApiResult<Walkthrough> {
         let steps = serde_json::from_value(self.steps).map_err(ApiError::internal)?;
 
-        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at })
+        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at, dismissed: self.dismissed_at.is_some() })
     }
 }
 
@@ -79,7 +80,7 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
         steps.push(WalkthroughStep { title, key: step.get("key").and_then(Value::as_bool).unwrap_or(false), section: Some(text_of(step, "section").trim().to_string()).filter(|section| !section.is_empty()), icon: Some(text_of(step, "icon").trim().to_string()).filter(|icon| ICONS.contains(&icon.as_str())), explanation: text_of(step, "explanation"), files });
     }
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps) values ($1, $2) returning id, conversation_id, steps, created_at")
+    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps) values ($1, $2) returning id, conversation_id, steps, created_at, dismissed_at")
         .bind(conversation_id)
         .bind(serde_json::to_value(&steps).map_err(ApiError::internal)?)
         .fetch_one(&state.pool)
@@ -93,7 +94,7 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Walkthrough>>> {
     find_owned(&state.pool, id, user.id).await?;
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
+    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
 
     Ok(Json(row.map(WalkthroughRow::to_proto).transpose()?))
 }
@@ -122,4 +123,27 @@ pub async fn mark_read(State(state): State<AppState>, user: AuthUser, Path((id, 
     sqlx::query("insert into walkthrough_reads (walkthrough_id, user_id, step) values ($1, $2, $3) on conflict do nothing").bind(id).bind(user.id).bind(step).execute(&state.pool).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn set_dismissed(state: &AppState, user: &AuthUser, id: Uuid, dismissed: bool) -> ApiResult<StatusCode> {
+    let row = sqlx::query_as::<_, WalkthroughRow>(
+        "update walkthroughs w set dismissed_at = case when $3 then now() else null end from conversations c where c.id = w.conversation_id and w.id = $1 and c.owner = $2 returning w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(dismissed)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("That walkthrough"))?;
+    state.publish(Some(user.id), StreamMessage::Walkthrough(row.to_proto()?));
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn dismiss(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    set_dismissed(&state, &user, id, true).await
+}
+
+pub async fn reopen(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    set_dismissed(&state, &user, id, false).await
 }

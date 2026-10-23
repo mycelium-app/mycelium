@@ -827,6 +827,7 @@ data class Walkthrough(
     @SerialName("conversation_id") val conversationId: String,
     val steps: List<WalkthroughStep>,
     @SerialName("created_at") val createdAt: String,
+    val dismissed: Boolean = false,
 )
 
 @Serializable
