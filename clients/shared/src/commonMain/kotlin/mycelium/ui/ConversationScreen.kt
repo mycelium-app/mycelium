@@ -36,6 +36,10 @@ import mycelium.api.LoginInfo
 import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
 import mycelium.state.Annotation
+import mycelium.state.DraftAttachment
+import mycelium.state.PickedFile
+import mycelium.state.attachmentProblem
+import mycelium.state.mediaTypeOf
 import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
 import mycelium.state.Store
@@ -78,9 +82,33 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val conversation = state.conversations[id] ?: fetched
     var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
 
+    var drafts by remember(id) { mutableStateOf(emptyList<DraftAttachment>()) }
+    var attachProblem by remember(id) { mutableStateOf<String?>(null) }
+    var nextDraftId by remember(id) { mutableStateOf(0) }
+
+    fun addFiles(picked: List<PickedFile>) {
+        var held = drafts
+        attachProblem = null
+
+        for (file in picked) {
+            val named = PickedFile(file.name, mediaTypeOf(file.name, file.bytes, file.mediaType), file.bytes)
+            val problem = attachmentProblem(named, held.size)
+
+            if (problem != null) {
+                attachProblem = problem
+            } else {
+                held = held + DraftAttachment(nextDraftId++, named)
+            }
+        }
+
+        drafts = held
+    }
+
     fun send(text: String) {
-        store.send(id, messageWithAnnotations(annotations, text))
+        store.send(id, messageWithAnnotations(annotations, text), drafts.map { it.file })
         annotations = emptyList()
+        drafts = emptyList()
+        attachProblem = null
     }
 
     LaunchedEffect(id) {
@@ -135,7 +163,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         canOpenFiles = !chat,
     )
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions) {
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes) {
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 ConversationHeader(
@@ -186,6 +214,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onSend = ::send,
                     annotations = annotations,
                     onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                    attachments = AttachmentControls(drafts, attachProblem, ::addFiles) { removed -> drafts = drafts - removed; attachProblem = null },
                     onStop = { store.act { api.cancel(id) } },
                     onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
                     onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },

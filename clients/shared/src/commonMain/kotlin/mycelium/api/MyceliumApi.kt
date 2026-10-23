@@ -416,9 +416,22 @@ class MyceliumApi(
             }
         }.body()
 
-    suspend fun sendPrompt(id: String, text: String) {
-        call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text)) } }
+    suspend fun sendPrompt(id: String, text: String, attachments: List<Attachment> = emptyList()) {
+        call("/conversations/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, attachments)) } }
     }
+
+    suspend fun uploadAttachment(id: String, name: String, mediaType: String, bytes: ByteArray): Attachment =
+        call("/conversations/$id/attachments") {
+            client.post(it) {
+                authorise()
+                parameter("name", name)
+                contentType(ContentType.parse(mediaType))
+                setBody(bytes)
+            }
+        }.body()
+
+    suspend fun attachmentBytes(sha256: String): ByteArray =
+        call("/attachments/$sha256") { client.get(it) { authorise() } }.body()
 
     suspend fun queue(id: String): List<QueuedPrompt> = call("/conversations/$id/queue") { client.get(it) { authorise() } }.body()
 

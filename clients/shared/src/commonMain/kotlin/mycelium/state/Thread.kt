@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import mycelium.api.Attachment
 import mycelium.api.Event
 import mycelium.api.EventKinds
 
@@ -32,10 +33,17 @@ data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>) 
     val phases: List<String> get() = agents.map { it.phase }.distinct()
 }
 
+data class ThreadImage(val sha256: String, val name: String, val mediaType: String, val data: String? = null, val sameAs: String? = null)
+
 sealed interface ThreadItem {
     val key: String
 
-    data class UserMessage(override val key: String, val text: String) : ThreadItem
+    data class UserMessage(
+        override val key: String,
+        val text: String,
+        val files: List<Attachment> = emptyList(),
+        val images: List<ThreadImage> = emptyList(),
+    ) : ThreadItem
 
     data class AgentMessage(override val key: String, val text: String) : ThreadItem
 
@@ -48,6 +56,7 @@ sealed interface ThreadItem {
         val status: ToolStatus,
         val diff: FileDiff?,
         val output: String?,
+        val images: List<ThreadImage> = emptyList(),
     ) : ThreadItem
 
     data class Plan(override val key: String, val entries: List<PlanEntry>) : ThreadItem
@@ -77,7 +86,7 @@ fun buildThread(events: List<Event>): List<ThreadItem> {
         val key = "e${event.seq}"
 
         when (event.kind) {
-            EventKinds.UserMessage -> items += ThreadItem.UserMessage(key, payload.string("text") ?: "")
+            EventKinds.UserMessage -> items += userMessageFrom(key, payload)
             EventKinds.AcpUpdate -> applyUpdate(items, key, payload)
             EventKinds.PermissionRequest -> items += permissionFrom(key, payload)
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
@@ -87,7 +96,46 @@ fun buildThread(events: List<Event>): List<ThreadItem> {
         }
     }
 
-    return items
+    return withSameImagesMarked(items)
+}
+
+private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMessage {
+    val attachments = (payload["attachments"] as? JsonArray).orEmpty().mapNotNull { element ->
+        val entry = element as? JsonObject ?: return@mapNotNull null
+
+        Attachment(
+            sha256 = entry.string("sha256") ?: return@mapNotNull null,
+            name = entry.string("name") ?: "attachment",
+            mediaType = entry.string("media_type") ?: "application/octet-stream",
+            size = entry.string("size")?.toLongOrNull() ?: 0,
+        )
+    }
+    val (pictures, files) = attachments.partition { isImage(it.mediaType) }
+
+    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) })
+}
+
+private fun withSameImagesMarked(items: List<ThreadItem>): List<ThreadItem> {
+    val firstSeen = mutableMapOf<String, String>()
+
+    fun marked(key: String, images: List<ThreadImage>): List<ThreadImage> = images.map { image ->
+        val earlier = firstSeen[image.sha256]
+
+        if (earlier == null) {
+            firstSeen[image.sha256] = key
+            image
+        } else {
+            image.copy(sameAs = earlier)
+        }
+    }
+
+    return items.map { item ->
+        when {
+            item is ThreadItem.UserMessage && item.images.isNotEmpty() -> item.copy(images = marked(item.key, item.images))
+            item is ThreadItem.ToolCall && item.images.isNotEmpty() -> item.copy(images = marked(item.key, item.images))
+            else -> item
+        }
+    }
 }
 
 private const val MaxSuggestions = 4
@@ -160,6 +208,7 @@ private fun toolCallFrom(key: String, update: JsonObject): ThreadItem.ToolCall {
         status = toolStatus(update.string("status")),
         diff = diffFrom(update),
         output = outputFrom(update),
+        images = imagesFrom(update, title),
     )
 }
 
@@ -182,6 +231,7 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
         status = update.string("status")?.let(::toolStatus) ?: current.status,
         diff = diffFrom(update) ?: current.diff,
         output = outputFrom(update) ?: current.output,
+        images = imagesFrom(update, title).ifEmpty { current.images },
     )
 }
 
@@ -215,6 +265,31 @@ private fun diffFrom(update: JsonObject): FileDiff? {
 
     return FileDiff(path, diffLines(block.string("oldText") ?: "", block.string("newText") ?: ""))
 }
+
+private const val MaxHashedImages = 64
+
+private val imageHashes = mutableMapOf<Pair<Int, Int>, String>()
+
+private fun imagesFrom(update: JsonObject, title: String): List<ThreadImage> =
+    toolContent(update).filter { it.string("type") == "content" }.mapNotNull { block ->
+        val image = block["content"] as? JsonObject ?: return@mapNotNull null
+        val data = image.string("data")
+
+        if (image.string("type") != "image" || data == null) {
+            return@mapNotNull null
+        }
+
+        val cacheKey = data.hashCode() to data.length
+        val hash = imageHashes[cacheKey] ?: decodeBase64(data)?.let(::sha256Hex)?.also {
+            if (imageHashes.size >= MaxHashedImages) {
+                imageHashes.clear()
+            }
+
+            imageHashes[cacheKey] = it
+        } ?: return@mapNotNull null
+
+        ThreadImage(hash, title, image.string("mimeType") ?: "image/png", data)
+    }
 
 private fun outputFrom(update: JsonObject): String? {
     val texts = toolContent(update)

@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -78,6 +79,8 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.suggestedReplies
 import mycelium.state.WorkflowProgress
+import mycelium.api.Attachment
+import mycelium.state.ThreadImage
 
 private const val ShortOutputLimit = 40
 
@@ -115,6 +118,14 @@ fun ThreadView(
         state.animateScrollBy(-(state.layoutInfo.viewportEndOffset - placed.offset - placed.size).toFloat())
     }
 
+    val jumpToImage: (String) -> Unit = { key ->
+        val target = items.indexOfFirst { it.key == key }
+
+        if (target >= 0) {
+            scope.launch { showTopOf(items.lastIndex - target) }
+        }
+    }
+
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = Tokens.Size.Measure).fillMaxWidth().semantics { contentDescription = "Conversation" },
@@ -144,7 +155,9 @@ fun ThreadView(
                         onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
                     )
                 } else {
-                    ThreadRow(item, onAnswer, onStopWorkflow)
+                    CompositionLocalProvider(LocalImageJump provides jumpToImage) {
+                        ThreadRow(item, onAnswer, onStopWorkflow)
+                    }
                 }
             }
         }
@@ -168,9 +181,15 @@ fun ThreadView(
 @Composable
 private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text)
+        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
-        is ThreadItem.ToolCall -> ToolCall(item)
+        is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            ToolCall(item)
+
+            for (image in item.images) {
+                ThreadImageView(image, item.title)
+            }
+        }
         is ThreadItem.Plan -> PlanCard(item)
         is ThreadItem.Permission -> PermissionCard(item, onAnswer)
         is ThreadItem.TurnEnd -> Unit
@@ -180,18 +199,24 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
 }
 
 @Composable
-private fun UserMessage(text: String) {
+private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>) {
     val colors = MyTheme.colors
 
     Annotatable {
-        Box(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .background(colors.bgPanel, BlockShape)
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
         ) {
-            Label(text, style = Tokens.Type.Prose)
+            if (text.isNotEmpty()) {
+                Label(text, style = Tokens.Type.Prose)
+            }
+
+            if (files.isNotEmpty() || images.isNotEmpty()) {
+                MessageAttachments(files, images)
+            }
         }
     }
 }

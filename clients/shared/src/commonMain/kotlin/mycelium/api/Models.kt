@@ -630,7 +630,15 @@ data class SessionSummary(
 )
 
 @Serializable
-data class PromptRequest(val text: String)
+data class Attachment(
+    val sha256: String,
+    val name: String,
+    @SerialName("media_type") val mediaType: String,
+    val size: Long,
+)
+
+@Serializable
+data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList())
 
 @Serializable
 data class PatchQueueRequest(val text: String)
@@ -781,6 +789,7 @@ data class QueuedPrompt(
     val position: Int,
     val text: String,
     @SerialName("created_at") val createdAt: String,
+    val attachments: List<Attachment> = emptyList(),
 )
 
 sealed interface StreamMessage {

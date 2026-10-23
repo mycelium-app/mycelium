@@ -9,8 +9,13 @@ import android.os.Build
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
+import mycelium.state.MaxAttachmentBytes
+import mycelium.state.PickedFile
+import mycelium.state.mediaTypeOf
 
-class AndroidPlatform(private val context: Context) : Platform {
+class AndroidPlatform(private val context: Context, private val launchPicker: () -> Unit = {}) : Platform {
+    private var waitingForPick: ((List<PickedFile>) -> Unit)? = null
+
     private val preferences = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -69,6 +74,25 @@ class AndroidPlatform(private val context: Context) : Platform {
         val colour = if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600
 
         return context.getColor(colour).toLong()
+    }
+
+    override fun pickFiles(onPicked: (List<PickedFile>) -> Unit) {
+        waitingForPick = onPicked
+        launchPicker()
+    }
+
+    fun picked(uris: List<Uri>) {
+        val files = uris.mapNotNull { uri ->
+            runCatching {
+                val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: "attachment"
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(MaxAttachmentBytes + 1) } ?: return@runCatching null
+
+                PickedFile(name, mediaTypeOf(name, bytes, context.contentResolver.getType(uri)), bytes)
+            }.getOrNull()
+        }
+
+        waitingForPick?.invoke(files)
+        waitingForPick = null
     }
 
     override fun copyToClipboard(text: String) {

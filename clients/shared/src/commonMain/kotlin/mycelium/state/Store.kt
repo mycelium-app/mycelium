@@ -34,12 +34,14 @@ import kotlin.io.encoding.Base64
 private const val EventPageSize = 500
 private const val FirstRetryMillis = 1_000L
 private const val LongestRetryMillis = 15_000L
+private const val MaxCachedAttachments = 20
 
 class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
+    private val attachmentCache = mutableMapOf<String, ByteArray>()
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
@@ -298,18 +300,40 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         }
     }
 
-    fun send(conversationId: String, text: String) {
+    fun send(conversationId: String, text: String, files: List<PickedFile> = emptyList()) {
         val prompt = text.trim()
-        mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + prompt)) }
+        val shownWhileSending = prompt.isNotEmpty()
+
+        if (shownWhileSending) {
+            mutableState.update { it.copy(sending = it.sending + (conversationId to it.sending[conversationId].orEmpty() + prompt)) }
+        }
 
         act {
             try {
-                api.sendPrompt(conversationId, prompt)
+                val attachments = files.map { file -> api.uploadAttachment(conversationId, file.name, file.mediaType, file.bytes) }
+                api.sendPrompt(conversationId, prompt, attachments)
             } catch (failure: Exception) {
-                mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, prompt)) }
+                if (shownWhileSending) {
+                    mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, prompt)) }
+                }
+
                 throw failure
             }
         }
+    }
+
+    suspend fun attachmentBytes(sha256: String): ByteArray? {
+        attachmentCache[sha256]?.let { return it }
+
+        val bytes = runCatching { api.attachmentBytes(sha256) }.getOrNull() ?: return null
+
+        if (attachmentCache.size >= MaxCachedAttachments) {
+            attachmentCache.clear()
+        }
+
+        attachmentCache[sha256] = bytes
+
+        return bytes
     }
 
     fun typeIntoTerminal(terminalId: String, text: String) {

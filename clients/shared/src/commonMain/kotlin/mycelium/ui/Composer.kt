@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -104,8 +107,10 @@ fun Composer(
     annotations: List<Annotation> = emptyList(),
     onRemoveAnnotation: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
+    attachments: AttachmentControls? = null,
 ) {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
     val source = remember { MutableInteractionSource() }
     val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }
@@ -134,10 +139,18 @@ fun Composer(
     }
     var highlighted by remember(query, mention?.query) { mutableStateOf(0) }
 
+    DisposableEffect(platform, attachments?.onAdd) {
+        val onAdd = attachments?.onAdd
+
+        platform?.listenForFiles(onAdd)
+
+        onDispose { platform?.listenForFiles(null) }
+    }
+
     fun submit() {
         val trimmed = text.text.trim()
 
-        if (trimmed.isNotEmpty() || annotations.isNotEmpty()) {
+        if (trimmed.isNotEmpty() || annotations.isNotEmpty() || attachments?.drafts?.isNotEmpty() == true) {
             val side = sideChatOf(trimmed)
 
             if (side != null) {
@@ -157,6 +170,12 @@ fun Composer(
                 onTextChange = { text = it },
                 source = source,
                 onSubmit = ::submit,
+                onPaste = {
+                    val pasted = platform?.clipboardFiles().orEmpty()
+
+                    attachments?.onAdd?.invoke(pasted)
+                    attachments != null && pasted.isNotEmpty()
+                },
                 onKey = { key ->
                     when {
                         key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
@@ -173,6 +192,12 @@ fun Composer(
             if (matches.isNotEmpty()) {
                 CompletionPopup(if (query != null) "Commands" else "Files", matches, highlighted.coerceIn(matches.indices))
             }
+        }
+    }
+
+    val attach: @Composable () -> Unit = {
+        if (attachments != null && platform != null) {
+            MyButton({ platform.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
         }
     }
 
@@ -219,6 +244,7 @@ fun Composer(
                 }
 
                 AnnotationChips(annotations, onRemoveAnnotation)
+                attachments?.let { AttachmentChips(it) }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
@@ -226,6 +252,7 @@ fun Composer(
                 }
 
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    attach()
                     pickers()
                 }
             }
@@ -263,6 +290,10 @@ fun Composer(
                 AnnotationChips(annotations, onRemoveAnnotation)
             }
 
+            Box(measured.padding(horizontal = Tokens.Space.S2)) {
+                attachments?.let { AttachmentChips(it) }
+            }
+
             field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
 
             Row(
@@ -270,6 +301,7 @@ fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                attach()
                 Box(Modifier.weight(1f))
 
                 if (working) {
@@ -284,7 +316,7 @@ fun Composer(
 }
 
 @Composable
-private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onKey: (Key) -> Boolean, modifier: Modifier = Modifier) {
+private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
 
     BasicTextField(
@@ -299,6 +331,10 @@ private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) ->
             .semantics { contentDescription = "Message" }
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && onKey(event.key)) {
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && onPaste()) {
                     return@onPreviewKeyEvent true
                 }
 
