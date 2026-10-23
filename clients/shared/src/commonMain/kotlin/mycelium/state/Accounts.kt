@@ -3,13 +3,17 @@ package mycelium.state
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.UsageWindow
+import kotlin.math.roundToInt
 import kotlin.random.Random
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 const val UnnamedAccount = "Account name not reported"
 
 data class AccountOnNode(val nodeName: String, val state: LoginState)
 
-data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>)
+data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList())
 
 fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     val grouped = linkedMapOf<Triple<String, String?, String?>, MutableList<Pair<NodeSummary, LoginInfo>>>()
@@ -23,7 +27,9 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     }
 
     return grouped.map { (key, entries) ->
-        AgentAccount(key.first, key.second ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) })
+        val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
+
+        AgentAccount(key.first, key.second ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty())
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 
@@ -45,15 +51,55 @@ fun accountsElsewhere(nodes: Collection<NodeSummary>, node: NodeSummary, agent: 
 
 fun accountChoices(logins: List<LoginInfo>, elsewhere: List<String>, nodeName: String): List<Choice> =
     logins.map { login ->
-        val left = login.usageLeft
+        val nearest = login.windows.maxByOrNull { it.usedPercent }
+        val left = nearest?.let { 100 - it.usedPercent.roundToInt().coerceIn(0, 100) } ?: login.usageLeft
 
         Choice(accountChoiceId(login), login.account ?: "Default account", when (login.state) {
-            LoginState.SignedIn -> if (left == null) "Usage unknown" else "$left% left"
+            LoginState.SignedIn -> if (left == null) "Usage unknown" else if (nearest == null) "$left% left" else "$left% left, ${windowName(nearest.name)}"
             LoginState.Expired -> "Expired"
             LoginState.SignedOut -> "Signed out"
             LoginState.Unknown -> "Unknown"
         }, usedPercent = left?.let { 100 - it }.takeIf { login.state == LoginState.SignedIn })
     } + elsewhere.map { Choice(SignInPrefix + it, it, "Sign in on $nodeName") }
+
+fun windowName(name: String): String = when (name) {
+    "five_hour" -> "5-hour window"
+    "seven_day" -> "weekly window"
+    else -> name.removePrefix("seven_day_").replace('_', ' ').let { "weekly $it window" }
+}
+
+fun usageClockTime(iso: String, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): String {
+    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val local = localDateTime(moment.toEpochMilliseconds())
+    val today = localDateTime(now.toEpochMilliseconds())
+
+    if (local == null || today == null) {
+        return until(iso, now)
+    }
+
+    val time = local.substringAfter('T')
+
+    val date = local.substringBefore('T')
+
+    if (date == today.substringBefore('T')) {
+        return time
+    }
+
+    val (_, month, day) = date.split('-')
+
+    return "${day.toInt()} ${MonthNames[month.toInt() - 1]} $time"
+}
+
+private val MonthNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+fun usageProjection(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): String {
+    val resets = window.resetsAt?.let { "resets ${usageClockTime(it, localDateTime, now)}" }
+    val about = if (localDateTime(now.toEpochMilliseconds()) == null) "" else "about "
+    val runsOut = window.runsOutAt?.let { "at this rate, runs out $about${usageClockTime(it, localDateTime, now)}" }
+    val steady = if (window.runsOutAt == null && window.ratePerHour != null) "at this rate, lasts until it resets" else null
+
+    return listOfNotNull(runsOut ?: steady, resets).joinToString(", ").replaceFirstChar { it.uppercase() }
+}
 
 fun accountMenuTitle(agent: String): String = when (agent) {
     "claude" -> "Claude account"

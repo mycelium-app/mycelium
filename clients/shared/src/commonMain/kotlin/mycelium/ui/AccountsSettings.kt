@@ -9,18 +9,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.LoginState
+import mycelium.state.AgentAccount
+import mycelium.state.usageProjection
+import mycelium.state.windowName
 import mycelium.state.Store
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
@@ -72,6 +77,8 @@ fun AccountsSettings(store: Store) {
                             Label(loginMethodName(account.method), color = colors.textMuted)
                         }
 
+                        AccountUsage(account)
+
                         Hairline()
                     }
                 }
@@ -109,3 +116,38 @@ fun AccountsSettings(store: Store) {
 
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 }
+
+@Composable
+private fun AccountUsage(account: AgentAccount) {
+    val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        if (account.windows.isEmpty()) {
+            Label("Usage unknown", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        for (window in account.windows) {
+            val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
+            val name = windowName(window.name).replaceFirstChar { it.uppercase() }
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                    Label(name, Modifier.width(UsageNameWidth), Tokens.Type.Meta, maxLines = 1)
+                    Box(Modifier.widthIn(max = UsageBarWidth).weight(1f)) { Meter(percent, "$name $percent% used") }
+                    Label("$percent% used", Modifier.width(UsageNameWidth), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                }
+
+                val projection = usageProjection(window, localDateTime)
+
+                if (projection.isNotEmpty()) {
+                    Label(projection, style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+            }
+        }
+    }
+}
+
+private val UsageNameWidth = 130.dp
+private val UsageBarWidth = 240.dp

@@ -56,7 +56,7 @@ private fun nodeJson(id: String, name: String, os: String, icon: String, online:
     """{"id":"$id","name":"$name","icon":"$icon","hostname":"$name","os":"$os","arch":"x86_64","version":"$version","address":"$address","online":$online,"draining":false,
     "last_seen_at":"${ago(minutes = 1)}","instructions_revision":"$revision","sessions_on_older_instructions":$older,
     "agents":[{"agent":"claude","version":"2.1.308","available":true},{"agent":"codex","version":"0.163.0","available":true}],
-    "logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in","usage_left":18},{"agent":"claude","account":"work@acme.example","method":"token","state":"signed_in","usage_left":77}$extraLogins]}"""
+    "logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in","usage_left":18,"usage_read_at":"${ago(minutes = 2)}","windows":[{"name":"five_hour","used_percent":82.0,"resets_at":"${ahead(hours = 3)}","rate_per_hour":27.0,"runs_out_at":"${ahead(hours = 1)}"},{"name":"seven_day","used_percent":31.0,"resets_at":"${ahead(days = 3)}","rate_per_hour":0.6},{"name":"seven_day_opus","used_percent":5.5,"resets_at":"${ahead(days = 3)}"}]},{"agent":"claude","account":"work@acme.example","method":"token","state":"signed_in","usage_left":77}$extraLogins]}"""
 
 private val BoardNodes = listOf(
     nodeJson(WillowId, "willow", "linux", "laptop", older = 2, address = "100.64.4.18"),

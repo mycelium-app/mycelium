@@ -128,6 +128,17 @@ data class LoginInfo(
     val method: String,
     val state: LoginState,
     @SerialName("usage_left") val usageLeft: Int? = null,
+    val windows: List<UsageWindow> = emptyList(),
+    @SerialName("usage_read_at") val usageReadAt: String? = null,
+)
+
+@Serializable
+data class UsageWindow(
+    val name: String,
+    @SerialName("used_percent") val usedPercent: Double,
+    @SerialName("resets_at") val resetsAt: String? = null,
+    @SerialName("rate_per_hour") val ratePerHour: Double? = null,
+    @SerialName("runs_out_at") val runsOutAt: String? = null,
 )
 
 @Serializable
@@ -894,7 +905,14 @@ data class GitFile(
 )
 
 @Serializable
-data class GitStatus(val branch: String, val upstream: String? = null, val ahead: Int, val behind: Int, val files: List<GitFile>)
+data class GitStatus(
+    val branch: String,
+    val upstream: String? = null,
+    val ahead: Int,
+    val behind: Int,
+    val files: List<GitFile>,
+    @SerialName("squash_message") val squashMessage: String? = null,
+)
 
 @Serializable
 data class GitCommit(val hash: String, val author: String, val date: String, val subject: String)

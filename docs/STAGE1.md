@@ -88,7 +88,8 @@ nodes            id uuid pk, name text unique, hostname, os, arch, version text,
                  created_by uuid, created_at, last_seen_at, revoked_at null, draining bool default false
 client_tokens    id uuid pk, user_id, label text, hostname, address, token_hash bytea unique, created_at, last_used_at, revoked_at null
 agents           node_id, agent text ('claude'|'codex'), version text, available bool, pk(node_id, agent)
-logins           id uuid pk, node_id, agent, account text null, method text, state text
+logins           id uuid pk, node_id, agent, account text null, method text, state text, usage_left, usage_windows jsonb, usage_read_at
+login_usage_history  node_id, agent, account, read_at, windows jsonb: one row per reading, the last 8 days kept
                  ('signed_in'|'signed_out'|'expired'|'unknown'), updated_at, unique(node_id, agent, coalesce(account, ''))
 conversations    id uuid pk, owner uuid, node_id, agent, cwd text, title text, status text, acp_session_id text null,
                  mode text null, model text null, account text null, created_at, updated_at, archived_at null
@@ -419,7 +420,7 @@ Node to control plane:
 | `session_closed` | `conversation_id` (the node closed an idle session to make room, so the next message starts it again with `session/load`) |
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
-| `logins` | `logins: [{agent, account?, method, state}]` |
+| `logins` | `logins: [{agent, account?, method, state, usage_left?, windows?: [{name, used_percent, resets_at?}], usage_read_at?}]` |
 | `instructions_held` | `revision, unmanaged: [label]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
@@ -462,7 +463,7 @@ The control plane keeps every sent `prompt` as unacknowledged until `prompt_rece
 
 An answer to a permission request is refused with 409 when the conversation has failed (`session_failed`, retry it first) or is no longer waiting for input (`already_resolved`). A pending send-now is forgotten when its node disconnects.
 
-A node reports one `logins` entry per account: the agent's default home plus one per folder under `<state_dir>/accounts/<agent>/<name>`, each named by the email found in that folder's own config (`.claude.json` for Claude Code, the `auth.json` identity token for Codex), else by the folder name. The node runs an agent as an account by setting `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to that folder, for both `start_session` and `start_login`; `account` on `start_login` signs in to (and creates, if new) that account's folder. Each `logins` report replaces the node's previous list. Usage left per account is not reported: neither agent exposes it through a documented interface.
+A node reports one `logins` entry per account: the agent's default home plus one per folder under `<state_dir>/accounts/<agent>/<name>`, each named by the email found in that folder's own config (`.claude.json` for Claude Code, the `auth.json` identity token for Codex), else by the folder name. The node runs an agent as an account by setting `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to that folder, for both `start_session` and `start_login`; `account` on `start_login` signs in to (and creates, if new) that account's folder. Each `logins` report replaces the node's previous list. A Claude account's usage is read every 5 minutes from `GET https://api.anthropic.com/api/oauth/usage` with the bearer token in that account's own `.credentials.json` (best effort): every window the response carries (`five_hour`, `seven_day`, `seven_day_opus`, ...) is reported with its percent used and `resets_at`, and `usage_left` is 100 minus the busiest. The control plane keeps the latest per account and a reading history, and `GET /nodes` adds to each window `rate_per_hour` and `runs_out_at` (the rate since the window last reset, shown only when it would run out before it resets). Codex accounts report no windows: codex-acp 2.2.2 exposes rate limits only inside its own session text, and its `_meta.quota` carries token counts.
 
 `start_login` carries the method the node reported in `logins`: `claude` supports `oauth_token`, `codex` supports `device_auth`. Any other method is answered with `login_output` explaining it and `login_finished` with `ok` false.
 

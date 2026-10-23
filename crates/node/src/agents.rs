@@ -1,5 +1,5 @@
 use crate::config::agent_command;
-use crate::usage::UsageCache;
+use crate::usage::{UsageCache, usage_left};
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, LoginState};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -155,9 +155,11 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
             };
             let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
-            let usage_left = usage.left(&account.dir).filter(|_| credential_present);
+            let reading = usage.reading(&account.dir).filter(|_| credential_present);
+            let usage_left = reading.as_ref().and_then(|reading| usage_left(&reading.windows));
+            let (windows, usage_read_at) = reading.map_or((Vec::new(), None), |reading| (reading.windows, Some(reading.read_at)));
 
-            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left });
+            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left, windows, usage_read_at });
         }
     }
 

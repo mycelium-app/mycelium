@@ -31,6 +31,8 @@ interface Platform {
 
     fun timeZone(): String? = null
 
+    fun localDateTime(epochMillis: Long): String? = null
+
     fun loadPreference(key: String): String? = null
 
     fun savePreference(key: String, value: String) = Unit

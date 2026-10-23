@@ -62,6 +62,8 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
 
     override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
 
+    override fun localDateTime(epochMillis: Long): String? = java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(epochMillis), java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+
     override fun loadPreference(key: String): String? = settings.getString(key, null)
 
     override fun savePreference(key: String, value: String) {

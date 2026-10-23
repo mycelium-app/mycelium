@@ -6,7 +6,7 @@ use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::json;
 
 fn login(account: &str, state: LoginState) -> LoginInfo {
-    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None }
+    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None }
 }
 
 async fn node_with_accounts(server: &Server, accounts: Vec<LoginInfo>) -> common::NodeLink {
@@ -64,6 +64,74 @@ async fn the_usage_left_an_account_reports_is_shown_on_the_node_and_replaced_by_
         (nodes[0]["logins"][0]["usage_left"] == json!(60)).then_some(())
     })
     .await;
+}
+
+fn window(name: &str, used: f64, resets_in_hours: i64) -> mycelium_proto::conversation::UsageWindow {
+    mycelium_proto::conversation::UsageWindow { name: name.into(), used_percent: used, resets_at: Some(chrono::Utc::now() + chrono::Duration::hours(resets_in_hours)), rate_per_hour: None, runs_out_at: None }
+}
+
+async fn report_usage(link: &mut common::NodeLink, hours_ago: i64, windows: Vec<mycelium_proto::conversation::UsageWindow>) {
+    let read_at = chrono::Utc::now() - chrono::Duration::hours(hours_ago);
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { windows, usage_read_at: Some(read_at), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+}
+
+async fn first_login(server: &Server, settled: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    let user = server.user.clone();
+
+    common::eventually("the reported usage", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+        let login = nodes[0]["logins"][0].clone();
+
+        settled(&login).then_some(login)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn each_usage_window_an_account_reports_is_shown_with_its_percent_reset_and_when_it_was_read() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    report_usage(&mut link, 0, vec![window("five_hour", 64.0, 2), window("seven_day", 31.0, 100), window("seven_day_opus", 5.0, 100)]).await;
+    let login = first_login(&server, |login| login["windows"].as_array().is_some_and(|windows| windows.len() == 3)).await;
+
+    let names: Vec<_> = login["windows"].as_array().unwrap().iter().map(|window| (window["name"].as_str().unwrap().to_string(), window["used_percent"].as_f64().unwrap())).collect();
+    assert_eq!(names, vec![("five_hour".to_string(), 64.0), ("seven_day".to_string(), 31.0), ("seven_day_opus".to_string(), 5.0)]);
+    assert!(login["windows"][0]["resets_at"].is_string());
+    assert!(login["usage_read_at"].is_string());
+}
+
+#[tokio::test]
+async fn the_rate_of_use_and_when_the_window_runs_out_come_from_the_readings_since_it_last_reset() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    report_usage(&mut link, 9 * 24, vec![window("five_hour", 0.0, 2)]).await;
+    report_usage(&mut link, 30, vec![window("five_hour", 90.0, 2)]).await;
+    report_usage(&mut link, 3, vec![window("five_hour", 10.0, 2)]).await;
+    report_usage(&mut link, 2, vec![window("five_hour", 20.0, 2)]).await;
+    report_usage(&mut link, 0, vec![window("five_hour", 40.0, 10)]).await;
+    let login = first_login(&server, |login| login["windows"][0]["used_percent"] == json!(40.0)).await;
+
+    let five_hour = &login["windows"][0];
+    assert!((five_hour["rate_per_hour"].as_f64().unwrap() - 10.0).abs() < 0.1, "{five_hour}");
+    let runs_out: chrono::DateTime<chrono::Utc> = five_hour["runs_out_at"].as_str().unwrap().parse().unwrap();
+    assert!(((runs_out - chrono::Utc::now()).num_minutes() - 360).abs() < 5, "{five_hour}");
+}
+
+#[tokio::test]
+async fn no_projection_is_given_when_the_window_resets_before_it_would_run_out_or_use_is_not_rising() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    report_usage(&mut link, 3, vec![window("five_hour", 10.0, 1), window("seven_day", 50.0, 100)]).await;
+    report_usage(&mut link, 0, vec![window("five_hour", 40.0, 1), window("seven_day", 50.0, 100)]).await;
+    let login = first_login(&server, |login| login["windows"][0]["used_percent"] == json!(40.0)).await;
+
+    assert!(login["windows"][0]["rate_per_hour"].is_number());
+    assert!(login["windows"][0]["runs_out_at"].is_null());
+    assert!(login["windows"][1]["rate_per_hour"].is_null());
+    assert!(login["windows"][1]["runs_out_at"].is_null());
 }
 
 #[tokio::test]

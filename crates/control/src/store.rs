@@ -2,7 +2,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::versions::newer;
 use mycelium_proto::api::NodeSummary;
-use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt};
+use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt, UsageWindow};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -219,12 +219,13 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         .bind(&ids)
         .fetch_all(&state.pool)
         .await?;
-    let logins = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i16>)>(
-        "select node_id, agent, account, method, state, usage_left from logins where node_id = any($1) order by agent",
+    let logins = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i16>, sqlx::types::Json<Vec<UsageWindow>>, Option<chrono::DateTime<chrono::Utc>>)>(
+        "select node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at from logins where node_id = any($1) order by agent",
     )
     .bind(&ids)
     .fetch_all(&state.pool)
     .await?;
+    let usage_history = crate::account_usage::project_windows(state, &ids).await?;
 
     let current_revision = crate::instructions::current_revision(state).await?;
     let mut summaries = Vec::new();
@@ -246,8 +247,10 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
 
         let mut node_logins = Vec::new();
 
-        for (_, agent, account, method, login_state, usage_left) in logins.iter().filter(|row| row.0 == node.id) {
-            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()) });
+        for (_, agent, account, method, login_state, usage_left, windows, usage_read_at) in logins.iter().filter(|row| row.0 == node.id) {
+            let history = usage_history.iter().find(|group| group.0 == node.id && group.1 == *agent && group.2 == account.clone().unwrap_or_default()).map(|group| group.3.as_slice()).unwrap_or_default();
+            let windows = crate::account_usage::with_projections(windows.0.clone(), history);
+            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: *usage_read_at });
         }
 
         summaries.push(NodeSummary {
