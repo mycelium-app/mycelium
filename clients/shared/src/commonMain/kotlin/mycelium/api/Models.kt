@@ -387,7 +387,25 @@ data class CreateTaskRequest(
     @SerialName("project_id") val projectId: String? = null,
     val branch: String? = null,
     val prompt: String? = null,
+    val status: String = TaskStatuses.Open,
+    val options: List<String> = emptyList(),
+    val answer: String? = null,
+    @SerialName("source_id") val sourceId: String? = null,
+    @SerialName("source_title") val sourceTitle: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
 )
+
+object TaskStatuses {
+    const val Question = "question"
+    const val Proposed = "proposed"
+    const val Open = "open"
+    const val Claimed = "claimed"
+    const val Done = "done"
+    const val Declined = "declined"
+}
+
+@Serializable
+data class AnswerTaskRequest(val answer: String)
 
 @Serializable
 data class Schedule(

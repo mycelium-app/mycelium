@@ -261,6 +261,18 @@ class MyceliumApi(
         call("/tasks/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun approveTask(id: String): Task =
+        call("/tasks/$id/approve") { client.post(it) { authorise() } }.body()
+
+    suspend fun declineTask(id: String): Task =
+        call("/tasks/$id/decline") { client.post(it) { authorise() } }.body()
+
+    suspend fun answerTask(id: String, answer: String): Task =
+        call("/tasks/$id/answer") { client.post(it) { authorise(); json(AnswerTaskRequest(answer)) } }.body()
+
+    suspend fun finishTask(id: String): Task =
+        call("/tasks/$id/done") { client.post(it) { authorise() } }.body()
+
     suspend fun schedules(): List<Schedule> = call("/schedules") { client.get(it) { authorise() } }.body()
 
     suspend fun createSchedule(request: CreateScheduleRequest): Schedule =

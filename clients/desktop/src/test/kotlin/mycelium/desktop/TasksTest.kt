@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -56,7 +57,19 @@ private fun conversation(id: String, title: String, status: String, cwd: String 
 private const val BoardNodes = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"v0.1.13","online":true,"draining":false,
 "agents":[{"agent":"claude","version":"2","available":true},{"agent":"codex","version":"1","available":true}],"logins":[],"sessions":[]}]"""
 
+private fun task(id: String, title: String, status: String, extra: String = "") =
+    """{"id":"$id","node_id":"n1","agent":"claude","cwd":"/work/app","project_id":"p1","branch":null,"title":"$title","status":"$status","created_at":"2026-10-22T10:00:00Z"$extra}"""
+
+private val BoardTaskList = "[" + listOf(
+    task("t1", "Rebuild install.md", "open"),
+    task("tq", "Tag now, or wait?", "question", ""","options":["Tag now","Wait"],"source_title":"Release""""),
+    task("tp", "Cache cargo in the release jobs", "proposed", ""","source_title":"Release""""),
+    task("tc", "Merge the Gradle jobs", "claimed", ""","conversation_id":"c-claimed""""),
+    task("tx", "Old idea", "declined"),
+).joinToString(",") + "]"
+
 private val BoardConversations = "[" + listOf(
+    conversation("c-claimed", "Gradle merge", "review"),
     conversation("c-input", "Waiting on you", "input", "/work/app"),
     conversation("c-run", "Running job", "working", "/work/app-wt/feature-x", model = "\"opus\""),
     conversation("c-review", "Ready for a look", "review", agent = "codex"),
@@ -84,11 +97,15 @@ class TasksTest {
             }
 
             when {
+                request.method == HttpMethod.Post && path.endsWith("/tasks/tp/approve") -> respond(task("tp", "Cache cargo in the release jobs", "open"), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/tasks/tp/decline") -> respond(task("tp", "Cache cargo in the release jobs", "declined"), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/tasks/tq/answer") -> respond(task("tq", "Tag now, or wait?", "done", ""","answer":"Wait""""), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/tasks/tc/done") -> respond(task("tc", "Merge the Gradle jobs", "done", ""","conversation_id":"c-claimed""""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/t1/start") -> respond(conversation("c-new", "Rebuild install.md", "working", "/work/app"), HttpStatusCode.Created, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks") -> respond("""{"id":"t2","node_id":"n1","agent":"claude","cwd":"/srv","title":"Tidy","created_at":"2026-10-22T10:00:00Z"}""", HttpStatusCode.Created, json)
                 path.endsWith("/conversations/c-input/events") -> respond(PermissionEvent, HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") -> respond("[]", HttpStatusCode.OK, json)
-                path.endsWith("/tasks") -> respond("""[{"id":"t1","node_id":"n1","agent":"claude","cwd":"/work/app","project_id":"p1","branch":null,"title":"Rebuild install.md","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
+                path.endsWith("/tasks") -> respond(BoardTaskList, HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"app","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/worktrees") -> respond("""[{"id":"w1","project_id":"p1","branch":"feature/x","path":"/work/app-wt/feature-x","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(BoardNodes, HttpStatusCode.OK, json)
@@ -109,16 +126,99 @@ class TasksTest {
     }
 
     @Test
-    fun conversationsSitInTheLaneOfTheirStatusAndBacklogTasksInToDo() {
+    fun tasksSitInTheLaneOfTheirStatusAndConversationsWithoutATaskInClaimed() {
         showBoard()
 
-        for (title in listOf("Waiting on you", "Running job", "Ready for a look", "Broke down", "Rebuild install.md")) {
+        for (title in listOf("Tag now, or wait?", "Cache cargo in the release jobs", "Rebuild install.md", "Merge the Gradle jobs", "Waiting on you", "Running job", "Ready for a look", "Broke down")) {
             rule.onNodeWithText(title).assertExists()
         }
 
-        for (lane in listOf("Needs input", "To do", "Running", "To review")) {
+        for (lane in listOf("Questions", "Proposed", "Open", "Claimed")) {
             rule.onNodeWithText(lane).assertExists()
         }
+
+        rule.onNodeWithText("Gradle merge").assertDoesNotExist()
+        rule.onNodeWithText("Old idea").assertDoesNotExist()
+    }
+
+    @Test
+    fun questionsAndProposalsNameWhereTheyCameFrom() {
+        showBoard()
+
+        rule.onNodeWithText("From Release").assertExists()
+        rule.onNodeWithText("app · from Release").assertExists()
+    }
+
+    @Test
+    fun approvingAProposalPostsItAndOffersItToStart() {
+        showBoard()
+
+        rule.onNodeWithContentDescription("Approve Cache cargo in the release jobs").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tp/approve") } }
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Start Cache cargo in the release jobs").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Approve Cache cargo in the release jobs").assertDoesNotExist()
+    }
+
+    @Test
+    fun decliningAProposalHidesItFromTheBoard() {
+        showBoard()
+
+        rule.onNodeWithContentDescription("Decline Cache cargo in the release jobs").performClick()
+
+        rule.waitUntil { rule.onAllNodesWithText("Cache cargo in the release jobs").fetchSemanticsNodes().isEmpty() }
+        assertTrue(posts.any { it.first.endsWith("/tasks/tp/decline") })
+    }
+
+    @Test
+    fun showDeclinedBringsDeclinedTasksBackIntoDone() {
+        platform.saved["tasks-collapsed-lanes"] = ""
+        showBoard()
+
+        rule.onNodeWithText("Old idea").assertDoesNotExist()
+        rule.onNodeWithText("Show declined").performClick()
+
+        rule.onNodeWithText("Old idea").assertExists()
+        rule.onNodeWithText("Declined").assertExists()
+        rule.onNodeWithText("Hide declined").assertExists()
+    }
+
+    @Test
+    fun aQuestionIsAnsweredByPickingAnOptionAndTheAnswerIsSent() {
+        showBoard()
+
+        rule.onNodeWithContentDescription("Answer Tag now, or wait?").performClick()
+        rule.onNodeWithContentDescription("Answer Tag now, or wait?: Wait").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        assertEquals("""{"answer":"Wait"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
+    }
+
+    @Test
+    fun aQuestionIsAnsweredInYourOwnWordsAndAnEmptyAnswerIsRefused() {
+        showBoard()
+
+        rule.onNodeWithContentDescription("Answer Tag now, or wait?").performClick()
+        rule.onNodeWithText("Send answer").performClick()
+        rule.onNodeWithText("Enter an answer to send.").assertExists()
+        assertTrue(posts.none { it.first.endsWith("/answer") })
+
+        rule.onNodeWithContentDescription("Answer. Error: Enter an answer to send.").performTextInput("Tag it tomorrow")
+        rule.onNodeWithText("Send answer").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        assertEquals("""{"answer":"Tag it tomorrow"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
+    }
+
+    @Test
+    fun aClaimedTaskWhoseConversationIsReadyIsMarkedDoneFromItsCard() {
+        showBoard()
+
+        rule.onNodeWithText("Ready to review").assertExists()
+        rule.onNodeWithContentDescription("Mark Merge the Gradle jobs done").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tc/done") } }
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Mark Merge the Gradle jobs done").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test
@@ -149,22 +249,22 @@ class TasksTest {
 
     @Test
     fun aLaneCollapsedEarlierStaysCollapsedWhenTheBoardIsOpenedAgain() {
-        platform.saved["tasks-collapsed-lanes"] = "Running,Done"
+        platform.saved["tasks-collapsed-lanes"] = "Claimed,Done"
         showBoard()
 
         rule.onNodeWithText("Running job").assertDoesNotExist()
-        rule.onNodeWithContentDescription("Expand Running, 1").assertExists()
-        rule.onNodeWithText("Ready for a look").assertExists()
+        rule.onNodeWithContentDescription("Expand Claimed, 5").assertExists()
+        rule.onNodeWithText("Cache cargo in the release jobs").assertExists()
     }
 
     @Test
     fun collapsingALaneHidesItsCardsAndSavesTheCollapsedLanes() {
         showBoard()
 
-        rule.onNodeWithContentDescription("Collapse Running").performClick()
+        rule.onNodeWithContentDescription("Collapse Claimed").performScrollTo().performClick()
 
         rule.onNodeWithText("Running job").assertDoesNotExist()
-        assertEquals(setOf("Done", "Running"), platform.saved.getValue("tasks-collapsed-lanes").split(',').toSet())
+        assertEquals(setOf("Done", "Claimed"), platform.saved.getValue("tasks-collapsed-lanes").split(',').toSet())
     }
 
     @Test
@@ -232,7 +332,7 @@ class TasksTest {
     }
 
     @Test
-    fun startingABacklogTaskStartsAConversationAndMovesTheCardToRunning() {
+    fun startingAnOpenTaskStartsAConversationAndClaimsTheCard() {
         showBoard()
 
         rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()

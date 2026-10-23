@@ -3,16 +3,17 @@ package mycelium.state
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Task
+import mycelium.api.TaskStatuses
 
 enum class Lane(val title: String) {
-    NeedsInput("Needs input"),
-    ToDo("To do"),
-    Running("Running"),
-    ToReview("To review"),
+    Questions("Questions"),
+    Proposed("Proposed"),
+    Open("Open"),
+    Claimed("Claimed"),
     Done("Done"),
 }
 
-data class BoardFilter(val text: String = "", val projectId: String? = null, val nodeId: String? = null, val agent: String? = null)
+data class BoardFilter(val text: String = "", val projectId: String? = null, val nodeId: String? = null, val agent: String? = null, val showDeclined: Boolean = false)
 
 data class BoardCard(
     val key: String,
@@ -26,43 +27,47 @@ data class BoardCard(
     val conversation: Conversation?,
     val task: Task?,
 ) {
-    val details: String get() = listOfNotNull(agentName(agent), model, projectName, branch).joinToString(" · ")
+    val details: String
+        get() = when (task?.status) {
+            TaskStatuses.Question -> "From ${task.sourceTitle ?: "a conversation that is gone"}"
+            TaskStatuses.Proposed -> listOfNotNull(projectName, task.sourceTitle?.let { "from $it" }).joinToString(" · ")
+            else -> listOfNotNull(agentName(agent), model, projectName, branch).joinToString(" · ")
+        }
 }
 
 private const val DoneCardLimit = 50
 
 fun laneOf(status: ConversationStatus): Lane = when (status) {
-    ConversationStatus.Input -> Lane.NeedsInput
-    ConversationStatus.Working -> Lane.Running
-    ConversationStatus.Review, ConversationStatus.Failed -> Lane.ToReview
     ConversationStatus.Done -> Lane.Done
+    else -> Lane.Claimed
+}
+
+fun laneOf(task: Task, showDeclined: Boolean): Lane? = when (task.status) {
+    TaskStatuses.Question -> Lane.Questions
+    TaskStatuses.Proposed -> Lane.Proposed
+    TaskStatuses.Open -> Lane.Open
+    TaskStatuses.Claimed -> Lane.Claimed
+    TaskStatuses.Declined -> Lane.Done.takeIf { showDeclined }
+    else -> Lane.Done
 }
 
 fun boardCards(state: AppState, filter: BoardFilter = BoardFilter()): Map<Lane, List<BoardCard>> {
+    val claimedBy = state.tasks.values.mapNotNull { it.conversationId }.toSet()
     val fromConversations = state.conversations.values
-        .filter { it.archivedAt == null }
+        .filter { it.archivedAt == null && it.id !in claimedBy }
         .sortedByDescending { it.updatedAt }
         .map { conversation ->
             val worktree = state.worktrees.values.firstOrNull { it.path == conversation.cwd }
             val project = worktree?.let { state.projects[it.projectId] } ?: state.projects.values.firstOrNull { it.path == conversation.cwd }
 
-            laneOf(conversation.status) to BoardCard(
-                key = conversation.id,
-                title = conversation.title,
-                agent = conversation.agent,
-                model = conversation.model,
-                projectId = project?.id,
-                projectName = project?.name,
-                branch = worktree?.branch,
-                nodeId = conversation.nodeId,
-                conversation = conversation,
-                task = null,
-            )
+            laneOf(conversation.status) to BoardCard(conversation.id, conversation.title, conversation.agent, conversation.model, project?.id, project?.name, worktree?.branch, conversation.nodeId, conversation, null)
         }
-    val fromTasks = state.tasks.values.sortedBy { it.createdAt }.map { task ->
+    val fromTasks = state.tasks.values.sortedBy { it.createdAt }.mapNotNull { task ->
+        val lane = laneOf(task, filter.showDeclined) ?: return@mapNotNull null
+        val conversation = task.conversationId?.let { state.conversations[it] }
         val project = task.projectId?.let { state.projects[it] }
 
-        Lane.ToDo to BoardCard(task.id, task.title, task.agent, null, project?.id, project?.name, task.branch, task.nodeId, null, task)
+        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task)
     }
     val matching = (fromConversations + fromTasks).filter { (_, card) -> matches(card, filter) }
     val lanes = matching.groupBy({ it.first }, { it.second })

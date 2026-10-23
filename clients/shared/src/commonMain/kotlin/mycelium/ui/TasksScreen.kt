@@ -36,6 +36,8 @@ import kotlinx.coroutines.launch
 import mycelium.Platform
 import mycelium.api.ConversationStatus
 import mycelium.api.CreateTaskRequest
+import mycelium.api.Task
+import mycelium.api.TaskStatuses
 import mycelium.state.AppState
 import mycelium.state.BoardCard
 import mycelium.state.BoardFilter
@@ -52,20 +54,21 @@ private const val CollapsedPreference = "tasks-collapsed-lanes"
 private const val TickMillis = 1_000L
 private val LaneMinWidth = 260.dp
 private val CollapsedLaneWidth = 40.dp
+private val finishedStatuses = setOf(ConversationStatus.Review, ConversationStatus.Done, ConversationStatus.Failed)
 
 private fun laneIcon(lane: Lane): MyIcon = when (lane) {
-    Lane.NeedsInput -> MyIcon.Alert
-    Lane.ToDo -> MyIcon.List
-    Lane.Running -> MyIcon.Working
-    Lane.ToReview -> MyIcon.Review
+    Lane.Questions -> MyIcon.Question
+    Lane.Proposed -> MyIcon.Review
+    Lane.Open -> MyIcon.List
+    Lane.Claimed -> MyIcon.Working
     Lane.Done -> MyIcon.Check
 }
 
 @Composable
 private fun laneColour(lane: Lane) = when (lane) {
-    Lane.NeedsInput, Lane.ToReview -> MyTheme.colors.statusAttention
-    Lane.Running -> MyTheme.colors.statusWorking
-    Lane.ToDo, Lane.Done -> MyTheme.colors.textMuted
+    Lane.Questions, Lane.Proposed -> MyTheme.colors.statusAttention
+    Lane.Claimed -> MyTheme.colors.statusWorking
+    Lane.Open, Lane.Done -> MyTheme.colors.textMuted
 }
 
 private fun Modifier.vertical(): Modifier =
@@ -86,6 +89,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
     var nodeMenu by remember { mutableStateOf(false) }
     var agentMenu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var answering by remember { mutableStateOf<Task?>(null) }
     var now by remember { mutableStateOf(kotlin.time.Clock.System.now()) }
 
     LaunchedEffect(Unit) {
@@ -93,7 +97,8 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
     }
 
     val lanes = boardCards(state, filter)
-    val waiting = lanes.getValue(Lane.NeedsInput).mapNotNull { it.conversation?.id }
+    val claimed = lanes.getValue(Lane.Claimed)
+    val waiting = claimed.mapNotNull { it.conversation?.takeIf { conversation -> conversation.status == ConversationStatus.Input }?.id }
 
     LaunchedEffect(waiting) {
         for (id in waiting) {
@@ -101,7 +106,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
         }
     }
 
-    if (lanes.getValue(Lane.Running).isNotEmpty()) {
+    if (claimed.any { it.conversation?.status == ConversationStatus.Working }) {
         LaunchedEffect(Unit) {
             while (true) {
                 delay(TickMillis)
@@ -205,6 +210,14 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
                     }
                 }
             }
+
+            MyButton(
+                { filter = filter.copy(showDeclined = !filter.showDeclined) },
+                text = if (filter.showDeclined) "Hide declined" else "Show declined",
+                variant = ButtonVariant.Outline,
+                size = ButtonSize.Sm,
+                muted = !filter.showDeclined,
+            )
         }
 
         Hairline()
@@ -226,7 +239,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
                         CollapsedLane(lane, cards.size, onExpand = { toggle(lane) })
                     } else {
                         LaneColumn(lane, cards, laneWidth, onCollapse = { toggle(lane) }) { card ->
-                            TaskCardView(card, store, state, lane, now, onOpen)
+                            TaskCardView(card, store, state, now, onOpen, onAnswer = { answering = it })
                         }
                     }
                 }
@@ -236,6 +249,10 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
 
     if (adding) {
         AddTaskDialog(store, state, onDismiss = { adding = false })
+    }
+
+    answering?.let { task ->
+        AnswerTaskDialog(store, task, onDismiss = { answering = null })
     }
 }
 
@@ -283,7 +300,7 @@ private fun CollapsedLane(lane: Lane, count: Int, onExpand: () -> Unit) {
 }
 
 @Composable
-private fun TaskCardView(card: BoardCard, store: Store, state: AppState, lane: Lane, now: kotlin.time.Instant, onOpen: (String) -> Unit) {
+private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: kotlin.time.Instant, onOpen: (String) -> Unit, onAnswer: (Task) -> Unit) {
     val colors = MyTheme.colors
     val conversation = card.conversation
     val permission = conversation?.let { pendingPermission(state.events[it.id].orEmpty()) }
@@ -304,14 +321,14 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, lane: L
             StatusMark("Failed", Tone.Failed, MyIcon.Failed)
         }
 
-        if (conversation != null && lane == Lane.Running) {
+        if (conversation != null && conversation.status == ConversationStatus.Working) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                 Label(elapsed(conversation.updatedAt, now), Modifier.weight(1f).semantics { contentDescription = "Running for ${elapsed(conversation.updatedAt, now)}" }, Tokens.Type.Meta, colors.textMuted)
                 MyButton({ store.act { store.api.cancel(conversation.id) } }, text = "Stop", icon = MyIcon.Stop, description = "Stop ${card.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
         }
 
-        if (conversation != null && lane == Lane.NeedsInput) {
+        if (conversation != null && conversation.status == ConversationStatus.Input) {
             if (permission == null) {
                 MyButton({ onOpen(conversation.id) }, text = "Answer", description = "Answer ${card.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             } else {
@@ -332,16 +349,89 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, lane: L
         }
 
         card.task?.let { task ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                MyButton(
-                    { store.act { store.startTask(task) } },
-                    text = "Start",
-                    description = "Start ${task.title}",
-                    variant = ButtonVariant.Outline,
-                    size = ButtonSize.Sm,
-                )
-                MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+            when (task.status) {
+                TaskStatuses.Question -> MyButton({ onAnswer(task) }, text = "Answer", description = "Answer ${task.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+
+                TaskStatuses.Proposed -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                    MyButton({ store.act { store.approveTask(task) } }, text = "Approve", description = "Approve ${task.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    MyButton({ store.act { store.declineTask(task) } }, text = "Decline", description = "Decline ${task.title}", size = ButtonSize.Sm, muted = true)
+                }
+
+                TaskStatuses.Open -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                    MyButton({ store.act { store.startTask(task) } }, text = "Start", description = "Start ${task.title}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+                }
+
+                TaskStatuses.Claimed -> if (conversation != null && conversation.status in finishedStatuses) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                        if (conversation.status != ConversationStatus.Failed) {
+                            StatusMark("Ready to review", Tone.Attention, MyIcon.Review, Modifier.weight(1f))
+                        } else {
+                            Box(Modifier.weight(1f))
+                        }
+
+                        MyButton({ store.act { store.finishTask(task) } }, text = "Mark done", description = "Mark ${task.title} done", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    }
+                }
+
+                TaskStatuses.Declined -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+
+                TaskStatuses.Done -> task.answer?.let { Label("Answered: $it", style = Tokens.Type.Meta, color = colors.text) }
             }
+        }
+    }
+}
+
+@Composable
+private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var answer by remember { mutableStateOf("") }
+    var answerError by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var running by remember { mutableStateOf(false) }
+
+    fun submit(text: String) {
+        if (running) {
+            return
+        }
+
+        answerError = if (text.isBlank()) "Enter an answer to send." else null
+
+        if (answerError != null) {
+            return
+        }
+
+        failure = null
+        running = true
+
+        scope.launch {
+            failure = attempt {
+                store.answerTask(task, text.trim())
+                onDismiss()
+            }
+            running = false
+        }
+    }
+
+    Dialog(onDismiss) {
+        Label("Answer a question", Modifier.semantics { heading() }, Tokens.Type.Title)
+        Label(task.title, style = Tokens.Type.UiStrong)
+
+        if (task.options.isNotEmpty()) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                for (option in task.options) {
+                    MyButton({ submit(option) }, text = option, description = "Answer ${task.title}: $option", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                }
+            }
+        }
+
+        TextInput(answer, { answer = it }, label = "Answer", placeholder = "Your answer", error = answerError, onSubmit = { submit(answer) })
+
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            MyButton(onDismiss, text = "Cancel", muted = true)
+            MyButton({ submit(answer) }, text = "Send answer", variant = ButtonVariant.Outline)
         }
     }
 }

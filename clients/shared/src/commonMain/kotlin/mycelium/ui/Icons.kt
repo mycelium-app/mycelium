@@ -40,6 +40,7 @@ enum class MyIcon(vararg val paths: String) {
     Search(circle(11f, 11f, 7f), "m20 20-3.5-3.5"),
     Plus("M12 5v14M5 12h14"),
     Alert(circle(12f, 12f, 9f), "M12 8v4M12 16h.01"),
+    Question(circle(12f, 12f, 9f), "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"),
     Failed(circle(12f, 12f, 9f), "m15 9-6 6M9 9l6 6"),
     Review(circle(12f, 12f, 9f), circle(12f, 12f, 3f)),
     Working("M21 12a9 9 0 1 1-6.2-8.56"),

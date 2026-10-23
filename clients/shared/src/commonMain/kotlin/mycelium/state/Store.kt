@@ -22,6 +22,7 @@ import mycelium.api.Schedule
 import mycelium.api.SetGoalRequest
 import mycelium.api.ScheduleRun
 import mycelium.api.Task
+import mycelium.api.TaskStatuses
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
 import mycelium.api.NodeResources
@@ -197,9 +198,21 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     suspend fun startTask(task: Task): Conversation {
         val conversation = api.startTask(task.id)
 
-        mutableState.update { it.copy(tasks = it.tasks - task.id, conversations = it.conversations + (conversation.id to conversation)) }
+        mutableState.update { it.copy(tasks = it.tasks + (task.id to task.copy(status = TaskStatuses.Claimed, conversationId = conversation.id)), conversations = it.conversations + (conversation.id to conversation)) }
 
         return conversation
+    }
+
+    suspend fun approveTask(task: Task) = replaceTask(api.approveTask(task.id))
+
+    suspend fun declineTask(task: Task) = replaceTask(api.declineTask(task.id))
+
+    suspend fun answerTask(task: Task, answer: String) = replaceTask(api.answerTask(task.id, answer))
+
+    suspend fun finishTask(task: Task) = replaceTask(api.finishTask(task.id))
+
+    private fun replaceTask(task: Task) {
+        mutableState.update { it.copy(tasks = it.tasks + (task.id to task)) }
     }
 
     suspend fun deleteTask(task: Task) {
