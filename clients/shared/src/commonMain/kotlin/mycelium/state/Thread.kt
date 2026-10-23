@@ -59,6 +59,7 @@ sealed interface ThreadItem {
         val diff: FileDiff?,
         val output: String?,
         val images: List<ThreadImage> = emptyList(),
+        val input: JsonObject? = null,
     ) : ThreadItem
 
     data class Plan(override val key: String, val entries: List<PlanEntry>) : ThreadItem
@@ -284,6 +285,7 @@ private fun toolCallFrom(key: String, update: JsonObject): ThreadItem.ToolCall {
         diff = diffFrom(update),
         output = outputFrom(update),
         images = imagesFrom(update, title),
+        input = inputFrom(update),
     )
 }
 
@@ -307,8 +309,11 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
         diff = diffFrom(update) ?: current.diff,
         output = outputFrom(update) ?: current.output,
         images = imagesFrom(update, title).ifEmpty { current.images },
+        input = inputFrom(update) ?: current.input,
     )
 }
+
+private fun inputFrom(update: JsonObject): JsonObject? = (update["rawInput"] as? JsonObject)?.takeIf { it.isNotEmpty() }
 
 private fun toolArgument(update: JsonObject, title: String): String {
     val locations = update["locations"] as? JsonArray

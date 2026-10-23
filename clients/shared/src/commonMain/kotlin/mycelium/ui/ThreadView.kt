@@ -70,6 +70,8 @@ import mycelium.state.Token
 import mycelium.state.ColumnAlign
 import mycelium.state.TokenKind
 import mycelium.state.highlight
+import mycelium.state.myceliumCall
+import mycelium.state.myceliumTool
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseGeneratedUi
@@ -195,7 +197,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
             ToolCall(item)
 
             for (image in item.images) {
-                ThreadImageView(image, item.title)
+                ThreadImageView(image, myceliumTool(item.title)?.label ?: item.title)
             }
         }
         is ThreadItem.Plan -> PlanCard(item)
@@ -670,7 +672,7 @@ private fun closingMarker(text: String, marker: String, index: Int, previous: Ch
 fun toolLabel(kind: String, title: String): String = when (kind) {
     "execute" -> "bash"
     "read", "edit", "search", "fetch", "delete", "move", "think" -> kind
-    else -> title.substringBefore(' ').lowercase()
+    else -> myceliumTool(title)?.label ?: title.substringBefore(' ').lowercase()
 }
 
 @Composable
@@ -688,13 +690,20 @@ private fun ToolCall(call: ThreadItem.ToolCall) {
         return
     }
 
+    val mycelium = myceliumCall(call)
+
+    if (mycelium != null) {
+        MyceliumCard(call, mycelium)
+        return
+    }
+
     Row(
         Modifier.fillMaxWidth().heightIn(min = Tokens.Size.ControlSm),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Label(toolLabel(call.kind, call.title), style = Tokens.Type.Code, color = colors.text, maxLines = 1)
-        Label(call.argument, Modifier.weight(1f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
+        Label(call.argument.takeUnless { it == call.title && myceliumTool(it) != null }.orEmpty(), Modifier.weight(1f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
 
         when (call.status) {
             ToolStatus.Running -> StatusMark("Running", Tone.Working, MyIcon.Working)
@@ -721,7 +730,7 @@ private fun DiffStat(diff: FileDiff) {
 }
 
 @Composable
-private fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+internal fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val colors = MyTheme.colors
 
     Column(
@@ -735,7 +744,7 @@ private fun Card(modifier: Modifier = Modifier, content: @Composable () -> Unit)
 }
 
 @Composable
-private fun CardHead(content: @Composable RowScope.() -> Unit) {
+internal fun CardHead(content: @Composable RowScope.() -> Unit) {
     val colors = MyTheme.colors
 
     Column(Modifier.fillMaxWidth().background(colors.bgPanel)) {

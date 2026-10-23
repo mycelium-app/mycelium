@@ -103,6 +103,8 @@ enum class MyIcon(vararg val paths: String) {
     Code("m16 18 6-6-6-6M8 6l-6 6 6 6"),
     Flask("M10 2v7.5L4.5 19a2 2 0 0 0 1.7 3h11.6a2 2 0 0 0 1.7-3L14 9.5V2M8.5 2h7M7 16h10"),
     Chat("M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"),
+    Memory("M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z", "M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z", "M12 5v13"),
+    Task(rect(3f, 3f, 18f, 18f, 2f), "m9 12 2 2 4-4"),
 }
 
 val NodeIcons: Map<String, MyIcon> by lazy {
