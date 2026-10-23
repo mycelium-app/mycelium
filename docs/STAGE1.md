@@ -165,7 +165,7 @@ Conversations:
 - `GET /api/v1/conversations?archived=false`.
 - `POST /api/v1/conversations` `{node_id, agent, account?, cwd, title?, prompt?}` → the conversation (409 `account_not_signed_in` unless the node reports that account signed in for the agent); the node
   starts the ACP session, and `prompt`, if given, is the first message.
-- `GET /api/v1/conversations/{id}`, `PATCH` `{title?, archived?, account?}` (409 `account_locked` once the conversation has a session), `POST /{id}/opened` marks review as done.
+- `GET /api/v1/conversations/{id}`, `PATCH` `{title?, archived?, account?, use_default_account?}` (409 `account_locked` once the conversation has a session), `POST /{id}/opened` marks review as done.
 - `GET /api/v1/conversations/{id}/events?after=<seq>&limit=500`.
 - `POST /{id}/prompt` `{text}`: sent now if idle, otherwise appended to the queue.
 - `GET /{id}/queue`, `PATCH /{id}/queue/{qid}` `{text}`, `DELETE /{id}/queue/{qid}`, `POST /{id}/queue/{qid}/send-now`

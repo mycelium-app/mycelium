@@ -113,3 +113,26 @@ async fn a_sign_in_can_name_the_account_it_is_for() {
         other => panic!("expected start_login, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn the_default_account_can_be_chosen_explicitly_until_the_conversation_has_a_session() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, vec![login("sam@example.com", LoginState::SignedIn), login("work@acme.example", LoginState::SignedIn)]).await;
+    let created = server.create_conversation(link.id, None).await;
+    let conversation_id = link.expect_start_session().await;
+    let path = format!("/api/v1/conversations/{}", created.id);
+
+    server.user.json(server.user.patch(&path).json(&json!({"account": "work@acme.example"}))).await;
+    let (status, body) = server.user.json(server.user.patch(&path).json(&json!({"use_default_account": true}))).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body["account"].is_null());
+
+    server.user.json(server.user.patch(&path).json(&json!({"account": "work@acme.example"}))).await;
+    link.start_session(conversation_id, "s1").await;
+    let user = server.user.clone();
+    common::eventually("the session", || async { (!user.json(user.get(&path)).await.1["acp_session_id"].is_null()).then_some(()) }).await;
+
+    let (status, body) = server.user.json(server.user.patch(&path).json(&json!({"use_default_account": true}))).await;
+    assert_eq!(status, 409);
+    assert_eq!(body["error"], "account_locked");
+}

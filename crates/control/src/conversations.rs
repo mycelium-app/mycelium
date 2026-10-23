@@ -179,6 +179,11 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, user.id).await?;
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+    let use_default = request.use_default_account == Some(true);
+
+    if use_default && before.acp_session_id.is_some() && before.account.is_some() {
+        return Err(ApiError::conflict("account_locked", "This conversation has already started with its account. Start a new conversation to use another one."));
+    }
 
     if let Some(account) = account {
         if before.acp_session_id.is_some() && before.account.as_deref() != Some(account) {
@@ -190,7 +195,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "update conversations set title = coalesce($2, title), account = coalesce($4, account),
+        "update conversations set title = coalesce($2, title), account = case when $5 then null else coalesce($4, account) end,
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
@@ -200,6 +205,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(title)
     .bind(request.archived)
     .bind(account)
+    .bind(use_default)
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
