@@ -65,6 +65,7 @@ import mycelium.state.FileDiff
 import mycelium.state.PlanStatus
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
+import mycelium.state.suggestedReplies
 import mycelium.state.WorkflowProgress
 
 private const val ShortOutputLimit = 40
@@ -75,6 +76,7 @@ fun ThreadView(
     onAnswer: (requestId: String, optionId: String) -> Unit,
     onStopWorkflow: () -> Unit,
     modifier: Modifier = Modifier,
+    onSuggest: (String) -> Unit = {},
 ) {
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -127,6 +129,8 @@ fun ThreadView(
 
                     TurnEnd(
                         item = item,
+                        suggestions = if (index == items.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
+                        onSuggest = onSuggest,
                         onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
                         onScrollToMessage = if (asked < 0) null else ({
                             scope.launch {
@@ -554,7 +558,7 @@ private fun PermissionCard(permission: ThreadItem.Permission, onAnswer: (String,
 }
 
 @Composable
-private fun TurnEnd(item: ThreadItem.TurnEnd, onCopy: (() -> Unit)?, onScrollToMessage: (() -> Unit)?, onScrollToTop: (() -> Unit)?) {
+private fun TurnEnd(item: ThreadItem.TurnEnd, suggestions: List<String>, onSuggest: (String) -> Unit, onCopy: (() -> Unit)?, onScrollToMessage: (() -> Unit)?, onScrollToTop: (() -> Unit)?) {
     val stopped = when (item.stopReason) {
         "end_turn" -> null
         "cancelled" -> "Stopped"
@@ -566,7 +570,11 @@ private fun TurnEnd(item: ThreadItem.TurnEnd, onCopy: (() -> Unit)?, onScrollToM
             Label(stopped, Modifier.padding(end = Tokens.Space.S1), Tokens.Type.Meta, MyTheme.colors.textMuted)
         }
 
-        Box(Modifier.weight(1f))
+        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            for (reply in suggestions) {
+                MyButton({ onSuggest(reply) }, text = reply, description = "Reply: $reply", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+            }
+        }
 
         if (onCopy != null) {
             MyButton(onCopy, icon = MyIcon.Copy, description = "Copy this agent response", size = ButtonSize.Sm, muted = true)

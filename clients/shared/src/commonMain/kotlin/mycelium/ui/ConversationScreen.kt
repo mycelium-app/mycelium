@@ -115,6 +115,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
                 onStopWorkflow = { store.act { api.cancel(id) } },
                 modifier = Modifier.weight(1f),
+                onSuggest = { reply -> store.send(id, reply) },
             )
 
             Composer(

@@ -9,6 +9,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.buildThread
 import mycelium.state.diffLines
+import mycelium.state.suggestedReplies
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -185,5 +186,47 @@ class ThreadTest {
         assertEquals(1, progress.finishedCount)
         assertEquals(false, progress.complete)
         assertEquals(listOf("Build"), progress.phases)
+    }
+}
+
+class SuggestedRepliesTest {
+    @Test
+    fun aNumberedChoiceAfterAQuestionBecomesOneReplyPerOption() {
+        val answer = "Which should I do first?\n\n1. Open a merge request\n2. **Do the Android strings** too\n3. Run the e2e suite."
+
+        assertEquals(listOf("Open a merge request", "Do the Android strings too", "Run the e2e suite"), suggestedReplies(answer))
+    }
+
+    @Test
+    fun aBulletedChoiceFollowedByAClosingQuestionBecomesReplies() {
+        val answer = "I can take either route:\n- Rewrite the parser\n- Patch the regex\n\nWhich do you prefer?"
+
+        assertEquals(listOf("Rewrite the parser", "Patch the regex"), suggestedReplies(answer))
+    }
+
+    @Test
+    fun aListIntroducedAsOptionsBecomesRepliesWithoutAQuestion() {
+        assertEquals(listOf("Rewrite the parser", "Patch the regex"), suggestedReplies("There are two options:\n- Rewrite the parser\n- Patch the regex"))
+    }
+
+    @Test
+    fun aSummaryListWithoutAQuestionSuggestsNothing() {
+        assertEquals(emptyList(), suggestedReplies("Done. Changes:\n- Moved the strings\n- Updated three screens"))
+    }
+
+    @Test
+    fun moreThanFourOptionsOrALongSentenceSuggestsNothing() {
+        assertEquals(emptyList(), suggestedReplies("Pick one:\n- a\n- b\n- c\n- d\n- e"))
+        assertEquals(emptyList(), suggestedReplies("Pick one:\n- ${"long ".repeat(30)}\n- short"))
+    }
+
+    @Test
+    fun aYesOrNoQuestionOffersYesAndNo() {
+        assertEquals(listOf("Yes", "No"), suggestedReplies("Tests pass. Want me to open a merge request?"))
+    }
+
+    @Test
+    fun anOpenQuestionSuggestsNothing() {
+        assertEquals(emptyList(), suggestedReplies("What colour should the button be?"))
     }
 }

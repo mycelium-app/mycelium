@@ -90,6 +90,40 @@ fun buildThread(events: List<Event>): List<ThreadItem> {
     return items
 }
 
+private const val MaxSuggestions = 4
+
+private const val MaxSuggestionLength = 80
+
+private val listItem = Regex("""^(?:\d+[.)]|[-*\u2022]|[A-Da-d][.)])\s+(.+)$""")
+
+private val offersChoice = Regex("""\b(?:options?|either|choose|pick|prefer|which|alternatives?|approaches?|routes?)\b""", RegexOption.IGNORE_CASE)
+
+private val yesNoQuestion = Regex("""^(?:want me to|would you like|should i|shall i|do you want|can i|may i)\b""", RegexOption.IGNORE_CASE)
+
+fun suggestedReplies(answer: String): List<String> {
+    val lines = answer.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val closing = lines.lastOrNull().orEmpty()
+    val asksClosing = !listItem.matches(closing) && closing.endsWith("?")
+    val body = if (asksClosing) lines.dropLast(1) else lines
+    val items = body.takeLastWhile { listItem.matches(it) }
+    val lead = body.dropLast(items.size).lastOrNull().orEmpty()
+    val asksWhich = asksClosing || lead.endsWith("?") || (lead.endsWith(":") && offersChoice.containsMatchIn(lead))
+
+    if (items.size in 2..MaxSuggestions && asksWhich) {
+        val replies = items.mapNotNull { line -> listItem.matchEntire(line)?.groupValues?.get(1)?.replace(Regex("""[*_`]"""), "")?.trim()?.trimEnd('.', ';', ',') }
+
+        if (replies.all { it.isNotEmpty() && it.length <= MaxSuggestionLength }) {
+            return replies
+        }
+    }
+
+    if (asksClosing && yesNoQuestion.containsMatchIn(closing.substringAfterLast(". "))) {
+        return listOf("Yes", "No")
+    }
+
+    return emptyList()
+}
+
 private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: JsonObject) {
     val update = payload["update"] as? JsonObject ?: return
 
