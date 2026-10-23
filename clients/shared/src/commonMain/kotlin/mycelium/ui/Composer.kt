@@ -330,7 +330,7 @@ private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) ->
     BasicTextField(
         value = text,
         onValueChange = onTextChange,
-        textStyle = Tokens.Type.Input.themed().copy(color = colors.text),
+        textStyle = Tokens.Type.Prose.themed().copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
         interactionSource = source,
         modifier = modifier
@@ -357,7 +357,7 @@ private fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) ->
         decorationBox = { inner ->
             Box(contentAlignment = Alignment.CenterStart) {
                 if (text.text.isEmpty()) {
-                    Label("Ask, plan or build", style = Tokens.Type.Input, color = colors.textFaint)
+                    Label("Ask, plan or build", style = Tokens.Type.Prose, color = colors.textFaint)
                 }
 
                 inner()

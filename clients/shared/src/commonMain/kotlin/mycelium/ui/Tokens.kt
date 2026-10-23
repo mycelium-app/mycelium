@@ -190,7 +190,6 @@ object Tokens {
         val Meta = TextStyle(fontFamily = Sans, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
         val MetaStrong = TextStyle(fontFamily = Sans, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
         val Prose = TextStyle(fontFamily = Sans, fontSize = 14.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
-        val Input = TextStyle(fontFamily = Mono, fontSize = 13.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal)
         val Code = TextStyle(fontFamily = Mono, fontSize = 12.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
         val CodeSm = TextStyle(fontFamily = Mono, fontSize = 11.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal)
         val Recap = TextStyle(fontFamily = Sans, fontSize = 13.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal)
