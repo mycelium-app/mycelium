@@ -449,7 +449,16 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
 
     let each_run: EachRun = parse_enum(&row.each_run)?;
 
-    if let (EachRun::Same, Some(conversation_id)) = (each_run, row.last_conversation_id) {
+    let reusable = match (each_run, row.last_conversation_id) {
+        (EachRun::Same, Some(conversation_id)) => {
+            let status = sqlx::query_scalar::<_, String>("select status from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+            status.filter(|status| status != "failed").map(|_| conversation_id)
+        }
+        _ => None,
+    };
+
+    if let Some(conversation_id) = reusable {
         let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await;
 
         if queued.is_ok() {
