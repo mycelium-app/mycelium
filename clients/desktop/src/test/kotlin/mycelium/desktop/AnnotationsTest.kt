@@ -19,6 +19,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.assertTextEquals
 
 import androidx.compose.ui.test.pressKey
@@ -40,7 +41,14 @@ import mycelium.state.Store
 import mycelium.ui.Route
 import mycelium.ui.Shell
 import mycelium.api.ConversationStatus
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import mycelium.state.Annotation
+import mycelium.state.DiffLine
+import mycelium.state.FileDiff
+import mycelium.state.ToolStatus
 import mycelium.state.SessionOptions
 import mycelium.state.ThreadItem
 import mycelium.ui.AnnotateActions
@@ -117,23 +125,18 @@ class AnnotationsTest {
         }
 
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
+            moveTo(Offset(1f, centerY))
             press()
-            moveTo(Offset(width * 0.9f, centerY))
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
             release()
-        }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput {
-            keyDown(Key.CtrlLeft)
-            pressKey(Key.C)
-            keyUp(Key.CtrlLeft)
         }
         rule.onNodeWithText("Add to message").assertIsDisplayed().performClick()
         rule.onNode(hasSetTextAction()).performTextInput("make this 5000")
         rule.onNodeWithText("Add").performClick()
 
         assertEquals(1, attached.size)
-        assertEquals(Annotation("RESTORE_BACKOFF_MS", "make this 5000"), attached.single())
+        assertEquals(Annotation("The retry delay is read from RESTORE_BACKOFF_MS", "make this 5000"), attached.single())
     }
 
     @Test
@@ -150,16 +153,11 @@ class AnnotationsTest {
         }
 
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
+            moveTo(Offset(1f, centerY))
             press()
-            moveTo(Offset(width * 0.9f, centerY))
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
             release()
-        }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput {
-            keyDown(Key.CtrlLeft)
-            pressKey(Key.C)
-            keyUp(Key.CtrlLeft)
         }
         rule.onNodeWithText("Add to message").assertIsDisplayed()
 
@@ -181,22 +179,147 @@ class AnnotationsTest {
         }
 
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
+            moveTo(Offset(1f, centerY))
             press()
-            moveTo(Offset(width * 0.9f, centerY))
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
             release()
-        }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-        rule.onRoot().performKeyInput {
-            keyDown(Key.CtrlLeft)
-            pressKey(Key.C)
-            keyUp(Key.CtrlLeft)
         }
         rule.onNodeWithText("Add to message").assertIsDisplayed()
 
         rule.onNodeWithText("Another message").performClick()
 
         rule.onAllNodesWithText("Add to message").assertCountEquals(0)
+    }
+
+    private fun dragAcrossTheMessage() {
+        rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
+            moveTo(Offset(1f, centerY))
+            press()
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
+            release()
+        }
+    }
+
+    private fun showMessage(attached: MutableList<Annotation> = mutableListOf(), item: ThreadItem = ThreadItem.AgentMessage("e1", "The retry delay is read from RESTORE_BACKOFF_MS")) {
+        rule.setContent {
+            MyceliumTheme(true) {
+                CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { attached += it }, onAsk = { _, _ -> }), LocalClipboardManager provides memory) {
+                    ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                }
+            }
+        }
+    }
+
+    @Test
+    fun theOfferAppearsAsSoonAsTextIsSelectedWithoutCopyingAndLeavesTheClipboardAlone() {
+        showMessage()
+
+        dragAcrossTheMessage()
+
+        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Copy").assertIsDisplayed()
+        assertEquals("RESTORE_BACKOFF_MS", memory.getText()?.text)
+    }
+
+    @Test
+    fun escapeDismissesTheOffer() {
+        showMessage()
+
+        dragAcrossTheMessage()
+        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onAllNodes(isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+
+        rule.onAllNodesWithText("Add to message").assertCountEquals(0)
+    }
+
+    @Test
+    fun theShortcutAnnotatesTheSelectionWithoutTheMouse() {
+        val attached = mutableListOf<Annotation>()
+        showMessage(attached)
+
+        dragAcrossTheMessage()
+        rule.onAllNodes(isRoot())[0].performKeyInput {
+            keyDown(Key.CtrlLeft)
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.A)
+            keyUp(Key.ShiftLeft)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.onNode(hasSetTextAction()).performTextInput("why")
+        rule.onNodeWithText("Add").performClick()
+
+        assertEquals(1, attached.size)
+        assertTrue(attached.single().comment == "why")
+    }
+
+    @Test
+    fun selectingInsideACodeBlockOffersAnnotation() {
+        showMessage(item = ThreadItem.AgentMessage("e1", "```\nRESTORE_BACKOFF_MS = 500\n```"))
+
+        rule.onNodeWithText("RESTORE_BACKOFF_MS = 500").performMouseInput {
+            moveTo(Offset(1f, centerY))
+            press()
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
+            release()
+        }
+
+        rule.onNodeWithText("Add to message").assertIsDisplayed()
+    }
+
+    @Test
+    fun selectingInsideADiffOffersAnnotation() {
+        val diff = FileDiff("Retry.kt", listOf(DiffLine(DiffLine.Kind.Added, null, 1, "val RESTORE_BACKOFF_MS = 5000")))
+        showMessage(item = ThreadItem.ToolCall("k", "t1", "Edit", "edit", "Retry.kt", ToolStatus.Done, diff, null))
+
+        rule.onNodeWithText("val RESTORE_BACKOFF_MS = 5000").performMouseInput {
+            moveTo(Offset(1f, centerY))
+            press()
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
+            release()
+        }
+
+        rule.onNodeWithText("Add to message").assertIsDisplayed()
+    }
+
+    @Test
+    fun selectingInsideCommandOutputOffersAnnotation() {
+        showMessage(item = ThreadItem.ToolCall("k", "t1", "Run", "execute", "cargo test", ToolStatus.Done, null, "test result: ok. 12 passed"))
+
+        rule.onNodeWithText("test result: ok. 12 passed").performMouseInput {
+            moveTo(Offset(1f, centerY))
+            press()
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
+            release()
+        }
+
+        rule.onNodeWithText("Add to message").assertIsDisplayed()
+    }
+
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    @Test
+    fun rendersTheOfferOverASelectedParagraphForReview() {
+        val item = ThreadItem.AgentMessage("e1", "The retry delay is read from RESTORE_BACKOFF_MS, which defaults to 500.\n\nRaise it when the node is on a slow link.")
+        val file = renderAt("annotation-offer", dark = true, phone = false, interact = { scene ->
+            fun pointer(type: androidx.compose.ui.input.pointer.PointerEventType, x: Float) =
+                scene.sendPointerEvent(type, Offset(x, 65f), nativeEvent = null)
+            pointer(androidx.compose.ui.input.pointer.PointerEventType.Move, 400f)
+            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Press, Offset(400f, 65f), buttons = androidx.compose.ui.input.pointer.PointerButtons(isPrimaryPressed = true))
+            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, Offset(700f, 65f), buttons = androidx.compose.ui.input.pointer.PointerButtons(isPrimaryPressed = true))
+            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Release, Offset(700f, 65f))
+        }) {
+            CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { }, onAsk = { _, _ -> })) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(mycelium.ui.MyTheme.colors.bgContent).padding(24.dp)) {
+                    ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {})
+                }
+            }
+        }
+
+        assertTrue(file.length() > 0)
     }
 
     @Test
@@ -232,24 +355,16 @@ class AnnotationsTest {
         }
 
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
+            moveTo(Offset(1f, centerY))
             press()
-            moveTo(Offset(width * 0.9f, centerY))
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width - 1f, centerY))
             release()
-        }
-        repeat(20) {
-            if (rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isEmpty()) {
-                rule.onRoot().performKeyInput { pressKey(Key.Tab) }
-                rule.onRoot().performKeyInput {
-                    keyDown(Key.CtrlLeft)
-                    pressKey(Key.C)
-                    keyUp(Key.CtrlLeft)
-                }
-            }
         }
         rule.onNodeWithText("Add to message").performClick()
         rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Add to message"))).performTextInput("make this 5000")
         rule.onNodeWithText("Add").performClick()
-        rule.onNodeWithContentDescription("Attached: \"RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Attached: \"The retry delay is read from RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
 
         status = "working"
         events = events + chunk(2, " and it is 500")
@@ -262,7 +377,7 @@ class AnnotationsTest {
         runBlocking { store.refresh() }
         rule.waitForIdle()
 
-        rule.onNodeWithContentDescription("Attached: \"RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Attached: \"The retry delay is read from RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
     }
 
     private fun chunk(seq: Int, text: String) =
