@@ -17,6 +17,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -29,7 +30,7 @@ private const val ViewBox = 24f
 private const val StrokeWidth = 1.5f
 private const val SpinMillis = 900
 
-private val FilledIcons = setOf(MyIcon.ClaudeMark)
+private val MyIcon.filled: Boolean get() = this == MyIcon.ClaudeMark
 
 internal fun circle(cx: Float, cy: Float, r: Float) =
     "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 ${-2 * r} 0"
@@ -50,7 +51,6 @@ enum class MyIcon(vararg val paths: String) {
     Question(circle(12f, 12f, 9f), "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"),
     Lightbulb("M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5", "M9 18h6M10 22h4"),
     TriangleAlert("m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4M12 17h.01"),
-    Exclamation("M12 5v9M12 19h.01"),
     Failed(circle(12f, 12f, 9f), "m15 9-6 6M9 9l6 6"),
     Review(circle(12f, 12f, 9f), circle(12f, 12f, 3f)),
     Working("M21 12a9 9 0 1 1-6.2-8.56"),
@@ -144,19 +144,19 @@ fun Icon(icon: MyIcon, tint: Color, size: Dp = Tokens.Size.IconMd, modifier: Mod
         modifier
     }
 
-    StrokedPaths(icon.paths.asList(), tint, size, turned)
+    StrokedPaths(icon.paths.asList(), tint, size, turned, filled = icon.filled)
 }
 
 @Composable
-internal fun StrokedPaths(paths: List<String>, tint: Color, size: Dp, modifier: Modifier = Modifier) {
-    val parsed = remember(paths) { paths.map { PathParser().parsePathString(it).toPath() } }
+internal fun StrokedPaths(paths: List<String>, tint: Color, size: Dp, modifier: Modifier = Modifier, filled: Boolean = false) {
+    val parsed = remember(paths) { paths.map { PathParser().parsePathString(it).toPath().apply { fillType = PathFillType.NonZero } } }
 
     Canvas(modifier.size(size)) {
         val scale = this.size.width / ViewBox
 
         withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
             for (path in parsed) {
-                drawPath(path, tint, style = Stroke(width = StrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(path, tint, style = if (filled) Fill else Stroke(width = StrokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }
     }

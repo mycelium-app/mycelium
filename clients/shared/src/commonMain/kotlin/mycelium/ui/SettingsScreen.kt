@@ -33,8 +33,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import mycelium.state.NotifyFinishedPreference
+import mycelium.state.NotifySoundPreference
 import mycelium.state.Store
 import mycelium.ClientVersion
+import mycelium.Platform
 import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
@@ -212,6 +215,33 @@ private fun AppearanceSettings() {
             DisplayChoice("Reduce motion", MotionSetting.entries, display.reducedMotion, { it.label }) { appearance.onDisplay(display.copy(reducedMotion = it)) }
             DisplayChoice("Times", TimestampStyle.entries, display.timestamps, { it.label }) { appearance.onDisplay(display.copy(timestamps = it)) }
         }
+
+        val platform = LocalPlatform.current
+
+        if (platform != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Notifications", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                PreferenceSwitch(platform, NotifyFinishedPreference, "Notify when an agent finishes", onTurnedOn = platform::requestNotificationPermission)
+                PreferenceSwitch(platform, NotifySoundPreference, "Play a sound")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreferenceSwitch(platform: Platform, key: String, label: String, onTurnedOn: () -> Unit = {}) {
+    var on by remember { mutableStateOf(platform.loadPreference(key) != false.toString()) }
+
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Checkbox(on, label, {
+            on = !on
+            platform.savePreference(key, on.toString())
+
+            if (on) {
+                onTurnedOn()
+            }
+        }, checkedState = "On", uncheckedState = "Off")
+        Label(label)
     }
 }
 

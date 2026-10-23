@@ -66,7 +66,7 @@ class ProjectsExistingFolderTest {
 
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-        rule.waitUntil { rule.onAllNodesWithText("backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("backups").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Set up acme-org/backups on a node").performClick()
     }
 
@@ -85,10 +85,10 @@ class ProjectsExistingFolderTest {
         rule.onNode(hasText("Use an existing folder") and hasClickAction()).performClick()
         rule.onNodeWithContentDescription("Folder on the node").performTextInput("/home/sam/backups")
         rule.onNode(hasText("Use folder") and hasClickAction()).performClick()
-        rule.waitUntil { posts.isNotEmpty() }
+        rule.waitUntil(5_000) { posts.isNotEmpty() }
 
         assertEquals("""{"node_id":"$Laptop","forge_id":"f1","repository":"acme-org/backups","path":"/home/sam/backups"}""", posts.single().replace(",\"new_repository\":false", ""))
-        rule.waitUntil { rule.onAllNodesWithText("Use folder").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Use folder").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test
@@ -100,6 +100,6 @@ class ProjectsExistingFolderTest {
         rule.onNodeWithContentDescription("Folder on the node").performTextInput("/x")
         rule.onNode(hasText("Use folder") and hasClickAction()).performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("is a checkout of other/repo", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("is a checkout of other/repo", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 }

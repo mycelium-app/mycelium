@@ -6,12 +6,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import mycelium.Platform
 import mycelium.api.ApiException
 import mycelium.api.Conversation
+import mycelium.api.ConversationStatus
 import mycelium.api.CreateProjectRequest
 import mycelium.api.DeclineInstructionProposalRequest
 import mycelium.api.InstructionProposal
@@ -43,7 +48,7 @@ private const val FirstRetryMillis = 1_000L
 private const val LongestRetryMillis = 15_000L
 private const val MaxCachedAttachments = 20
 
-class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
+class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform? = null) {
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
@@ -51,6 +56,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     private val attachmentCache = mutableMapOf<String, ByteArray>()
 
     val composerDrafts = ComposerDrafts()
+    val pinDismissals = PinDismissals()
+
+    var viewing: String? = null
+
+    private val mutableOpenRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val openRequests: SharedFlow<String> = mutableOpenRequests.asSharedFlow()
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
@@ -117,7 +128,49 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     }
 
     fun receive(message: StreamMessage) {
+        val before = state.value
         mutableState.update { reduce(it, message) }
+
+        if (message is StreamMessage.WalkthroughNotesChanged) {
+            mutableWalkthroughNotes.update { it + (message.conversationId to message.notes) }
+        }
+
+        announceFinished(before, message)
+    }
+
+    fun openFromNotification(conversationId: String) {
+        mutableOpenRequests.tryEmit(conversationId)
+    }
+
+    private fun announceFinished(before: AppState, message: StreamMessage) {
+        val platform = platform ?: return
+
+        if (message !is StreamMessage.ConversationChanged) {
+            return
+        }
+
+        val updated = message.conversation
+        val previous = before.conversations[updated.id] ?: return
+        val outcome = finishedWording(updated.status)
+
+        if (previous.status != ConversationStatus.Working || outcome == null || updated.sideKind != null) {
+            return
+        }
+
+        if (updated.id == viewing && platform.windowFocused()) {
+            return
+        }
+
+        val node = before.nodes[updated.nodeId]?.name
+        val wantsSound = platform.loadPreference(NotifySoundPreference) != false.toString()
+
+        if (platform.loadPreference(NotifyFinishedPreference) != false.toString()) {
+            platform.notify(updated.title, listOfNotNull(outcome, node).joinToString(" · "), updated.id, wantsSound)
+        }
+
+        if (wantsSound) {
+            platform.chime()
+        }
     }
 
     fun stop() {

@@ -44,7 +44,7 @@ class SidebarModeTest {
     val rule = createComposeRule()
 
     @Test
-    fun projectsAndIssuesShowOnlyAlongsideWorkspaces() {
+    fun nodesProjectsAndIssuesShowOnlyAlongsideWorkspaces() {
         val engine = MockEngine { request ->
             val body = if (request.url.encodedPath.endsWith("/nodes") || request.url.encodedPath.endsWith("/conversations")) "[]" else "{}"
 
@@ -55,9 +55,11 @@ class SidebarModeTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, ModePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
 
         rule.onNodeWithContentDescription("Projects").assertExists()
+        rule.onNodeWithContentDescription("Nodes").assertExists()
         rule.onNodeWithText("Chats").performClick()
         rule.onAllNodesWithContentDescription("Projects").assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Issues").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Nodes").assertCountEquals(0)
         rule.onNodeWithText("Workspaces").performClick()
         rule.onNodeWithContentDescription("Issues").assertExists()
     }

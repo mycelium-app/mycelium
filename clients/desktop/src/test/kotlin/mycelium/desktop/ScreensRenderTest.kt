@@ -12,8 +12,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -33,6 +31,7 @@ import mycelium.ui.Shell
 import mycelium.ui.SignInScreen
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -145,10 +144,13 @@ internal fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0
 private fun render(name: String, dark: Boolean, content: @androidx.compose.runtime.Composable () -> Unit): File = renderAt(name, dark, false, content = content)
 
 class ScreensRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
+
     private val me = Me("u", "sam@example.com", "Sam")
 
     private fun shell(route: Route, nodes: String = Nodes): @androidx.compose.runtime.Composable () -> Unit {
-        val store = Store(fakeApi(nodes), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fakeApi(nodes), scopes.create())
 
         runBlocking {
             store.refresh()

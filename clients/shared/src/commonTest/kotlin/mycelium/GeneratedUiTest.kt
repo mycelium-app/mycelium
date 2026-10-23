@@ -5,6 +5,9 @@ import mycelium.state.UiBar
 import mycelium.state.UiNode
 import mycelium.state.barChartDescription
 import mycelium.state.parseGeneratedUi
+import mycelium.state.parseUiBlock
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -74,5 +77,25 @@ class GeneratedUiTest {
         val deep = (1..20).fold("""{"type":"text","text":"x"}""") { inner, _ -> """{"type":"column","children":[$inner]}""" }
 
         assertNull(parseGeneratedUi(deep))
+    }
+
+    @Test
+    fun aBlockCarriesAnOptionalIdAndStickyFlag() {
+        val pinned = parseUiBlock("""{"type":"heading","text":"Plan","id":"plan","sticky":true}""")!!
+
+        assertEquals("plan", pinned.id)
+        assertTrue(pinned.sticky)
+        assertEquals("Plan", pinned.label)
+
+        val plain = parseUiBlock("""{"type":"text","text":"Hello"}""")!!
+
+        assertNull(plain.id)
+        assertFalse(plain.sticky)
+    }
+
+    @Test
+    fun aStickyFlagThatIsNotABooleanIsIgnored() {
+        assertFalse(parseUiBlock("""{"type":"text","text":"Hello","sticky":"true"}""")!!.sticky)
+        assertNull(parseUiBlock("""{"type":"text","text":"Hello","id":"  "}""")!!.id)
     }
 }

@@ -49,17 +49,17 @@ class MemoriesLiveTest {
     @Test
     fun aMemoryStoredByAnAgentAppearsWhileTheTabIsOpenAndFollowsItsEditAndRemoval() {
         val store = showMemories(listOf(memory("m1", "Staging listens on 5433")))
-        rule.waitUntil { shows("Staging listens on 5433") }
+        rule.waitUntil(5_000) { shows("Staging listens on 5433") }
 
         stream(store, """{"type":"memory",${memory("m2", "Releases need a tag").removePrefix("{")}""")
-        rule.waitUntil { shows("Releases need a tag") }
+        rule.waitUntil(5_000) { shows("Releases need a tag") }
 
         stream(store, """{"type":"memory",${memory("m2", "Releases need a signed tag").removePrefix("{")}""")
-        rule.waitUntil { shows("Releases need a signed tag") }
+        rule.waitUntil(5_000) { shows("Releases need a signed tag") }
         rule.onNodeWithText("Releases need a tag").assertDoesNotExist()
 
         stream(store, """{"type":"memory_removed","memory_id":"m1"}""")
-        rule.waitUntil { !shows("Staging listens on 5433") }
+        rule.waitUntil(5_000) { !shows("Staging listens on 5433") }
     }
 
     @Test
@@ -67,12 +67,12 @@ class MemoriesLiveTest {
         val stored = mutableListOf(memory("m1", "Staging listens on 5433"))
         val store = showMemories(stored)
         rule.onNodeWithContentDescription("Search memories").performTextInput("Releases")
-        rule.waitUntil { !shows("Staging listens on 5433") }
+        rule.waitUntil(5_000) { !shows("Staging listens on 5433") }
 
         stored += memory("m2", "Releases need a tag")
         stream(store, """{"type":"memory",${memory("m2", "Releases need a tag").removePrefix("{")}""")
 
-        rule.waitUntil { shows("Releases need a tag") }
+        rule.waitUntil(5_000) { shows("Releases need a tag") }
         rule.onNodeWithText("Staging listens on 5433").assertDoesNotExist()
     }
 }

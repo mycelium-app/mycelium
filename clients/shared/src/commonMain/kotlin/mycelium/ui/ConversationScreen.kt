@@ -72,6 +72,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
+    var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
@@ -280,6 +281,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onCancelResume = { store.act { api.cancelResume(id) } },
                     ) else null,
                     agent = conversation.agent,
+                    dismissedPins = dismissedPins,
+                    onUnpin = { key ->
+                        store.pinDismissals.dismiss(id, key)
+                        dismissedPins = store.pinDismissals[id]
+                    },
                 )
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }

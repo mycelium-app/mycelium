@@ -18,8 +18,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ForgesSettings
@@ -38,8 +36,11 @@ class ForgesSettingsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<HttpRequestData>()
-    private val bodies = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<HttpRequestData>())
+    private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
     private var connectAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to GitLabJson
 
     private fun store(initial: String = "[$GitHubJson]"): Store {
@@ -55,13 +56,19 @@ class ForgesSettingsTest {
             }
         }
 
-        return Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+    }
+
+    private fun showSettings(store: Store) {
+        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
     fun theListShowsEachForgesAccountHostAndOrganisations() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("GitHub").assertExists()
         rule.onNodeWithText("github.com").assertExists()
@@ -72,7 +79,7 @@ class ForgesSettingsTest {
     @Test
     fun connectingSendsTheKindBaseUrlAndTokenAndAddsTheRow() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Connect a forge").performClick()
         rule.onNodeWithText("GitLab").performClick()
@@ -80,7 +87,7 @@ class ForgesSettingsTest {
         rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
         rule.onNodeWithText("Connect").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("sam, slop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam, slop").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"kind":"gitlab","base_url":"https://gitlab.example.com","token":"glpat-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onNodeWithText("Connect a forge").assertExists()
     }
@@ -88,7 +95,7 @@ class ForgesSettingsTest {
     @Test
     fun theTokenFieldNamesTheScopeToUseForTheChosenForge() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Connect a forge").performClick()
         rule.onNodeWithText("Use a token with the repo scope, or a fine-grained token with Contents, Issues and Pull requests permissions.").assertExists()
@@ -100,7 +107,7 @@ class ForgesSettingsTest {
     @Test
     fun theTokenFieldIsMaskedAndEmptyWhenTheFormOpensAgain() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Connect a forge").performClick()
         rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
@@ -108,7 +115,7 @@ class ForgesSettingsTest {
         rule.onNodeWithContentDescription("Personal access token").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
 
         rule.onNodeWithText("Connect").performClick()
-        rule.waitUntil { rule.onAllNodesWithText("sam, slop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam, slop").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Connect a forge").performClick()
 
         rule.onNodeWithContentDescription("Personal access token").assertTextEquals("")
@@ -118,13 +125,13 @@ class ForgesSettingsTest {
     fun aServerErrorShowsItsMessageAndKeepsTheForm() {
         connectAnswer = HttpStatusCode.BadRequest to """{"error":"forge_token_rejected","message":"GitHub did not accept that token. Check it and try again."}"""
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Connect a forge").performClick()
         rule.onNodeWithContentDescription("Personal access token").performTextInput("bad")
         rule.onNodeWithText("Connect").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("GitHub did not accept that token. Check it and try again.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not accept that token. Check it and try again.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Personal access token").assertExists()
         rule.onNodeWithText("Cancel").assertExists()
     }
@@ -132,7 +139,7 @@ class ForgesSettingsTest {
     @Test
     fun cancellingClosesTheFormWithoutSendingAnything() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Connect a forge").performClick()
         rule.onNodeWithText("Cancel").performClick()
@@ -144,11 +151,11 @@ class ForgesSettingsTest {
     @Test
     fun disconnectingRemovesTheRow() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        showSettings(store)
 
         rule.onNodeWithText("Disconnect").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/forges/f1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 }

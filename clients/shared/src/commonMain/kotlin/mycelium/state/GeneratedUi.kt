@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlin.math.roundToInt
@@ -41,11 +42,32 @@ sealed interface UiNode {
     data class Button(val label: String, val action: UiAction) : UiNode
 }
 
-fun parseGeneratedUi(source: String): UiNode? {
-    val root = runCatching { Json.parseToJsonElement(source) }.getOrNull() ?: return null
-
-    return node(root, 0)
+data class UiBlock(val node: UiNode, val id: String?, val sticky: Boolean) {
+    val pinKey: String get() = "ui:${id ?: node.hashCode()}"
+    val label: String get() = node.pinLabel()
 }
+
+fun parseUiBlock(source: String): UiBlock? {
+    val root = runCatching { Json.parseToJsonElement(source) }.getOrNull() ?: return null
+    val parsed = node(root, 0) ?: return null
+    val fields = root as JsonObject
+    val sticky = (fields["sticky"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == true
+
+    return UiBlock(parsed, fields.text("id")?.takeIf { it.isNotBlank() }, sticky)
+}
+
+fun parseGeneratedUi(source: String): UiNode? = parseUiBlock(source)?.node
+
+private fun UiNode.pinLabel(): String = when (this) {
+    is UiNode.Heading -> text
+    is UiNode.Column -> children.firstNotNullOfOrNull { it.pinLabel().takeIf { label -> label != PinnedFallback } } ?: PinnedFallback
+    is UiNode.Row -> children.firstNotNullOfOrNull { it.pinLabel().takeIf { label -> label != PinnedFallback } } ?: PinnedFallback
+    is UiNode.BarChart -> title ?: PinnedFallback
+    is UiNode.Progress -> label
+    else -> PinnedFallback
+}
+
+private const val PinnedFallback = "Pinned card"
 
 fun barChartDescription(chart: UiNode.BarChart): String =
     (listOfNotNull(chart.title) + chart.bars.map { "${it.label}: ${it.display}" }).joinToString(". ")

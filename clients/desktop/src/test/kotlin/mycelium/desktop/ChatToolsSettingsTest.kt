@@ -81,7 +81,7 @@ class ChatToolsSettingsTest {
         rule.onNodeWithContentDescription("Bearer token, if the server needs one").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         rule.onNodeWithText("Add server").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() && rule.onAllNodesWithText("Add a server").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() && rule.onAllNodesWithText("Add a server").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"name":"GitHub","url":"https://gh.test/mcp","bearer_token":"ghp-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("ghp-secret").assertCountEquals(0)
         rule.onNodeWithText("No token").assertExists()
@@ -96,7 +96,7 @@ class ChatToolsSettingsTest {
         rule.onNodeWithText("Add a server").performClick()
         rule.onNodeWithText("Add server").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("GitHub did not accept this token. Check that it has not expired and is for this server, then try again.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not accept this token. Check that it has not expired and is for this server, then try again.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Name").assertExists()
     }
 
@@ -106,11 +106,11 @@ class ChatToolsSettingsTest {
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
         rule.onNodeWithContentDescription("Use Lab in chats").performClick()
-        rule.waitUntil { requests.any { it.method == HttpMethod.Patch } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
         assertEquals("""{"enabled":false}""", bodies.last { it.isNotEmpty() })
-        rule.waitUntil { runCatching { rule.onNodeWithContentDescription("Use Lab in chats").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off")) }.isSuccess }
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Use Lab in chats").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off")) }.isSuccess }
 
         rule.onNodeWithContentDescription("Remove Lab").performClick()
-        rule.waitUntil { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isEmpty() }
     }
 }

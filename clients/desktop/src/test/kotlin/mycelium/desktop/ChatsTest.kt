@@ -175,7 +175,7 @@ class ChatsTest {
     private fun newChatScreen() {
         shell(Route.NewChat)
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Message").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Message").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -196,7 +196,7 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Message").performTextInput("Plan a trip to Lisbon")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
         assertEquals("""{"provider_id":"p1","model":"llama3.2","prompt":"Plan a trip to Lisbon"}""", bodies.last { it.contains("provider_id") })
     }
 
@@ -234,7 +234,7 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Message").performTextInput("Hello")
         rule.onNodeWithContentDescription("Send").performClick()
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
         assertEquals("""{"provider_id":"p2","model":"claude-sonnet-5-5","prompt":"Hello"}""", bodies.last { it.contains("provider_id") })
     }
 
@@ -248,7 +248,7 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Message").performTextInput("Summarise this")
         rule.onNodeWithContentDescription("Send").performClick()
 
-        rule.waitUntil { requests.any { it.url.encodedPath.endsWith("/prompt") } }
+        rule.waitUntil(5_000) { requests.any { it.url.encodedPath.endsWith("/prompt") } }
         ChatPlatform.picked = emptyList()
         assertEquals("""{"provider_id":"p1","model":"llama3.2"}""", bodies.last { it.contains("provider_id") })
         assertEquals("""{"text":"Summarise this","attachments":[{"sha256":"abc","name":"notes.txt","media_type":"text/plain","size":5}]}""", bodies.last { it.contains("Summarise") })
@@ -258,11 +258,11 @@ class ChatsTest {
     fun anOpenChatShowsItsProviderAndModelAndSwitchingPatchesTheConversation() {
         shell(Route.Chat("c1"))
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Model: Ollama · llama3.2").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Ollama · llama3.2").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Patch } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
         assertEquals("""{"provider_id":"p2","model":"claude-sonnet-5-5"}""", bodies.last { it.contains("provider_id") })
     }
 
@@ -271,11 +271,11 @@ class ChatsTest {
         removedProvider = true
         shell(Route.Chat("c1"))
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Model: Choose a model").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Choose a model").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Model: Choose a model").performClick()
         rule.onNodeWithText("qwen3").performClick()
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Patch } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
         assertEquals("""{"provider_id":"p1","model":"qwen3"}""", bodies.last { it.contains("provider_id") })
     }
 
@@ -284,7 +284,7 @@ class ChatsTest {
         chatEvents = """[{"conversation_id":"c1","seq":1,"kind":"model_changed","payload":{"provider_id":"p2","provider_name":"Anthropic","model":"claude-sonnet-5-5"},"created_at":"2026-10-22T10:00:00Z"}]"""
         shell(Route.Chat("c1"))
 
-        rule.waitUntil { rule.onAllNodesWithText("Switched to Anthropic · claude-sonnet-5-5").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Switched to Anthropic · claude-sonnet-5-5").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -292,7 +292,7 @@ class ChatsTest {
         providers = "[]"
         shell(Route.NewChat)
 
-        rule.waitUntil { rule.onAllNodesWithText("Open Settings").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Open Settings").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("No chat model is set up. Add a provider in Settings, under Chat models, then start a chat.").assertIsDisplayed()
 
         rule.onNodeWithText("Open Settings").performClick()

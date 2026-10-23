@@ -19,8 +19,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
@@ -56,7 +54,10 @@ class SchedulesTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<Triple<String, String, String>>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
 
     private fun showSchedules() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -77,11 +78,12 @@ class SchedulesTest {
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); SchedulesScreen(store, state) } }
-        rule.waitUntil { rule.onAllNodesWithText("Renovate sweep").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Renovate sweep").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ready to review").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun chooseFromMenu(prompt: String, item: String) {
@@ -89,7 +91,7 @@ class SchedulesTest {
         rule.onNodeWithText(item).performClick()
     }
 
-    private fun sent(method: String, suffix: String) = requests.firstOrNull { it.first == method && it.second.endsWith(suffix) }
+    private fun sent(method: String, suffix: String) = requests.toList().firstOrNull { it.first == method && it.second.endsWith(suffix) }
 
     @Test
     fun eachScheduleShowsItsPromptProjectWhenAndWhatEachRunDoes() {
@@ -121,8 +123,8 @@ class SchedulesTest {
 
         chooseFromMenu("Renovate sweep", "Run now")
 
-        rule.waitUntil { sent("POST", "/schedules/s1/run") != null }
-        rule.waitUntil { requests.count { it.second.endsWith("/schedule-runs") } >= 2 }
+        rule.waitUntil(5_000) { sent("POST", "/schedules/s1/run") != null }
+        rule.waitUntil(5_000) { requests.toList().count { it.second.endsWith("/schedule-runs") } >= 2 }
     }
 
     @Test
@@ -131,7 +133,7 @@ class SchedulesTest {
 
         chooseFromMenu("Renovate sweep", "Pause")
 
-        rule.waitUntil { sent("PATCH", "/schedules/s1") != null }
+        rule.waitUntil(5_000) { sent("PATCH", "/schedules/s1") != null }
         assertEquals("""{"paused":true}""", sent("PATCH", "/schedules/s1")?.third)
     }
 
@@ -141,7 +143,7 @@ class SchedulesTest {
 
         chooseFromMenu("Summarise the week", "Resume")
 
-        rule.waitUntil { sent("PATCH", "/schedules/s3") != null }
+        rule.waitUntil(5_000) { sent("PATCH", "/schedules/s3") != null }
         assertEquals("""{"paused":false}""", sent("PATCH", "/schedules/s3")?.third)
     }
 
@@ -157,7 +159,7 @@ class SchedulesTest {
         rule.onNodeWithContentDescription("Prompt").performTextInput("Renovate nightly")
         rule.onNodeWithText("Save").performClick()
 
-        rule.waitUntil { sent("PATCH", "/schedules/s1") != null }
+        rule.waitUntil(5_000) { sent("PATCH", "/schedules/s1") != null }
         assertEquals("""{"prompt":"Renovate nightly"}""", sent("PATCH", "/schedules/s1")?.third)
     }
 
@@ -167,7 +169,7 @@ class SchedulesTest {
 
         chooseFromMenu("Check backups", "Delete")
 
-        rule.waitUntil { rule.onAllNodesWithText("Check backups").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Check backups").fetchSemanticsNodes().isEmpty() }
         assertTrue(sent("DELETE", "/schedules/s2") != null)
     }
 
@@ -180,7 +182,7 @@ class SchedulesTest {
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/app")
         rule.onNodeWithText("Add schedule").performClick()
 
-        rule.waitUntil { sent("POST", "/schedules") != null }
+        rule.waitUntil(5_000) { sent("POST", "/schedules") != null }
         assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"0 6 * * 1","each_run":"new","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
     }
 
@@ -197,7 +199,7 @@ class SchedulesTest {
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/app")
         rule.onNodeWithText("Add schedule").performClick()
 
-        rule.waitUntil { sent("POST", "/schedules") != null }
+        rule.waitUntil(5_000) { sent("POST", "/schedules") != null }
         assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"30 7 * * *","each_run":"same","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
     }
 
@@ -235,7 +237,7 @@ class SchedulesTest {
                 else -> respond("[]", HttpStatusCode.OK, json)
             }
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh(); store.refreshProjects(); store.refreshSchedules() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); content(store, state) } }
@@ -264,7 +266,7 @@ class SchedulesTest {
 
         rule.onNodeWithText("Confirm schedule").performClick()
 
-        rule.waitUntil { sent("POST", "/schedules/s9/confirm") != null }
+        rule.waitUntil(5_000) { sent("POST", "/schedules/s9/confirm") != null }
         assertEquals("{}", sent("POST", "/schedules/s9/confirm")?.third)
     }
 
@@ -278,7 +280,7 @@ class SchedulesTest {
         rule.onNodeWithText("Weekdays at 21:30, Europe/London.", substring = true).assertExists()
         rule.onNodeWithContentDescription("Confirm the schedule").performClick()
 
-        rule.waitUntil { sent("POST", "/schedules/s9/confirm") != null }
+        rule.waitUntil(5_000) { sent("POST", "/schedules/s9/confirm") != null }
         assertEquals("""{"cron":"30 21 * * 1-5"}""", sent("POST", "/schedules/s9/confirm")?.third)
     }
 
@@ -301,7 +303,7 @@ class SchedulesTest {
 
         rule.onNodeWithContentDescription("Decline the proposed schedule").performClick()
 
-        rule.waitUntil { sent("POST", "/schedules/s9/decline") != null }
-        rule.waitUntil { rule.onAllNodesWithText("Schedule proposed").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { sent("POST", "/schedules/s9/decline") != null }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Schedule proposed").fetchSemanticsNodes().isEmpty() }
     }
 }

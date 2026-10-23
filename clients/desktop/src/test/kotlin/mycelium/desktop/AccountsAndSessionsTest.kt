@@ -16,8 +16,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -83,8 +81,11 @@ class AccountsAndSessionsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<HttpRequestData>()
-    private val bodies = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<HttpRequestData>())
+    private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     private fun store(nodesJson: String = NodesJson): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -103,7 +104,7 @@ class AccountsAndSessionsTest {
                 else -> respond("[]", HttpStatusCode.OK, json)
             }
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
 
@@ -148,7 +149,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Sign in Codex on orion").performClick()
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
     }
 
     @Test
@@ -169,7 +170,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("End session Desktop app on willow").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Desktop app on willow").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Desktop app on willow").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/sessions/s2", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 
@@ -186,7 +187,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithText("Sign out").performClick()
 
-        rule.waitUntil { signedOut == 1 }
+        rule.waitUntil(5_000) { signedOut == 1 }
         assertEquals("true", requests.last { it.method == HttpMethod.Delete }.url.parameters["confirm_current"])
     }
 
@@ -200,7 +201,7 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithText("Revoke atlas").performClick()
 
-        rule.waitUntil { requests.any { it.method == HttpMethod.Delete } }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Delete } }
         assertEquals("/api/v1/nodes/n2", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 
@@ -238,7 +239,8 @@ class AccountsAndSessionsTest {
         rule.onNodeWithContentDescription("Sign in Claude Code on a node").performClick()
         rule.onAllNodesWithText("willow").onLast().performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n1/logins") } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }
         assertTrue(Regex(""""account":"account-\d{4}"""").containsMatchIn(bodies.last()), bodies.last())
         assertTrue(requests.last { it.method == HttpMethod.Post }.url.encodedPath.endsWith("/nodes/n1/logins"))
     }

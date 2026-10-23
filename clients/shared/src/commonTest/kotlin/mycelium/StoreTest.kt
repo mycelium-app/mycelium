@@ -14,12 +14,27 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
+import mycelium.api.parseStreamMessage
 import mycelium.state.Store
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class StoreTest {
+    @Test
+    fun walkthroughNotesStreamedFromAnotherDeviceReplaceTheLocalOnes() = runTest {
+        val store = Store(MyceliumApi("https://mycelium.test", null, MockEngine { respond("", HttpStatusCode.NoContent) }), backgroundScope)
+        val note = """{"id":"n1","step":0,"comment":"Check this","sent":false,"created_at":"2026-10-23T10:00:00Z"}"""
+
+        store.receive(parseStreamMessage("""{"type":"walkthrough_notes","conversation_id":"c1","walkthrough_id":"w1","notes":[$note]}""")!!)
+
+        assertEquals(listOf("Check this"), store.walkthroughNotes.value.getValue("c1").map { it.comment })
+
+        store.receive(parseStreamMessage("""{"type":"walkthrough_notes","conversation_id":"c1","walkthrough_id":"w1","notes":[]}""")!!)
+
+        assertEquals(emptyList(), store.walkthroughNotes.value.getValue("c1"))
+    }
+
     @Test
     fun typedTerminalInputReachesTheNodeInOrderAndIsBatched() = runTest {
         val posted = MutableStateFlow(emptyList<String>())

@@ -26,8 +26,6 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.decodeFromString
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
@@ -97,9 +95,12 @@ class GitGraphTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private fun open(fake: GitFake) {
         val conversation = MyceliumJson.decodeFromString<Conversation>(ConversationJson)
-        val store = Store(fake.api, CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fake.api, scopes.create())
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -129,6 +130,7 @@ class GitGraphTest {
         val fake = GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":false,"untracked":false,"additions":1,"deletions":0}]}""")
         open(fake)
 
+        awaitText("Commit options")
         rule.onNodeWithContentDescription("Commit options").performClick()
         rule.onNodeWithText("Amend").performClick()
         rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/commit") } }
@@ -151,6 +153,7 @@ class GitGraphTest {
         val fake = GitFake()
         open(fake)
 
+        awaitText("More remote actions")
         rule.onNodeWithContentDescription("More remote actions").performClick()
         rule.onNodeWithText("Pull (rebase)").performClick()
         rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/pull") } }
@@ -184,13 +187,13 @@ class GitGraphTest {
     fun theGraphTabListsCommitsWithTheirRefsAndSelectingOneOpensItsDiff() {
         open(GitFake())
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Graph").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Graph").performClick()
         awaitText("Merge the importer")
 
         rule.onNode(hasContentDescription("Merge the importer, Sam, ", substring = true) and hasContentDescription("tag v1.2", substring = true)).assertIsDisplayed()
         rule.onNode(hasContentDescription("Add the importer", substring = true) and hasContentDescription("branch feature/importer", substring = true)).assertIsDisplayed()
         rule.onNode(hasContentDescription("Merge the importer", substring = true)).performClick()
-        rule.waitForIdle()
 
         awaitText("Back to the graph")
         rule.onNodeWithContentDescription("Back to the graph").assertIsDisplayed()
@@ -203,6 +206,7 @@ class GitGraphTest {
         val fake = GitFake()
         open(fake)
 
+        awaitText("Switch branch, current branch main")
         rule.onNodeWithContentDescription("Switch branch, current branch main").performClick()
         awaitText("origin/release")
 
@@ -210,7 +214,7 @@ class GitGraphTest {
         rule.onNodeWithText("Remote branches").assertIsDisplayed()
         rule.onNodeWithContentDescription("main, current branch").assertIsDisplayed()
         rule.onNodeWithContentDescription("origin/release, remote branch").performClick()
-        rule.waitForIdle()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/switch") } }
 
         assertEquals("""{"branch":"release","create":true,"track":"origin/release"}""", fake.switchBody())
     }
@@ -220,6 +224,7 @@ class GitGraphTest {
         val fake = GitFake()
         open(fake)
 
+        awaitText("Switch branch, current branch main")
         rule.onNodeWithContentDescription("Switch branch, current branch main").performClick()
         awaitText("origin/release")
         rule.onNodeWithContentDescription("Search branches").performTextInput("fresh-idea")
@@ -227,7 +232,7 @@ class GitGraphTest {
 
         rule.onNodeWithContentDescription("Create branch fresh-idea").assertIsDisplayed()
         rule.onNodeWithContentDescription("Create branch fresh-idea").performClick()
-        rule.waitForIdle()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/switch") } }
 
         assertEquals("""{"branch":"fresh-idea","create":true}""", fake.switchBody())
         assertTrue(fake.requests.any { it.method == HttpMethod.Post })
@@ -237,6 +242,7 @@ class GitGraphTest {
     fun rendersTheGraphForReview() {
         val fake = GitFake()
         open(fake)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Graph").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Graph").performClick()
         awaitText("Merge the importer")
         File("build/screens").mkdirs()

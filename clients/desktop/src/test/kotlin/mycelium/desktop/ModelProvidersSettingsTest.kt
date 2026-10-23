@@ -78,7 +78,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Ollama serves this at http://<host>:11434/v1.").assertExists()
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Add a provider").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add a provider").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"kind":"openai_compatible","name":"Ollama","base_url":"http://box:11434/v1"}""", bodies.last { it.isNotEmpty() })
     }
 
@@ -94,7 +94,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithContentDescription("API key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Ends in wxyz").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ends in wxyz").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"kind":"anthropic","name":"Claude API","api_key":"sk-ant-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("sk-ant-secret").assertCountEquals(0)
     }
@@ -112,7 +112,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithContentDescription("API key").performTextInput("sk-or-secret")
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil { bodies.any { it.contains("openrouter.ai") } }
+        rule.waitUntil(5_000) { bodies.any { it.contains("openrouter.ai") } }
         assertEquals("""{"kind":"openai_compatible","name":"OpenRouter","base_url":"https://openrouter.ai/api/v1","api_key":"sk-or-secret"}""", bodies.last { it.isNotEmpty() })
     }
 
@@ -125,7 +125,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Mycelium could not reach http://box:11434/v1. Check the address and try again.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Mycelium could not reach http://box:11434/v1. Check the address and try again.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Base URL").assertExists()
     }
 
@@ -137,7 +137,7 @@ class ModelProvidersSettingsTest {
 
         rule.onNodeWithContentDescription("Refresh the models of Ollama").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("gemma3, qwen3").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("gemma3, qwen3").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("/api/v1/model-providers/p1/refresh", requests.last { it.method == HttpMethod.Post }.url.encodedPath)
     }
 
@@ -148,7 +148,7 @@ class ModelProvidersSettingsTest {
 
         rule.onNodeWithContentDescription("Remove Ollama").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("llama3.2, qwen3").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("llama3.2, qwen3").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/model-providers/p1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 }

@@ -110,6 +110,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.WalkthroughChanged -> state.copy(walkthroughs = state.walkthroughs + (message.walkthrough.conversationId to message.walkthrough))
 
+    is StreamMessage.WalkthroughNotesChanged -> state
+
     is StreamMessage.MoveChanged -> state.copy(moves = state.moves + (message.progress.conversationId to message.progress))
 
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))

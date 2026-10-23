@@ -36,7 +36,8 @@ internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
     val colors = MyTheme.colors
     val searching = call.title == ToolSearchName
     val heading = if (searching) "Searched for tools" else name?.heading ?: call.title
-    val state = when (call.status) {
+    val status = if (call.awaitingApproval) ToolStatus.Pending else call.status
+    val state = when (status) {
         ToolStatus.Failed -> "Failed"
         ToolStatus.Done -> "Done"
         ToolStatus.Running -> "Running"
@@ -54,7 +55,7 @@ internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
 
             Box(Modifier.weight(1f))
 
-            when (call.status) {
+            when (status) {
                 ToolStatus.Failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
                 ToolStatus.Done -> StatusMark("Done", Tone.Muted, MyIcon.Check)
                 ToolStatus.Running -> StatusMark("Running", Tone.Working, MyIcon.Working)
@@ -64,12 +65,12 @@ internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
 
         val output = call.output?.trim()?.takeIf { it.isNotEmpty() && !searching }
 
-        if (call.status != ToolStatus.Pending) {
+        if (status != ToolStatus.Pending) {
             Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                 ArgumentLines(call.input)
 
                 if (output != null) {
-                    Label(output, style = Tokens.Type.Ui, color = if (call.status == ToolStatus.Failed) colors.statusFailed else colors.textMuted, maxLines = OutputLines)
+                    Label(output, style = Tokens.Type.Ui, color = if (status == ToolStatus.Failed) colors.statusFailed else colors.textMuted, maxLines = OutputLines)
                 }
             }
         }

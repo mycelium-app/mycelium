@@ -961,6 +961,8 @@ sealed interface StreamMessage {
 
     data class WalkthroughChanged(val walkthrough: Walkthrough) : StreamMessage
 
+    data class WalkthroughNotesChanged(val conversationId: String, val notes: List<WalkthroughNote>) : StreamMessage
+
     data class ScheduleChanged(val schedule: Schedule) : StreamMessage
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
@@ -1005,6 +1007,13 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "goal" -> StreamMessage.GoalChanged(MyceliumJson.decodeFromJsonElement(Goal.serializer(), element))
         "goal_cleared" -> StreamMessage.GoalCleared(element.requireString("conversation_id"))
         "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
+        "walkthrough_notes" -> StreamMessage.WalkthroughNotesChanged(
+            conversationId = element.requireString("conversation_id"),
+            notes = MyceliumJson.decodeFromJsonElement(
+                kotlinx.serialization.builtins.ListSerializer(WalkthroughNote.serializer()),
+                element.getValue("notes"),
+            ),
+        )
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))

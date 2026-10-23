@@ -5,6 +5,7 @@ import mycelium.state.Terminal
 import mycelium.state.TerminalColor
 import mycelium.state.TerminalKey
 import mycelium.state.terminalControlInput
+import mycelium.state.terminalCursorShown
 import mycelium.state.terminalKeyInput
 import mycelium.state.xtermRgb
 import kotlin.test.Test
@@ -18,6 +19,14 @@ private const val Esc = "\u001B"
 private fun terminal(columns: Int = 20, rows: Int = 5, output: String = ""): Terminal = Terminal(columns, rows).also { it.feed(output) }
 
 class TerminalTest {
+    @Test
+    fun focusedCursorBlinksAndUnfocusedOutlineStaysAndHiddenCursorNeverShows() {
+        assertTrue(terminalCursorShown(visible = true, focused = true, blinkOn = true))
+        assertFalse(terminalCursorShown(visible = true, focused = true, blinkOn = false))
+        assertTrue(terminalCursorShown(visible = true, focused = false, blinkOn = false))
+        assertFalse(terminalCursorShown(visible = false, focused = true, blinkOn = true))
+    }
+
     @Test
     fun printableTextAndLineEndingsFillTheGrid() {
         val screen = terminal(output = "hello\r\nworld")

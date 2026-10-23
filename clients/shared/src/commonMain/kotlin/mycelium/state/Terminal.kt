@@ -45,6 +45,8 @@ fun codePointString(codePoint: Int): String =
         charArrayOf((0xD800 + (offset shr 10)).toChar(), (0xDC00 + (offset and 0x3FF)).toChar()).concatToString()
     }
 
+fun terminalCursorShown(visible: Boolean, focused: Boolean, blinkOn: Boolean): Boolean = visible && (!focused || blinkOn)
+
 fun xtermRgb(index: Int): Triple<Int, Int, Int> {
     if (index in 16..231) {
         val level = { part: Int -> if (part == 0) 0 else 55 + part * 40 }

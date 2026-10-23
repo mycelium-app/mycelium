@@ -76,13 +76,17 @@ import mycelium.state.toolSearchText
 import mycelium.state.myceliumTool
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
-import mycelium.state.parseGeneratedUi
+import mycelium.state.parseUiBlock
+import mycelium.state.pinnedCards
+import mycelium.state.workflowPinKey
 import mycelium.state.parsedMarkdown
 import mycelium.state.DiffLine
 import mycelium.state.FileDiff
 import mycelium.state.PlanStatus
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
+import mycelium.state.UiNode
+import mycelium.state.workflowStats
 import mycelium.state.suggestedReplies
 import mycelium.state.WorkflowProgress
 import mycelium.api.Attachment
@@ -100,8 +104,12 @@ fun ThreadView(
     onRetry: (() -> Unit)? = null,
     limitActions: LimitActions? = null,
     agent: String = "",
+    dismissedPins: Set<String> = emptySet(),
+    onUnpin: (String) -> Unit = {},
 ) {
     val state = rememberLazyListState()
+    val pinned = remember(items, dismissedPins) { pinnedCards(items, dismissedPins) }
+    val pinnedKeys = remember(pinned) { pinned.map { it.key }.toSet() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val atNewest by remember { derivedStateOf { state.firstVisibleItemIndex == 0 && state.firstVisibleItemScrollOffset == 0 } }
@@ -117,7 +125,7 @@ fun ThreadView(
 
     LaunchedEffect(items.size, items.lastOrNull()) {
         if (following) {
-            state.scrollToItem(0)
+            state.requestScrollToItem(0)
         }
     }
     val gallery = remember(items) {
@@ -147,55 +155,70 @@ fun ThreadView(
     }
 
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-        val side = maxOf(Tokens.Space.S4, (maxWidth - readingMeasure()) / 2 + Tokens.Space.S4)
+        val height = maxHeight
+        val spare = (maxWidth - readingMeasure()) / 2
+        val side = maxOf(Tokens.Space.S4, spare + Tokens.Space.S4)
+        val beside = spare >= PinnedRailWidth + Tokens.Space.S8
 
-        LazyColumn(
-            Modifier.fillMaxSize().scrollbar(state, reverse = true).semantics { contentDescription = "Conversation" },
-            state = state,
-            reverseLayout = true,
-            contentPadding = PaddingValues(
-                start = side,
-                top = Tokens.Space.S8,
-                end = side,
-                bottom = Tokens.Space.S4,
-            ),
-            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
-        ) {
-            itemsIndexed(items.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
-                val index = items.lastIndex - reversedIndex
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    Modifier.fillMaxSize().scrollbar(state, reverse = true).semantics { contentDescription = "Conversation" },
+                    state = state,
+                    reverseLayout = true,
+                    contentPadding = PaddingValues(
+                        start = side,
+                        top = Tokens.Space.S8,
+                        end = side,
+                        bottom = Tokens.Space.S4,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
+                ) {
+                    itemsIndexed(items.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
+                        val index = items.lastIndex - reversedIndex
 
-                if (item is ThreadItem.TurnEnd) {
-                    val asked = items.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
-                    val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
+                        if (item is ThreadItem.TurnEnd) {
+                            val asked = items.subList(0, index).indexOfLast { it is ThreadItem.UserMessage }
+                            val answer = items.subList(asked + 1, index).filterIsInstance<ThreadItem.AgentMessage>().joinToString("\n\n") { it.text }
 
-                    TurnEnd(
-                        item = item,
-                        suggestions = if (index == items.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
-                        onSuggest = onSuggest,
-                        onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
-                        onScrollToMessage = if (asked < 0) null else ({ scope.launch { showTopOf(items.lastIndex - asked) } }),
-                        onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
-                    )
-                } else {
-                    CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery) {
-                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
+                            TurnEnd(
+                                item = item,
+                                suggestions = if (index == items.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
+                                onSuggest = onSuggest,
+                                onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
+                                onScrollToMessage = if (asked < 0) null else ({ scope.launch { showTopOf(items.lastIndex - asked) } }),
+                                onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
+                            )
+                        } else {
+                            CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
+                            }
+                        }
+                    }
+                }
+
+                if (!atNewest) {
+                    Box(Modifier.align(Alignment.BottomEnd).padding(end = Tokens.Space.S4, bottom = Tokens.Space.S3)) {
+                        MyButton(
+                            onClick = {
+                                following = true
+                                scope.launch { state.animateScrollToItem(0) }
+                            },
+                            icon = MyIcon.ScrollToBottom,
+                            description = "Scroll to the newest message",
+                            variant = ButtonVariant.Outline,
+                        )
                     }
                 }
             }
+
+            if (pinned.isNotEmpty() && !beside) {
+                PinnedStack(pinned, onStopWorkflow, onUnpin, Modifier.widthIn(max = readingMeasure()).fillMaxWidth().heightIn(max = height / 3))
+            }
         }
 
-        if (!atNewest) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(end = Tokens.Space.S4, bottom = Tokens.Space.S3)) {
-                MyButton(
-                    onClick = {
-                        following = true
-                        scope.launch { state.animateScrollToItem(0) }
-                    },
-                    icon = MyIcon.ScrollToBottom,
-                    description = "Scroll to the newest message",
-                    variant = ButtonVariant.Outline,
-                )
-            }
+        if (pinned.isNotEmpty() && beside) {
+            PinnedRail(pinned, onStopWorkflow, onUnpin, Modifier.align(Alignment.TopEnd))
         }
     }
 }
@@ -207,7 +230,9 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            ToolCall(item, chat = agent == "chat")
+            if (toolLabel(item.kind, item.title) != "workflow" || item.status == ToolStatus.Failed) {
+                ToolCall(item, chat = agent == "chat")
+            }
 
             for (image in item.images) {
                 ThreadImageView(image, myceliumTool(item.title)?.label ?: item.title)
@@ -223,7 +248,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
                 MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry this conversation")
             }
         }
-        is ThreadItem.Workflow -> WorkflowCard(item.progress, onStopWorkflow)
+        is ThreadItem.Workflow -> if (workflowPinKey(item.progress.runId) in LocalPinnedKeys.current) PinnedReference("Workflow") else WorkflowCard(item.progress, onStopWorkflow)
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
         is ThreadItem.Note -> Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
     }
@@ -316,11 +341,13 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
                     }.themed(),
                 )
                 is MarkdownBlock.Code -> {
-                    val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseGeneratedUi(block.text) else null }
+                    val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseUiBlock(block.text) else null }
 
                     if (generated != null) {
-                        Box(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3)) {
-                            GeneratedUi(generated)
+                        if ((generated.sticky || generated.id != null) && generated.pinKey in LocalPinnedKeys.current) {
+                            PinnedReference(generated.label)
+                        } else {
+                            GeneratedUiPanel(generated.node)
                         }
                     } else {
                         Column(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape)) {
@@ -482,10 +509,10 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
         }
 
         Box(Modifier.border(Tokens.Size.Hairline, colors.border, BlockShape).horizontalScroll(rememberScrollState())) {
-            Column {
+            Column(Modifier.width(IntrinsicSize.Max)) {
                 marked.forEachIndexed { index, row ->
                     if (index > 0) {
-                        Hairline(Modifier.width(widths.fold(0.dp) { total, width -> total + width }))
+                        Hairline()
                     }
 
                     Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
@@ -979,8 +1006,18 @@ private fun TurnEnd(item: ThreadItem.TurnEnd, suggestions: List<String>, onSugge
 }
 
 @Composable
-private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {
+internal fun GeneratedUiPanel(node: UiNode) {
     val colors = MyTheme.colors
+
+    Box(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3)) {
+        GeneratedUi(node)
+    }
+}
+
+@Composable
+internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: PinControls? = null) {
+    val colors = MyTheme.colors
+    val totals = workflowStats(progress.totals).takeIf { progress.agents.size > 1 }
 
     Card {
         CardHead {
@@ -991,11 +1028,23 @@ private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {
             }
 
             Label("Workflow", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("${progress.finishedCount} of ${progress.agents.size} agents", Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            Label("${progress.finishedCount} of ${progress.agents.size} agents", Modifier.weight(1f, fill = totals == null), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+
+            if (totals != null) {
+                Label(totals, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            }
 
             if (!progress.complete) {
                 MyButton(onStop, text = "Stop", icon = MyIcon.Stop, description = "Stop the workflow", size = ButtonSize.Sm, muted = true)
             }
+
+            if (pin != null) {
+                PinButtons(pin)
+            }
+        }
+
+        if (pin?.collapsed == true) {
+            return@Card
         }
 
         Row(
@@ -1040,6 +1089,8 @@ private fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit) {
                         }
 
                         Label(agent.label, Modifier.weight(1f), maxLines = 1)
+
+                        workflowStats(agent)?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1) }
                     }
                 }
             }

@@ -77,6 +77,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
 
             when {
                 failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+                verb != null && call.awaitingApproval -> StatusMark("Waiting", Tone.Muted, MyIcon.Clock)
                 verb != null -> StatusMark("Running", Tone.Working, MyIcon.Working)
                 finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && waiting != null -> StatusMark(waiting, Tone.Muted, MyIcon.Clock)

@@ -45,7 +45,9 @@ private object UsageCardPlatform : Platform {
 private const val UsageCardNodes = """[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"v0.1.13","online":true,"draining":false,
 "agents":[{"agent":"claude","version":"2.1.308","available":true}],
 "logins":[
- {"agent":"claude","account":"ann@example.com","method":"oauth_token","state":"signed_in"},
+ {"agent":"claude","account":"ann@example.net","method":"oauth_token","state":"signed_in","usage_read_at":"2099-01-01T10:00:00Z",
+  "windows":[{"name":"seven_day","used_percent":10.0,"resets_at":"2099-01-05T10:00:00Z"}]},
+ {"agent":"claude","account":"quiet@example.org","method":"oauth_token","state":"signed_in"},
  {"agent":"claude","account":"work@example.com","method":"oauth_token","state":"signed_in","usage_read_at":"2099-01-01T10:00:00Z",
   "windows":[{"name":"five_hour","used_percent":40.0,"resets_at":"2099-01-01T22:30:00Z"}]}],
 "sessions":[]}]"""
@@ -75,7 +77,7 @@ class UsageCardTest {
     }
 
     @Test
-    fun theUsageButtonTogglesACardWithTheOpenChatsAccountFirst() {
+    fun theUsageButtonTogglesACardOfAccountsWithUsageByDomainWithTheOpenChatsAccountFirst() {
         showShell()
 
         rule.onNodeWithText("This chat").assertDoesNotExist()
@@ -86,9 +88,12 @@ class UsageCardTest {
         rule.onNodeWithText("40% used").assertIsDisplayed()
 
         val thisChatTop = rule.onNodeWithText("This chat").getUnclippedBoundsInRoot().top
-        val annTop = rule.onNodeWithText("ann@example.com").getUnclippedBoundsInRoot().top
+        val annTop = rule.onNodeWithText("example.net").getUnclippedBoundsInRoot().top
 
         assertTrue(thisChatTop < annTop)
+        rule.onNodeWithText("ann@example.net").assertDoesNotExist()
+        rule.onNodeWithText("example.org").assertDoesNotExist()
+        rule.onNodeWithText("Usage unknown").assertDoesNotExist()
 
         rule.onNodeWithContentDescription("Usage").performClick()
 

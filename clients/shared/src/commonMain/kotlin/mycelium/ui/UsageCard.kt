@@ -38,7 +38,14 @@ fun UsageCard(accounts: List<Pair<AgentAccount, Boolean>>, modifier: Modifier = 
         ) {
             Label("Usage", Modifier.padding(Tokens.Space.S1_5).semantics { heading() }, Tokens.Type.UiStrong)
 
-            for ((account, thisChat) in accounts) {
+            val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
+
+            if (reported.isEmpty()) {
+                Hairline()
+                Label("No account has reported usage yet.", Modifier.padding(Tokens.Space.S1_5), Tokens.Type.Meta, colors.textMuted)
+            }
+
+            for ((account, thisChat) in reported) {
                 Hairline()
 
                 UsageBlock(account, thisChat)
@@ -56,18 +63,11 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
             Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconMd)
-            Label(account.label, Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+            Label(account.label.substringAfter('@'), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong)
 
             if (thisChat) {
                 Tag("This chat")
             }
-
-            Box(Modifier.weight(1f))
-            Label(account.nodes.map { it.nodeName }.distinct().joinToString(", "), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-        }
-
-        if (account.windows.isEmpty()) {
-            Label("Usage unknown", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         for (window in account.windows) {

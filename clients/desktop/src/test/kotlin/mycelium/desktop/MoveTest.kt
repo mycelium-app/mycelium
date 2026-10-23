@@ -16,8 +16,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -64,8 +62,11 @@ class MoveTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<Pair<String, String>>()
-    private val opened = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val opened = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     private fun store(plan: String, answer: String): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -87,7 +88,7 @@ class MoveTest {
 
             respond(reply, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
         return store
@@ -103,6 +104,10 @@ class MoveTest {
                 MoveSheet(store, state, conversation, onDismiss = { opened += "dismissed" }, onOpenConversation = { opened += it })
             }
         }
+    }
+
+    private fun waitForPlan() {
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Goes with it", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun waitForText(text: String) {
@@ -121,6 +126,7 @@ class MoveTest {
         rule.onNodeWithContentDescription("Running on willow, open the node menu").performClick()
         rule.onNodeWithText("Move").performClick()
 
+        waitForDescription("Move to build-01")
         rule.onNodeWithText("Move to").assertIsDisplayed()
         rule.onNodeWithContentDescription("Move to build-01").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Move to willow").fetchSemanticsNodes().size)
@@ -138,6 +144,7 @@ class MoveTest {
     @Test
     fun moveAfterThisTurnAsksTheControlPlaneToMoveToTheChosenNode() {
         sheet(store(Movable, progress("waiting")))
+        waitForPlan()
 
         rule.onNodeWithText("Move after this turn").performClick()
 
@@ -151,6 +158,7 @@ class MoveTest {
     @Test
     fun forkInsteadAsksForAForkAndOpensTheNewConversationWhenItIsReady() {
         sheet(store(Movable, progress("done", fork = true, result = "c2")))
+        waitForPlan()
 
         rule.onNodeWithText("Fork instead").performClick()
 
@@ -163,6 +171,7 @@ class MoveTest {
     @Test
     fun aFinishedMoveClosesTheSheetAndOpensNothingElse() {
         sheet(store(Movable, progress("done", result = "c1")))
+        waitForPlan()
 
         rule.onNodeWithText("Move after this turn").performClick()
         rule.waitUntil(5_000) { opened.isNotEmpty() }
@@ -173,6 +182,7 @@ class MoveTest {
     @Test
     fun aWaitingMoveCanBeCancelled() {
         sheet(store(Movable, progress("waiting")))
+        waitForPlan()
 
         rule.onNodeWithText("Move after this turn").performClick()
         rule.onNodeWithText("Cancel move").performClick()
@@ -186,6 +196,7 @@ class MoveTest {
     @Test
     fun aFailedMoveShowsWhatFailedAndLeavesTheButtonsToTryAgain() {
         sheet(store(Movable, progress("failed", message = "The project folder on this node has uncommitted changes. Nothing has changed: the conversation is still on willow. Choose Move to try again.")))
+        waitForPlan()
 
         rule.onNodeWithText("Move after this turn").performClick()
 

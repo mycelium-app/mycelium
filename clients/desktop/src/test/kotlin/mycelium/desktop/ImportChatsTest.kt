@@ -63,7 +63,7 @@ class ImportChatsTest {
 
         rule.onNodeWithText("Import from Claude").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Imported 12 chats, 3 were already here").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 12 chats, 3 were already here").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Imported 12 chats, 3 were already here").assertIsDisplayed()
         assertEquals("[]", imports.single().second)
     }
@@ -74,7 +74,7 @@ class ImportChatsTest {
 
         rule.onNodeWithText("Import from Claude").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Imported 1 chat").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 1 chat").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Imported 1 chat").assertIsDisplayed()
     }
 
@@ -85,7 +85,7 @@ class ImportChatsTest {
 
         rule.onNodeWithText("Import from Claude").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText(message).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(message).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText(message).assertIsDisplayed()
     }
 

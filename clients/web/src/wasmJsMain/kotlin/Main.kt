@@ -30,6 +30,9 @@ private external fun goTo(url: String)
 @JsFun("(url) => { window.open(url, '_blank', 'noopener'); }")
 private external fun openTab(url: String)
 
+@JsFun("() => { window.close(); }")
+private external fun closeThisWindow()
+
 @JsFun("(text) => { navigator.clipboard.writeText(text); }")
 private external fun writeClipboard(text: String)
 
@@ -78,7 +81,42 @@ private external fun listenForPastedAndDroppedFiles(onFile: (JsString, JsString,
 }""")
 private external fun chooseFiles(onFile: (JsString, JsString, JsString) -> Unit)
 
+@JsFun("() => document.hasFocus()")
+private external fun pageFocused(): Boolean
+
+@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Notification.requestPermission(); } }")
+private external fun askNotificationPermission()
+
+@JsFun("""(title, body, id, onOpen) => {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') { return; }
+    const shown = new Notification(title, { body, tag: id });
+    shown.onclick = () => { window.focus(); onOpen(id); shown.close(); };
+}""")
+private external fun showNotification(title: String, body: String, id: String, onOpen: (JsString) -> Unit)
+
+@JsFun("""() => {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) { return; }
+    const audio = new Context();
+    const start = audio.currentTime;
+    [[659.25, 0], [880, 0.125]].forEach(([frequency, offset]) => {
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, start + offset);
+        gain.gain.linearRampToValueAtTime(0.25, start + offset + 0.025);
+        gain.gain.linearRampToValueAtTime(0, start + offset + 0.125);
+        oscillator.connect(gain).connect(audio.destination);
+        oscillator.start(start + offset);
+        oscillator.stop(start + offset + 0.125);
+    });
+    setTimeout(() => audio.close(), 500);
+}""")
+private external fun playChime()
+
 private object WebPlatform : Platform {
+    private var notificationOpener: ((String) -> Unit)? = null
+
     private var fileListener: ((List<PickedFile>) -> Unit)? = null
 
     init {
@@ -132,11 +170,27 @@ private object WebPlatform : Platform {
 
     override fun openUrl(url: String) = openTab(url)
 
+    override fun closeWindow() = closeThisWindow()
+
     override fun copyToClipboard(text: String) = writeClipboard(text)
 
     override fun timeZone(): String? = browserTimeZone().ifBlank { null }
 
     override fun localDateTime(epochMillis: Long): String? = browserDateTime(epochMillis.toDouble())
+
+    override fun windowFocused(): Boolean = pageFocused()
+
+    override fun requestNotificationPermission() = askNotificationPermission()
+
+    override fun notify(title: String, body: String, conversationId: String, sound: Boolean) {
+        showNotification(title, body, conversationId) { id -> notificationOpener?.invoke(id.toString()) }
+    }
+
+    override fun chime() = playChime()
+
+    override fun listenForNotificationOpens(listener: ((String) -> Unit)?) {
+        notificationOpener = listener
+    }
 
     override fun loadPreference(key: String): String? = readStorage(key)
 

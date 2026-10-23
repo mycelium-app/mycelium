@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -16,8 +17,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -55,6 +54,9 @@ private object SidePlatform : Platform {
 class SideChatsTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
 
     private val conversation = Conversation("c1", "u", "n", "claude", "/work", "t", ConversationStatus.Done, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
 
@@ -109,16 +111,19 @@ class SideChatsTest {
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, SidePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Empty) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("What is the default delay", substring = true).assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Collapse side chats of Fix the build").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("What is the default delay").fetchSemanticsNodes().isEmpty() }
         assertEquals(0, rule.onAllNodesWithText("What is the default delay").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Expand side chats of Fix the build").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("What is the default delay", substring = true).assertIsDisplayed()
     }
 }

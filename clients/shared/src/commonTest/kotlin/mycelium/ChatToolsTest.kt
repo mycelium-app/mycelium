@@ -75,4 +75,22 @@ class ChatToolsTest {
         assertEquals("Sunny in Paris", call.output)
         assertEquals(listOf("city" to "Paris"), readableArguments(call.input))
     }
+
+    @Test
+    fun aToolCallAwaitsApprovalFromTheRequestUntilItIsAnswered() {
+        val call = update(1, """{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"mcp__lab__get_weather","kind":"other","status":"in_progress"}""")
+        val asked = event(2, EventKinds.PermissionRequest, """{"request_id":"r1","toolCall":{"toolCallId":"call_1","title":"mcp__lab__get_weather"},"options":[]}""")
+        val answered = event(3, EventKinds.PermissionResolved, """{"request_id":"r1","option_id":"allow_once"}""")
+
+        assertEquals(true, (buildThread(listOf(call, asked)).first() as ThreadItem.ToolCall).awaitingApproval)
+        assertEquals(false, (buildThread(listOf(call, asked, answered)).first() as ThreadItem.ToolCall).awaitingApproval)
+    }
+
+    @Test
+    fun aToolCallArrivingAfterItsApprovalRequestStillAwaitsApproval() {
+        val asked = event(1, EventKinds.PermissionRequest, """{"request_id":"r1","toolCall":{"toolCallId":"call_1","title":"mcp__lab__get_weather"},"options":[]}""")
+        val call = update(2, """{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"mcp__lab__get_weather","kind":"other","status":"in_progress"}""")
+
+        assertEquals(true, buildThread(listOf(asked, call)).filterIsInstance<ThreadItem.ToolCall>().single().awaitingApproval)
+    }
 }

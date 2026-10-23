@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
@@ -143,6 +144,14 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
+
+    LaunchedEffect(store) {
+        store.openRequests.collect { route = Route.Chat(it) }
+    }
+
+    SideEffect {
+        store.viewing = (route as? Route.Chat)?.id
+    }
     val colors = MyTheme.colors
     var sidebarWidth by remember { mutableStateOf(platform.loadPreference(SidebarWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.Sidebar) }
     val density = LocalDensity.current
@@ -184,6 +193,14 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
+
+    LaunchedEffect(store) {
+        store.openRequests.collect { route = Route.Chat(it) }
+    }
+
+    SideEffect {
+        store.viewing = (route as? Route.Chat)?.id
+    }
     var drawerOpen by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -359,7 +376,6 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
-                SidebarLink("Nodes", MyIcon.Server, selected = route == Route.Nodes || route is Route.Node) { onRoute(Route.Nodes) }
                 SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }
@@ -420,6 +436,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 val appearance = LocalAppearance.current
 
                 if (mode == WorkspacesMode) {
+                    MyButton({ onRoute(Route.Nodes) }, text = "Nodes".takeIf { labelled }, icon = MyIcon.Server, description = "Nodes", muted = true, selected = route == Route.Nodes || route is Route.Node)
                     MyButton({ onRoute(Route.Projects) }, text = "Projects".takeIf { labelled }, icon = MyIcon.Folder, description = "Projects", muted = true, selected = route == Route.Projects)
                     MyButton({ onRoute(Route.Issues) }, text = "Issues".takeIf { labelled }, icon = MyIcon.Issue, description = "Issues", muted = true, selected = route == Route.Issues)
                 }
@@ -599,22 +616,15 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             Box {
                 ProjectIcon(project, Tokens.Size.IconSm)
 
-                val badgeSize = Tokens.Size.IconSm - Tokens.Space.S1
-                val badge = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5)
-                    .size(badgeSize)
-                    .background(colors.bgPanel, CircleShape)
+                val badge = when (row.status) {
+                    ConversationStatus.Working -> colors.statusWorking
+                    ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
+                    ConversationStatus.Failed -> colors.statusFailed
+                    ConversationStatus.Done -> null
+                }
 
-                when (row.status) {
-                    ConversationStatus.Working -> Icon(MyIcon.Working, colors.statusWorking, badgeSize, badge)
-                    ConversationStatus.Input, ConversationStatus.Review -> Box(badge.padding(Tokens.Space.S0_5 / 2).background(colors.statusAttention, CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(MyIcon.Exclamation, colors.onAccent, badgeSize - Tokens.Space.S0_5)
-                    }
-                    ConversationStatus.Failed -> Box(badge.padding(Tokens.Space.S0_5 / 2).background(colors.statusFailed, CircleShape), contentAlignment = Alignment.Center) {
-                        Icon(MyIcon.Close, colors.onAccent, badgeSize - Tokens.Space.S0_5)
-                    }
-                    ConversationStatus.Done -> Unit
+                if (badge != null) {
+                    Box(Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5).size(Tokens.Space.S2).background(badge, CircleShape))
                 }
             }
 
@@ -632,7 +642,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
             }
 
-            Icon(agentIcon(row.agent), if (node != null) nodeColour(node) else colors.textMuted, Tokens.Size.IconSm)
+            Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm)
 
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
@@ -671,6 +681,6 @@ private const val SidebarWidthPreference = "sidebar-width"
 
 private const val UsageOpenPreference = "usage-card-open"
 
-private val FooterLabelsWidth = 360.dp
+private val FooterLabelsWidth = 440.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"

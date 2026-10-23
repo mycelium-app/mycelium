@@ -15,8 +15,6 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -69,8 +67,11 @@ class PastConversationsTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private val importFinishes = CompletableDeferred<Unit>()
-    private val deleted = mutableListOf<String>()
+    private val deleted = java.util.Collections.synchronizedList(mutableListOf<String>())
     private var importStarted = false
 
     private fun store(usage: String = UsageJson, current: String = "[]", archived: String = ArchivedJson): Store {
@@ -100,7 +101,7 @@ class PastConversationsTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
 
@@ -112,6 +113,7 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("okapi").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Project").assertExists()
         rule.onNodeWithText("okapi").assertExists()
     }
@@ -121,6 +123,7 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("~$0.50 (estimated)").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Turns").assertExists()
         rule.onNodeWithText("Tokens").assertExists()
         rule.onNodeWithText("Cost").assertExists()
@@ -134,6 +137,7 @@ class PastConversationsTest {
         val store = store(usage = "[]")
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Not reported").fetchSemanticsNodes().size == 2 }
         rule.onAllNodesWithText("Not reported").assertCountEquals(2)
     }
 
@@ -142,6 +146,7 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Plan the rollout").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Delete Plan the rollout?").assertExists()
@@ -150,7 +155,7 @@ class PastConversationsTest {
 
         rule.onNodeWithText("Delete conversation").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Open Plan the rollout").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Plan the rollout").fetchSemanticsNodes().isEmpty() }
         assertEquals(listOf("/api/v1/conversations/c1"), deleted)
     }
 
@@ -159,6 +164,7 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Plan the rollout").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Cancel").performClick()
@@ -172,12 +178,13 @@ class PastConversationsTest {
         val store = store(current = ArchivedJson)
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More").performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Delete Plan the rollout?").assertExists()
         rule.onNodeWithText("Delete conversation").performClick()
 
-        rule.waitUntil { deleted.isNotEmpty() }
+        rule.waitUntil(5_000) { deleted.isNotEmpty() }
         assertEquals(listOf("/api/v1/conversations/c1"), deleted)
     }
 
@@ -186,6 +193,7 @@ class PastConversationsTest {
         val store = store(archived = TwoArchivedJson)
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Scratch notes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open Scratch notes").assertExists()
 
         val nodeLefts = rule.onAllNodesWithText("laptop").fetchSemanticsNodes().map { it.positionInRoot.x }
@@ -198,6 +206,7 @@ class PastConversationsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Import 3").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Import 3").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Importing 1 of 3").fetchSemanticsNodes().isNotEmpty() || rule.onAllNodesWithText("Importing 2 of 3").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Importing Claude Code conversations from laptop").assertExists()
@@ -208,6 +217,7 @@ class PastConversationsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 2, 1 could not be read").fetchSemanticsNodes().isNotEmpty() }
         rule.onAllNodesWithContentDescription("Importing Claude Code conversations from laptop").assertCountEquals(0)
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show which Claude Code conversations from laptop could not be read").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Show which Claude Code conversations from laptop could not be read").performClick()
         rule.onNodeWithText("bad.jsonl: There is no conversation in this file.").assertExists()
     }

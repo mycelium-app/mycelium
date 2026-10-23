@@ -31,8 +31,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
 import mycelium.api.Me
@@ -64,6 +62,9 @@ import kotlin.test.assertTrue
 class AnnotationsTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
 
     private val conversation = Conversation("c1", "u", "n", "claude", "/work", "t", ConversationStatus.Done, createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
 
@@ -124,6 +125,7 @@ class AnnotationsTest {
             }
         }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The retry delay is read from RESTORE_BACKOFF_MS").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
             moveTo(Offset(1f, centerY))
             press()
@@ -132,7 +134,9 @@ class AnnotationsTest {
             release()
         }
         rule.onAllNodesWithText("Ctrl+Shift+A", substring = true).assertCountEquals(0)
+        waitForOffer()
         rule.onNodeWithContentDescription("Add to message, Ctrl+Shift+A").assertExists()
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed().performClick()
         rule.onNode(hasSetTextAction()).performTextInput("make this 5000")
         rule.onNodeWithText("Add").performClick()
@@ -154,6 +158,7 @@ class AnnotationsTest {
             }
         }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The retry delay is read from RESTORE_BACKOFF_MS").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
             moveTo(Offset(1f, centerY))
             press()
@@ -161,11 +166,13 @@ class AnnotationsTest {
             moveTo(Offset(width - 1f, centerY))
             release()
         }
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
 
         rule.runOnIdle { focus!!.clearFocus() }
         rule.waitForIdle()
 
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
     }
 
@@ -180,6 +187,7 @@ class AnnotationsTest {
             }
         }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The retry delay is read from RESTORE_BACKOFF_MS").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
             moveTo(Offset(1f, centerY))
             press()
@@ -187,14 +195,21 @@ class AnnotationsTest {
             moveTo(Offset(width - 1f, centerY))
             release()
         }
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
 
         rule.onNodeWithText("Another message").performClick()
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isEmpty() }
         rule.onAllNodesWithText("Add to message").assertCountEquals(0)
     }
 
+    private fun waitForOffer() {
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isNotEmpty() }
+    }
+
     private fun dragAcrossTheMessage() {
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The retry delay is read from RESTORE_BACKOFF_MS").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
             moveTo(Offset(1f, centerY))
             press()
@@ -220,6 +235,7 @@ class AnnotationsTest {
 
         dragAcrossTheMessage()
 
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
         rule.onNodeWithText("Copy").assertIsDisplayed()
         assertEquals("RESTORE_BACKOFF_MS", memory.getText()?.text)
@@ -230,9 +246,11 @@ class AnnotationsTest {
         showMessage()
 
         dragAcrossTheMessage()
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
         rule.onAllNodes(isRoot())[0].performKeyInput { pressKey(Key.Escape) }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isEmpty() }
         rule.onAllNodesWithText("Add to message").assertCountEquals(0)
     }
 
@@ -249,6 +267,7 @@ class AnnotationsTest {
             keyUp(Key.ShiftLeft)
             keyUp(Key.CtrlLeft)
         }
+        rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasSetTextAction()).performTextInput("why")
         rule.onNodeWithText("Add").performClick()
 
@@ -268,6 +287,7 @@ class AnnotationsTest {
             release()
         }
 
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
     }
 
@@ -284,6 +304,7 @@ class AnnotationsTest {
             release()
         }
 
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
     }
 
@@ -299,6 +320,7 @@ class AnnotationsTest {
             release()
         }
 
+        waitForOffer()
         rule.onNodeWithText("Add to message").assertIsDisplayed()
     }
 
@@ -343,7 +365,7 @@ class AnnotationsTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking {
             store.refresh()
             store.open("c1")
@@ -356,6 +378,7 @@ class AnnotationsTest {
             }
         }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("The retry delay is read from RESTORE_BACKOFF_MS").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("The retry delay is read from RESTORE_BACKOFF_MS").performMouseInput {
             moveTo(Offset(1f, centerY))
             press()
@@ -363,6 +386,7 @@ class AnnotationsTest {
             moveTo(Offset(width - 1f, centerY))
             release()
         }
+        waitForOffer()
         rule.onNodeWithText("Add to message").performClick()
         rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Add to message"))).performTextInput("make this 5000")
         rule.onNodeWithText("Add").performClick()

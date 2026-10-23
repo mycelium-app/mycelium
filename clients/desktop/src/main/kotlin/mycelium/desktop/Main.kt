@@ -35,6 +35,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import javax.imageio.ImageIO
 import java.awt.Desktop
+import java.awt.SystemTray
+import java.awt.TrayIcon
+import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioSystem
 import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
 import java.awt.event.KeyEvent as AwtKeyEvent
@@ -123,6 +127,48 @@ private object DesktopPlatform : Platform {
         }
     }
 
+    private var notificationOpener: ((String) -> Unit)? = null
+
+    private var notifiedConversation: String? = null
+
+    private val trayIcon: TrayIcon? by lazy {
+        runCatching {
+            if (!SystemTray.isSupported()) {
+                return@runCatching null
+            }
+
+            val image = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+            val canvas = image.createGraphics()
+            canvas.color = java.awt.Color(0x3d, 0x8b, 0x6e)
+            canvas.fillOval(1, 1, 14, 14)
+            canvas.dispose()
+
+            val icon = TrayIcon(image, "Mycelium")
+            icon.isImageAutoSize = true
+            icon.addActionListener { notifiedConversation?.let { notificationOpener?.invoke(it) } }
+            SystemTray.getSystemTray().add(icon)
+
+            icon
+        }.getOrNull()
+    }
+
+    override fun windowFocused(): Boolean = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null
+
+    override fun notify(title: String, body: String, conversationId: String, sound: Boolean) {
+        notifiedConversation = conversationId
+        trayIcon?.displayMessage(title, body, TrayIcon.MessageType.NONE)
+    }
+
+    override fun chime() {
+        Thread {
+            runCatching { playChime() }
+        }.start()
+    }
+
+    override fun listenForNotificationOpens(listener: ((String) -> Unit)?) {
+        notificationOpener = listener
+    }
+
     private var fileListener: ((List<PickedFile>) -> Unit)? = null
 
     private fun read(file: File): PickedFile? = runCatching {
@@ -184,6 +230,32 @@ private object DesktopPlatform : Platform {
 
         return true
     }
+}
+
+private fun playChime() {
+    val sampleRate = 44_100f
+    val tones = listOf(659.25 to 0.125, 880.0 to 0.125)
+    val format = AudioFormat(sampleRate, 16, 1, true, false)
+    val samples = ByteArrayOutputStream()
+
+    for ((frequency, seconds) in tones) {
+        val count = (sampleRate * seconds).toInt()
+        val fade = count / 5
+
+        for (index in 0 until count) {
+            val envelope = minOf(1.0, index.toDouble() / fade, (count - index).toDouble() / fade)
+            val value = (Math.sin(2 * Math.PI * frequency * index / sampleRate) * envelope * 0.25 * Short.MAX_VALUE).toInt()
+            samples.write(value and 0xff)
+            samples.write((value shr 8) and 0xff)
+        }
+    }
+
+    val line = AudioSystem.getSourceDataLine(format)
+    line.open(format)
+    line.start()
+    line.write(samples.toByteArray(), 0, samples.size())
+    line.drain()
+    line.close()
 }
 
 @OptIn(ExperimentalComposeUiApi::class)

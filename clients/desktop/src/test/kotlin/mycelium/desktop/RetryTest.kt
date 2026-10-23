@@ -80,7 +80,7 @@ class RetryTest {
 
         rule.onNodeWithContentDescription("Error: This node already runs 4 conversations, its limit.").assertExists()
         rule.onNodeWithContentDescription("Retry this conversation").performClick()
-        rule.waitUntil { retried.isNotEmpty() }
+        rule.waitUntil(5_000) { retried.isNotEmpty() }
 
         assertEquals(listOf("/api/v1/conversations/c1/retry"), retried)
     }

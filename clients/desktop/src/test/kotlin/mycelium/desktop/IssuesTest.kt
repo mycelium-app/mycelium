@@ -98,7 +98,7 @@ class IssuesTest {
                 IssuesScreen(store, state, onOpened)
             }
         }
-        rule.waitUntil { rule.onAllNodesWithText(waitFor).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(waitFor).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -147,7 +147,7 @@ class IssuesTest {
 
         rule.onNodeWithContentDescription("Create a workspace for issue 5").performClick()
 
-        rule.waitUntil { opened != null }
+        rule.waitUntil(5_000) { opened != null }
         assertEquals("/api/v1/projects/p3/issues/5/workspace" to """{"agent":"claude"}""", posts.single())
     }
 
@@ -160,7 +160,7 @@ class IssuesTest {
         rule.onNodeWithContentDescription("Create a workspace for issue 412").performClick()
         rule.onNodeWithText("atlas").performClick()
 
-        rule.waitUntil { opened != null }
+        rule.waitUntil(5_000) { opened != null }
         assertEquals("/api/v1/projects/p2/issues/412/workspace" to """{"agent":"codex"}""", posts.single())
     }
 
@@ -172,7 +172,7 @@ class IssuesTest {
 
         rule.onNodeWithContentDescription("Open the workspace for issue 398").performClick()
 
-        rule.waitUntil { opened != null }
+        rule.waitUntil(5_000) { opened != null }
         assertEquals("/api/v1/projects/p1/issues/398/workspace", posts.single().first)
     }
 
@@ -181,7 +181,7 @@ class IssuesTest {
         issues = """{"issues":[{"forge_id":"f1","repository":"slop/mycelium","number":5,"title":"Show the branch in the header","url":"u","body":""}],"failures":[{"forge_id":"f2","message":"GitLab could not be reached."}]}"""
         show(store(), waitFor = "Show the branch in the header")
 
-        rule.waitUntil { rule.onAllNodesWithText("GitLab could not be reached.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitLab could not be reached.").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -192,7 +192,7 @@ class IssuesTest {
 
         rule.onNodeWithContentDescription("Create a workspace for issue 5").performClick()
 
-        rule.waitUntil { store.problem.value != null }
+        rule.waitUntil(5_000) { store.problem.value != null }
         assertEquals("fatal: worktree path exists", store.problem.value)
     }
 }

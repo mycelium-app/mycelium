@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
@@ -85,7 +86,7 @@ class UsageLimitTest {
     fun aLimitWithoutAResetTimeOffersOnlyToRetry() {
         show(store(resetsAt = null))
 
-        rule.onNodeWithText("Claude Code's 5-hour limit is reached. Mycelium does not know when it resets.").assertExists()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Claude Code's 5-hour limit is reached. Mycelium does not know when it resets.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Retry this conversation now").assertExists()
         rule.onNodeWithText("Resume at", substring = true).assertDoesNotExist()
     }
@@ -96,7 +97,7 @@ class UsageLimitTest {
 
         rule.onNodeWithContentDescription("Resume this conversation at 15:31").performClick()
 
-        rule.waitUntil { calls.isNotEmpty() }
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
 
         assertEquals(listOf("POST /api/v1/conversations/c1/resume"), calls.toList())
     }
@@ -107,7 +108,7 @@ class UsageLimitTest {
 
         rule.onNodeWithContentDescription("Retry this conversation now").performClick()
 
-        rule.waitUntil { calls.isNotEmpty() }
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
 
         assertEquals(listOf("POST /api/v1/conversations/c1/retry"), calls.toList())
     }
@@ -119,7 +120,7 @@ class UsageLimitTest {
         rule.onNodeWithText("Resumes at 15:31.").assertExists()
         rule.onNodeWithContentDescription("Cancel the automatic resume").performClick()
 
-        rule.waitUntil { calls.isNotEmpty() }
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
 
         assertEquals(listOf("DELETE /api/v1/conversations/c1/resume"), calls.toList())
     }
@@ -131,7 +132,7 @@ class UsageLimitTest {
         rule.onNodeWithText("Resumes at 15:31").assertExists()
         rule.onNodeWithContentDescription("Cancel the automatic resume of Plan the rollout").performClick()
 
-        rule.waitUntil { calls.isNotEmpty() }
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
 
         assertEquals(listOf("DELETE /api/v1/conversations/c1/resume"), calls.toList())
     }
@@ -144,7 +145,7 @@ class UsageLimitTest {
         rule.onNodeWithText("When a usage limit is reached").assertExists()
         rule.onNodeWithText("Wait and resume automatically").performClick()
 
-        rule.waitUntil { calls.isNotEmpty() }
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
 
         assertEquals(listOf("PUT /api/v1/usage-limit"), calls.toList())
         assertEquals("""{"on_usage_limit":"resume"}""", bodies.single())

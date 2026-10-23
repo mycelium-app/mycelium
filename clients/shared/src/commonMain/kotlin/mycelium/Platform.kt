@@ -29,6 +29,8 @@ interface Platform {
 
     fun approveReturnTo(): String? = null
 
+    fun closeWindow() {}
+
     fun currentPath(): String
 
     fun navigate(url: String)
@@ -54,4 +56,14 @@ interface Platform {
     fun clipboardFiles(): List<PickedFile> = emptyList()
 
     fun listenForFiles(listener: ((List<PickedFile>) -> Unit)?) = Unit
+
+    fun windowFocused(): Boolean = false
+
+    fun requestNotificationPermission() = Unit
+
+    fun notify(title: String, body: String, conversationId: String, sound: Boolean = true) = Unit
+
+    fun chime() = Unit
+
+    fun listenForNotificationOpens(listener: ((String) -> Unit)?) = Unit
 }

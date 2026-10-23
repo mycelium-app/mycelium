@@ -163,7 +163,7 @@ private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onOpen: 
 }
 
 @Composable
-fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (String) -> Unit, onDone: () -> Unit) {
+fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (String) -> Unit, onDone: () -> Unit, onClose: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<PendingDevice?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -183,8 +183,17 @@ fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (
         scope.launch {
             try {
                 if (approve) api.approveDevice(code) else api.denyDevice(code)
-                outcome = if (approve) "Approved. You can close this page and go back to the machine." else "Denied. The machine will not be connected."
+                val signingInApp = pending?.kind == DeviceKind.Client
+                outcome = when {
+                    !approve -> "Denied. The machine will not be connected."
+                    signingInApp -> "You can close this tab and return to Mycelium."
+                    else -> "Approved. You can close this page and go back to the machine."
+                }
                 signInCallbackFrom(returnTo)?.let(onReturn)
+
+                if (approve && signingInApp) {
+                    onClose()
+                }
             } catch (failure: ApiException) {
                 error = failure.message
             } catch (_: Exception) {

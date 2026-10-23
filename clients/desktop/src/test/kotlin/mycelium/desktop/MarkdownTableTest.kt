@@ -39,4 +39,19 @@ class MarkdownTableTest {
 
         assertTrue(paragraph.right - cell.right < 40.dp, "the table stops ${paragraph.right - cell.right} short of the message's right edge")
     }
+
+    @Test
+    fun aShortTableIsNarrowerThanTheThread() {
+        val table = "| Check | Result |\n|---|---|\n| sig | ok |\n| sha | ok |"
+        val prose = "A long enough paragraph that the thread is clearly wider than a two column table of short words."
+        val message = "$prose\n\n$table"
+        rule.setContent { MyceliumTheme(true) { ThreadView(listOf(ThreadItem.AgentMessage("m1", message)), onAnswer = { _, _ -> }, onStopWorkflow = {}) } }
+
+        val paragraph = rule.onNodeWithText(prose, useUnmergedTree = true).getBoundsInRoot()
+        val header = rule.onNodeWithText("Check", useUnmergedTree = true).getBoundsInRoot()
+        val result = rule.onNodeWithText("Result", useUnmergedTree = true).getBoundsInRoot()
+
+        assertTrue(result.right < paragraph.right - 40.dp, "the table reaches ${result.right} of ${paragraph.right}")
+        assertTrue(header.left < result.left)
+    }
 }

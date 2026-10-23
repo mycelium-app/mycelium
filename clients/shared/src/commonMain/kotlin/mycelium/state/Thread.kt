@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 import mycelium.api.Attachment
 import mycelium.api.Event
 import mycelium.api.EventKinds
@@ -25,12 +26,53 @@ data class PlanEntry(val content: String, val status: PlanStatus)
 
 data class PermissionOption(val id: String, val name: String, val kind: String)
 
-data class WorkflowAgent(val key: String, val label: String, val phase: String, val finished: Boolean)
+data class WorkflowAgent(
+    val key: String,
+    val label: String,
+    val phase: String,
+    val finished: Boolean,
+    val tokens: Long? = null,
+    val turns: Int? = null,
+    val elapsedMs: Long? = null,
+)
 
 data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>) {
     val finishedCount: Int get() = agents.count { it.finished }
     val complete: Boolean get() = agents.isNotEmpty() && finishedCount == agents.size
     val phases: List<String> get() = agents.map { it.phase }.distinct()
+    val totals: WorkflowAgent get() = WorkflowAgent(
+        key = runId,
+        label = "Workflow",
+        phase = "",
+        finished = complete,
+        tokens = agents.mapNotNull { it.tokens }.takeIf { it.isNotEmpty() }?.sum(),
+        turns = agents.mapNotNull { it.turns }.takeIf { it.isNotEmpty() }?.sum(),
+        elapsedMs = agents.mapNotNull { it.elapsedMs }.takeIf { it.isNotEmpty() }?.sum(),
+    )
+}
+
+fun workflowStats(agent: WorkflowAgent): String? = listOfNotNull(
+    agent.tokens?.let { "${tokenCount(it)} tokens" },
+    agent.turns?.let { if (it == 1) "1 turn" else "$it turns" },
+    agent.elapsedMs?.let { durationText(it) },
+).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
+private fun tokenCount(tokens: Long): String = when {
+    tokens >= 1_000_000 -> "${tokens / 100_000 / 10.0}M"
+    tokens >= 1_000 -> "${tokens / 100 / 10.0}k"
+    else -> tokens.toString()
+}
+
+private fun durationText(ms: Long): String {
+    val seconds = ms / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+
+    return when {
+        hours > 0 -> "${hours}h ${(minutes % 60).toString().padStart(2, '0')}m"
+        minutes > 0 -> "${minutes}m ${(seconds % 60).toString().padStart(2, '0')}s"
+        else -> "${seconds}s"
+    }
 }
 
 data class ThreadImage(val sha256: String, val name: String, val mediaType: String, val data: String? = null, val sameAs: String? = null)
@@ -60,6 +102,7 @@ sealed interface ThreadItem {
         val output: String?,
         val images: List<ThreadImage> = emptyList(),
         val input: JsonObject? = null,
+        val awaitingApproval: Boolean = false,
     ) : ThreadItem
 
     data class Plan(override val key: String, val entries: List<PlanEntry>) : ThreadItem
@@ -72,6 +115,7 @@ sealed interface ThreadItem {
         val resolved: Boolean,
         val server: String? = null,
         val input: JsonObject? = null,
+        val callId: String? = null,
     ) : ThreadItem
 
     data class Note(override val key: String, val text: String) : ThreadItem
@@ -165,7 +209,7 @@ class ThreadBuilder {
         when (event.kind) {
             EventKinds.UserMessage -> items += userMessageFrom(key, payload)
             EventKinds.AcpUpdate -> applyUpdate(items, key, payload)
-            EventKinds.PermissionRequest -> items += permissionFrom(key, payload)
+            EventKinds.PermissionRequest -> requestPermission(items, permissionFrom(key, payload))
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
             EventKinds.TurnEnd -> items += ThreadItem.TurnEnd(key, payload.string("stop_reason") ?: "end_turn")
             EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", usageLimitFrom(payload))
@@ -255,7 +299,10 @@ private fun applyUpdate(items: MutableList<ThreadItem>, key: String, payload: Js
         "agent_message_chunk" -> appendAgentText(items, key, update.contentText())
         "agent_thought_chunk" -> appendThought(items, key, update.contentText())
         "user_message_chunk" -> Unit
-        "tool_call" -> items += toolCallFrom(key, update)
+        "tool_call" -> {
+            val call = toolCallFrom(key, update)
+            items += call.copy(awaitingApproval = items.any { it is ThreadItem.Permission && !it.resolved && it.callId == call.callId })
+        }
         "tool_call_update" -> mergeToolUpdate(items, update)
         "note" -> items += ThreadItem.Note(key, update.contentText())
         "plan" -> items += ThreadItem.Plan(key, planEntries(update))
@@ -432,14 +479,30 @@ private fun permissionFrom(key: String, payload: JsonObject): ThreadItem.Permiss
         resolved = false,
         server = toolCall?.string("server"),
         input = toolCall?.get("rawInput") as? JsonObject,
+        callId = toolCall?.string("toolCallId"),
     )
+}
+
+private fun requestPermission(items: MutableList<ThreadItem>, permission: ThreadItem.Permission) {
+    items += permission
+    setAwaitingApproval(items, permission.callId, true)
+}
+
+private fun setAwaitingApproval(items: MutableList<ThreadItem>, callId: String?, awaiting: Boolean) {
+    val index = items.indexOfLast { it is ThreadItem.ToolCall && it.callId == callId }
+
+    if (callId != null && index >= 0) {
+        items[index] = (items[index] as ThreadItem.ToolCall).copy(awaitingApproval = awaiting)
+    }
 }
 
 private fun resolvePermission(items: MutableList<ThreadItem>, requestId: String?) {
     val index = items.indexOfLast { it is ThreadItem.Permission && it.requestId == requestId }
 
     if (index >= 0) {
-        items[index] = (items[index] as ThreadItem.Permission).copy(resolved = true)
+        val permission = (items[index] as ThreadItem.Permission).copy(resolved = true)
+        items[index] = permission
+        setAwaitingApproval(items, permission.callId, false)
     }
 }
 
@@ -464,20 +527,28 @@ fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject): List<Wo
     return when (line.string("type")) {
         "started" -> {
             if (agents.any { it.key == agentKey }) {
-                agents
+                agents.map { if (it.key == agentKey) it.withStats(line) else it }
             } else {
                 agents + WorkflowAgent(
                     key = agentKey,
                     label = line.string("label") ?: "Agent",
                     phase = line.string("phase") ?: "Run",
                     finished = false,
-                )
+                ).withStats(line)
             }
         }
-        "result" -> agents.map { if (it.key == agentKey) it.copy(finished = true) else it }
-        else -> agents
+        "result" -> agents.map { if (it.key == agentKey) it.copy(finished = true).withStats(line) else it }
+        else -> agents.map { if (it.key == agentKey) it.withStats(line) else it }
     }
 }
+
+private fun WorkflowAgent.withStats(line: JsonObject) = copy(
+    tokens = line.number("tokens") ?: tokens,
+    turns = line.number("turns")?.toInt() ?: turns,
+    elapsedMs = line.number("elapsed_ms") ?: elapsedMs,
+)
+
+private fun JsonObject.number(key: String): Long? = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
 
 fun diffLines(oldText: String, newText: String): List<DiffLine> {
     val old = if (oldText.isEmpty()) emptyList() else oldText.split("\n")

@@ -178,9 +178,9 @@ private fun AppContent(platform: Platform) {
                     val code = approveCode
 
                     if (code != null) {
-                        ApproveScreen(current.api, code, platform.approveReturnTo(), platform::navigate, onDone = { approveCode = null })
+                        ApproveScreen(current.api, code, platform.approveReturnTo(), platform::navigate, onDone = { approveCode = null }, onClose = platform::closeWindow)
                     } else {
-                        val store = remember(current.api) { Store(current.api, scope) }
+                        val store = remember(current.api) { Store(current.api, scope, platform) }
 
                         DisposableEffect(store) {
                             store.start()
@@ -189,6 +189,11 @@ private fun AppContent(platform: Platform) {
 
                         LaunchedEffect(store) {
                             platform.resumes.collect { store.reconnect() }
+                        }
+
+                        DisposableEffect(store) {
+                            platform.listenForNotificationOpens { store.openFromNotification(it) }
+                            onDispose { platform.listenForNotificationOpens(null) }
                         }
 
                         Shell(

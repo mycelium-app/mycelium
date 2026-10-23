@@ -61,6 +61,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntSize
 import kotlin.io.encoding.Base64
 import kotlin.math.floor
+import kotlinx.coroutines.delay
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.state.AppState
@@ -72,6 +73,7 @@ import mycelium.state.TerminalKey
 import mycelium.state.codePointString
 import mycelium.state.projectName
 import mycelium.state.terminalControlInput
+import mycelium.state.terminalCursorShown
 import mycelium.state.terminalKeyInput
 import mycelium.state.xtermRgb
 import androidx.compose.ui.unit.dp
@@ -97,7 +99,10 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val style = Tokens.Type.Code.themed()
-    val cellWidth = remember(style, measurer) { measurer.measure("M".repeat(CellProbeLength), style).size.width.toFloat() / CellProbeLength }
+    val measuredWidth = remember(style, measurer) { measurer.measure("M".repeat(CellProbeLength), style).size.width.toFloat() / CellProbeLength }
+    val cellWidth = if (measuredWidth > 0f) measuredWidth else with(density) { style.fontSize.toPx() * FallbackCellRatio }
+    val reducedMotion = LocalReducedMotion.current
+    var blinkOn by remember { mutableStateOf(true) }
     val cellHeight = with(density) { style.lineHeight.toPx() }
     val ansi = ansiColours(colors)
     val source = remember { MutableInteractionSource() }
@@ -158,6 +163,15 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
+    LaunchedEffect(reducedMotion, revision) {
+        blinkOn = true
+
+        while (!reducedMotion) {
+            delay(CursorBlinkMillis)
+            blinkOn = !blinkOn
+        }
+    }
+
     LaunchedEffect(id) {
         if (id != null && !touch) {
             focusRequester.requestFocus()
@@ -214,7 +228,11 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
                 .semantics { contentDescription = "Terminal for ${projectName(conversation.cwd)}. Press Shift and Tab to leave it." },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                revision.let { drawEmulator(emulator, measurer, style, cellWidth, cellHeight, ansi, colors.text, colors.bgContent, focused.value) }
+                revision.let { drawEmulator(emulator, measurer, style, cellWidth, cellHeight, ansi, colors.text, colors.bgContent) }
+            }
+
+            Canvas(Modifier.fillMaxSize()) {
+                revision.let { drawCursor(emulator, cellWidth, cellHeight, colors.text, focused.value, blinkOn) }
             }
         }
 
@@ -271,6 +289,9 @@ private val LetterKeys = listOf(
 private const val CellProbeLength = 20
 private const val DefaultColumns = 80
 private const val DefaultRows = 24
+private const val FallbackCellRatio = 0.6f
+private const val CursorBlinkMillis = 530L
+private const val CursorBlockAlpha = 0.6f
 
 private val ModifierKeys = setOf(Key.ShiftLeft, Key.ShiftRight, Key.CtrlLeft, Key.CtrlRight, Key.AltLeft, Key.AltRight, Key.MetaLeft, Key.MetaRight, Key.CapsLock, Key.Function)
 private val PrivateUseCodePoints = 0xE000..0xF8FF
@@ -363,7 +384,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
     ansi: List<Color>,
     defaultForeground: Color,
     defaultBackground: Color,
-    focused: Boolean,
 ) {
     for (row in 0 until emulator.rows) {
         val top = row * cellHeight
@@ -389,8 +409,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
 
             for (column in 0 until emulator.columns) {
                 val cell = emulator.cell(row, column)
-                val atCursor = focused && emulator.cursorVisible && row == emulator.cursorRow && column == emulator.cursorColumn
-                val inverse = cell.style.inverse != atCursor
+                val inverse = cell.style.inverse
                 val foreground = resolve(cell.style.foreground, ansi, defaultForeground).let { if (cell.style.dim) it.copy(alpha = 0.6f) else it }
                 val background = resolve(cell.style.background, ansi, Color.Transparent)
                 val painted = if (inverse) background.takeIf { it != Color.Transparent } ?: defaultBackground else foreground
@@ -417,9 +436,26 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawEmulator(
         paint(emulator.columns)
         drawText(measurer, text, Offset(0f, top), style, softWrap = false, maxLines = 1)
     }
+}
 
-    if (!focused && emulator.cursorVisible) {
-        drawRect(defaultForeground, Offset(emulator.cursorColumn * cellWidth, emulator.cursorRow * cellHeight), Size(cellWidth, cellHeight), style = Stroke(1.dp.toPx()))
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCursor(
+    emulator: Terminal,
+    cellWidth: Float,
+    cellHeight: Float,
+    colour: Color,
+    focused: Boolean,
+    blinkOn: Boolean,
+) {
+    if (!terminalCursorShown(emulator.cursorVisible, focused, blinkOn)) {
+        return
+    }
+
+    val origin = Offset(emulator.cursorColumn * cellWidth, emulator.cursorRow * cellHeight)
+
+    if (focused) {
+        drawRect(colour, origin, Size(cellWidth, cellHeight), alpha = CursorBlockAlpha)
+    } else {
+        drawRect(colour, origin, Size(cellWidth, cellHeight), style = Stroke(1.dp.toPx()))
     }
 }
 

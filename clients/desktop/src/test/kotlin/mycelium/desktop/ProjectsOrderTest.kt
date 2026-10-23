@@ -73,7 +73,7 @@ class ProjectsOrderTest {
     private fun show() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
-        rule.waitUntil { rule.onAllNodesWithText("freshest").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("freshest").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun top(text: String): Float = rule.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top

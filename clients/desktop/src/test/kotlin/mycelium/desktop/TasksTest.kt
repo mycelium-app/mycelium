@@ -126,7 +126,7 @@ class TasksTest {
 
     private fun showBoard(store: Store = store(), onOpen: (String) -> Unit = {}, ready: String = "Rebuild install.md") {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); TasksScreen(store, state, platform, onOpen) } }
-        rule.waitUntil { rule.onAllNodesWithText(ready).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(ready).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -159,8 +159,8 @@ class TasksTest {
 
         rule.onNodeWithContentDescription("Approve Cache cargo in the release jobs").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tp/approve") } }
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Start Cache cargo in the release jobs").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/tp/approve") } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Start Cache cargo in the release jobs").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Approve Cache cargo in the release jobs").assertDoesNotExist()
     }
 
@@ -170,7 +170,7 @@ class TasksTest {
 
         rule.onNodeWithContentDescription("Decline Cache cargo in the release jobs").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("Cache cargo in the release jobs").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Cache cargo in the release jobs").fetchSemanticsNodes().isEmpty() }
         assertTrue(posts.any { it.first.endsWith("/tasks/tp/decline") })
     }
 
@@ -194,7 +194,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Answer Tag now, or wait?").performClick()
         rule.onNodeWithContentDescription("Answer Tag now, or wait?: Wait").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/tq/answer") } }
         assertEquals("""{"answer":"Wait"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
     }
 
@@ -210,7 +210,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Answer. Error: Enter an answer to send.").performTextInput("Tag it tomorrow")
         rule.onNodeWithText("Send answer").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/tq/answer") } }
         assertEquals("""{"answer":"Tag it tomorrow"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
     }
 
@@ -228,7 +228,7 @@ class TasksTest {
         rule.onNodeWithText("Answer a question").assertExists()
         rule.onNodeWithText("Send answer").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tq/answer") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/tq/answer") } }
         assertEquals("""{"answer":"test reply"}""", posts.first { it.first.endsWith("/tasks/tq/answer") }.second)
     }
 
@@ -239,8 +239,8 @@ class TasksTest {
         rule.onNodeWithText("Ready to review").assertExists()
         rule.onNodeWithContentDescription("Mark Merge the Gradle jobs done").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/tc/done") } }
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Mark Merge the Gradle jobs done").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/tc/done") } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Mark Merge the Gradle jobs done").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test
@@ -339,17 +339,17 @@ class TasksTest {
 
         rule.onNodeWithContentDescription("Stop Running job").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/conversations/c-run/cancel") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/conversations/c-run/cancel") } }
     }
 
     @Test
     fun aPermissionRequestIsAnsweredFromTheCard() {
         showBoard()
 
-        rule.waitUntil { rule.onAllNodesWithText("Run npm test").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Run npm test").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Allow once: Run npm test").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/conversations/c-input/permission") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/conversations/c-input/permission") } }
         assertEquals("""{"request_id":"r1","option_id":"allow"}""", posts.first { it.first.endsWith("/permission") }.second)
     }
 
@@ -359,8 +359,8 @@ class TasksTest {
 
         rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
-        rule.waitUntil { rule.onAllNodesWithText("Start", substring = false).fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Start", substring = false).fetchSemanticsNodes().isEmpty() }
         rule.onNodeWithContentDescription("Stop Rebuild install.md").assertExists()
     }
 
@@ -412,7 +412,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
         rule.onNodeWithText("Queue for Still working").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/t1/start") } }
         assertEquals("""{"conversation_id":"c-busy"}""", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
     }
 
@@ -423,9 +423,9 @@ class TasksTest {
         rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
         rule.onNodeWithText("Send to Ready for a look").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/t1/start") } }
         assertEquals("""{"conversation_id":"c-idle"}""", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Start Rebuild install.md").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Start Rebuild install.md").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test
@@ -435,7 +435,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
         rule.onNodeWithText("New conversation").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/t1/start") } }
         assertEquals("", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
     }
 
@@ -460,7 +460,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Folder").performTextInput("/srv")
         rule.onNodeWithText("Add task").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks") } }
         assertEquals("""{"node_id":"n1","agent":"claude","title":"Tidy","cwd":"/srv"}""", posts.first { it.first.endsWith("/tasks") }.second)
     }
 
@@ -486,10 +486,10 @@ class TasksTest {
         showBoard(store(dependants()), ready = "Verify v0.1.11 from S3")
 
         rule.onNodeWithContentDescription("Mark Merge the Gradle jobs done").performClick()
-        rule.waitUntil { rule.onAllNodesWithText("waits on 1 task", substring = true).fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("waits on 1 task", substring = true).fetchSemanticsNodes().isEmpty() }
         rule.onNodeWithContentDescription("Start Verify v0.1.11 from S3").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t3/start") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks/t3/start") } }
     }
 
     @Test
@@ -502,7 +502,7 @@ class TasksTest {
         rule.onNodeWithContentDescription("Waits on Rebuild install.md").performClick()
         rule.onNodeWithText("Add task").performClick()
 
-        rule.waitUntil { posts.any { it.first.endsWith("/tasks") } }
+        rule.waitUntil(5_000) { posts.any { it.first.endsWith("/tasks") } }
         assertEquals("""{"node_id":"n1","agent":"claude","title":"Tidy","cwd":"/srv","depends_on":["t1"]}""", posts.first { it.first.endsWith("/tasks") }.second)
     }
 }

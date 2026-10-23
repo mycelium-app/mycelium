@@ -20,8 +20,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
@@ -64,8 +62,11 @@ class ProjectsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val posts = mutableListOf<Pair<String, String>>()
-    private val patches = mutableListOf<Pair<String, String>>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val patches = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private var groups = "[]"
     private var forges = ForgesJson
     private var repositories = RepositoriesJson
@@ -103,7 +104,7 @@ class ProjectsTest {
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
 
@@ -115,7 +116,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-backups").assertExists()
         rule.onNodeWithText("acme-org").assertExists()
         rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().let { assertEquals(2, it.size) }
@@ -131,7 +132,7 @@ class ProjectsTest {
         var opened: String? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = { opened = it }) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("New conversation in acme-org/acme-backups").performClick()
 
         assertEquals("p1", opened)
@@ -145,7 +146,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("Settings, Forges", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Settings, Forges", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -154,7 +155,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("GitHub did not answer. Try again in a moment.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not answer. Try again in a moment.").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -163,12 +164,12 @@ class ProjectsTest {
         var created: String? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-org/acme-backups").performClick()
         rule.onNodeWithContentDescription("Set up on atlas").performClick()
         rule.onNodeWithText("Clone and open").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/acme-backups"}""", posts.single().second)
         assertEquals("p1", created)
     }
@@ -180,13 +181,13 @@ class ProjectsTest {
         var created: Project? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-org/acme-backups").performClick()
         rule.onNodeWithContentDescription("Group work").performClick()
         rule.onNodeWithText("Clone and open").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"group_id":"g1"}""", patches.single().second)
         assertEquals("g1", created?.groupId)
     }
@@ -198,11 +199,11 @@ class ProjectsTest {
         var created: Project? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-org/acme-backups").performClick()
         rule.onNodeWithText("Clone and open").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals(0, patches.size)
     }
 
@@ -217,7 +218,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Folder on the node").performTextInput("work/homelab")
         rule.onNodeWithText("Register and open").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","path":"work/homelab"}""", posts.single().second)
     }
 
@@ -226,7 +227,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-org/acme-backups").performClick()
 
         rule.onNodeWithText("acme-org/acme-backups").assertExists()
@@ -240,7 +241,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
 
         listOf("1", "2", "3").forEach { rule.onNodeWithText(it).assertExists() }
     }
@@ -251,13 +252,13 @@ class ProjectsTest {
         var created: String? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
         rule.onNodeWithContentDescription("New repository").performTextInput("acme-org/restore-tool")
         rule.onNodeWithText("~/projects/acme-org/restore-tool").assertExists()
         rule.onNodeWithText("Create and open").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/restore-tool","new_repository":true}""", posts.single().second)
     }
 
@@ -266,7 +267,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
         rule.onNodeWithContentDescription("New repository").performTextInput("restore-tool")
         rule.onNodeWithText("Create and open").performClick()
@@ -281,11 +282,11 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
-        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-org/acme-backups").performClick()
         rule.onNodeWithText("Clone and open").performClick()
 
-        rule.waitUntil { rule.onAllNodesWithText("repository not found").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("repository not found").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Clone and open").assertExists()
     }
 
@@ -306,11 +307,11 @@ class ProjectsTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }, projectId = "p1") } }
 
-        rule.waitUntil { store.state.value.projects.isNotEmpty() }
+        rule.waitUntil(5_000) { store.state.value.projects.isNotEmpty() }
         rule.waitForIdle()
         rule.onNodeWithContentDescription("Send").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1"}""", posts.single().second)
     }
 
@@ -323,7 +324,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
         rule.onNodeWithContentDescription("Send").performClick()
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
     }
 
@@ -349,7 +350,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("Message").performTextInput("Fix the build")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }
 
-        rule.waitUntil { created != null }
+        rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden","prompt":"Fix the build"}""", posts.single().second)
     }
 }
