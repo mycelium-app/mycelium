@@ -232,7 +232,7 @@ impl Daemon {
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
-            ControlToNode::CloseSession { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Close)),
+            ControlToNode::CloseSession { conversation_id } => self.with_session(conversation_id, |session| session.close()),
             ControlToNode::StartLogin { login_id, agent, method, account } => match (self.options.login_commands)(agent, &method) {
                 Some(command) => self.start_login(login_id, agent, command, account),
                 None => self.logins.refuse(login_id, format!("{} cannot sign in with {method} from here. Use the method this node lists for it, or sign in on the node itself.", agent.as_str())),
@@ -391,11 +391,18 @@ impl Daemon {
             return;
         }
 
-        let running = existing.iter().filter(|(_, handle)| !handle.ended()).count();
+        let running = existing.iter().filter(|(_, handle)| handle.running()).count();
         if running >= self.config.max_sessions {
-            self.refuse(conversation_id, format!("This node already runs {running} conversations, its limit. Stop one or raise max_sessions."));
+            let least_recently_used = existing.iter().filter(|(_, handle)| handle.idle()).min_by_key(|(_, handle)| handle.last_active());
 
-            return;
+            let Some((idle_id, idle)) = least_recently_used else {
+                self.refuse(conversation_id, format!("This node is already running {running} conversations, its limit, and every one of them is busy. Wait for one to finish or stop one, or raise max_sessions in {} on this node and restart it.", self.config_file.display()));
+
+                return;
+            };
+
+            idle.close();
+            let _ = self.out.send(NodeToControl::SessionClosed { conversation_id: *idle_id });
         }
 
         let agent_command = (self.options.agent_commands)(agent);

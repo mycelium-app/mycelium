@@ -86,6 +86,7 @@ fn node_hello_is_tagged_snake_case_with_exact_fields() {
 fn every_node_message_round_trips_under_its_tag() {
     let cases = vec![
         (NodeToControl::SessionStarted { conversation_id: id(), acp_session_id: "s".into(), modes: Some(json!([])), models: None, config_options: None }, "session_started"),
+        (NodeToControl::SessionClosed { conversation_id: id() }, "session_closed"),
         (NodeToControl::PromptReceived { conversation_id: id(), prompt_id: id() }, "prompt_received"),
         (NodeToControl::AcpUpdate { conversation_id: id(), seq: 1, update: json!({"a": 1}) }, "acp_update"),
         (NodeToControl::PermissionRequest { conversation_id: id(), seq: 2, request_id: "r".into(), request: json!({}) }, "permission_request"),

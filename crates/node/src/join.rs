@@ -63,7 +63,7 @@ pub async fn join(options: JoinOptions) -> Result<()> {
         token: granted.token,
         state_dir: default_state_dir(),
         projects_root: default_projects_root(),
-        max_sessions: 4,
+        max_sessions: 8,
     };
     let path = options.config_path.unwrap_or_else(config_path);
     config.save(&path)?;

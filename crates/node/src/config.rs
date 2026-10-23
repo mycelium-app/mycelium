@@ -20,7 +20,7 @@ pub struct NodeConfig {
 }
 
 fn default_max_sessions() -> usize {
-    4
+    8
 }
 
 impl NodeConfig {
@@ -144,7 +144,7 @@ mod tests {
             token: "abc".into(),
             state_dir: "/tmp/state".into(),
             projects_root: "/tmp/projects".into(),
-            max_sessions: 4,
+            max_sessions: 8,
         }
     }
 

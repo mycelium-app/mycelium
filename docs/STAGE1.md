@@ -408,6 +408,7 @@ Node to control plane:
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
 | `logins` | `logins: [{agent, account?, method, state}]` |
+| `session_closed` | `conversation_id` (the node closed an idle session to make room, so the next message starts it again with `session/load`) |
 | `instructions_held` | `revision, unmanaged: [label]` |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
@@ -465,7 +466,7 @@ replays everything after them from the keepers.
 ### Config
 
 `~/.config/mycelium/node.toml` (or `/var/lib/mycelium-node/node.toml` under the system service):
-`control_plane`, `node_id`, `token`, `state_dir`, `projects_root`, `max_sessions` (default 4).
+`control_plane`, `node_id`, `token`, `state_dir`, `projects_root`, `max_sessions` (default 8). At the limit the node closes its least recently used idle session (not working, not waiting for input) to make room and tells the control plane; the conversation resumes through `session/load` on its next message. It refuses the new session only when every session is busy.
 `mycelium node join` writes it with mode 0600. `MYCELIUM_NODE_CONFIG` overrides the path.
 `MYCELIUM_JOIN_TOKEN_FILE`, when set, joins without a device code: a single-use token minted in the
 UI. Stage 1 implements the device code; the token file is accepted by the CLI flag parser and

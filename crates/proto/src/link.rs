@@ -49,6 +49,9 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<Value>,
     },
+    SessionClosed {
+        conversation_id: Uuid,
+    },
     SessionFailed {
         conversation_id: Uuid,
         seq: i64,

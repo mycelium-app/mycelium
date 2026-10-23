@@ -408,6 +408,49 @@ async fn set_config_reaches_the_agent_as_session_set_mode() {
 }
 
 #[tokio::test]
+async fn at_the_session_limit_the_least_recently_used_idle_session_is_closed_to_make_room() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    fixture.config.max_sessions = 2;
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let (first, second, third) = (Uuid::from_u128(30), Uuid::from_u128(31), Uuid::from_u128(32));
+    start_conversation(&mut connection, first).await;
+    start_conversation(&mut connection, second).await;
+    prompt(&connection, first, "hello");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("late")).await;
+
+    connection.send(ControlToNode::StartSession { conversation_id: third, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None });
+
+    let closed = connection.next_matching(|message| matches!(message, NodeToControl::SessionClosed { .. })).await;
+    assert!(matches!(closed, NodeToControl::SessionClosed { conversation_id } if conversation_id == second));
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { conversation_id, .. } if *conversation_id == third)).await;
+    wait_for_file(&fixture.session_dir(second).join("exit.json")).await;
+    assert!(!fixture.session_dir(first).join("exit.json").exists());
+}
+
+#[tokio::test]
+async fn at_the_session_limit_with_every_session_busy_the_new_one_is_refused_with_the_setting_to_raise() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    fixture.config.max_sessions = 1;
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let (busy, refused) = (Uuid::from_u128(33), Uuid::from_u128(34));
+    start_conversation(&mut connection, busy).await;
+    prompt(&connection, busy, "do something slow");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
+
+    connection.send(ControlToNode::StartSession { conversation_id: refused, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None });
+
+    let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
+    let NodeToControl::SessionFailed { message, .. } = failed else {
+        unreachable!();
+    };
+    assert!(message.contains("every one of them is busy") && message.contains("raise max_sessions in") && message.contains("node.toml"), "{message}");
+}
+
+#[tokio::test]
 async fn a_missing_folder_fails_the_session_with_a_reason() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

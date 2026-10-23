@@ -222,6 +222,10 @@ impl SessionState {
         self.session_id.as_deref()
     }
 
+    pub fn is_busy(&self) -> bool {
+        self.session_id.is_none() || self.history_loading || !self.queued_prompts.is_empty() || !self.permissions.is_empty() || self.pending.values().any(|pending| *pending == Pending::Prompt)
+    }
+
     pub fn mark_closing(&mut self) {
         self.closing = true;
     }
@@ -616,6 +620,18 @@ mod tests {
         state.on_entry(1, Direction::Out, json!({}));
         state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true}}}));
         state.on_entry(3, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": result}));
+    }
+
+    #[test]
+    fn a_session_is_busy_until_started_and_while_a_prompt_is_open_and_idle_between_turns() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        assert!(state.is_busy());
+
+        started(&mut state, json!({"sessionId": "s1"}));
+        assert!(!state.is_busy());
+
+        state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "go".into(), attachments: vec![] });
+        assert!(state.is_busy());
     }
 
     #[test]

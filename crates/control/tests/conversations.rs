@@ -949,3 +949,19 @@ async fn migration_0033_gives_back_the_predicted_title_only_to_titles_the_user_n
     assert_eq!(flags, (Some(false), Some(true), Some(false)));
 }
 
+#[tokio::test]
+async fn a_conversation_whose_idle_session_the_node_closed_resumes_it_on_the_next_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+
+    link.send(NodeToControl::SessionClosed { conversation_id: id }).await;
+    link.barrier(id, 1).await;
+    prompt(&server, id, "carry on").await;
+
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, .. } => assert_eq!((conversation_id, resume.as_deref()), (id, Some("acp-1"))),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+}
+

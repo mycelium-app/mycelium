@@ -79,7 +79,7 @@ async fn join_prints_the_code_waits_for_approval_and_writes_a_private_credential
     assert_eq!(config.control_plane, url);
     assert_eq!(config.node_id.to_string(), "7f0c1d52-3c2e-4b43-a0a5-1c8a1e2b9d11");
     assert_eq!(config.token, "tok-123");
-    assert_eq!(config.max_sessions, 4);
+    assert_eq!(config.max_sessions, 8);
     assert_eq!(std::fs::metadata(&config_path).unwrap().permissions().mode() & 0o777, 0o600);
 
     let requests = script.device_requests.lock().unwrap();

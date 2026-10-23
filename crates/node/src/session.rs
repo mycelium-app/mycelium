@@ -9,7 +9,7 @@ use std::collections::{HashSet, VecDeque};
 use std::io::{BufRead, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -53,9 +53,38 @@ pub struct SessionHandle {
     acked: Arc<AtomicI64>,
     ended: Arc<AtomicBool>,
     acp_session_id: Arc<Mutex<Option<String>>>,
+    busy: Arc<AtomicBool>,
+    closing: Arc<AtomicBool>,
+    last_active: Arc<AtomicU64>,
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
 impl SessionHandle {
+    pub fn running(&self) -> bool {
+        !self.ended() && !self.closing.load(Ordering::SeqCst)
+    }
+
+    pub fn idle(&self) -> bool {
+        self.running() && !self.busy.load(Ordering::SeqCst)
+    }
+
+    pub fn last_active(&self) -> u64 {
+        self.last_active.load(Ordering::SeqCst)
+    }
+
+    pub fn close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+        self.command(Command::Close);
+    }
+
+    fn record_activity(&self, state: &SessionState) {
+        self.busy.store(state.is_busy(), Ordering::SeqCst);
+        self.last_active.store(now_millis(), Ordering::SeqCst);
+    }
+
     pub fn acked(&self) -> i64 {
         self.acked.load(Ordering::SeqCst)
     }
@@ -161,7 +190,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     let (messages, inbox) = mpsc::unbounded_channel();
     let acked = Arc::new(AtomicI64::new(read_acked(&spec.dir)));
     let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || !socket_path(&spec.dir).exists());
-    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)) };
+    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(true)), closing: Arc::new(AtomicBool::new(false)), last_active: Arc::new(AtomicU64::new(now_millis())) };
 
     let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
     let saved = if spec.launch.is_none() { load_snapshot(&spec.dir, base) } else { None };
@@ -185,6 +214,8 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     if spec.launch.is_none() && closed_path(&spec.dir).exists() {
         state.mark_closing();
     }
+
+    handle.record_activity(&state);
 
     let actor = Actor {
         conversation_id: spec.conversation_id,
@@ -259,6 +290,7 @@ impl Actor {
 
                     let actions = self.interpret(&mut state, entry);
                     self.perform(actions, &mut connection).await;
+                    self.handle.record_activity(&state);
                 }
                 message = inbox.recv() => {
                     let Some(message) = message else {
@@ -279,6 +311,7 @@ impl Actor {
 
                             let actions = state.on_command(command);
                             self.perform(actions, &mut connection).await;
+                            self.handle.record_activity(&state);
                         }
                         Message::Ack(seq) => self.acknowledge(seq, &mut state),
                         Message::Replay => self.replay(),
