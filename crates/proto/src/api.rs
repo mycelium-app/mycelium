@@ -532,8 +532,6 @@ pub struct Issue {
     pub title: String,
     pub url: String,
     pub body: String,
-}
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_requests: Option<Vec<PullRequest>>,
 }
@@ -552,6 +550,8 @@ pub struct PullRequest {
     pub label: String,
     pub url: String,
     pub state: PullRequestState,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Issues {
     pub issues: Vec<Issue>,
@@ -561,6 +561,17 @@ pub struct Issues {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartWorkspaceRequest {
     pub agent: AgentId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Question,
+    Proposed,
+    Open,
+    Claimed,
+    Done,
+    Declined,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -573,7 +584,18 @@ pub struct Task {
     pub branch: Option<String>,
     pub title: String,
     pub prompt: Option<String>,
+    pub status: TaskStatus,
+    pub options: Vec<String>,
+    pub answer: Option<String>,
+    pub source_id: Option<Uuid>,
+    pub source_title: Option<String>,
+    pub conversation_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnswerTaskRequest {
+    pub answer: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -583,17 +605,6 @@ pub struct CreateTaskRequest {
     #[serde(default)]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Question,
-    Proposed,
-    Open,
-    Claimed,
-    Done,
-    Declined,
-}
-
     pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
@@ -604,20 +615,9 @@ pub enum TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-    pub status: TaskStatus,
-    pub options: Vec<String>,
-    pub answer: Option<String>,
-    pub source_id: Option<Uuid>,
-    pub source_title: Option<String>,
-    pub conversation_id: Option<Uuid>,
 pub enum EachRun {
     New,
     Same,
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnswerTaskRequest {
-    pub answer: String,
-}
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -703,6 +703,8 @@ pub struct Activity {
     pub range: String,
     pub totals: ActivityRow,
     pub days: Vec<ActivityRow>,
+    #[serde(default)]
+    pub hours: Vec<ActivityRow>,
     pub conversations: Vec<ActivityRow>,
     pub nodes: Vec<ActivityRow>,
     pub agents: Vec<ActivityRow>,
@@ -723,8 +725,6 @@ pub struct MovePlan {
     pub movable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(default)]
-    pub hours: Vec<ActivityRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     pub changed_files: u32,

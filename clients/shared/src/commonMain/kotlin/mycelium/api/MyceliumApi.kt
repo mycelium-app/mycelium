@@ -261,10 +261,6 @@ class MyceliumApi(
     suspend fun startTask(id: String): Conversation =
         call("/tasks/$id/start") { client.post(it) { authorise() } }.body()
 
-    suspend fun deleteTask(id: String) {
-        call("/tasks/$id") { client.delete(it) { authorise() } }
-    }
-
     suspend fun approveTask(id: String): Task =
         call("/tasks/$id/approve") { client.post(it) { authorise() } }.body()
 
@@ -276,6 +272,10 @@ class MyceliumApi(
 
     suspend fun finishTask(id: String): Task =
         call("/tasks/$id/done") { client.post(it) { authorise() } }.body()
+
+    suspend fun deleteTask(id: String) {
+        call("/tasks/$id") { client.delete(it) { authorise() } }
+    }
 
     suspend fun schedules(): List<Schedule> = call("/schedules") { client.get(it) { authorise() } }.body()
 

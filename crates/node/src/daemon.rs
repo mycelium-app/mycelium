@@ -28,6 +28,7 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
 };
 
 const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
+const USAGE_INTERVAL: Duration = Duration::from_secs(310);
 
 type CommandSource = Arc<dyn Fn(AgentId) -> Vec<String> + Send + Sync>;
 type LoginCommandSource = Arc<dyn Fn(AgentId, &str) -> Option<Vec<String>> + Send + Sync>;
@@ -42,8 +43,8 @@ pub struct DaemonOptions {
     pub home: PathBuf,
     pub transcript_roots: Vec<PathBuf>,
     pub transcript_poll: Duration,
-}
     pub usage_endpoint: String,
+}
 
 impl DaemonOptions {
     pub fn from_environment() -> Result<DaemonOptions> {
@@ -57,8 +58,8 @@ impl DaemonOptions {
             liveness: Liveness::default(),
             transcript_roots: vec![home.join(".claude").join("projects"), home.join(".codex").join("sessions")],
             transcript_poll: Duration::from_secs(2),
-            home,
             usage_endpoint: USAGE_ENDPOINT.to_string(),
+            home,
         })
     }
 }
@@ -80,8 +81,8 @@ pub struct Daemon {
     out: mpsc::UnboundedSender<NodeToControl>,
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
     logins: LoginManager,
-    terminals: TerminalManager,
     usage: Arc<UsageCache>,
+    terminals: TerminalManager,
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
@@ -101,8 +102,8 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
-        terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
         usage,
+        terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
@@ -116,8 +117,8 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     daemon.reattach_sessions();
     daemon.write_status();
     tokio::spawn(follow_transcripts(daemon.clone()));
-
     tokio::spawn(follow_usage(daemon.clone()));
+
     run_link(daemon, out_rx).await
 }
 
@@ -149,7 +150,6 @@ async fn follow_transcripts(daemon: Arc<Daemon>) {
     }
 }
 
-impl Daemon {
 async fn follow_usage(daemon: Arc<Daemon>) {
     let mut ticker = tokio::time::interval(USAGE_INTERVAL);
 
@@ -169,6 +169,7 @@ async fn follow_usage(daemon: Arc<Daemon>) {
     }
 }
 
+impl Daemon {
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
@@ -288,6 +289,15 @@ async fn follow_usage(daemon: Arc<Daemon>) {
             ControlToNode::Watch { seconds } => {
                 self.watcher.extend(Duration::from_secs(seconds.into()));
             }
+            ControlToNode::StopProcess { request_id, pid, name } => {
+                let out = self.out.clone();
+                let proc_root = self.watcher.proc_root().to_path_buf();
+
+                tokio::task::spawn_blocking(move || {
+                    let stopped = crate::resources::Sampler::new(proc_root, Vec::new()).stop(pid, &name);
+                    let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
+                });
+            }
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }
@@ -316,15 +326,6 @@ async fn follow_usage(daemon: Arc<Daemon>) {
 
         match handle {
             Some(handle) => action(&handle),
-            ControlToNode::StopProcess { request_id, pid, name } => {
-                let out = self.out.clone();
-                let proc_root = self.watcher.proc_root().to_path_buf();
-
-                tokio::task::spawn_blocking(move || {
-                    let stopped = crate::resources::Sampler::new(proc_root, Vec::new()).stop(pid, &name);
-                    let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
-                });
-            }
             None => tracing::warn!(conversation = %conversation_id, "the control plane addressed a conversation this node does not run"),
         }
     }

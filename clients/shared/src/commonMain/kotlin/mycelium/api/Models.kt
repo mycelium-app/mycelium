@@ -170,12 +170,11 @@ data class ProcessUsage(
     @SerialName("cpu_percent") val cpuPercent: Double,
     @SerialName("memory_bytes") val memoryBytes: Long,
     val agent: Boolean = false,
-    @SerialName("conversation_id") val conversationId: String? = null,
     val stoppable: Boolean = false,
+    @SerialName("conversation_id") val conversationId: String? = null,
     val cwd: String? = null,
 )
 
-@Serializable
 @Serializable
 data class DockerContainer(val name: String, val state: String)
 
@@ -206,8 +205,8 @@ data class ResourceSample(
     val disks: List<DiskUsage> = emptyList(),
     val processes: List<ProcessUsage> = emptyList(),
     val ports: List<ListeningPort> = emptyList(),
-)
     val docker: DockerUsage? = null,
+)
 
 @Serializable
 data class CpuPoint(@SerialName("at_ms") val atMs: Long, @SerialName("cpu_percent") val cpuPercent: Double)
@@ -236,6 +235,7 @@ data class Activity(
     val range: String,
     val totals: ActivityRow,
     val days: List<ActivityRow> = emptyList(),
+    val hours: List<ActivityRow> = emptyList(),
     val conversations: List<ActivityRow> = emptyList(),
     val nodes: List<ActivityRow> = emptyList(),
     val agents: List<ActivityRow> = emptyList(),
@@ -387,17 +387,6 @@ data class Task(
     val title: String,
     val prompt: String? = null,
     @SerialName("created_at") val createdAt: String,
-)
-
-@Serializable
-data class CreateTaskRequest(
-    @SerialName("node_id") val nodeId: String,
-    val agent: String,
-    val title: String,
-    val cwd: String? = null,
-    @SerialName("project_id") val projectId: String? = null,
-    val branch: String? = null,
-    val prompt: String? = null,
     val status: String = TaskStatuses.Open,
     val options: List<String> = emptyList(),
     val answer: String? = null,
@@ -417,6 +406,17 @@ object TaskStatuses {
 
 @Serializable
 data class AnswerTaskRequest(val answer: String)
+
+@Serializable
+data class CreateTaskRequest(
+    @SerialName("node_id") val nodeId: String,
+    val agent: String,
+    val title: String,
+    val cwd: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    val branch: String? = null,
+    val prompt: String? = null,
+)
 
 @Serializable
 data class Schedule(
@@ -472,11 +472,9 @@ data class Issue(
     val title: String,
     val url: String,
     val body: String? = null,
+    @SerialName("pull_requests") val pullRequests: List<PullRequest>? = null,
 )
 
-    @SerialName("pull_requests") val pullRequests: List<PullRequest>? = null,
-@Serializable
-data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
 @Serializable
 enum class PullRequestState {
     @SerialName("open") Open,
@@ -487,6 +485,8 @@ enum class PullRequestState {
 @Serializable
 data class PullRequest(val number: Long, val label: String, val url: String, val state: PullRequestState)
 
+@Serializable
+data class Issues(val issues: List<Issue> = emptyList(), val failures: List<RepositoryFailure> = emptyList())
 
 @Serializable
 data class StartWorkspaceRequest(val agent: String)

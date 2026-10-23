@@ -189,7 +189,7 @@ Conversations:
   or `session/set_config_option`, whichever the agent advertises.
 
 Activity:
-- `GET /api/v1/activity?range=today|7d|30d&node_id=` → `{range, totals, days, conversations, nodes, agents, projects, models, unreported_agents}` for the caller's own conversations, `range` defaulting to `7d` (400 `range_invalid` otherwise) and `node_id` narrowing to one node. Every row is `{key, name, turns, reported_turns, working_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd}`; `days` has one row per UTC day of the range, empty days included, `cost_usd` is null until an agent reports a cost, and the breakdowns hold the top 50 by tokens. A turn is recorded when its `turn_end` arrives: tokens from the turn's `usage`, cost as the change in the agent's running total from its latest `usage_update` (`cost.amount`), the model from that update's `_meta["_claude/model"]` else the conversation's, and time working from the last user message to the turn end. A turn with neither tokens nor cost is counted as a turn only (`reported_turns` does not include it), and `unreported_agents` names the agents in the range with no reported turn. Imported conversations count their turns on the day they were last active, with no usage.
+- `GET /api/v1/activity?range=today|7d|30d&node_id=` → `{range, totals, days, hours, conversations, nodes, agents, projects, models, unreported_agents}` for the caller's own conversations, `range` defaulting to `7d` (400 `range_invalid` otherwise) and `node_id` narrowing to one node. Every row is `{key, name, turns, reported_turns, working_ms, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd}`; `days` has one row per UTC day of the range and `hours` one row per UTC hour (`key` is `YYYY-MM-DDTHH`) from the first day of the range to the current hour, empty ones included, `cost_usd` is null until an agent reports a cost, and the breakdowns hold the top 50 by tokens. A turn is recorded when its `turn_end` arrives: tokens from the turn's `usage`, cost as the change in the agent's running total from its latest `usage_update` (`cost.amount`), the model from that update's `_meta["_claude/model"]` else the conversation's, and time working from the last user message to the turn end. A turn with neither tokens nor cost is counted as a turn only (`reported_turns` does not include it), and `unreported_agents` names the agents in the range with no reported turn. Imported conversations count their turns on the day they were last active, with no usage.
 
 History:
 - `GET /api/v1/imports` → `[{node_id, agent, found, imported}]` per node and agent; `POST /api/v1/imports`
@@ -404,9 +404,9 @@ Control plane to node:
 | type | fields |
 |---|---|
 | `ack` | `conversation_id, seq` |
+| `stop_process` | `request_id, pid, name` (send SIGTERM to the process if it is still called `name` and is stoppable) |
 | `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?, instructions?` |
 | `instructions` | `revision, global?` |
-| `process_stopped` | `request_id, ok, error?` (the answer to `stop_process`) |
 | `prompt` | `conversation_id, prompt_id, text` |
 | `cancel` | `conversation_id` |
 | `permission_response` | `conversation_id, request_id, outcome` (ACP `RequestPermissionOutcome`) |
@@ -414,7 +414,6 @@ Control plane to node:
 | `close_session` | `conversation_id` |
 | `start_login` | `login_id, agent, method, account?` |
 | `login_input` | `login_id, text` |
-| `stop_process` | `request_id, pid, name` (send SIGTERM to the process if it is still called `name` and is stoppable) |
 | `stop_login` | `login_id` |
 | `start_terminal` | `terminal_id, conversation_id, cwd, cols, rows` |
 | `terminal_input` | `terminal_id, data` (base64 bytes) |
