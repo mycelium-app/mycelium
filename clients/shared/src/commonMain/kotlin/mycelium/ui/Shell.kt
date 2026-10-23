@@ -87,6 +87,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
+import mycelium.state.clockTime
 import mycelium.state.isLaptop
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
@@ -448,6 +449,7 @@ private fun LazyListScope.conversationRows(
             expanded = row.conversation.id !in collapsed,
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
+            onCancelResume = { store.act { store.api.cancelResume(row.conversation.id) } },
         )
     }
 }
@@ -487,8 +489,9 @@ private fun SectionHeading(section: SidebarSection) {
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
     var menuOpen by remember { mutableStateOf(false) }
     val statusName = statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
@@ -531,12 +534,28 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
-            Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
+            Column(Modifier.weight(1f)) {
+                Label(row.title, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
-            Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                if (row.resumeAt != null) {
+                    Label("Resumes at ${clockTime(row.resumeAt) { millis -> platform?.localDateTime(millis) }}", style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
+                }
+            }
+
+            if (row.resumeAt != null) {
+                Box(Modifier.width(Tokens.Size.ControlMd * 2))
+            } else {
+                Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+            }
 
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
+            }
+        }
+
+        if (row.resumeAt != null) {
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S2 + Tokens.Size.IconSm + Tokens.Space.S2)) {
+                MyButton(onCancelResume, text = "Cancel", description = "Cancel the automatic resume of ${row.title}", size = ButtonSize.Sm, muted = true)
             }
         }
 

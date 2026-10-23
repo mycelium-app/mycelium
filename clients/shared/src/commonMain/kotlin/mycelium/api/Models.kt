@@ -379,6 +379,9 @@ data class Extensions(
 )
 
 @Serializable
+data class UsageLimitSetting(@SerialName("on_usage_limit") val onUsageLimit: String)
+
+@Serializable
 data class InstructionVersion(val id: String, @SerialName("created_at") val createdAt: String)
 
 @Serializable
@@ -727,6 +730,7 @@ data class Conversation(
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("archived_at") val archivedAt: String? = null,
     @SerialName("pinned_at") val pinnedAt: String? = null,
+    @SerialName("resume_at") val resumeAt: String? = null,
     val account: String? = null,
     @SerialName("title_user_set") val titleUserSet: Boolean = false,
     @SerialName("parent_id") val parentId: String? = null,

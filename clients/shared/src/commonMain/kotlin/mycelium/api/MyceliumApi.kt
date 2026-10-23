@@ -259,6 +259,11 @@ class MyceliumApi(
     suspend fun saveExtensions(extensions: Extensions): Extensions =
         call("/extensions") { client.put(it) { authorise(); json(extensions) } }.body()
 
+    suspend fun usageLimitSetting(): UsageLimitSetting = call("/usage-limit") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveUsageLimitSetting(setting: UsageLimitSetting): UsageLimitSetting =
+        call("/usage-limit") { client.put(it) { authorise(); json(setting) } }.body()
+
     suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveInstructions(layer: String, text: String): InstructionLayer =
@@ -375,6 +380,14 @@ class MyceliumApi(
 
     suspend fun retryConversation(id: String) {
         call("/conversations/$id/retry") { client.post(it) { authorise() } }
+    }
+
+    suspend fun scheduleResume(id: String) {
+        call("/conversations/$id/resume") { client.post(it) { authorise() } }
+    }
+
+    suspend fun cancelResume(id: String) {
+        call("/conversations/$id/resume") { client.delete(it) { authorise() } }
     }
 
     suspend fun deleteConversation(id: String) {

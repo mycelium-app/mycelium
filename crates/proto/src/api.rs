@@ -500,6 +500,24 @@ pub struct Extensions {
     pub mycelium_tools: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnUsageLimit {
+    Ask,
+    Resume,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageLimitSetting {
+    pub on_usage_limit: OnUsageLimit,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ResumeRequest {
+    #[serde(default)]
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InstructionVersion {
     pub id: String,

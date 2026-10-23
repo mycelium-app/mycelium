@@ -74,11 +74,19 @@ sealed interface ThreadItem {
 
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
 
-    data class Failure(override val key: String, val message: String) : ThreadItem
+    data class Failure(override val key: String, val message: String, val limit: UsageLimitNote? = null) : ThreadItem
 
     data class Workflow(override val key: String, val progress: WorkflowProgress) : ThreadItem
 
     data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
+}
+
+data class UsageLimitNote(val window: String, val resetsAt: String?)
+
+private fun usageLimitFrom(payload: JsonObject): UsageLimitNote? {
+    val limit = payload["usage_limit"] as? JsonObject ?: return null
+
+    return UsageLimitNote(limit.string("window") ?: "usage", limit.string("resets_at"))
 }
 
 private const val MaxDiffSide = 400
@@ -156,7 +164,7 @@ class ThreadBuilder {
             EventKinds.PermissionRequest -> items += permissionFrom(key, payload)
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
             EventKinds.TurnEnd -> items += ThreadItem.TurnEnd(key, payload.string("stop_reason") ?: "end_turn")
-            EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.")
+            EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", usageLimitFrom(payload))
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
         }

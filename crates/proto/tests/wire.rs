@@ -64,6 +64,7 @@ fn conversation() -> Conversation {
         updated_at: now(),
         archived_at: None,
         pinned_at: None,
+        resume_at: None,
     }
 }
 

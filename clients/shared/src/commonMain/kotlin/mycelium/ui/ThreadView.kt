@@ -96,6 +96,8 @@ fun ThreadView(
     modifier: Modifier = Modifier,
     onSuggest: (String) -> Unit = {},
     onRetry: (() -> Unit)? = null,
+    limitActions: LimitActions? = null,
+    agent: String = "",
 ) {
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -165,7 +167,7 @@ fun ThreadView(
                     )
                 } else {
                     CompositionLocalProvider(LocalImageJump provides jumpToImage) {
-                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null)
+                        ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
                     }
                 }
             }
@@ -188,7 +190,7 @@ fun ThreadView(
 }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
@@ -203,7 +205,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Plan -> PlanCard(item)
         is ThreadItem.Permission -> PermissionCard(item, onAnswer)
         is ThreadItem.TurnEnd -> Unit
-        is ThreadItem.Failure -> Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
 
             if (onRetry != null) {

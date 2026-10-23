@@ -37,6 +37,7 @@ mod stream;
 mod tasks;
 mod terminals;
 mod transcripts;
+mod usage_limits;
 mod versions;
 mod walkthrough_diff;
 mod walkthroughs;
@@ -75,6 +76,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(boot::migrate_until_ready(state.clone()));
     tokio::spawn(versions::refresh_regularly(state.clone()));
     tokio::spawn(schedules::run_regularly(state.clone()));
+    tokio::spawn(usage_limits::resume_regularly(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
@@ -152,6 +154,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))
         .route("/api/v1/conversations/{id}/queue/{queue_id}/send-now", post(prompts::send_now))
         .route("/api/v1/conversations/{id}/retry", post(prompts::retry))
+        .route("/api/v1/conversations/{id}/resume", post(usage_limits::resume).delete(usage_limits::cancel_resume))
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))
         .route("/api/v1/conversations/{id}/config", post(prompts::config))
@@ -180,6 +183,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-proposals/{id}/decline", post(instruction_proposals::decline))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
+        .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/{id}", delete(tasks::delete))

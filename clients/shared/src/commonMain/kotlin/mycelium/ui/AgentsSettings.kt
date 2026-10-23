@@ -22,10 +22,13 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.ImportRequest
 import mycelium.api.ImportStatus
+import mycelium.api.UsageLimitSetting
 import mycelium.state.Store
 import mycelium.state.agentName
 
 private val ImportableAgents = listOf("claude", "codex")
+
+private val UsageLimitChoices = listOf("Ask me" to "ask", "Wait and resume automatically" to "resume")
 
 fun pendingImports(status: ImportStatus?): Int = ((status?.found ?: 0) - (status?.imported ?: 0)).coerceAtLeast(0)
 
@@ -37,11 +40,30 @@ fun AgentsSettings(store: Store) {
     var skipped by remember { mutableStateOf<Map<Pair<String, String>, Int>>(emptyMap()) }
     var importing by remember { mutableStateOf<Set<Pair<String, String>>>(emptySet()) }
 
+    var onUsageLimit by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
         store.act { statuses = store.api.imports() }
+        store.act { onUsageLimit = store.api.usageLimitSetting().onUsageLimit }
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
+        onUsageLimit?.let { chosen ->
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("When a usage limit is reached", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Segmented(
+                    UsageLimitChoices.map { it.first },
+                    UsageLimitChoices.first { it.second == chosen }.first,
+                    { label ->
+                        val picked = UsageLimitChoices.first { it.first == label }.second
+                        onUsageLimit = picked
+                        store.act { store.api.saveUsageLimitSetting(UsageLimitSetting(picked)) }
+                    },
+                    groupLabel = "When a usage limit is reached",
+                )
+            }
+        }
+
         for (agent in ImportableAgents) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)

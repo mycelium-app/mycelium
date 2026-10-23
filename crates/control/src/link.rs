@@ -159,11 +159,23 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 crate::moves::session_failed(state, owner, conversation_id);
             }
 
-            if let Err(error) = crate::goals::session_failed(state, conversation_id).await {
+            let limit = crate::usage_limits::inspect(state, node_id, conversation_id, &message).await?;
+            let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
+
+            if resume_at.is_none()
+                && let Err(error) = crate::goals::session_failed(state, conversation_id).await
+            {
                 tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
             }
 
-            record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
+            let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
+            let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
+
+            if let Some(at) = resume_at.filter(|_| recorded) {
+                crate::usage_limits::schedule(state, conversation_id, at).await?;
+            }
+
+            Ok(())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
             record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await.map(|_| ())
@@ -393,6 +405,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     }
 
     record_turn(state, conversation_id, usage.as_ref()).await?;
+    sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await?;
     state.hub.forget_prompts_of(conversation_id);
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     crate::moves::turn_ended(state, owner, conversation_id).await;

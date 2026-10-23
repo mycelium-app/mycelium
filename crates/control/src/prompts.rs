@@ -128,7 +128,7 @@ pub async fn retry(State(state): State<AppState>, user: AuthUser, Path(id): Path
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+pub async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 
@@ -146,6 +146,7 @@ async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> 
         return Err(node_offline());
     }
 
+    sqlx::query("update conversations set resume_at = null where id = $1").bind(id).execute(&mut *tx).await?;
     let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
     tx.commit().await?;
 
@@ -280,6 +281,14 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
 
     if offered == Some(false) {
         return Err(ApiError::bad_request("unknown_option", "Choose one of the options the agent offered."));
+    }
+
+    if chats::is_chat(&row) {
+        if !state.hub.answer_chat_approval(id, &answer.request_id, answer.option_id.clone()) {
+            return Err(ApiError::conflict("already_resolved", "This permission request has already been answered."));
+        }
+
+        return Ok(StatusCode::NO_CONTENT);
     }
 
     let outcome = json!({"outcome": "selected", "optionId": answer.option_id});

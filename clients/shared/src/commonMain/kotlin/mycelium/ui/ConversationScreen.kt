@@ -261,6 +261,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     modifier = Modifier.weight(1f),
                     onSuggest = ::send,
                     onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
+                    limitActions = if (conversation.status == ConversationStatus.Failed) LimitActions(
+                        resumeAt = conversation.resumeAt,
+                        onResume = { store.act { api.scheduleResume(id) } },
+                        onRetryNow = { store.act { api.retryConversation(id) } },
+                        onCancelResume = { store.act { api.cancelResume(id) } },
+                    ) else null,
+                    agent = conversation.agent,
                 )
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
