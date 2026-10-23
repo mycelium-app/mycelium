@@ -28,6 +28,10 @@ import mycelium.state.Store
 
 private val ForgeKinds = mapOf("GitHub" to "github", "GitLab" to "gitlab")
 
+private val ForgeTokenHints = mapOf(
+    "github" to "Use a token with the repo scope, or a fine-grained token with Contents, Issues and Pull requests permissions.",
+    "gitlab" to "Use a token with the api scope. read_api is enough to browse only.",
+)
 private val ForgeDefaultHosts = mapOf("github" to "https://github.com", "gitlab" to "https://gitlab.com")
 
 @Composable
@@ -127,6 +131,7 @@ fun ForgesSettings(store: Store) {
                 )
                 TextInput(baseUrl, { baseUrl = it }, label = "Base URL for a self-hosted forge", placeholder = ForgeDefaultHosts.getValue(kind), mono = true)
                 TextInput(token, { token = it }, label = "Personal access token", mono = true, masked = true, onSubmit = ::connect)
+                Label(ForgeTokenHints.getValue(kind), style = Tokens.Type.Meta, color = colors.textMuted)
 
                 failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 

@@ -86,6 +86,18 @@ class ForgesSettingsTest {
     }
 
     @Test
+    fun theTokenFieldNamesTheScopeToUseForTheChosenForge() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+
+        rule.onNodeWithText("Connect a forge").performClick()
+        rule.onNodeWithText("Use a token with the repo scope, or a fine-grained token with Contents, Issues and Pull requests permissions.").assertExists()
+
+        rule.onNodeWithText("GitLab").performClick()
+        rule.onNodeWithText("Use a token with the api scope. read_api is enough to browse only.").assertExists()
+    }
+
+    @Test
     fun theTokenFieldIsMaskedAndEmptyWhenTheFormOpensAgain() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }

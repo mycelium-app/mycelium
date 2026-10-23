@@ -4,12 +4,14 @@ use axum::Json;
 use axum::Router;
 use axum::extract::Query;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use common::{Server, serve};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 const GITHUB_TOKEN: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+const NARROW_TOKEN: &str = "narrow-scope-token";
 const GITLAB_TOKEN: &str = "glpat-0123456789abcdefghij";
 
 fn authorised(headers: &HeaderMap, scheme: &str, token: &str) -> bool {
@@ -21,6 +23,10 @@ fn authorised(headers: &HeaderMap, scheme: &str, token: &str) -> bool {
 
 fn fake_github() -> Router {
     async fn user(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
+        if authorised(&headers, "bearer", NARROW_TOKEN) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+
         authorised(&headers, "bearer", GITHUB_TOKEN).then(|| Json(json!({"login": "samexample"}))).ok_or(StatusCode::UNAUTHORIZED)
     }
 
@@ -47,8 +53,16 @@ fn fake_github() -> Router {
 }
 
 fn fake_gitlab() -> Router {
-    async fn user(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
-        authorised(&headers, "private", GITLAB_TOKEN).then(|| Json(json!({"username": "sam"}))).ok_or(StatusCode::UNAUTHORIZED)
+    async fn user(headers: HeaderMap) -> Result<Json<Value>, Response> {
+        if authorised(&headers, "private", NARROW_TOKEN) {
+            return Err((StatusCode::FORBIDDEN, Json(json!({"error": "insufficient_scope", "error_description": "Request was rejected"}))).into_response());
+        }
+
+        if authorised(&headers, "private", "blocked-token") {
+            return Err((StatusCode::FORBIDDEN, Json(json!({"error": "access_denied"}))).into_response());
+        }
+
+        authorised(&headers, "private", GITLAB_TOKEN).then(|| Json(json!({"username": "sam"}))).ok_or(StatusCode::UNAUTHORIZED.into_response())
     }
 
     async fn groups(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
@@ -100,6 +114,26 @@ async fn a_token_the_forge_refuses_is_rejected_and_nothing_is_stored() {
     assert!(error["message"].as_str().unwrap().starts_with("GitHub did not accept this token"));
     let (_, listed) = server.user.json(server.user.get("/api/v1/forges")).await;
     assert_eq!(listed, json!([]));
+}
+
+#[tokio::test]
+async fn an_expired_token_and_a_token_without_scope_are_told_apart() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab()).await;
+    let github = serve(fake_github()).await;
+
+    let (_, expired) = connect(&server, "gitlab", &gitlab, "glpat-expired").await;
+    let (status, gitlab_scope) = connect(&server, "gitlab", &gitlab, NARROW_TOKEN).await;
+    let (_, github_scope) = connect(&server, "github", &github, NARROW_TOKEN).await;
+    let (_, other) = connect(&server, "gitlab", &gitlab, "blocked-token").await;
+
+    assert_eq!(expired["error"], "forge_token_rejected");
+    assert!(expired["message"].as_str().unwrap().contains("has not expired"));
+    assert_eq!((status, gitlab_scope["error"].clone()), (400, json!("forge_token_scope")));
+    assert!(gitlab_scope["message"].as_str().unwrap().starts_with("This token cannot read your account. Create a token with the api scope (read_api is enough to browse;"));
+    assert_eq!(github_scope["error"], "forge_token_scope");
+    assert!(github_scope["message"].as_str().unwrap().contains("classic token with the repo scope"));
+    assert_eq!(other["error"], "forge_failed");
 }
 
 #[tokio::test]

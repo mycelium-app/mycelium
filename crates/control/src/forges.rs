@@ -39,6 +39,7 @@ pub struct ForgeRow {
 
 pub enum ForgeError {
     Rejected,
+    MissingScope,
     Unreachable,
     Conflict,
     CreateRefused,
@@ -51,12 +52,20 @@ pub struct ForgeFile {
     blob: String,
 }
 
+fn missing_scope_message(kind: ForgeKind) -> &'static str {
+    match kind {
+        ForgeKind::Gitlab => "This token cannot read your account. Create a token with the api scope (read_api is enough to browse; api is needed to clone private repositories, save instructions and create repositories), then try again.",
+        ForgeKind::Github => "This token cannot read your account. Create a fine-grained token with the Contents, Issues and Pull requests permissions, or a classic token with the repo scope, then try again.",
+    }
+}
+
 impl ForgeError {
     pub fn into_api(self, kind: ForgeKind, base_url: &str) -> ApiError {
         let name = display_name(kind);
 
         match self {
             ForgeError::Rejected => ApiError::bad_request("forge_token_rejected", format!("{name} did not accept this token. Check that it has not expired and can read your account, then try again.")),
+            ForgeError::MissingScope => ApiError::bad_request("forge_token_scope", missing_scope_message(kind)),
             ForgeError::Unreachable => ApiError::bad_request("forge_unreachable", format!("Mycelium could not reach {base_url}. Check the address and try again.")),
             ForgeError::Conflict => ApiError::conflict("forge_file_changed", format!("The file changed on {name} since Mycelium last read it. Pull the latest version, then make your edit again.")),
             ForgeError::CreateRefused => ApiError::bad_request("forge_repository_refused", format!("{name} did not create that repository. It may already exist, or the name may not be allowed. Choose a different name and try again.")),
@@ -118,14 +127,24 @@ impl ForgeApi {
         }
     }
 
+    async fn refused(&self, response: reqwest::Response) -> Result<reqwest::Response, ForgeError> {
+        match response.status() {
+            StatusCode::UNAUTHORIZED => Err(ForgeError::Rejected),
+            StatusCode::FORBIDDEN => {
+                let body: Value = response.json().await.unwrap_or(Value::Null);
+                let other_reason = self.kind == ForgeKind::Gitlab && body["error"].as_str().is_some_and(|error| error != "insufficient_scope");
+
+                Err(if other_reason { ForgeError::Failed(StatusCode::FORBIDDEN.as_u16()) } else { ForgeError::MissingScope })
+            }
+            _ => Ok(response),
+        }
+    }
+
     pub async fn get(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
         let request = self.authorised(http.get(format!("{}{path}", self.api_url())));
         let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let response = self.refused(response).await?;
         let status = response.status();
-
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(ForgeError::Rejected);
-        }
 
         if !status.is_success() {
             return Err(ForgeError::Failed(status.as_u16()));
@@ -261,11 +280,8 @@ impl ForgeApi {
         };
         let request = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body);
         let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let response = self.refused(response).await?;
         let status = response.status();
-
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(ForgeError::Rejected);
-        }
 
         if matches!(status.as_u16(), 400 | 409 | 422) {
             return Err(ForgeError::Conflict);
@@ -397,11 +413,8 @@ impl ForgeApi {
         };
         let request = self.authorised(http.post(format!("{}{path}", self.api_url()))).json(&body);
         let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let response = self.refused(response).await?;
         let status = response.status();
-
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(ForgeError::Rejected);
-        }
 
         if matches!(status.as_u16(), 400 | 409 | 422) {
             return Err(ForgeError::CreateRefused);
