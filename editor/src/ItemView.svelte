@@ -18,16 +18,9 @@
     node.select();
   }
 
-  function finishText(event: Event & { currentTarget: HTMLTextAreaElement })
+  function keepText(event: Event & { currentTarget: HTMLTextAreaElement })
   {
-    const text = event.currentTarget.value;
-
-    editor.editingId = null;
-
-    if (item.type !== 'path' && 'text' in item && text !== item.text)
-    {
-      editor.patchItem(item.id, { text });
-    }
+    editor.editingText = event.currentTarget.value;
   }
 
   function finishRename(event: Event & { currentTarget: HTMLInputElement })
@@ -106,7 +99,7 @@
 {:else if item.type === 'text'}
   <div class="text-item" class:selected data-item={item.id} style:left={`${item.x}px`} style:top={`${item.y}px`} style:width={`${item.w}px`} style:font-size={`${item.size}px`} style:color={item.color} ondblclick={startEditing} role="presentation">
     {#if editing}
-      <textarea class="inline-edit" aria-label="Text" value={item.text} use:focusOnMount onblur={finishText} onkeydown={onTextKeydown} rows={Math.max(1, item.text.split('\n').length)}></textarea>
+      <textarea class="inline-edit" aria-label="Text" value={item.text} use:focusOnMount oninput={keepText} onblur={() => editor.finishEditing()} onkeydown={onTextKeydown} rows={Math.max(1, item.text.split('\n').length)}></textarea>
     {:else}
       {item.text}
     {/if}
@@ -114,7 +107,7 @@
 {:else if item.type === 'note'}
   <div class="note" class:selected data-item={item.id} style:left={`${item.x}px`} style:top={`${item.y}px`} style:width={`${item.w}px`} style:height={`${item.h}px`} ondblclick={startEditing} role="presentation">
     {#if editing}
-      <textarea class="inline-edit" aria-label="Note" value={item.text} use:focusOnMount onblur={finishText} onkeydown={onTextKeydown}></textarea>
+      <textarea class="inline-edit" aria-label="Note" value={item.text} use:focusOnMount oninput={keepText} onblur={() => editor.finishEditing()} onkeydown={onTextKeydown}></textarea>
     {:else}
       {item.text}
     {/if}

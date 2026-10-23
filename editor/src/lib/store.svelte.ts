@@ -24,6 +24,7 @@ export class Editor
   tool = $state<Tool>('select');
   selectedId = $state<string | null>(null);
   editingId = $state<string | null>(null);
+  editingText: string | null = null;
   enteredId = $state<string | null>(null);
   pageId = $state('p1');
   viewport = $state.raw<Viewport>({ x: 0, y: 0, zoom: 1 });
@@ -130,7 +131,7 @@ export class Editor
     if (this.viewOnly && tool !== 'select' && tool !== 'hand') return;
 
     this.tool = tool;
-    this.editingId = null;
+    this.finishEditing();
     this.enteredId = null;
     this.pendingAnchor = null;
     this.openThread = null;
@@ -146,7 +147,7 @@ export class Editor
   select(id: string | null): void
   {
     this.selectedId = id;
-    this.editingId = null;
+    this.finishEditing();
 
     if (id !== this.enteredId)
     {
@@ -223,6 +224,21 @@ export class Editor
   patchItem(id: string, patch: Partial<Item>): void
   {
     this.edit(updateItem(this.doc, id, patch));
+  }
+
+  finishEditing(): void
+  {
+    const id = this.editingId;
+    const text = this.editingText;
+    const item = id ? findItem(this.doc, id) : undefined;
+
+    this.editingId = null;
+    this.editingText = null;
+
+    if (id && text !== null && item && 'text' in item && item.text !== text)
+    {
+      this.patchItem(id, { text });
+    }
   }
 
   moveBy(id: string, dx: number, dy: number): DesignDoc
