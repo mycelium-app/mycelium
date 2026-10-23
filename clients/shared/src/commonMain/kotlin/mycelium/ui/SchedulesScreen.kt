@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -64,14 +65,14 @@ fun SchedulesScreen(store: Store, state: AppState) {
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
-                TableCard {
-                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label("Prompt", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Project", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("When", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Each run", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Next", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Box(Modifier.weight(2.5f))
+                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 280.dp))) {
+                    ContentRow(header = true) {
+                        Label("Prompt", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Project", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("When", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Each run", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Next", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Box(Modifier)
                     }
 
                     Hairline()
@@ -84,11 +85,11 @@ fun SchedulesScreen(store: Store, state: AppState) {
             }
 
             if (runs.isNotEmpty()) {
-                TableCard {
-                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label("Last runs", Modifier.weight(1f).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Conversation", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Result", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                ContentTable(listOf(ColumnSpec(max = 120.dp), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp))) {
+                    ContentRow(header = true) {
+                        Label("Last runs", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
+                        Label("Conversation", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Result", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     }
 
                     Hairline()
@@ -116,22 +117,18 @@ private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
     val colors = MyTheme.colors
     var reviewing by remember(schedule.id) { mutableStateOf(false) }
 
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Label(schedule.prompt, Modifier.weight(3f), maxLines = 1)
-        Label(state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), Modifier.weight(1.5f), color = colors.textMuted, maxLines = 1)
-        Column(Modifier.weight(1.5f)) {
+    ContentRow {
+        Label(schedule.prompt, maxLines = 1)
+        Label(state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), color = colors.textMuted, maxLines = 1)
+        Column {
             Label(describeCron(schedule.cron), style = Tokens.Type.Code, maxLines = 1)
             Label(schedule.timeZone, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
 
-        Label(eachRunName(schedule.eachRun), Modifier.weight(1.5f), color = colors.textMuted, maxLines = 1)
-        Label(if (schedule.proposed) "Waiting for you" else if (schedule.paused) "Paused" else until(schedule.nextRunAt), Modifier.weight(1f), color = if (schedule.paused) colors.textFaint else colors.text, maxLines = 1)
+        Label(eachRunName(schedule.eachRun), color = colors.textMuted, maxLines = 1)
+        Label(if (schedule.proposed) "Waiting for you" else if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text, maxLines = 1)
 
-        Row(Modifier.weight(2.5f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
             if (schedule.proposed) {
                 MyButton({ reviewing = true }, text = "Review", description = "Review: ${schedule.prompt}", size = ButtonSize.Sm)
                 MyButton({ store.act { store.declineSchedule(schedule) } }, text = "Decline", description = "Decline: ${schedule.prompt}", size = ButtonSize.Sm, muted = true)
@@ -158,15 +155,11 @@ private fun RunRow(run: ScheduleRun, state: AppState) {
     val colors = MyTheme.colors
     val conversation = state.conversations[run.conversationId]
 
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Label(ago(run.ranAt), Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
-        Label(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty(), Modifier.weight(3f), maxLines = 1)
+    ContentRow {
+        Label(ago(run.ranAt), color = colors.textMuted, maxLines = 1)
+        Label(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty(), maxLines = 1)
 
-        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
             if (run.outcome == SkippedOutcome) {
                 StatusMark("Skipped: ${run.reason.orEmpty()}", Tone.Attention, MyIcon.Alert)
             } else if (conversation != null) {

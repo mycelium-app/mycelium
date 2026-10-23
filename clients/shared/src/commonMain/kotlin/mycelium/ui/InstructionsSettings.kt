@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -303,25 +304,25 @@ fun InstructionsSettings(store: Store) {
             }
         }
 
-        TableCard {
-            Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                Label("Node", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Holds", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Sessions on an older version", Modifier.weight(2.5f), Tokens.Type.MetaStrong, colors.textMuted)
+        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp))) {
+            ContentRow(header = true) {
+                Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("Holds", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Label("Sessions on an older version", style = Tokens.Type.MetaStrong, color = colors.textMuted)
             }
 
             Hairline()
 
             for (node in state.nodes.values.sortedBy { it.name }) {
-                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label(node.name, Modifier.weight(2f), maxLines = 1)
-                        Label(heldVersion(node), Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
-                        Label(olderSessions(node), Modifier.weight(2.5f), color = colors.textMuted)
+                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(vertical = Tokens.Space.S1)) {
+                    ContentRow(minHeight = 0.dp) {
+                        Label(node.name, maxLines = 1)
+                        Label(heldVersion(node), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
+                        Label(olderSessions(node), color = colors.textMuted)
                     }
 
                     for (file in node.instructionsUnmanaged) {
-                        Label("Not managed, left as it is: $file", style = Tokens.Type.Meta, color = colors.textMuted)
+                        Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
                     }
                 }
 

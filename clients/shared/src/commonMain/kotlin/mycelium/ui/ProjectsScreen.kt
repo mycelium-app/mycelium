@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -148,15 +149,15 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
-            TableCard {
+            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 160.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
                 if (forges != null && connected.isEmpty() && folders.isEmpty()) {
                     Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
                 } else {
-                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label("Repository", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Forge", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Set up on", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Box(Modifier.weight(1.5f))
+                    ContentRow(header = true) {
+                        Label("Repository", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Forge", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Set up on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Box(Modifier)
                     }
 
                     Hairline()
@@ -168,19 +169,15 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                     val forge = connected.firstOrNull { it.id == repository.forgeId }
                     val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
 
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    ContentRow {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
                             Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                         }
 
-                        Label(forge?.let(::forgeName).orEmpty(), Modifier.weight(1.5f), color = colors.textMuted, maxLines = 1)
+                        Label(forge?.let(::forgeName).orEmpty(), color = colors.textMuted, maxLines = 1)
 
-                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             NodeMarks(setUp, state)
 
                             if (key in cloning) {
@@ -225,7 +222,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                             }
                         }
 
-                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             if (setUp.isNotEmpty()) {
                                 MyButton(
                                     { onNewConversation(newConversationProject(setUp, state).id) },
@@ -242,19 +239,15 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                 }
 
                 for (folder in folders) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Label(folder.name, Modifier.weight(3f), maxLines = 1)
-                        Box(Modifier.weight(1.5f))
+                    ContentRow {
+                        Label(folder.name, maxLines = 1)
+                        Box(Modifier)
 
-                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             NodeMarks(listOf(folder), state)
                         }
 
-                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             MyButton(
                                 { onNewConversation(folder.id) },
                                 text = "New conversation",

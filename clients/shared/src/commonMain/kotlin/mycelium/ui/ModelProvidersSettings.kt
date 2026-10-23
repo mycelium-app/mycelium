@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -66,12 +68,12 @@ fun ModelProvidersSettings(store: Store) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Label("Chat models", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            TableCard {
-                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Provider", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Key", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Models", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("", Modifier.weight(2f))
+            ContentTable(listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp))) {
+                ContentRow(header = true) {
+                    Label("Provider", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Key", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Models", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
                 }
 
                 Hairline()
@@ -79,20 +81,16 @@ fun ModelProvidersSettings(store: Store) {
                 for (provider in providers) {
                     val kindName = ProviderKinds.entries.first { it.value == provider.kind }.key
 
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(2f)) {
+                    ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
+                        Column {
                             Label(provider.name, maxLines = 1)
                             Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                         }
 
-                        Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", Modifier.weight(1f), color = colors.textMuted, maxLines = 1)
-                        Label(provider.models.joinToString(", ").ifEmpty { "No models found" }, Modifier.weight(3f), color = colors.textMuted)
+                        Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted, maxLines = 1)
+                        Label(provider.models.joinToString(", ").ifEmpty { "No models found" }, color = colors.textMuted)
 
-                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
                             MyButton(
                                 { store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } } },
                                 text = "Refresh",

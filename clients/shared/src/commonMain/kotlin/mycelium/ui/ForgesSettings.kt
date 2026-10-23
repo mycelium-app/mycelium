@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -72,12 +73,12 @@ fun ForgesSettings(store: Store) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Forges", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            TableCard {
-                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Forge", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Signed in as", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Organisations", Modifier.weight(2.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Box(Modifier.weight(1f))
+            ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp), ColumnSpec(max = 160.dp))) {
+                ContentRow(header = true) {
+                    Label("Forge", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Signed in as", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Organisations", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
                 }
 
                 Hairline()
@@ -86,21 +87,17 @@ fun ForgesSettings(store: Store) {
                     val name = if (forge.kind == "gitlab") "GitLab" else "GitHub"
                     val host = forge.baseUrl.substringAfter("://").trimEnd('/')
 
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    ContentRow {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
                             Label(name, maxLines = 1)
                             Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                         }
 
-                        Label(forge.account, Modifier.weight(1.5f), maxLines = 1)
-                        Label(forge.organisations.joinToString(", "), Modifier.weight(2.5f), color = colors.textMuted)
+                        Label(forge.account, maxLines = 1)
+                        Label(forge.organisations.joinToString(", "), color = colors.textMuted)
 
-                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             MyButton(
                                 {
                                     store.act {

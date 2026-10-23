@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import mycelium.api.Conversation
@@ -128,16 +129,16 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
-            TableCard {
+            ContentTable(listOf(ColumnSpec(max = 64.dp), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
                 if (state.projects.values.none { it.forgeId != null }) {
                     Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
                 } else {
-                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.weight(0.7f))
-                        Label("Issue", Modifier.weight(4f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Worktree", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Pull request", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                        Box(Modifier.weight(1.7f))
+                    ContentRow(header = true) {
+                        Box(Modifier)
+                        Label("Issue", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Worktree", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Pull request", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Box(Modifier)
                     }
 
                     Hairline()
@@ -147,15 +148,11 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                     val projects = projectsOfIssue(state.projects.values, issue)
                     val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
 
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Label("#${issue.number}", Modifier.weight(0.7f), Tokens.Type.Code, colors.textFaint, maxLines = 1)
-                        Label(issue.title, Modifier.weight(4f))
+                    ContentRow {
+                        Label("#${issue.number}", style = Tokens.Type.Code, color = colors.textFaint, maxLines = 1)
+                        Label(issue.title)
 
-                        Column(Modifier.weight(3f)) {
+                        Column {
                             if (existing.isEmpty()) {
                                 Label("None", color = colors.textFaint)
                             }
@@ -174,7 +171,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                             }
                         }
 
-                        Column(Modifier.weight(2f)) {
+                        Column {
                             val requests = issue.pullRequests
 
                             when {
@@ -187,7 +184,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                             }
                         }
 
-                        Row(Modifier.weight(1.7f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             if (issue.number in starting) {
                                 Box(Modifier.width(Tokens.Size.NumberField)) {
                                     IndeterminateProgress("Starting a workspace for issue ${issue.number}")

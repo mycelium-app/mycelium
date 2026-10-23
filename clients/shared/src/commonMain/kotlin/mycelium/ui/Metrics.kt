@@ -125,38 +125,37 @@ fun DataTable(
             return@Column
         }
 
-        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-            for (column in columns) {
-                Label(column.title, Modifier.weight(column.weight), Tokens.Type.MetaStrong, colors.textMuted, maxLines = 1)
-            }
+        val specs = columns.mapIndexed { position, _ -> ColumnSpec(flexible = position == 0) } + listOfNotNull(trailing?.let { ColumnSpec(min = TrailingWidth, max = TrailingWidth) })
 
-            if (trailing != null) {
-                Box(Modifier.width(TrailingWidth))
-            }
-        }
-
-        rows.forEachIndexed { index, cells ->
-            Hairline()
-
-            val clickable = if (onRow != null) Modifier.pressable({ onRow(index) }, description = rowDescription(index)) else Modifier
-
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = rowHeight()).then(clickable).padding(horizontal = Tokens.Space.S3),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                columns.forEachIndexed { position, column ->
-                    Label(
-                        cells.getOrElse(position) { "" },
-                        Modifier.weight(column.weight),
-                        if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui,
-                        if (position == 0) colors.text else colors.textMuted,
-                        maxLines = 1,
-                    )
+        ContentTable(specs, card = false) {
+            ContentRow {
+                for (column in columns) {
+                    Label(column.title, style = Tokens.Type.MetaStrong, color = colors.textMuted, maxLines = 1)
                 }
 
                 if (trailing != null) {
-                    Box(Modifier.width(TrailingWidth), contentAlignment = Alignment.CenterEnd) { trailing(index) }
+                    Box(Modifier)
+                }
+            }
+
+            rows.forEachIndexed { index, cells ->
+                Hairline()
+
+                val clickable = if (onRow != null) Modifier.pressable({ onRow(index) }, description = rowDescription(index)) else Modifier
+
+                ContentRow(clickable) {
+                    columns.forEachIndexed { position, _ ->
+                        Label(
+                            cells.getOrElse(position) { "" },
+                            style = if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui,
+                            color = if (position == 0) colors.text else colors.textMuted,
+                            maxLines = 1,
+                        )
+                    }
+
+                    if (trailing != null) {
+                        Box(contentAlignment = Alignment.CenterEnd) { trailing(index) }
+                    }
                 }
             }
         }

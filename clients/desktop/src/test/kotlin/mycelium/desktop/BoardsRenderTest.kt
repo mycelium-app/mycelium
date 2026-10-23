@@ -26,6 +26,7 @@ import mycelium.ui.MyTheme
 import mycelium.ui.MoveSheet
 import mycelium.ui.NewChatScreen
 import mycelium.ui.ActivityScreen
+import mycelium.ui.AccountsSettings
 import mycelium.ui.ForgesSettings
 import mycelium.ui.InstructionsSettings
 import mycelium.ui.Route
@@ -254,6 +255,7 @@ class BoardsRenderTest {
 
     @Test
     fun settingsSections() {
+        section("board-settings-accounts") { AccountsSettings(it) }
         section("board-settings-sessions") { SessionsSettings(it, onSignOut = {}) }
         section("board-instructions") { InstructionsSettings(it) }
         section("board-forges") { ForgesSettings(it) }

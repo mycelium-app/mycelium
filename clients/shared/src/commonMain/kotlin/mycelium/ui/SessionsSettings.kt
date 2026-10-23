@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -40,12 +41,12 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Clients", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            TableCard {
-                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Client", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Last used", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Box(Modifier.weight(1.5f))
+            ContentTable(listOf(ColumnSpec(max = 360.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 160.dp))) {
+                ContentRow(header = true) {
+                    Label("Client", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Address", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Last used", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
                 }
 
                 Hairline()
@@ -53,12 +54,8 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                 for (session in sessions) {
                     val where = if (session.hostname.isBlank()) session.label else "${session.label} on ${session.hostname}"
 
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    ContentRow {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             Icon(if (session.kind == "browser") MyIcon.Globe else MyIcon.Laptop, colors.textMuted, Tokens.Size.IconSm)
                             Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
 
@@ -67,10 +64,10 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                             }
                         }
 
-                        Label(session.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
-                        Label(if (session.current) "now" else ago(session.lastUsedAt), Modifier.weight(1f), color = colors.textMuted)
+                        Label(session.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
+                        Label(if (session.current) "now" else ago(session.lastUsedAt), color = colors.textMuted)
 
-                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             MyButton(
                                 {
                                     if (session.current) {
@@ -98,31 +95,27 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Nodes", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            TableCard {
-                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Node", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Last seen", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Box(Modifier.weight(1.5f))
+            ContentTable(listOf(ColumnSpec(max = 360.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 160.dp))) {
+                ContentRow(header = true) {
+                    Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Address", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Last seen", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
                 }
 
                 Hairline()
 
                 for (node in state.nodes.values.sortedBy { it.name }) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    ContentRow {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                             Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
                             Label(node.name, maxLines = 1)
                         }
 
-                        Label(node.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
-                        Label(if (node.online) "online" else node.lastSeenAt?.let(::ago) ?: "never", Modifier.weight(1f), color = colors.textMuted)
+                        Label(node.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
+                        Label(if (node.online) "online" else node.lastSeenAt?.let(::ago) ?: "never", color = colors.textMuted)
 
-                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                        Row(horizontalArrangement = Arrangement.End) {
                             MyButton({ revoking = node }, text = "Revoke", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Revoke ${node.name}")
                         }
                     }

@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -44,37 +45,35 @@ fun AccountsSettings(store: Store) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-                Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    Label("Account", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Signed in on", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Method", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                }
-
-                Hairline()
-
-                for (account in accounts.filter { it.agent == agent }) {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Label(account.label, Modifier.weight(2f), maxLines = 1)
-
-                        FlowRow(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                            for (node in account.nodes) {
-                                when (node.state) {
-                                    LoginState.SignedIn -> Label(node.nodeName)
-                                    LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
-                                    LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
-                                    LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
-                                }
-                            }
-                        }
-
-                        Label(loginMethodName(account.method), Modifier.weight(1.5f), color = colors.textMuted)
+                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 200.dp))) {
+                    ContentRow(header = true) {
+                        Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Signed in on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Method", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     }
 
                     Hairline()
+
+                    for (account in accounts.filter { it.agent == agent }) {
+                        ContentRow(Modifier.padding(vertical = Tokens.Space.S1)) {
+                            Label(account.label, maxLines = 1)
+
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                                for (node in account.nodes) {
+                                    when (node.state) {
+                                        LoginState.SignedIn -> Label(node.nodeName)
+                                        LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
+                                        LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
+                                        LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
+                                    }
+                                }
+                            }
+
+                            Label(loginMethodName(account.method), color = colors.textMuted)
+                        }
+
+                        Hairline()
+                    }
                 }
 
                 val signInNodes = state.nodes.values.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }.sortedBy { it.name }
