@@ -362,7 +362,7 @@ private fun ConversationHeader(
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(
-                if (chat) conversation.model.orEmpty() else projectName(conversation.cwd) + if (node != null) "  ·" else "",
+                if (chat) conversation.model.orEmpty() else projectName(conversation.cwd),
                 style = Tokens.Type.Meta,
                 color = colors.textMuted,
                 maxLines = 1,
@@ -386,12 +386,8 @@ private fun ConversationHeader(
 
             if (archived) {
                 Tag("Archived")
-            } else {
-                StatusMark(statusSectionName(conversation.status), toneOf(conversation.status), iconOf(conversation.status))
-
-                if (conversation.status == ConversationStatus.Failed) {
-                    MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry ${conversation.title}")
-                }
+            } else if (conversation.status == ConversationStatus.Failed) {
+                MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry ${conversation.title}")
             }
 
             Box(Modifier.weight(1f))
