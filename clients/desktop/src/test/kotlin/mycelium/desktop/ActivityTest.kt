@@ -1,5 +1,14 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -35,6 +44,7 @@ private fun row(key: String, name: String, turns: Int, reported: Int, input: Lon
     """{"key":"$key","name":"$name","turns":$turns,"reported_turns":$reported,"working_ms":$workingMs,"input_tokens":$input,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0,"cost_usd":$cost}"""
 
 private val Reported = """{"range":"7d","totals":${row("", "", 4, 3, 182_000_000, "1940.2", 11_520_000)},
+"hours":[${row("2026-10-02T09", "2026-10-02T09", 1, 1, 1_000_000, "10.0", 60_000)},${row("2026-10-02T10", "2026-10-02T10", 3, 2, 181_000_000, "1930.2", 11_460_000)}],
 "days":[${row("2026-10-01", "2026-10-01", 1, 1, 1_000_000, "10.0", 60_000)},${row("2026-10-02", "2026-10-02", 3, 2, 181_000_000, "1930.2", 11_460_000)}],
 "conversations":[${row("c1", "Backups", 4, 3, 182_000_000, "1940.2", 11_520_000)}],
 "nodes":[${row("n1", "willow", 4, 3, 182_000_000, "1940.2", 11_520_000)}],
@@ -66,7 +76,7 @@ class ActivityTest {
 
     private fun shown(text: String): Boolean = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
-    private fun showSidebar(answer: String) {
+    private fun showSidebar(answer: String, width: Dp = 1400.dp) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -84,7 +94,7 @@ class ActivityTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, ActivityPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(width)) { Shell(store, ActivityPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } } }
         rule.onNodeWithContentDescription("Activity").performClick()
         rule.waitForIdle()
     }
@@ -93,15 +103,50 @@ class ActivityTest {
     fun theActivityButtonOpensTheSevenDayTotalsBreakdownsAndChartSummary() {
         showSidebar(Reported)
 
-        rule.onNodeWithText("4 turns").assertExists()
-        rule.onNodeWithContentDescription("Tokens per day over 2 days. Peak 181M on 2 Oct, 182M in total.").assertExists()
+        rule.onNodeWithText("4 turns, 3h 12m working").assertExists()
+        rule.onNodeWithContentDescription("Tokens per hour, last 7 days. Peak 181M in the hour from 2 Oct 10:00, 182M in total.").assertExists()
         assertEquals(true, shown("~$1,940"))
         assertEquals(true, shown("3h 12m"))
         assertEquals(true, shown("182M"))
-        rule.onNodeWithText("Peak 181M on 2 Oct, 182M in total.").assertExists()
+        rule.onNodeWithText("Peak 181M in the hour from 2 Oct 10:00, 182M in total.").assertExists()
         assertEquals(true, shown("midden"))
         assertEquals(true, shown("claude-opus-5-5"))
         assertEquals("range=7d", asked.last())
+    }
+
+    @Test
+    fun energyWaterAndForestAreShownAsEstimatesWithTheirSourcesNamed() {
+        showSidebar(Reported)
+
+        rule.onNodeWithText("Energy and water").assertExists()
+        rule.onNodeWithText("~36 kWh").assertExists()
+        rule.onNodeWithText("~40 L of water").assertExists()
+        rule.onNodeWithText("Forest").assertExists()
+        rule.onNodeWithText("~270 tree-days").assertExists()
+        rule.onNodeWithText("~16 kg CO\u2082").assertExists()
+        rule.onNodeWithText("How this is estimated", substring = true).assertExists()
+        rule.onNodeWithText("never measured", substring = true).assertExists()
+        rule.onNodeWithText("Epoch AI, 2025", substring = true).assertExists()
+    }
+
+    @Test
+    fun projectsAndNodesSitSideBySideOnAWideScreenAndStackOnANarrowOne() {
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+        fun top(title: String) = rule.onNode(hasText(title) and heading).fetchSemanticsNode().positionInRoot.y
+
+        showSidebar(Reported, 1400.dp)
+        assertEquals(top("Projects"), top("Nodes"))
+    }
+
+    @Test
+    fun projectsAndNodesStackOnANarrowScreen() {
+        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
+
+        showSidebar(Reported, 700.dp)
+
+        val projects = rule.onNode(hasText("Projects") and heading).fetchSemanticsNode().positionInRoot.y
+        val nodes = rule.onNode(hasText("Nodes") and heading).fetchSemanticsNode().positionInRoot.y
+        assertEquals(true, nodes > projects)
     }
 
     @Test

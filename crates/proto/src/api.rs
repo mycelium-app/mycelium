@@ -703,6 +703,8 @@ pub struct MovePlan {
     pub movable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub hours: Vec<ActivityRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     pub changed_files: u32,

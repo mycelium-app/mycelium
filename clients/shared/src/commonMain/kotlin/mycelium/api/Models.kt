@@ -181,6 +181,7 @@ data class DockerContainer(val name: String, val state: String)
 @Serializable
 data class DockerUsage(val running: Int = 0, val containers: List<DockerContainer> = emptyList())
 
+@Serializable
 data class ListeningPort(
     val port: Int,
     val address: String,

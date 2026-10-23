@@ -237,6 +237,15 @@ Issues:
 Node link:
 - `GET /api/v1/node/connect` (WebSocket, node token). Frames below.
 
+### Activity estimates
+
+Energy, water and forest on the Activity page are estimates the client derives from the tokens of the range, never measured, and the page says so in a "How this is estimated" note. The factors and where they come from:
+
+- Energy: 0.6 Wh per 1,000 output tokens and 0.2 Wh per 1,000 input tokens, counting cache reads and writes as input. Epoch AI estimates about 0.3 Wh for a typical ChatGPT query of a few hundred output tokens and about 2.5 Wh for a 10,000 token prompt (https://epoch.ai/gradient-updates/how-much-energy-does-chatgpt-use, 2025). It is a third-party estimate for one provider, applied to every agent, and cached tokens are probably cheaper than fresh input, so it errs high.
+- Water: 1.1 mL per Wh, the ratio of the 0.26 mL and 0.24 Wh Google reports for a median Gemini text prompt, which includes the data centre's cooling water (https://cloud.google.com/blog/products/infrastructure/measuring-the-environmental-impact-of-ai-inference, 2025). It does not count water used to generate the electricity.
+- CO2: 445 g per kWh, the IEA's global average for electricity generation in 2024 (https://iea.org/reports/electricity-2025/emissions). Google's own market-based figure is far lower; a global grid average is the one a reader can check.
+- Forest: a tree-day is 60 g of CO2, from the widely quoted 48 pounds (about 22 kg) a mature tree absorbs a year, attributed to the Arbor Day Foundation. The figure is repeated more often than it is sourced.
+
 ### Memory
 
 Agents share one memory through two MCP tools served by the control plane at `/api/v1/mcp`, so a
@@ -387,6 +396,7 @@ Node to control plane:
 | `transcript` | `path, offset, data` (base64; the bytes at `offset`) |
 | `workflow` | `conversation_id, run_id, line` (the journal line as JSON; no `seq`) |
 | `resources` | `sample` (see `POST /nodes/{id}/watch`; sent every 3 seconds while a watch lease lasts) |
+| `process_stopped` | `request_id, ok, error?` (the answer to `stop_process`) |
 | `pong` | |
 
 Control plane to node:

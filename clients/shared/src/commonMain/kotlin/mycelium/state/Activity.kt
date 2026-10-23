@@ -1,6 +1,7 @@
 package mycelium.state
 
 import mycelium.api.Activity
+import mycelium.api.ActivityRow
 import kotlin.math.roundToInt
 
 val ActivityRanges = listOf("Today" to "today", "7 days" to "7d", "30 days" to "30d")
@@ -56,8 +57,44 @@ fun usageNotice(activity: Activity): String? {
     }
 }
 
-fun tokensPerDaySummary(activity: Activity): String {
-    val peak = activity.days.maxByOrNull { it.tokens }
+fun tokensPerHourSummary(activity: Activity): String {
+    val peak = activity.hours.maxByOrNull { it.tokens }
 
-    return if (peak == null || peak.tokens == 0L) "No tokens were reported on these days." else "Peak ${formatTokens(peak.tokens)} on ${dayLabel(peak.key)}, ${formatTokens(activity.totals.tokens)} in total."
+    if (peak == null || peak.tokens == 0L) {
+        return "No tokens were reported in these hours."
+    }
+
+    return "Peak ${formatTokens(peak.tokens)} in the hour from ${dayLabel(peak.key.take(10))} ${peak.key.takeLast(2)}:00, ${formatTokens(activity.totals.tokens)} in total."
 }
+
+fun tokensPerHourTitle(range: String): String = if (range == "today") "Tokens per hour, today" else "Tokens per hour, last ${ActivityRanges.first { it.second == range }.first}"
+
+const val WhPerThousandOutputTokens = 0.6
+const val WhPerThousandInputTokens = 0.2
+const val MillilitresWaterPerWh = 1.1
+const val GramsCo2PerKwh = 445.0
+const val GramsCo2PerTreeDay = 60.0
+
+const val EstimateNote = "How this is estimated: figures are derived from token counts, never measured. " +
+    "Energy uses 0.6 Wh per 1,000 output tokens and 0.2 Wh per 1,000 input and cached tokens (Epoch AI, 2025). " +
+    "Water uses 1.1 mL per Wh (Google, 2025). CO\u2082 uses 445 g per kWh (IEA, 2024). " +
+    "A tree-day is the 60 g of CO\u2082 a mature tree absorbs in a day, about 22 kg a year, a widely quoted figure."
+
+data class UsageEstimate(val energyWh: Double, val waterMl: Double, val co2Grams: Double, val treeDays: Double)
+
+fun estimateUsage(row: ActivityRow): UsageEstimate {
+    val energyWh = row.outputTokens / 1000.0 * WhPerThousandOutputTokens + (row.inputTokens + row.cacheReadTokens + row.cacheWriteTokens) / 1000.0 * WhPerThousandInputTokens
+    val co2Grams = energyWh / 1000 * GramsCo2PerKwh
+
+    return UsageEstimate(energyWh, energyWh * MillilitresWaterPerWh, co2Grams, co2Grams / GramsCo2PerTreeDay)
+}
+
+private fun approximately(value: Double): String = "~" + if (value >= 10) value.roundToInt().toString() else withOneDecimal((value * 10).roundToInt())
+
+fun formatEnergy(wh: Double): String = if (wh >= 1000) "${approximately(wh / 1000)} kWh" else "${approximately(wh)} Wh"
+
+fun formatWater(ml: Double): String = if (ml >= 1000) "${approximately(ml / 1000)} L of water" else "${approximately(ml)} mL of water"
+
+fun formatCo2(grams: Double): String = if (grams >= 1000) "${approximately(grams / 1000)} kg CO\u2082" else "${approximately(grams)} g CO\u2082"
+
+fun formatTreeDays(days: Double): String = if (days < 1) "<1 tree-day" else "~${days.roundToInt()} ${if (days.roundToInt() == 1) "tree-day" else "tree-days"}"

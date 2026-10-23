@@ -157,3 +157,24 @@ async fn an_unknown_range_is_refused_with_the_choices() {
     assert_eq!(status, 400);
     assert_eq!(body["message"], "Choose today, 7d or 30d as the range.");
 }
+
+#[tokio::test]
+async fn the_hourly_series_runs_from_the_start_of_the_range_to_the_current_hour_and_holds_the_turns_of_each_hour() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, conversation, 1, Some(usage(10, 5, 0, 0)), None, None).await;
+    finish_turn(&mut link, conversation, 3, Some(usage(20, 5, 0, 0)), None, None).await;
+
+    let today = activity(&server, "?range=today").await;
+    let week = activity(&server, "?range=7d").await;
+    let hours = today["hours"].as_array().unwrap();
+    let week_hours = week["hours"].as_array().unwrap();
+
+    assert!(!hours.is_empty() && hours.len() <= 24);
+    assert!(hours.iter().all(|hour| hour["key"].as_str().unwrap().len() == 13));
+    assert_eq!(hours.iter().map(|hour| hour["input_tokens"].as_i64().unwrap()).sum::<i64>(), 30);
+    assert_eq!(hours.last().unwrap()["turns"].as_i64().unwrap() + hours.iter().rev().skip(1).map(|hour| hour["turns"].as_i64().unwrap()).sum::<i64>(), 2);
+    assert!(week_hours.len() > 6 * 24 && week_hours.len() <= 7 * 24);
+    assert_eq!(week_hours.last().unwrap()["key"], hours.last().unwrap()["key"]);
+}

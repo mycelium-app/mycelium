@@ -4,13 +4,15 @@ use crate::state::AppState;
 use crate::store::Tx;
 use axum::Json;
 use axum::extract::{Query, State};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
 use mycelium_proto::api::{Activity, ActivityRow};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
 const BREAKDOWN_LIMIT: i64 = 50;
+const SERIES_LIMIT: i64 = 24 * 30 + 1;
+const HOUR_KEY: &str = "to_char(date_trunc('hour', u.ended_at at time zone 'utc'), 'YYYY-MM-DD\"T\"HH24')";
 const PROJECT_OF_CONVERSATION: &str = "(select p.id from projects p where p.node_id = c.node_id and (c.cwd = p.path or starts_with(c.cwd, p.path || '/') or starts_with(c.cwd, p.path || '-worktrees/')) order by length(p.path) desc limit 1)";
 
 #[derive(Deserialize)]
@@ -112,7 +114,7 @@ pub async fn record_imported_turns(tx: &mut Tx<'_>, conversation_id: Uuid) -> Ap
     Ok(())
 }
 
-async fn grouped(state: &AppState, owner: Uuid, days: i32, node_id: Option<Uuid>, key: &str, name: &str, order: &str) -> ApiResult<Vec<ActivityRow>> {
+async fn grouped(state: &AppState, owner: Uuid, days: i32, node_id: Option<Uuid>, key: &str, name: &str, order: &str, limit: i64) -> ApiResult<Vec<ActivityRow>> {
     let rows = sqlx::query_as::<_, TotalsRow>(sqlx::AssertSqlSafe(format!(
         "select {key} as key, {name} as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
                 coalesce(sum(u.working_ms), 0)::bigint as working_ms, coalesce(sum(u.input_tokens), 0)::bigint as input_tokens,
@@ -123,7 +125,7 @@ async fn grouped(state: &AppState, owner: Uuid, days: i32, node_id: Option<Uuid>
          join nodes n on n.id = u.node_id
          left join projects p on p.id = u.project_id
          where u.owner = $1 and u.day > (now() at time zone 'utc')::date - $2 and ($3::uuid is null or u.node_id = $3)
-         group by 1, 2 order by {order} limit {BREAKDOWN_LIMIT}"
+         group by 1, 2 order by {order} limit {limit}"
     )))
     .bind(owner)
     .bind(days)
@@ -143,19 +145,27 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Query(query): Qu
     };
 
     let by_tokens = "sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens) desc, count(*) desc";
-    let totals = grouped(&state, user.id, days, query.node_id, "''", "''", "1").await?.into_iter().next().unwrap_or_default();
-    let recorded_days = grouped(&state, user.id, days, query.node_id, "u.day::text", "u.day::text", "1").await?;
-    let conversations = grouped(&state, user.id, days, query.node_id, "c.id::text", "c.title", by_tokens).await?;
-    let nodes = grouped(&state, user.id, days, query.node_id, "n.id::text", "n.name", by_tokens).await?;
-    let agents = grouped(&state, user.id, days, query.node_id, "u.agent", "u.agent", by_tokens).await?;
-    let projects = grouped(&state, user.id, days, query.node_id, "coalesce(p.id::text, '')", "coalesce(p.name, 'No project')", by_tokens).await?;
-    let models = grouped(&state, user.id, days, query.node_id, "coalesce(u.model, '')", "coalesce(u.model, 'Unknown')", by_tokens).await?;
+    let totals = grouped(&state, user.id, days, query.node_id, "''", "''", "1", 1).await?.into_iter().next().unwrap_or_default();
+    let recorded_days = grouped(&state, user.id, days, query.node_id, "u.day::text", "u.day::text", "1", SERIES_LIMIT).await?;
+    let recorded_hours = grouped(&state, user.id, days, query.node_id, HOUR_KEY, HOUR_KEY, "1", SERIES_LIMIT).await?;
+    let conversations = grouped(&state, user.id, days, query.node_id, "c.id::text", "c.title", by_tokens, BREAKDOWN_LIMIT).await?;
+    let nodes = grouped(&state, user.id, days, query.node_id, "n.id::text", "n.name", by_tokens, BREAKDOWN_LIMIT).await?;
+    let agents = grouped(&state, user.id, days, query.node_id, "u.agent", "u.agent", by_tokens, BREAKDOWN_LIMIT).await?;
+    let projects = grouped(&state, user.id, days, query.node_id, "coalesce(p.id::text, '')", "coalesce(p.name, 'No project')", by_tokens, BREAKDOWN_LIMIT).await?;
+    let models = grouped(&state, user.id, days, query.node_id, "coalesce(u.model, '')", "coalesce(u.model, 'Unknown')", by_tokens, BREAKDOWN_LIMIT).await?;
 
     let today = sqlx::query_scalar::<_, NaiveDate>("select (now() at time zone 'utc')::date").fetch_one(&state.pool).await?;
     let series = (0..days).rev().map(|ago| (today - chrono::Duration::days(ago as i64)).to_string()).map(|date| {
         recorded_days.iter().find(|row| row.key == date).cloned().unwrap_or(ActivityRow { key: date.clone(), name: date, ..ActivityRow::default() })
     });
+    let now_hour = sqlx::query_scalar::<_, NaiveDateTime>("select date_trunc('hour', now() at time zone 'utc')").fetch_one(&state.pool).await?;
+    let first_hour = (today - chrono::Duration::days(days as i64 - 1)).and_hms_opt(0, 0, 0).unwrap_or(now_hour);
+    let hours = std::iter::successors(Some(first_hour), |hour| Some(*hour + chrono::Duration::hours(1)))
+        .take_while(|hour| *hour <= now_hour)
+        .map(|hour| hour.format("%Y-%m-%dT%H").to_string())
+        .map(|key| recorded_hours.iter().find(|row| row.key == key).cloned().unwrap_or(ActivityRow { key: key.clone(), name: key, ..ActivityRow::default() }))
+        .collect();
     let unreported_agents = agents.iter().filter(|row| row.turns > 0 && row.reported_turns == 0).map(|row| row.key.clone()).collect();
 
-    Ok(Json(Activity { range: range.to_string(), totals, days: series.collect(), conversations, nodes, agents, projects, models, unreported_agents }))
+    Ok(Json(Activity { range: range.to_string(), totals, days: series.collect(), hours, conversations, nodes, agents, projects, models, unreported_agents }))
 }
