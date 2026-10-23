@@ -42,7 +42,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -181,7 +181,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
 private fun UserMessage(text: String) {
     val colors = MyTheme.colors
 
-    SelectionContainer {
+    Annotatable {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -199,7 +199,7 @@ private fun AgentMessage(text: String) {
     val colors = MyTheme.colors
     val codeFont = LocalFonts.current.mono
 
-    SelectionContainer {
+    Annotatable {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             for (block in markdownBlocks(text)) {
                 when (block) {
@@ -445,7 +445,9 @@ private fun CommandCard(call: ThreadItem.ToolCall) {
         if (output.isNotEmpty()) {
             Hairline()
             Box(Modifier.fillMaxWidth().heightIn(max = Tokens.Size.CommandOutput).verticalScroll(rememberScrollState()).padding(Tokens.Space.S2)) {
-                Label(output, style = Tokens.Type.CodeSm, color = colors.textMuted)
+                Annotatable {
+                    Label(output, style = Tokens.Type.CodeSm, color = colors.textMuted)
+                }
             }
         }
     }
@@ -466,9 +468,11 @@ internal fun DiffCard(diff: FileDiff, status: ToolStatus) {
             }
         }
 
-        Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            for (line in diff.lines) {
-                DiffRow(line)
+        Annotatable {
+            Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                for (line in diff.lines) {
+                    DiffRow(line)
+                }
             }
         }
     }
@@ -489,9 +493,12 @@ private fun DiffRow(line: DiffLine) {
     }
 
     Row(Modifier.background(background)) {
-        Label(line.oldNumber?.toString() ?: "", Modifier.width(Tokens.Size.DiffNumber).padding(end = Tokens.Space.S2), Tokens.Type.CodeSm.copy(textAlign = TextAlign.End), colors.textFaint)
-        Label(line.newNumber?.toString() ?: "", Modifier.width(Tokens.Size.DiffNumber).padding(end = Tokens.Space.S2), Tokens.Type.CodeSm.copy(textAlign = TextAlign.End), colors.textFaint)
-        Label(sign, Modifier.width(Tokens.Size.DiffSign), Tokens.Type.Code, signColor)
+        DisableSelection {
+            Label(line.oldNumber?.toString() ?: "", Modifier.width(Tokens.Size.DiffNumber).padding(end = Tokens.Space.S2), Tokens.Type.CodeSm.copy(textAlign = TextAlign.End), colors.textFaint)
+            Label(line.newNumber?.toString() ?: "", Modifier.width(Tokens.Size.DiffNumber).padding(end = Tokens.Space.S2), Tokens.Type.CodeSm.copy(textAlign = TextAlign.End), colors.textFaint)
+            Label(sign, Modifier.width(Tokens.Size.DiffSign), Tokens.Type.Code, signColor)
+        }
+
         Label(line.text, style = Tokens.Type.Code)
     }
 }

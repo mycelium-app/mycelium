@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -33,7 +34,9 @@ import mycelium.api.ConfigRequest
 import mycelium.api.LoginInfo
 import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
+import mycelium.state.Annotation
 import mycelium.state.AppState
+import mycelium.state.messageWithAnnotations
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.ago
@@ -62,6 +65,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
+    var annotations by remember(id) { mutableStateOf(emptyList<Annotation>()) }
+
+    fun send(text: String) {
+        store.send(id, messageWithAnnotations(annotations, text))
+        annotations = emptyList()
+    }
 
     LaunchedEffect(id) {
         store.act { store.open(id) }
@@ -91,76 +100,87 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
     val delivering = sending.take(if (goesStraight) 1 else 0)
 
-    Row(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            ConversationHeader(
-                conversation = conversation,
-                node = node,
-                compact = compact,
-                onNode = { nodeSheetOpen = true },
-                onDetails = { panel = SidePanel.Details },
-                onTerminal = { panel = SidePanel.Terminal },
-                onGit = { panel = SidePanel.Git },
-                onRename = { title -> store.rename(conversation, title) },
-                onArchive = {
-                    store.act {
-                        api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
-                        onArchived()
-                    }
-                },
-            )
+    val annotate = remember(id) {
+        AnnotateActions(
+            onAttach = { added -> annotations = annotations + added },
+            onAsk = { quote, question -> store.act { onOpenConversation(api.startSideChat(id, "btw", messageWithAnnotations(listOf(Annotation(quote, "")), question)).id) } },
+        )
+    }
 
-            ThreadView(
-                items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
-                onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
-                onStopWorkflow = { store.act { api.cancel(id) } },
-                modifier = Modifier.weight(1f),
-                onSuggest = { reply -> store.send(id, reply) },
-            )
-
-            Composer(
-                conversation = conversation,
-                working = conversation.status == ConversationStatus.Working,
-                queue = state.queues[id].orEmpty(),
-                sending = sending.drop(delivering.size),
-                onSend = { text -> store.send(id, text) },
-                onStop = { store.act { api.cancel(id) } },
-                onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
-                onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
-                onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
-                options = remember(conversation, state.events[id]) { sessionOptions(conversation, state.events[id].orEmpty()) },
-                commands = remember(state.events[id]) { slashCommands(state.events[id].orEmpty()) },
-                onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
-                onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
-                onSearchFiles = { query -> api.files(id, query) },
-                accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
-                accountLocked = conversation.acpSessionId != null,
-                onSetAccount = { account ->
-                    store.act {
-                        when {
-                            account.startsWith(SignInPrefix) && node != null -> {
-                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
-                                signIn = LoginSession(started.loginId, conversation.agent)
-                            }
-                            account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
-                            else -> api.patchConversation(id, PatchConversationRequest(account = account))
+    CompositionLocalProvider(LocalAnnotate provides annotate) {
+        Row(Modifier.fillMaxSize()) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                ConversationHeader(
+                    conversation = conversation,
+                    node = node,
+                    compact = compact,
+                    onNode = { nodeSheetOpen = true },
+                    onDetails = { panel = SidePanel.Details },
+                    onTerminal = { panel = SidePanel.Terminal },
+                    onGit = { panel = SidePanel.Git },
+                    onRename = { title -> store.rename(conversation, title) },
+                    onArchive = {
+                        store.act {
+                            api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
+                            onArchived()
                         }
-                    }
-                },
-                onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
-                onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, kind, text.ifEmpty { null }).id) } },
-            )
-        }
+                    },
+                )
 
-        if (!compact) {
-            when (panel) {
-                SidePanel.Details -> Inspector(conversation, node)
-                SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
-                SidePanel.Git -> key(conversation.id) { GitSide(store, conversation) }
-                null -> Unit
+                ThreadView(
+                    items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
+                    onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
+                    onStopWorkflow = { store.act { api.cancel(id) } },
+                    modifier = Modifier.weight(1f),
+                    onSuggest = ::send,
+                )
+
+                Composer(
+                    conversation = conversation,
+                    working = conversation.status == ConversationStatus.Working,
+                    queue = state.queues[id].orEmpty(),
+                    sending = sending.drop(delivering.size),
+                    onSend = ::send,
+                    annotations = annotations,
+                    onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                    onStop = { store.act { api.cancel(id) } },
+                    onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
+                    onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
+                    onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
+                    options = remember(conversation, state.events[id]) { sessionOptions(conversation, state.events[id].orEmpty()) },
+                    commands = remember(state.events[id]) { slashCommands(state.events[id].orEmpty()) },
+                    onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
+                    onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
+                    onSearchFiles = { query -> api.files(id, query) },
+                    accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
+                    accountLocked = conversation.acpSessionId != null,
+                    onSetAccount = { account ->
+                        store.act {
+                            when {
+                                account.startsWith(SignInPrefix) && node != null -> {
+                                    val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
+                                    signIn = LoginSession(started.loginId, conversation.agent)
+                                }
+                                account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
+                                else -> api.patchConversation(id, PatchConversationRequest(account = account))
+                            }
+                        }
+                    },
+                    onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
+                    onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, kind, text.ifEmpty { null }).id) } },
+                )
             }
 
-            Rail(panel) { chosen -> panel = if (panel == chosen) null else chosen }
+            if (!compact) {
+                when (panel) {
+                    SidePanel.Details -> Inspector(conversation, node)
+                    SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
+                    SidePanel.Git -> key(conversation.id) { GitSide(store, conversation) }
+                    null -> Unit
+                }
+
+                Rail(panel) { chosen -> panel = if (panel == chosen) null else chosen }
+            }
         }
     }
 

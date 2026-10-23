@@ -23,6 +23,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -165,7 +167,25 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
         }
     }
 
+    var selecting by remember(emulator) { mutableStateOf(false) }
+
     Column(modifier) {
+        if (LocalAnnotate.current != null && id != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.End) {
+                MyButton({ selecting = !selecting }, text = if (selecting) "Back to terminal" else "Select output", size = ButtonSize.Sm, muted = true)
+            }
+        }
+
+        if (selecting) {
+            Box(Modifier.weight(1f).fillMaxWidth().background(colors.bgContent).verticalScroll(rememberScrollState()).padding(Tokens.Space.S2).semantics { contentDescription = "Terminal output" }) {
+                Annotatable {
+                    Label(emulator.screenText().trimEnd(), style = Tokens.Type.Code)
+                }
+            }
+
+            return@Column
+        }
+
         Box(
             Modifier
                 .weight(1f)

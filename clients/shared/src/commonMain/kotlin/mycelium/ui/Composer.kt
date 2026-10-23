@@ -47,7 +47,9 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
+import mycelium.state.Annotation
 import mycelium.state.SessionOptions
+import mycelium.state.annotationLabel
 import mycelium.state.SideChatCommands
 import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
@@ -98,6 +100,8 @@ fun Composer(
     accountLocked: Boolean = false,
     onSetAccount: (String) -> Unit = {},
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
+    annotations: List<Annotation> = emptyList(),
+    onRemoveAnnotation: (Annotation) -> Unit = {},
 ) {
     val colors = MyTheme.colors
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
@@ -131,7 +135,7 @@ fun Composer(
     fun submit() {
         val trimmed = text.text.trim()
 
-        if (trimmed.isNotEmpty()) {
+        if (trimmed.isNotEmpty() || annotations.isNotEmpty()) {
             val side = sideChatOf(trimmed)
 
             if (side != null) {
@@ -208,6 +212,8 @@ fun Composer(
                     QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
                 }
 
+                AnnotationChips(annotations, onRemoveAnnotation)
+
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
                     SendButtons(working, onStop, ::submit)
@@ -238,6 +244,10 @@ fun Composer(
             Box(measured) {
                 QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
             }
+        }
+
+        Box(measured.padding(horizontal = Tokens.Space.S2)) {
+            AnnotationChips(annotations, onRemoveAnnotation)
         }
 
         field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
@@ -506,6 +516,35 @@ private fun QueuedMessages(
             }
 
             Hairline()
+        }
+    }
+}
+
+@Composable
+private fun AnnotationChips(annotations: List<Annotation>, onRemove: (Annotation) -> Unit) {
+    if (annotations.isEmpty()) {
+        return
+    }
+
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.S1),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (annotation in annotations) {
+            val label = annotationLabel(annotation)
+
+            Row(
+                Modifier
+                    .border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape)
+                    .padding(start = Tokens.Space.S2)
+                    .semantics { contentDescription = "Attached: $label" },
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Label(label, style = Tokens.Type.Meta, maxLines = 1)
+                MyButton({ onRemove(annotation) }, icon = MyIcon.Close, description = "Remove attachment: $label", size = ButtonSize.Sm, muted = true)
+            }
         }
     }
 }
