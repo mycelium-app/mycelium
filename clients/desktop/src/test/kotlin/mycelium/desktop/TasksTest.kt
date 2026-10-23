@@ -393,6 +393,30 @@ class TasksTest {
     }
 
     @Test
+    fun startingATaskAlsoOffersWorkingConversationsOfItsProjectToQueueItInAndChats() {
+        showBoard(withIdleConversation(conversation("c-busy", "Still working", "working", "/work/app", project = "\"p1\""), conversation("c-chat", "Planning chat", "review", agent = "chat"), conversation("c-busy-chat", "Replying chat", "working", agent = "chat"), conversation("c-elsewhere", "Other project", "working", project = "\"p2\"")))
+
+        rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
+
+        rule.onNodeWithText("Send to Ready for a look").assertExists()
+        rule.onNodeWithText("Queue for Still working").assertExists()
+        rule.onNodeWithText("Send to Planning chat").assertExists()
+        rule.onNodeWithText("Queue for Replying chat").assertExists()
+        rule.onNodeWithText("Queue for Other project").assertDoesNotExist()
+    }
+
+    @Test
+    fun queueingATaskForAWorkingConversationPostsItsId() {
+        showBoard(withIdleConversation(conversation("c-busy", "Still working", "working", "/work/app", project = "\"p1\"")))
+
+        rule.onNodeWithContentDescription("Start Rebuild install.md").performClick()
+        rule.onNodeWithText("Queue for Still working").performClick()
+
+        rule.waitUntil { posts.any { it.first.endsWith("/tasks/t1/start") } }
+        assertEquals("""{"conversation_id":"c-busy"}""", posts.first { it.first.endsWith("/tasks/t1/start") }.second)
+    }
+
+    @Test
     fun sendingATaskToAnIdleConversationPostsItsIdAndClaimsTheCard() {
         showBoard(withIdleConversation())
 

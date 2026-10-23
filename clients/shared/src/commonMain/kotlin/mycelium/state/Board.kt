@@ -28,6 +28,7 @@ data class BoardCard(
     val task: Task?,
     val waitingOn: List<Task> = emptyList(),
     val idleConversations: List<Conversation> = emptyList(),
+    val sendTargets: List<Conversation> = emptyList(),
 ) {
     val details: String
         get() = when (task?.status) {
@@ -62,6 +63,20 @@ fun idleConversationsFor(task: Task, state: AppState): List<Conversation> =
             .sortedByDescending { it.updatedAt }
     }
 
+fun sendTargetsFor(task: Task, state: AppState): List<Conversation> =
+    if (task.status != TaskStatuses.Open) {
+        emptyList()
+    } else {
+        val ofProject = state.conversations.values
+            .filter { it.projectId == task.projectId && !it.isChat && it.acpSessionId != null && it.status != ConversationStatus.Failed }
+            .filter { state.nodes[it.nodeId]?.online == true }
+        val chats = state.conversations.values.filter { it.isChat && it.status != ConversationStatus.Failed }
+
+        (ofProject + chats).filter { it.archivedAt == null }.sortedByDescending { it.updatedAt }
+    }
+
+val Conversation.acceptsAMessageNow: Boolean get() = status == ConversationStatus.Review || status == ConversationStatus.Done
+
 fun laneOf(status: ConversationStatus): Lane = when (status) {
     ConversationStatus.Done -> Lane.Done
     else -> Lane.Claimed
@@ -92,7 +107,7 @@ fun boardCards(state: AppState, filter: BoardFilter = BoardFilter()): Map<Lane, 
         val conversation = task.conversationId?.let { state.conversations[it] }
         val project = task.projectId?.let { state.projects[it] }
 
-        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task, waitingOn(task, state.tasks), idleConversationsFor(task, state))
+        lane to BoardCard(task.id, task.title, task.agent, conversation?.model, project?.id, project?.name, task.branch, task.nodeId, conversation, task, waitingOn(task, state.tasks), idleConversationsFor(task, state), sendTargetsFor(task, state))
     }
     val matching = (fromConversations + fromTasks).filter { (_, card) -> matches(card, filter) }
     val lanes = matching.groupBy({ it.first }, { it.second })

@@ -42,6 +42,7 @@ import mycelium.state.BoardCard
 import mycelium.state.BoardFilter
 import mycelium.state.Lane
 import mycelium.state.Store
+import mycelium.state.acceptsAMessageNow
 import mycelium.state.agentName
 import mycelium.state.boardCards
 import mycelium.state.collapsedLanes
@@ -365,7 +366,7 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
                                 {
                                     when {
                                         card.waitingOn.isNotEmpty() -> explained = true
-                                        card.idleConversations.isEmpty() -> store.act { store.startTask(task) }
+                                        card.sendTargets.isEmpty() -> store.act { store.startTask(task) }
                                         else -> startMenu = true
                                     }
                                 },
@@ -374,15 +375,15 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
                                 variant = ButtonVariant.Outline,
                                 size = ButtonSize.Sm,
                                 muted = card.waitingOn.isNotEmpty(),
-                                trailingIcon = if (card.idleConversations.isEmpty() || card.waitingOn.isNotEmpty()) null else MyIcon.ChevronDown,
+                                trailingIcon = if (card.sendTargets.isEmpty() || card.waitingOn.isNotEmpty()) null else MyIcon.ChevronDown,
                             )
 
                             if (startMenu) {
                                 MenuPopup(onDismiss = { startMenu = false }) {
                                     MenuItem("New conversation", onClick = { startMenu = false; store.act { store.startTask(task) } })
 
-                                    for (idle in card.idleConversations) {
-                                        MenuItem("Send to ${idle.title}", onClick = { startMenu = false; store.act { store.startTask(task, idle.id) } })
+                                    for (target in card.sendTargets) {
+                                        MenuItem("${if (target.acceptsAMessageNow) "Send to" else "Queue for"} ${target.title}", onClick = { startMenu = false; store.act { store.startTask(task, target.id) } })
                                     }
                                 }
                             }
