@@ -19,6 +19,10 @@ use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 60;
 
+pub fn derived_title(text: &str) -> String {
+    text.lines().next().unwrap_or_default().chars().take(TITLE_LIMIT).collect()
+}
+
 #[derive(Deserialize)]
 pub struct ListQuery {
     #[serde(default)]
@@ -104,9 +108,11 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     }
 
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
-    let title = match (request.title.as_deref().map(str::trim).filter(|title| !title.is_empty()), prompt) {
+    let chosen_title = request.title.as_deref().map(str::trim).filter(|title| !title.is_empty());
+    let predicted_title = prompt.map(derived_title);
+    let title = match (chosen_title, &predicted_title) {
         (Some(title), _) => title.to_string(),
-        (None, Some(prompt)) => prompt.lines().next().unwrap_or_default().chars().take(TITLE_LIMIT).collect(),
+        (None, Some(predicted)) => predicted.clone(),
         (None, None) => "New conversation".to_string(),
     };
     let status = if prompt.is_some() { ConversationStatus::Working } else { ConversationStatus::Done };
@@ -114,7 +120,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id) values ($1, $2, $3, $4, $5, $6, $7, $8)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -126,6 +132,8 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     .bind(enum_text(&status))
     .bind(account)
     .bind(project.as_ref().map(|project| project.id))
+    .bind(chosen_title.is_some())
+    .bind(&predicted_title)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -198,7 +206,9 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "update conversations set title = coalesce($2, title), account = case when $5 then null else coalesce($4, account) end,
+        "update conversations set title = case when $6 then coalesce(predicted_title, title) else coalesce($2, title) end,
+             title_user_set = case when $6 then false when $2::text is not null then true else title_user_set end,
+             account = case when $5 then null else coalesce($4, account) end,
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
@@ -209,6 +219,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.archived)
     .bind(account)
     .bind(use_default)
+    .bind(request.clear_title == Some(true))
     .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;

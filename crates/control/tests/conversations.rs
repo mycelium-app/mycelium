@@ -763,3 +763,76 @@ async fn files_are_listed_by_the_node_running_the_conversation_in_its_folder() {
     assert_eq!(status, 200);
     assert_eq!(body, json!(["flake.nix"]));
 }
+
+async fn agent_titles(server: &Server, link: &mut NodeLink, id: Uuid, seq: i64, title: &str) {
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"sessionId": "acp-1", "update": {"sessionUpdate": "session_info_update", "title": title}}) }).await;
+
+    common::eventually("the predicted title", || async {
+        let predicted = sqlx::query_scalar::<_, Option<String>>("select predicted_title from conversations where id = $1").bind(id).fetch_one(&server.pool).await.unwrap();
+
+        (predicted.as_deref() == Some(title)).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_title_follows_the_agent_until_the_user_sets_one() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let url = format!("/api/v1/conversations/{id}");
+
+    agent_titles(&server, &mut link, id, 1, "Move restore copy into shared strings").await;
+    let followed = server.conversation(id).await;
+    assert_eq!((followed["title"].as_str(), followed["title_user_set"].as_bool()), (Some("Move restore copy into shared strings"), Some(false)));
+
+    let (_, renamed) = server.user.json(server.user.patch(&url).json(&json!({"title": "Restore work"}))).await;
+    assert_eq!((renamed["title"].as_str(), renamed["title_user_set"].as_bool()), (Some("Restore work"), Some(true)));
+
+    agent_titles(&server, &mut link, id, 2, "Share the restore strings").await;
+    assert_eq!(server.conversation(id).await["title"], "Restore work");
+}
+
+#[tokio::test]
+async fn clearing_a_title_returns_to_the_latest_prediction_and_follows_the_agent_again() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    let url = format!("/api/v1/conversations/{id}");
+    server.user.json(server.user.patch(&url).json(&json!({"title": "Restore work"}))).await;
+    agent_titles(&server, &mut link, id, 1, "Share the restore strings").await;
+
+    let (status, cleared) = server.user.json(server.user.patch(&url).json(&json!({"clear_title": true}))).await;
+    assert_eq!((status, cleared["title"].as_str(), cleared["title_user_set"].as_bool()), (200, Some("Share the restore strings"), Some(false)));
+
+    agent_titles(&server, &mut link, id, 2, "Share restore strings with Android").await;
+    common::eventually("the title to follow", || async { (server.conversation(id).await["title"] == "Share restore strings with Android").then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn a_conversation_started_without_a_title_is_named_from_its_first_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    assert_eq!(server.conversation(id).await["title"], "New conversation");
+
+    prompt(&server, id, "Fix the flaky restore test\nit fails on CI").await;
+
+    let named = server.conversation(id).await;
+    assert_eq!((named["title"].as_str(), named["title_user_set"].as_bool()), (Some("Fix the flaky restore test"), Some(false)));
+}
+
+#[tokio::test]
+async fn a_title_given_at_creation_is_the_users_and_the_agent_does_not_replace_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "title": "Release"}))).await;
+    let id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+    link.start_session(id, "acp-1").await;
+
+    agent_titles(&server, &mut link, id, 1, "Cut the release").await;
+
+    let kept = server.conversation(id).await;
+    assert_eq!((kept["title"].as_str(), kept["title_user_set"].as_bool()), (Some("Release"), Some(true)));
+}

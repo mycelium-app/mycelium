@@ -204,13 +204,11 @@ private fun ConversationHeader(
         }
 
         if (renaming) {
-            TextInput(draft, { draft = it }, label = "Conversation name", modifier = if (compact) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn), showLabel = false, onSubmit = {
-                if (draft.isNotBlank()) {
-                    onRename(draft.trim())
-                    renaming = false
-                }
+            TextInput(draft, { draft = it }, label = "Conversation name", placeholder = "Leave empty to use the suggested title", modifier = if (compact) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn), showLabel = false, onSubmit = {
+                onRename(draft.trim())
+                renaming = false
             })
-            MyButton({ if (draft.isNotBlank()) { onRename(draft.trim()); renaming = false } }, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+            MyButton({ onRename(draft.trim()); renaming = false }, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             MyButton({ renaming = false; draft = conversation.title }, text = "Cancel", size = ButtonSize.Sm, muted = true)
         } else {
             Row(

@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, status, acp_session_id, mode, model, account, options, created_at, updated_at, archived_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, acp_session_id, mode, model, account, options, created_at, updated_at, archived_at";
 
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
@@ -33,6 +33,7 @@ pub struct ConversationRow {
     pub agent: String,
     pub cwd: String,
     pub title: String,
+    pub title_user_set: bool,
     pub status: String,
     pub acp_session_id: Option<String>,
     pub mode: Option<String>,
@@ -53,6 +54,7 @@ impl ConversationRow {
             agent: parse_enum(&self.agent)?,
             cwd: self.cwd.clone(),
             title: self.title.clone(),
+            title_user_set: self.title_user_set,
             status: self.parsed_status()?,
             acp_session_id: self.acp_session_id.clone(),
             mode: self.mode.clone(),

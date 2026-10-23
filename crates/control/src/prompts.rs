@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
@@ -42,6 +43,13 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     };
 
     let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id}), None).await?;
+
+    sqlx::query("update conversations set predicted_title = coalesce(predicted_title, $2), title = case when title_user_set then title else coalesce(predicted_title, $2) end where id = $1")
+        .bind(conversation_id)
+        .bind(derived_title(&text))
+        .execute(&mut *tx)
+        .await?;
+
     let row = set_status(&mut tx, conversation_id, ConversationStatus::Working).await?;
     tx.commit().await?;
 

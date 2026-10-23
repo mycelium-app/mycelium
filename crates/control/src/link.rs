@@ -3,7 +3,7 @@ use crate::device::client_address;
 use crate::error::ApiResult;
 use crate::prompts::pump;
 use crate::state::{AppState, GitAnswer};
-use crate::store::{append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -21,6 +21,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, interval_at};
 use uuid::Uuid;
+
+const PREDICTED_TITLE_LIMIT: usize = 100;
 
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
@@ -109,7 +111,29 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
-        NodeToControl::AcpUpdate { conversation_id, seq, update } => record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await.map(|_| ()),
+        NodeToControl::AcpUpdate { conversation_id, seq, update } => {
+            let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
+            let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await?;
+
+            let (true, Some(title)) = (inserted, predicted) else {
+                return Ok(());
+            };
+
+            let renamed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+                "update conversations set predicted_title = $3, title = case when title_user_set then title else $3 end where id = $1 and node_id = $2 returning {CONVERSATION_COLUMNS}"
+            )))
+            .bind(conversation_id)
+            .bind(node_id)
+            .bind(title)
+            .fetch_optional(&state.pool)
+            .await?;
+
+            if let Some(renamed) = renamed {
+                state.publish(Some(renamed.owner), StreamMessage::Conversation(renamed.to_proto()?));
+            }
+
+            Ok(())
+        }
         NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
             let mut payload = request.clone();
 

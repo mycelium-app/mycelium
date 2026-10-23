@@ -30,6 +30,7 @@ fn conversation() -> Conversation {
         agent: AgentId::Claude,
         cwd: "/work".into(),
         title: "t".into(),
+        title_user_set: false,
         status: ConversationStatus::Input,
         acp_session_id: Some("s".into()),
         mode: None,

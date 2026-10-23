@@ -248,11 +248,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     }
 
     fun rename(conversation: Conversation, title: String) {
-        mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(title = title))) }
+        if (title.isNotEmpty()) {
+            mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(title = title, titleUserSet = true))) }
+        }
 
         act {
             try {
-                val renamed = api.patchConversation(conversation.id, PatchConversationRequest(title = title))
+                val request = if (title.isEmpty()) PatchConversationRequest(clearTitle = true) else PatchConversationRequest(title = title)
+                val renamed = api.patchConversation(conversation.id, request)
                 mutableState.update { it.copy(conversations = it.conversations + (renamed.id to renamed)) }
             } catch (failure: Exception) {
                 mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation)) }

@@ -432,6 +432,7 @@ data class CreateConversationRequest(
 @Serializable
 data class PatchConversationRequest(
     val title: String? = null,
+    @SerialName("clear_title") val clearTitle: Boolean? = null,
     val archived: Boolean? = null,
     val account: String? = null,
     @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
@@ -484,6 +485,7 @@ data class Conversation(
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("archived_at") val archivedAt: String? = null,
     val account: String? = null,
+    @SerialName("title_user_set") val titleUserSet: Boolean = false,
 )
 
 @Serializable

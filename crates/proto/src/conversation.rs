@@ -85,6 +85,8 @@ pub struct Conversation {
     pub agent: AgentId,
     pub cwd: String,
     pub title: String,
+    #[serde(default)]
+    pub title_user_set: bool,
     pub status: ConversationStatus,
     pub acp_session_id: Option<String>,
     pub mode: Option<String>,
