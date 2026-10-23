@@ -38,7 +38,7 @@ pub fn generated_ui_instructions() -> String {
 
 pub const RICH_MARKDOWN_INSTRUCTIONS: &str = "Mycelium renders these Markdown extensions, so use them where they help and not otherwise: task lists (- [ ] and - [x]), tables with column alignment, GitHub callouts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]), footnotes ([^1]), superscript (^x^), subscript (~x~), strikethrough, and fenced code with a language for highlighting (kotlin, rust, ts, js, python, shell, json, yaml, toml, diff). Raw HTML is not rendered.";
 
-async fn chat_node(state: &AppState, owner: Uuid) -> ApiResult<Uuid> {
+pub async fn chat_node(state: &AppState, owner: Uuid) -> ApiResult<Uuid> {
     let existing = sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and hostname = $2 limit 1").bind(owner).bind(CHAT_HOST).fetch_optional(&state.pool).await?;
 
     if let Some(existing) = existing {

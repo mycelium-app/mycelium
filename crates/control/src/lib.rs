@@ -3,6 +3,7 @@ mod activity;
 mod attachments;
 mod auth;
 mod boot;
+mod chat_import;
 mod chats;
 mod config;
 mod conversations;
@@ -156,6 +157,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/model-providers/{id}", delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/chats", post(chats::create))
+        .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
         .route("/api/v1/groups/{id}/folders", post(groups::add_folder))

@@ -58,6 +58,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             BarTitle("New chat")
         }
 
+        ImportFromClaude(store)
+
         if (loaded == null) {
             return@Column
         }

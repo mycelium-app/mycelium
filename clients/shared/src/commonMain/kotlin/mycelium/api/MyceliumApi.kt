@@ -351,6 +351,9 @@ class MyceliumApi(
     suspend fun createChat(request: CreateChatRequest): Conversation =
         call("/chats") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun importClaudeChats(export: ByteArray): ImportResult =
+        call("/chats/import") { client.post(it) { authorise(); contentType(ContentType.Application.Json); setBody(export) } }.body()
+
     suspend fun conversation(id: String): Conversation = call("/conversations/$id") { client.get(it) { authorise() } }.body()
 
     suspend fun patchConversation(id: String, request: PatchConversationRequest): Conversation =
