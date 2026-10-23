@@ -8,6 +8,7 @@ use axum::routing::get;
 use base64::Engine;
 use common::{NodeLink, Server, eventually, serve};
 use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -177,6 +178,15 @@ async fn start_in(server: &Server, link: &mut NodeLink, project: Uuid) -> (Uuid,
         ControlToNode::StartSession { conversation_id, instructions, .. } => (conversation_id, instructions),
         other => panic!("expected start_session, got {other:?}"),
     }
+}
+
+async fn group_streamed_for(stream: &mut common::StreamClient, conversation: Uuid, group: Option<Uuid>) -> Option<Uuid> {
+    stream
+        .until(|message| match message {
+            StreamMessage::Conversation(row) if row.id == conversation && row.group_id == group => Some(row.group_id),
+            _ => None,
+        })
+        .await
 }
 
 async fn expect_instructions(link: &mut NodeLink) -> (String, Option<String>) {
@@ -604,6 +614,27 @@ async fn a_projects_own_group_wins_over_a_folder_claim() {
     let (_, instructions) = start_in(&server, &mut link, project).await;
 
     assert_eq!(instructions.as_deref(), Some("Work rules."));
+}
+
+#[tokio::test]
+async fn changing_a_projects_group_regroups_its_conversations_and_tells_open_clients() {
+    let server = Server::start().await;
+    set_generated_ui(&server, false).await;
+    let mut link = server.online_node("laptop").await;
+    let work = create_group(&server, "work").await;
+    let slop = create_group(&server, "slop").await;
+    claim(&server, slop, "/w", None).await;
+    let project = project_in(&server, &mut link, "app", None).await;
+    let (conversation, _) = start_in(&server, &mut link, project).await;
+    let mut stream = server.user.stream().await;
+    let url = format!("/api/v1/projects/{project}");
+
+    server.user.json(server.user.patch(&url).json(&json!({"group_id": work}))).await;
+    let grouped = group_streamed_for(&mut stream, conversation, Some(work)).await;
+    server.user.json(server.user.patch(&url).json(&json!({"group_id": null}))).await;
+    let released = group_streamed_for(&mut stream, conversation, Some(slop)).await;
+
+    assert_eq!((grouped, released), (Some(work), Some(slop)));
 }
 
 #[tokio::test]
