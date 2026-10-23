@@ -2,11 +2,13 @@ use crate::auth::AuthNode;
 use crate::error::ApiResult;
 use crate::memories::search;
 use crate::state::AppState;
+use crate::tasks;
 use crate::walkthroughs;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use mycelium_proto::api::TaskStatus;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -52,6 +54,31 @@ fn tool_definitions() -> Value {
                     "scope": {"type": "string", "enum": ["global", "group"], "description": "global (default) is recalled in every conversation. group is recalled only in conversations whose project is in the same group."},
                 },
                 "required": ["text"],
+            },
+        },
+        {
+            "name": "propose_task",
+            "description": "Propose a task for the person to approve. It waits in the Proposed column of their Tasks board until they approve or decline it. Use it for follow-up work you found but are not doing now.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "A short title for the task."},
+                    "body": {"type": "string", "description": "What the task involves. It becomes the prompt of the conversation that works on it."},
+                    "project": {"type": "string", "description": "The name of the project the task belongs to. Defaults to this conversation's project."},
+                },
+                "required": ["title"],
+            },
+        },
+        {
+            "name": "ask_question",
+            "description": "Ask the person a question that you need answered before you can go on. It appears in the Questions column of their Tasks board. End your turn after asking: the answer arrives in this conversation as a new message.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The question."},
+                    "options": {"type": "array", "items": {"type": "string"}, "description": "Suggested answers the person can pick."},
+                },
+                "required": ["question"],
             },
         },
         {
@@ -180,6 +207,29 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     reply(&id, tool_text(&format!("Remembered as {memory_id}."), false))
                 }
+                Some(tool @ ("propose_task" | "ask_question")) => {
+                    let (field, status) = if tool == "propose_task" { ("title", TaskStatus::Proposed) } else { ("question", TaskStatus::Question) };
+                    let Some(title) = arguments.get(field).and_then(Value::as_str).map(str::trim) else {
+                        return Ok(failure(&id, INVALID_PARAMS, &format!("{tool} needs {field}, a string.")));
+                    };
+
+                    if title.is_empty() {
+                        return Ok(reply(&id, tool_text(&format!("Nothing was stored. Give the {field}."), true)));
+                    }
+
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was stored. A task belongs to a conversation, and this call did not come from one.", true)));
+                    };
+                    let body = arguments.get("body").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
+                    let options: Vec<String> = arguments.get("options").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|option| !option.is_empty()).map(String::from).collect();
+                    let project = arguments.get("project").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty());
+
+                    match tasks::record(&state, conversation_id, status, title, body, &options, project).await? {
+                        Ok(task) if status == TaskStatus::Question => reply(&id, tool_text(&format!("Question {} asked. End your turn: the answer arrives here as a new message.", task.id), false)),
+                        Ok(task) => reply(&id, tool_text(&format!("Task {} proposed. The person can approve it from their Tasks board.", task.id), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
                 Some("walkthrough") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                         return Ok(reply(&id, tool_text("Nothing was stored. A walkthrough belongs to a conversation, and this call did not come from one.", true)));
@@ -191,7 +241,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember or walkthrough."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question or walkthrough."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

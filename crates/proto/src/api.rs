@@ -563,6 +563,17 @@ pub struct CreateTaskRequest {
     #[serde(default)]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Question,
+    Proposed,
+    Open,
+    Claimed,
+    Done,
+    Declined,
+}
+
     pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
@@ -573,9 +584,20 @@ pub struct CreateTaskRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+    pub status: TaskStatus,
+    pub options: Vec<String>,
+    pub answer: Option<String>,
+    pub source_id: Option<Uuid>,
+    pub source_title: Option<String>,
+    pub conversation_id: Option<Uuid>,
 pub enum EachRun {
     New,
     Same,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnswerTaskRequest {
+    pub answer: String,
+}
+
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

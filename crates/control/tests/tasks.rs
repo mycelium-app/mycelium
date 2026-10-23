@@ -16,7 +16,40 @@ async fn add_task(server: &Server, node_id: Uuid, body: Value) -> (u16, Value) {
 async fn open_tasks(server: &Server) -> Vec<Value> {
     let (_, tasks) = server.user.json(server.user.get("/api/v1/tasks")).await;
 
-    tasks.as_array().unwrap().clone()
+    tasks.as_array().unwrap().iter().filter(|task| task["status"] == "open").cloned().collect()
+}
+
+async fn tasks_with_status(server: &Server, status: &str) -> Vec<Value> {
+    let (_, tasks) = server.user.json(server.user.get("/api/v1/tasks")).await;
+
+    tasks.as_array().unwrap().iter().filter(|task| task["status"] == status).cloned().collect()
+}
+
+async fn tool(server: &Server, token: &str, conversation: Option<Uuid>, name: &str, arguments: Value) -> Value {
+    let anonymous = server.anonymous();
+    let mut request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}));
+
+    if let Some(conversation) = conversation {
+        request = request.header("x-mycelium-conversation", conversation.to_string());
+    }
+
+    let (status, body) = anonymous.json(request).await;
+    assert_eq!(status, 200, "{body}");
+
+    body["result"].clone()
+}
+
+async fn asking_conversation(server: &Server, link: &mut common::NodeLink) -> Uuid {
+    let conversation = server.create_conversation(link.id, Some("Plan the release")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.expect_prompt().await;
+
+    conversation.id
+}
+
+fn path_of(task: &Value, action: &str) -> String {
+    format!("/api/v1/tasks/{}/{action}", task["id"].as_str().unwrap())
 }
 
 #[tokio::test]
@@ -125,4 +158,147 @@ async fn a_task_can_be_deleted_and_only_by_its_owner() {
     let (status, _) = server.user.json(server.user.delete(&path)).await;
     assert_eq!(status, 204);
     assert_eq!(open_tasks(&server).await.len(), 0);
+}
+
+#[tokio::test]
+async fn an_agent_proposes_a_task_that_waits_as_proposed_with_its_conversation_as_the_source() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+
+    let result = tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Cache cargo in the release jobs", "body": "Add a cargo cache to both release jobs"})).await;
+    assert_eq!(result["isError"], false, "{result}");
+
+    let proposed = tasks_with_status(&server, "proposed").await;
+    assert_eq!(proposed.len(), 1);
+    assert_eq!((proposed[0]["title"].clone(), proposed[0]["prompt"].clone(), proposed[0]["source_title"].clone(), proposed[0]["cwd"].clone()), (json!("Cache cargo in the release jobs"), json!("Add a cargo cache to both release jobs"), json!("Plan the release"), json!("/work/app")));
+    assert_eq!(open_tasks(&server).await.len(), 0);
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&proposed[0], "start"))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn a_proposed_task_belongs_to_the_named_project_and_an_unknown_project_is_refused() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'mycelium', '/work/mycelium') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+
+    let result = tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Tidy", "project": "Mycelium"})).await;
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(tasks_with_status(&server, "proposed").await[0]["project_id"], json!(project));
+
+    let refused = tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Tidy", "project": "nowhere"})).await;
+    assert_eq!(refused["isError"], true);
+    assert_eq!(tasks_with_status(&server, "proposed").await.len(), 1);
+}
+
+#[tokio::test]
+async fn proposing_or_asking_needs_a_title_and_a_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+
+    let outside = tool(&server, &link.token, None, "propose_task", json!({"title": "Tidy"})).await;
+    assert_eq!(outside["isError"], true);
+
+    let blank = tool(&server, &link.token, Some(conversation), "ask_question", json!({"question": "  "})).await;
+    assert_eq!(blank["isError"], true);
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/tasks")).await;
+    assert_eq!(listed, json!([]));
+}
+
+#[tokio::test]
+async fn approving_a_proposed_task_opens_it_and_declining_hides_it_as_declined() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Keep"})).await;
+    tool(&server, &link.token, Some(conversation), "propose_task", json!({"title": "Drop"})).await;
+    let proposed = tasks_with_status(&server, "proposed").await;
+
+    let (status, approved) = server.user.json(server.user.post(&path_of(&proposed[0], "approve"))).await;
+    assert_eq!((status, approved["status"].clone()), (200, json!("open")));
+    let (status, declined) = server.user.json(server.user.post(&path_of(&proposed[1], "decline"))).await;
+    assert_eq!((status, declined["status"].clone()), (200, json!("declined")));
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&proposed[0], "decline"))).await;
+    assert_eq!(status, 404);
+    let other = server.second_user("other@example.com").await;
+    let (status, _) = other.json(other.post(&path_of(&proposed[1], "approve"))).await;
+    assert_eq!(status, 404);
+    assert_eq!(open_tasks(&server).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_agent_asks_a_question_and_the_answer_reaches_its_conversation_as_a_prompt() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    let result = tool(&server, &link.token, Some(conversation), "ask_question", json!({"question": "Tag now, or wait?", "options": ["Tag now", "Wait"]})).await;
+    assert_eq!(result["isError"], false, "{result}");
+    link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+
+    let questions = tasks_with_status(&server, "question").await;
+    assert_eq!((questions[0]["title"].clone(), questions[0]["options"].clone(), questions[0]["source_title"].clone()), (json!("Tag now, or wait?"), json!(["Tag now", "Wait"]), json!("Plan the release")));
+
+    let (status, answered) = server.user.json(server.user.post(&path_of(&questions[0], "answer")).json(&json!({"answer": "Wait"}))).await;
+    assert_eq!((status, answered["status"].clone(), answered["answer"].clone()), (200, json!("done"), json!("Wait")));
+
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "Answer to your question \"Tag now, or wait?\": Wait");
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&questions[0], "answer")).json(&json!({"answer": "Again"}))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn an_empty_answer_is_refused_and_the_question_stays_open() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    tool(&server, &link.token, Some(conversation), "ask_question", json!({"question": "Tag now?"})).await;
+    let questions = tasks_with_status(&server, "question").await;
+
+    let (status, body) = server.user.json(server.user.post(&path_of(&questions[0], "answer")).json(&json!({"answer": "  "}))).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("answer_required")));
+    assert_eq!(tasks_with_status(&server, "question").await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_question_whose_conversation_is_gone_keeps_waiting_with_a_reason() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = asking_conversation(&server, &mut link).await;
+    tool(&server, &link.token, Some(conversation), "ask_question", json!({"question": "Tag now?"})).await;
+    sqlx::query("update tasks set source_id = null").execute(&server.pool).await.unwrap();
+    let questions = tasks_with_status(&server, "question").await;
+
+    let (status, body) = server.user.json(server.user.post(&path_of(&questions[0], "answer")).json(&json!({"answer": "Yes"}))).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("asker_gone")));
+    assert_eq!(tasks_with_status(&server, "question").await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_started_task_is_claimed_by_its_conversation_and_can_then_be_marked_done() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Tidy", "cwd": "/work/app"})).await;
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&task, "done"))).await;
+    assert_eq!(status, 404);
+
+    let (_, conversation) = server.user.json(server.user.post(&path_of(&task, "start"))).await;
+    link.expect_start_session().await;
+
+    let claimed = tasks_with_status(&server, "claimed").await;
+    assert_eq!((claimed.len(), claimed[0]["conversation_id"].clone()), (1, conversation["id"].clone()));
+
+    let (status, done) = server.user.json(server.user.post(&path_of(&task, "done"))).await;
+    assert_eq!((status, done["status"].clone()), (200, json!("done")));
 }
