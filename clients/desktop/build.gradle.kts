@@ -22,6 +22,7 @@ dependencies {
 
 tasks.test {
     useJUnit()
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
 }
 
 compose.desktop {

@@ -1,5 +1,20 @@
 [tools]
+"github:nextest-rs/nextest" = "cargo-nextest-0.9.149"
 rust = "1.96.0"
 java = "21"
 gradle = "9.8.2"
 node = "22"
+
+[tasks.test-rust]
+description = "Rust tests in parallel; needs the throwaway Postgres on 55499"
+env = { CARGO_TARGET_DIR = "{{env.HOME}}/.cache/mycelium-target", CARGO_INCREMENTAL = "0", MYCELIUM_TEST_DATABASE_URL = "postgres://postgres:pw@127.0.0.1:55499/postgres" }
+run = "cargo nextest run --workspace --no-fail-fast"
+
+[tasks.test-clients]
+description = "Client tests across JVM forks, plus the web and Android compiles"
+dir = "clients"
+run = "./gradlew :shared:jvmTest :desktop:test :web:compileKotlinWasmJs :androidApp:compileDebugKotlin --continue"
+
+[tasks.test]
+description = "Every suite, Rust first, then the clients"
+run = [{ task = "test-rust" }, { task = "test-clients" }]
