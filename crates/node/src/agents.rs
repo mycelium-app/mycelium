@@ -1,4 +1,5 @@
 use crate::config::agent_command;
+use crate::usage::UsageCache;
 use mycelium_proto::conversation::{AgentId, AgentInfo, LoginInfo, LoginState};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -142,7 +143,7 @@ pub fn account_env(agent: AgentId, account: &AccountHome) -> Vec<(String, String
     vec![(variable.to_string(), account.dir.display().to_string())]
 }
 
-pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo]) -> Vec<LoginInfo> {
+pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], usage: &UsageCache) -> Vec<LoginInfo> {
     let mut logins = Vec::new();
 
     for info in available.iter().filter(|info| info.available) {
@@ -154,7 +155,9 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo]) ->
             };
             let state = if credential_present { LoginState::SignedIn } else { LoginState::SignedOut };
 
-            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state });
+            let usage_left = usage.left(&account.dir).filter(|_| credential_present);
+
+            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left });
         }
     }
 
@@ -186,6 +189,7 @@ pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::{USAGE_ENDPOINT, USAGE_MIN_AGE};
 
     fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
@@ -226,12 +230,12 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let available = [AgentInfo { agent: AgentId::Codex, version: None, available: true, update_available: None }];
 
-        assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available)[0].state, LoginState::SignedOut);
+        assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available, &no_usage())[0].state, LoginState::SignedOut);
 
         std::fs::create_dir_all(home.path().join(".codex")).unwrap();
         std::fs::write(home.path().join(".codex").join("auth.json"), "{}").unwrap();
 
-        assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available)[0].state, LoginState::SignedIn);
+        assert_eq!(login_state(home.path(), &home.path().join("accounts"), &available, &no_usage())[0].state, LoginState::SignedIn);
     }
 
     #[test]
@@ -252,11 +256,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let unavailable = [AgentInfo { agent: AgentId::Claude, version: None, available: false, update_available: None }];
 
-        assert!(login_state(home.path(), &home.path().join("accounts"), &unavailable).is_empty());
+        assert!(login_state(home.path(), &home.path().join("accounts"), &unavailable, &no_usage()).is_empty());
     }
 
     fn available(agent: AgentId) -> [AgentInfo; 1] {
         [AgentInfo { agent, version: None, available: true, update_available: None }]
+    }
+
+    fn no_usage() -> UsageCache {
+        UsageCache::new(USAGE_ENDPOINT, USAGE_MIN_AGE)
     }
 
     fn write(path: &Path, text: &str) {
@@ -274,7 +282,7 @@ mod tests {
         write(&accounts.join("claude").join("work").join(".credentials.json"), "{}");
         std::fs::create_dir_all(accounts.join("claude").join("side")).unwrap();
 
-        let logins = login_state(home.path(), &accounts, &available(AgentId::Claude));
+        let logins = login_state(home.path(), &accounts, &available(AgentId::Claude), &no_usage());
 
         let listed: Vec<(Option<&str>, LoginState)> = logins.iter().map(|login| (login.account.as_deref(), login.state)).collect();
         assert_eq!(listed, vec![(Some("sam@example.com"), LoginState::SignedIn), (Some("side"), LoginState::SignedOut), (Some("work@acme.example"), LoginState::SignedIn)]);
@@ -287,7 +295,7 @@ mod tests {
         let payload = URL_SAFE_NO_PAD.encode(r#"{"email": "sam@example.com"}"#);
         write(&accounts.join("codex").join("sam").join("auth.json"), &format!(r#"{{"tokens": {{"id_token": "e30.{payload}.sig"}}}}"#));
 
-        let logins = login_state(home.path(), &accounts, &available(AgentId::Codex));
+        let logins = login_state(home.path(), &accounts, &available(AgentId::Codex), &no_usage());
 
         assert_eq!(logins[0].account, None);
         assert_eq!(logins[0].state, LoginState::SignedOut);

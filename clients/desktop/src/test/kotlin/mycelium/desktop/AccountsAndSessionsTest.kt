@@ -24,12 +24,15 @@ import mycelium.DeviceInfo
 import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
+import mycelium.api.LoginInfo
+import mycelium.api.LoginState
 import mycelium.api.MyceliumApi
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.SessionOptions
 import mycelium.state.Store
+import mycelium.state.accountChoices
 import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
 import mycelium.ui.MyceliumTheme
@@ -228,6 +231,22 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("Sign in on willow").performClick()
 
         assertEquals("sign in:side@example.com", picked)
+    }
+
+    @Test
+    fun thePickerIsTitledForTheAgentAndShowsEachAccountsUsageLeftOrThatItIsUnknown() {
+        val logins = listOf(
+            LoginInfo("claude", "sam@example.com", "token", LoginState.SignedIn, usageLeft = 18),
+            LoginInfo("claude", "work@acme.example", "token", LoginState.SignedIn),
+        )
+        composerWith(accounts = accountChoices(logins, listOf("side@example.com"), "willow"), started = false)
+
+        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
+
+        rule.onNodeWithText("Claude account").assertExists()
+        rule.onNodeWithText("18% left").assertExists()
+        rule.onNodeWithText("Usage unknown").assertExists()
+        rule.onNodeWithText("Sign in on willow").assertExists()
     }
 
     @Test

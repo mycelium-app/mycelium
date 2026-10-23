@@ -44,24 +44,24 @@ private fun ago(minutes: Long = 0, hours: Long = 0, days: Long = 0) = (Clock.Sys
 
 private fun ahead(hours: Long = 0, days: Long = 0) = (Clock.System.now() + hours.hours + days.days).toString()
 
-private fun conversationJson(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", parent: String? = null, side: String? = null, cwd: String = "/home/sam/projects/acme-backups") =
-    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","mode":"acceptEdits","model":"Opus 5.5",
+private fun conversationJson(id: String, title: String, status: String, node: String, updated: String, agent: String = "claude", parent: String? = null, side: String? = null, cwd: String = "/home/sam/projects/acme-backups", account: String? = null) =
+    """{"id":"$id","owner":"u","node_id":"$node","agent":"$agent","cwd":"$cwd","title":"$title","status":"$status","mode":"acceptEdits","model":"Opus 5.5",${if (account != null) """"account":"$account",""" else ""}
     "created_at":"${ago(days = 2)}","updated_at":"$updated","archived_at":null${if (parent != null) ""","parent_id":"$parent","side_kind":"$side"""" else ""}}"""
 
-private fun nodeJson(id: String, name: String, os: String, icon: String, online: Boolean = true, revision: String = "afad776", older: Int = 0, address: String, version: String = "0.1.10") =
+private fun nodeJson(id: String, name: String, os: String, icon: String, online: Boolean = true, revision: String = "afad776", older: Int = 0, address: String, version: String = "0.1.10", extraLogins: String = "") =
     """{"id":"$id","name":"$name","icon":"$icon","hostname":"$name","os":"$os","arch":"x86_64","version":"$version","address":"$address","online":$online,"draining":false,
     "last_seen_at":"${ago(minutes = 1)}","instructions_revision":"$revision","sessions_on_older_instructions":$older,
     "agents":[{"agent":"claude","version":"2.1.308","available":true},{"agent":"codex","version":"0.163.0","available":true}],
-    "logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in"},{"agent":"claude","account":"work@acme.example","method":"token","state":"signed_in"}]}"""
+    "logins":[{"agent":"claude","account":"sam@example.com","method":"token","state":"signed_in","usage_left":18},{"agent":"claude","account":"work@acme.example","method":"token","state":"signed_in","usage_left":77}$extraLogins]}"""
 
 private val BoardNodes = listOf(
     nodeJson(WillowId, "willow", "linux", "laptop", older = 2, address = "100.64.4.18"),
-    nodeJson(AtlasNodeId, "atlas", "linux", "server", online = false, revision = "85d49d3", address = "10.0.0.12"),
+    nodeJson(AtlasNodeId, "atlas", "linux", "server", online = false, revision = "85d49d3", address = "10.0.0.12", extraLogins = """,{"agent":"claude","account":"side@example.com","method":"token","state":"signed_in"}"""),
     nodeJson(BuildId, "build-01", "linux", "server", address = "10.0.0.20"),
 ).joinToString(",", "[", "]")
 
 private val BoardConversations = listOf(
-    conversationJson(BackupsId, "Backups", "review", WillowId, ago(minutes = 2)),
+    conversationJson(BackupsId, "Backups", "review", WillowId, ago(minutes = 2), account = "work@acme.example"),
     conversationJson("11111111-1111-1111-1111-111111111111", "Bump @immich/ui in midden", "working", AtlasNodeId, ago(hours = 7), cwd = "/home/sam/projects/midden"),
     conversationJson("55555555-5555-5555-5555-555555555555", "Uploads survive a 503", "working", AtlasNodeId, ago(hours = 8), agent = "codex", cwd = "/home/sam/projects/midden"),
     conversationJson("66666666-6666-6666-6666-666666666666", "Flux image automation for vm", "done", AtlasNodeId, ago(days = 1), cwd = "/home/sam/projects/vm"),

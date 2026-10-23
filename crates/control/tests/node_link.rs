@@ -114,7 +114,7 @@ async fn a_node_cannot_write_into_another_nodes_conversation() {
     intruder.send(NodeToControl::SessionStarted { conversation_id: conversation.id, acp_session_id: "forged".into(), modes: None, models: None, config_options: None }).await;
 
     let mut stream = server.user.stream().await;
-    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut }] }).await;
+    intruder.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedOut, usage_left: None }] }).await;
     stream.until(|message| matches!(message, StreamMessage::Node(node) if node.id == intruder.id && !node.logins.is_empty()).then_some(())).await;
 
     assert!(server.events(conversation.id).await.is_empty());
@@ -238,7 +238,7 @@ async fn an_agent_sign_in_is_started_on_the_node_and_its_output_streams_to_clien
     assert_eq!(status, 204);
     assert_eq!(link.next().await, ControlToNode::LoginInput { login_id, text: "abc123\n".into() });
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None }] }).await;
     link.send(NodeToControl::LoginFinished { login_id, ok: true }).await;
     stream.until(|message| matches!(message, StreamMessage::LoginFinished { ok: true, .. }).then_some(())).await;
 

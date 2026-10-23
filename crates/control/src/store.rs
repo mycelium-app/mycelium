@@ -215,8 +215,8 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         .bind(&ids)
         .fetch_all(&state.pool)
         .await?;
-    let logins = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String)>(
-        "select node_id, agent, account, method, state from logins where node_id = any($1) order by agent",
+    let logins = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, Option<i16>)>(
+        "select node_id, agent, account, method, state, usage_left from logins where node_id = any($1) order by agent",
     )
     .bind(&ids)
     .fetch_all(&state.pool)
@@ -242,8 +242,8 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
 
         let mut node_logins = Vec::new();
 
-        for (_, agent, account, method, login_state) in logins.iter().filter(|row| row.0 == node.id) {
-            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)? });
+        for (_, agent, account, method, login_state, usage_left) in logins.iter().filter(|row| row.0 == node.id) {
+            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()) });
         }
 
         summaries.push(NodeSummary {

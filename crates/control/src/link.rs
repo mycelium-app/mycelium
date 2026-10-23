@@ -423,14 +423,15 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
 
     for login in logins {
         sqlx::query(
-            "insert into logins (node_id, agent, account, method, state) values ($1, $2, $3, $4, $5)
-             on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, updated_at = now()",
+            "insert into logins (node_id, agent, account, method, state, usage_left) values ($1, $2, $3, $4, $5, $6)
+             on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, usage_left = excluded.usage_left, updated_at = now()",
         )
         .bind(node_id)
         .bind(enum_text(&login.agent))
         .bind(login.account)
         .bind(login.method)
         .bind(enum_text(&login.state))
+        .bind(login.usage_left.map(i16::from))
         .execute(&mut *tx)
         .await?;
     }

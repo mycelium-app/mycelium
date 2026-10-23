@@ -13,6 +13,7 @@ pub mod session;
 pub mod status;
 pub mod terminal;
 pub mod transcripts;
+pub mod usage;
 
 pub use daemon::run;
 pub use join::{JoinOptions, join};

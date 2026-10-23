@@ -7,7 +7,7 @@ import mycelium.api.Conversation
 import mycelium.api.Event
 import mycelium.api.EventKinds
 
-data class Choice(val id: String, val name: String, val description: String? = null)
+data class Choice(val id: String, val name: String, val description: String? = null, val usedPercent: Int? = null)
 
 data class Setting(val id: String, val name: String, val category: String?, val current: String?, val choices: List<Choice>)
 

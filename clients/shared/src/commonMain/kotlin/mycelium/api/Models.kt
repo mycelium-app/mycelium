@@ -124,6 +124,7 @@ data class LoginInfo(
     val account: String? = null,
     val method: String,
     val state: LoginState,
+    @SerialName("usage_left") val usageLeft: Int? = null,
 )
 
 @Serializable

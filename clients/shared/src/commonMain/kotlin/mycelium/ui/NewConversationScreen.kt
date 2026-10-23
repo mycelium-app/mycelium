@@ -24,6 +24,7 @@ import mycelium.state.Store
 import mycelium.state.SignInPrefix
 import mycelium.state.accountChoiceId
 import mycelium.state.accountChoices
+import mycelium.state.accountMenuTitle
 import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
@@ -201,7 +202,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             "Account",
                             accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()),
                             chosenAccount?.let(::accountChoiceId),
-                            { picked ->
+                            title = accountMenuTitle(chosenAgent.orEmpty()),
+                            icon = MyIcon.Person,
+                            onSelect = { picked ->
                                 if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
                                     store.act {
                                         val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), picked.removePrefix(SignInPrefix))

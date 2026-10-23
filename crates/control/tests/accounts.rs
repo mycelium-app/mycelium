@@ -6,7 +6,7 @@ use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::json;
 
 fn login(account: &str, state: LoginState) -> LoginInfo {
-    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state }
+    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None }
 }
 
 async fn node_with_accounts(server: &Server, accounts: Vec<LoginInfo>) -> common::NodeLink {
@@ -42,6 +42,26 @@ async fn a_node_lists_every_account_signed_in_to_one_agent_and_forgets_the_ones_
         let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
 
         (nodes[0]["logins"].as_array().unwrap().len() == 1).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_usage_left_an_account_reports_is_shown_on_the_node_and_replaced_by_the_next_report() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, vec![LoginInfo { usage_left: Some(18), ..login("sam@example.com", LoginState::SignedIn) }, login("work@acme.example", LoginState::SignedIn)]).await;
+
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    let usage = |nodes: &serde_json::Value| nodes[0]["logins"].as_array().unwrap().iter().map(|login| login["usage_left"].clone()).collect::<Vec<_>>();
+    assert_eq!(usage(&nodes), vec![json!(18), serde_json::Value::Null]);
+
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { usage_left: Some(60), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+
+    let user = server.user.clone();
+    common::eventually("the refreshed usage", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        (nodes[0]["logins"][0]["usage_left"] == json!(60)).then_some(())
     })
     .await;
 }

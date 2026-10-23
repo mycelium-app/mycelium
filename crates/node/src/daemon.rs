@@ -1,5 +1,6 @@
 use crate::acp::Command;
-use crate::agents::{ALL_AGENTS, account_env, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
+use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
+use crate::usage::{USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
 use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
@@ -42,6 +43,7 @@ pub struct DaemonOptions {
     pub transcript_roots: Vec<PathBuf>,
     pub transcript_poll: Duration,
 }
+    pub usage_endpoint: String,
 
 impl DaemonOptions {
     pub fn from_environment() -> Result<DaemonOptions> {
@@ -56,6 +58,7 @@ impl DaemonOptions {
             transcript_roots: vec![home.join(".claude").join("projects"), home.join(".codex").join("sessions")],
             transcript_poll: Duration::from_secs(2),
             home,
+            usage_endpoint: USAGE_ENDPOINT.to_string(),
         })
     }
 }
@@ -78,6 +81,7 @@ pub struct Daemon {
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
     logins: LoginManager,
     terminals: TerminalManager,
+    usage: Arc<UsageCache>,
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
@@ -90,12 +94,15 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
     let logins_home = options.home.clone();
     let logins_accounts = accounts_dir(&config.state_dir);
-    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents) });
+    let usage = Arc::new(UsageCache::new(&options.usage_endpoint, USAGE_MIN_AGE));
+    let logins_usage = usage.clone();
+    let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());
 
     let daemon = Arc::new(Daemon {
         logins: LoginManager::new(out.clone(), login_report),
         terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
+        usage,
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
@@ -110,6 +117,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     daemon.write_status();
     tokio::spawn(follow_transcripts(daemon.clone()));
 
+    tokio::spawn(follow_usage(daemon.clone()));
     run_link(daemon, out_rx).await
 }
 
@@ -142,6 +150,25 @@ async fn follow_transcripts(daemon: Arc<Daemon>) {
 }
 
 impl Daemon {
+async fn follow_usage(daemon: Arc<Daemon>) {
+    let mut ticker = tokio::time::interval(USAGE_INTERVAL);
+
+    loop {
+        ticker.tick().await;
+
+        let accounts = accounts_dir(&daemon.config.state_dir);
+        let folders: Vec<PathBuf> = account_homes(&daemon.options.home, &accounts, AgentId::Claude).into_iter().map(|account| account.dir).collect();
+
+        daemon.usage.refresh(&folders).await;
+
+        if daemon.connected.load(Ordering::SeqCst) {
+            let report = daemon.logins_report().await;
+
+            let _ = daemon.out.send(report);
+        }
+    }
+}
+
     pub fn config(&self) -> &NodeConfig {
         &self.config
     }
@@ -273,7 +300,7 @@ impl Daemon {
     }
 
     fn logins_for(&self, agents: &[AgentInfo]) -> Vec<LoginInfo> {
-        login_state(&self.options.home, &accounts_dir(&self.config.state_dir), agents)
+        login_state(&self.options.home, &accounts_dir(&self.config.state_dir), agents, &self.usage)
     }
 
     fn session_handles(&self) -> Vec<(Uuid, SessionHandle)> {

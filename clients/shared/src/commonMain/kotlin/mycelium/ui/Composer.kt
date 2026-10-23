@@ -47,6 +47,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
+import mycelium.state.accountMenuTitle
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
@@ -179,7 +180,7 @@ fun Composer(
         if (accounts.isNotEmpty() && accountLocked) {
             Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
         } else if (accounts.isNotEmpty()) {
-            OptionMenu("Account", accounts, conversation.account ?: DefaultAccountId.takeIf { id -> accounts.any { it.id == id } }, onSetAccount)
+            OptionMenu("Account", accounts, conversation.account ?: DefaultAccountId.takeIf { id -> accounts.any { it.id == id } }, onSetAccount, title = accountMenuTitle(conversation.agent), icon = MyIcon.Person)
         }
 
         if (modes.isNotEmpty()) {
@@ -339,6 +340,8 @@ fun OptionMenu(
     choices: List<Choice>,
     current: String?,
     onSelect: (String) -> Unit,
+    title: String = name,
+    icon: MyIcon? = null,
 ) {
     val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: current ?: name
     var open by remember { mutableStateOf(false) }
@@ -347,11 +350,11 @@ fun OptionMenu(
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box {
-        MyButton({ open = true }, text = buttonLabel, description = "$name: $buttonLabel", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
+        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {
-                MenuLabel(name)
+                MenuLabel(title)
 
                 if (searchable) {
                     TextInput(search, { search = it }, label = "Search ${name.lowercase()}", placeholder = "Select an option", showLabel = false, modifier = Modifier.padding(Tokens.Space.S1))
@@ -359,7 +362,7 @@ fun OptionMenu(
 
                 Column(Modifier.heightIn(max = Tokens.Size.MenuList).verticalScroll(rememberScrollState())) {
                     for (choice in shown) {
-                        MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description)
+                        MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description, meter = choice.usedPercent)
                     }
                 }
             }

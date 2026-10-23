@@ -156,6 +156,7 @@ impl Fixture {
             home: root.path().join("home"),
             transcript_roots: vec![root.path().join("home").join("projects")],
             transcript_poll: Duration::from_millis(50),
+            usage_endpoint: "http://127.0.0.1:9/api/oauth/usage".to_string(),
         };
 
         Fixture { root, config, options }

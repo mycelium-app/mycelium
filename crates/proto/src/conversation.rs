@@ -156,6 +156,8 @@ pub struct LoginInfo {
     pub account: Option<String>,
     pub method: String,
     pub state: LoginState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_left: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -602,7 +602,7 @@ fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null) {
     val colors = MyTheme.colors
 
     Row(
@@ -621,10 +621,18 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
 
         Label(label, maxLines = 1, overflow = TextOverflow.Visible)
 
-        if (hint != null) {
-            Label(hint, Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textMuted, maxLines = 1)
-        } else {
+        if (meter != null) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                Box(Modifier.width(Tokens.Size.MenuMeter)) {
+                    Meter(meter, hint.orEmpty())
+                }
+            }
+        } else if (hint == null) {
             Box(Modifier.weight(1f))
+        }
+
+        if (hint != null) {
+            Label(hint, if (meter != null) Modifier else Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textMuted, maxLines = 1)
         }
 
         if (checked) {

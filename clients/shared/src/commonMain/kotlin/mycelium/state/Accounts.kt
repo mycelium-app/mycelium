@@ -45,13 +45,21 @@ fun accountsElsewhere(nodes: Collection<NodeSummary>, node: NodeSummary, agent: 
 
 fun accountChoices(logins: List<LoginInfo>, elsewhere: List<String>, nodeName: String): List<Choice> =
     logins.map { login ->
+        val left = login.usageLeft
+
         Choice(accountChoiceId(login), login.account ?: "Default account", when (login.state) {
-            LoginState.SignedIn -> null
+            LoginState.SignedIn -> if (left == null) "Usage unknown" else "$left% left"
             LoginState.Expired -> "Expired"
             LoginState.SignedOut -> "Signed out"
             LoginState.Unknown -> "Unknown"
-        })
+        }, usedPercent = left?.let { 100 - it }.takeIf { login.state == LoginState.SignedIn })
     } + elsewhere.map { Choice(SignInPrefix + it, it, "Sign in on $nodeName") }
+
+fun accountMenuTitle(agent: String): String = when (agent) {
+    "claude" -> "Claude account"
+    "codex" -> "Codex account"
+    else -> "Account"
+}
 
 fun newAccountName(): String = "account-${Random.nextInt(1000, 10000)}"
 
