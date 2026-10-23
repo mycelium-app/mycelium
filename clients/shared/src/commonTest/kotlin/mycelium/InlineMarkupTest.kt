@@ -47,6 +47,15 @@ class InlineMarkupTest {
     }
 
     @Test
+    fun aBareUrlWithUnderscoresAndAFragmentStaysOneLink() {
+        val text = render("Thread: https://github.com/acme-org/backups/pull/4#discussion_r4337728320")
+        val urls = text.getLinkAnnotations(0, text.length).map { (it.item as LinkAnnotation.Url).url }
+
+        assertEquals(listOf("https://github.com/acme-org/backups/pull/4#discussion_r4337728320"), urls)
+        assertEquals("Thread: https://github.com/acme-org/backups/pull/4#discussion_r4337728320", text.text)
+    }
+
+    @Test
     fun anImageShowsItsAltTextAndItsUrlAsALink() {
         val text = render("![diagram](https://example.com/d.png)")
 
