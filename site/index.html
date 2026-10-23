@@ -32,6 +32,11 @@
 <main class="my">
 <section class="wrap hero">
 <h1>Your coding agents, on every machine, in one place.</h1>
+<p class="lead">Mycelium is a self-hosted control plane that runs Claude Code and Codex on each machine you own, and lets you steer every conversation from the browser, the desktop or your phone.</p>
+<div class="actions">
+<a class="my-btn my-btn--primary my-btn--lg" href="#install">Install</a>
+<a class="my-btn my-btn--outline my-btn--lg" href="#compare">How it compares</a>
+</div>
 </section>
 
 <div class="wrap">
@@ -74,8 +79,19 @@
 </div>
 <p class="wrap credit">Photo: Sofie D. on <a href="https://unsplash.com/photos/close-up-of-orange-coral-like-growth-on-dark-surface-XEaqcPO9c0g">Unsplash</a></p>
 
+
+<section class="wrap shots" aria-labelledby="shots-h">
+<h2 id="shots-h">In use</h2>
+<div class="shot-grid">
+<figure class="shot shot-3"><div class="shot-frame"><img style="--shift:-38%" src="shots/tasks-board.webp" width="1440" height="866" alt="The Tasks board with Questions, Proposed, Open and Claimed columns, each card showing its project, agent and model, with Answer, Approve, Start and Stop buttons." loading="lazy"></div><figcaption><strong>Tasks board.</strong> Agents propose work and ask questions here. You approve, answer or start it in any idle conversation.</figcaption></figure>
+<figure class="shot shot-2"><div class="shot-frame"><img src="shots/conversation.webp" width="1114" height="750" alt="A conversation in which the agent recalls a memory, changes package.json in a diff, runs commands, asks permission to commit and shows a workflow's progress." loading="lazy"></div><figcaption><strong>One thread.</strong> Memory recalls, diffs, commands, permission prompts and workflow progress, live.</figcaption></figure>
+<figure class="shot shot-1"><div class="shot-frame"><img src="shots/walkthrough.webp" width="560" height="600" alt="A walkthrough step titled Restore reads its copy from strings, with a diff of src/restore/Screen.tsx and two notes left for the agent." loading="lazy"></div><figcaption><strong>Walkthroughs.</strong> A diff explained step by step, with notes you leave for the agent.</figcaption></figure>
+<figure class="shot shot-3 shot-wide"><div class="shot-frame"><img style="--shift:-72%" src="shots/chat-generated-ui.webp" width="1440" height="866" alt="A chat with a plain model answering with a bar chart of restore times and two follow-up buttons, with the model picker in the composer." loading="lazy"></div><figcaption><strong>Chats.</strong> Plain models alongside the agents, with generated interfaces in the reply and the model switchable mid-chat.</figcaption></figure>
+</div>
+</section>
+
 <section class="wrap feature">
-<div class="copy"><span class="stage stage-1">First</span><h2>Every machine, one list.</h2><p>Conversations from all your nodes, sorted by what needs you. The group and the machine sit quietly at the end of each row.</p></div>
+<div class="copy"><span class="stage stage-1">Sessions</span><h2>Every machine, one list.</h2><p>Conversations from all your nodes, sorted by what needs you. The group and the machine sit quietly at the end of each row.</p></div>
 <div class="show show-1" aria-hidden="true">
 <div class="frame" style="width: 300px">
 <div class="my-sidebar" style="width: 100%; resize: none; border-right: 0">
@@ -94,7 +110,7 @@
 </section>
 
 <section class="wrap feature flip">
-<div class="copy"><span class="stage stage-1">First</span><h2>Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
+<div class="copy"><span class="stage stage-1">Queue</span><h2>Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
 <div class="show show-1" aria-hidden="true">
 <div class="frame" style="width: 560px">
 <div class="my-composer" style="border-top: 0">
@@ -110,7 +126,7 @@
 </section>
 
 <section class="wrap feature">
-<div class="copy"><span class="stage stage-1">First</span><h2>Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
+<div class="copy"><span class="stage stage-1">Workflows</span><h2>Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
 <div class="show show-1" aria-hidden="true">
 <div class="frame my-card" style="width: 560px; border-radius: var(--radius-float)">
 <div class="my-card__head" style="font-family: var(--font-sans); height: var(--size-bar); padding: 0 6px 0 10px"><span class="st-work" style="display: inline-flex"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><strong style="font-weight: 600; font-size: 13px">Build flow screens, then verify each</strong><span class="my-muted" style="font-size: 12px">6 of 10 agents · 4m 05s</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Stop</span></div>
@@ -127,7 +143,7 @@
 </section>
 
 <section class="wrap feature flip">
-<div class="copy"><span class="stage stage-2">Next</span><h2>Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
+<div class="copy"><span class="stage stage-2">Machines</span><h2>Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
 <div class="show show-2" aria-hidden="true">
 <div class="my-menu" style="width: 300px">
 <div class="my-menu__label">Run on</div>
@@ -140,22 +156,12 @@
 </section>
 
 <section class="wrap feature">
-<div class="copy"><span class="stage stage-3">Then</span><h2>Pick it up anywhere.</h2><p>The same list and the same conversation on your phone.</p></div>
-<div class="show show-3" aria-hidden="true">
-<div class="frame phone">
-<div class="my-bar" style="height: 52px; padding: 0 8px"><svg class="my-icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="my-bar__title" style="font-size: 15px; padding-left: 8px">Bump @acme/ui</span></div>
-<div class="my-thread" style="padding: 16px">
-<div class="my-msg-user">Bump @acme/ui to the latest release.</div>
-<div class="my-msg-agent"><p>They pin 2.4.1, so I'll match that rather than take the newest.</p>
-<div class="my-tool"><span class="my-tool__name">bash</span><span class="my-tool__arg">pnpm -r test</span><span class="my-tool__end"><span class="my-muted">142 passed</span></span></div></div>
-</div>
-<div class="glass-composer"><span class="fake-input" style="font-size: 16px">Ask, plan or build</span><div class="row2"><span>Opus 5.5 <span class="my-muted">Medium</span></span><span style="color: var(--status-attention); font-weight: 500">Auto</span></div></div>
-</div>
-</div>
+<div class="copy"><span class="stage stage-3">Phone</span><h2>Pick it up anywhere.</h2><p>The same list and the same conversation on your phone. Swipe from the left edge for the list, and it reconnects the moment you return to the app.</p></div>
+<div class="show show-3"><img class="phone-shot" src="shots/phone-conversation.webp" width="390" height="810" alt="The conversation on a phone, with a diff, a running test and a permission prompt." loading="lazy"></div>
 </section>
 
 <section class="wrap feature flip">
-<div class="copy"><span class="stage stage-4">Later</span><h2>Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met.</p></div>
+<div class="copy"><span class="stage stage-4">Goals</span><h2>Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met, or a token, time or usage limit stops it.</p></div>
 <div class="show show-4" aria-hidden="true">
 <div class="frame" style="width: 560px">
 <div class="my-composer" style="border-top: 0">
@@ -167,31 +173,36 @@
 </div>
 </section>
 
-<section id="install" class="wrap install">
-<h2>Install</h2>
-<ol class="install-steps">
-<li><h3>Run the control plane</h3><p>One container and a Postgres database. The web client comes with it.</p></li>
-<li><h3>Add your machines</h3><pre class="my-mono"><code>curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://your-control-plane</code></pre><p>Approve the code it prints, and the machine appears in your list. NixOS, nix-darwin and home-manager modules are in the flake.</p></li>
-<li><h3>Open a conversation</h3><p>In the browser, or the Linux desktop app.</p></li>
-</ol>
-<p class="install-more">Full steps, written so you can hand them to your agent: <a href="install.md">example.com/mycelium/install.md</a></p>
+
+<section id="more" class="wrap more" aria-labelledby="more-h">
+<h2 id="more-h">And the rest</h2>
+<ul class="more-grid">
+<li><h3>Git panel</h3><p>Stage, commit, amend, sign off, skip hooks, then publish, push or pull. A branch picker and a graph of every branch.</p></li>
+<li><h3>Walkthroughs</h3><p>Steps grouped into sections, a scope picker, and the ones you have read remembered.</p></li>
+<li><h3>Chats</h3><p>Anthropic, Ollama and OpenRouter. Switch model mid-chat, or import a claude.ai export.</p></li>
+<li><h3>Projects and groups</h3><p>Clone or create from GitHub and GitLab, sort by last update, assign to groups and pin conversations.</p></li>
+<li><h3>Accounts and usage</h3><p>Several logins per agent, with each usage window kept, its reset time and a projection.</p></li>
+<li><h3>Nodes</h3><p>Give each machine a colour. At the session limit it closes the least recently used idle session.</p></li>
+<li><h3>Schedules</h3><p>Cron in your time zone, or proposed by an agent from a conversation and confirmed by you.</p></li>
+<li><h3>Terminals</h3><p>A terminal panel on tmux, so the full terminal app survives the client closing.</p></li>
+<li><h3>History</h3><p>Turns, tokens and an estimated cost for every conversation, and search across every transcript.</p></li>
+</ul>
 </section>
 
-<section id="stages" class="stages">
+<section id="stages" class="stages" aria-labelledby="stages-h">
 <div class="wrap">
-<h2>What ships when</h2>
+<h2 id="stages-h">What is new</h2>
 <div class="stage-grid">
-<article class="show show-1"><span class="stage stage-1">First</span><h3>Run and steer</h3><ul><li>Nodes join by script or Nix</li><li>Claude Code and Codex over ACP</li><li>One list, live threads, queued messages</li><li>Live workflow progress</li><li>Agent logins from any client</li><li>Web and desktop</li></ul></article>
-<article class="show show-2"><span class="stage stage-2">Next</span><h3>Many machines</h3><ul><li>Move conversations between nodes</li><li>One AGENTS.md everywhere</li><li>Search every transcript</li><li>tmux for the full terminal app</li></ul></article>
-<article class="show show-3"><span class="stage stage-3">Then</span><h3>Everywhere</h3><ul><li>Phone and iPad</li><li>Shared memory</li><li>Zed as a client</li></ul></article>
-<article class="show show-4"><span class="stage stage-4">Later</span><h3>Hands off</h3><ul><li>Goals</li><li>Schedules</li><li>Start from a ticket</li><li>Diff walkthroughs</li></ul></article>
+<article class="show show-1"><span class="stage stage-1">Released in 0.3.8</span><h3>Git, chats and groups</h3><ul><li>Amend, sign off, push, pull and publish from the git panel</li><li>Branch picker and a graph of every branch</li><li>Chats with OpenRouter, mid-chat model switching and claude.ai imports</li><li>Pinned conversations and project groups</li><li>Node colours</li><li>Edge swipe and reconnect on Android</li></ul></article>
+<article class="show show-2"><span class="stage stage-2">Next release</span><h3>Reviewable by you</h3><ul><li>Memory, tasks and schedules shown as cards in the thread</li><li>An agent proposes an edit to your instructions, and you review the diff</li><li>Questions answered where they are asked</li><li>Walkthroughs that cover every changed hunk, with line notes</li><li>Select text to add it to a message or ask in a side chat</li><li>Text size, density and chat width</li></ul></article>
+<article class="show show-3"><span class="stage stage-3">Still to come</span><h3>More clients</h3><ul><li>iPhone and iPad</li><li>Zed as a client</li></ul></article>
 </div>
 </div>
 </section>
 
 <section id="compare" class="wrap compare">
 <h2>How it compares</h2>
-<p class="compare-lead">Checked against each project's own documentation on 23 October 2026. "Not documented" means we found nothing either way.</p>
+<p class="compare-lead">Checked against each project's own documentation on 23 October 2026. "Not documented" means we found nothing either way. The Mycelium column describes the latest release.</p>
 <svg class="sr-only" aria-hidden="true" focusable="false">
 <symbol id="st-yes" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.3l1.9 1.9 3.7-4.1"/></symbol>
 <symbol id="st-partly" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 1.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></symbol>
@@ -225,13 +236,13 @@
 <tr><th scope="row">Move a conversation to another machine</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With unsaved work</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Several accounts per agent</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Switcher, usage left</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-no"><svg aria-hidden="true"><use href="#st-no"/></svg>No</span></td></tr>
 <tr><th scope="row">Images and files in messages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Through plugins</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Chats with plain models</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Ollama, Anthropic</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Chats with plain models</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Ollama, Anthropic, OpenRouter</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Generated UI in replies</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 </tbody>
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Workspace tools</span></th></tr>
 <tr><th scope="row">Terminal panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">On tmux</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Git panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, history</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Diffs and PRs</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, history</span></td></tr>
+<tr><th scope="row">Git panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, push, graph</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Diffs and PRs</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, history</span></td></tr>
 <tr><th scope="row">Projects from GitHub and GitLab</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Clone or create</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">GitHub, no clone</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Worktrees</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
 <tr><th scope="row">Start from a forge issue</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Issues through Hub</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">GitHub, GitLab</span></td></tr>
@@ -241,21 +252,39 @@
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Planning and automation</span></th></tr>
 <tr><th scope="row">Tasks board</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Agents propose tasks</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Todos, no board</span></td></tr>
-<tr><th scope="row">Schedules</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td></tr>
-<tr><th scope="row">Goals</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With a token budget</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With a token budget</span></td></tr>
-<tr><th scope="row">Activity</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Tokens, cost estimate</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cost, quotas</span></td></tr>
+<tr><th scope="row">Schedules</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron, agent-proposed</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td></tr>
+<tr><th scope="row">Goals</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Token, time and usage limits</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With a token budget</span></td></tr>
+<tr><th scope="row">Activity</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Tokens, cost, usage windows</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cost, quotas</span></td></tr>
 </tbody>
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Knowledge</span></th></tr>
 <tr><th scope="row">Shared memory across agents</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Through MCP, by group</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">One instructions file on every machine</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With group layers</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Import past conversations</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Claude Code, Codex</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Import past conversations</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Claude Code, Codex, claude.ai</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Search every transcript</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 </tbody>
 </table>
 </div>
 <p id="fn-plugin" class="footnote"><sup>1</sup> A third-party plugin listed on <a href="https://paseo.sh">paseo.sh</a> or <a href="https://paseo.cafe">paseo.cafe</a>, not part of Paseo itself. Paseo plugins run on the daemon host without a sandbox. Mycelium is not affiliated with Paseo or OpenChamber, and their logos are their own.</p>
 </section>
+<section id="install" class="wrap install">
+<h2>Install</h2>
+<ol class="install-steps">
+<li><h3>Run the control plane</h3><p>One container and a Postgres database. The web client comes with it.</p></li>
+<li><h3>Add your machines</h3><pre class="my-mono"><code>curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://your-control-plane</code></pre><p>Approve the code it prints, and the machine appears in your list. NixOS, nix-darwin and home-manager modules are in the flake.</p></li>
+<li><h3>Open a conversation</h3><p>In the browser, or the Linux desktop app.</p></li>
+</ol>
+<div class="downloads">
+<h3>Download</h3>
+<ul>
+<li><a href="https://github.com/mycelium-app/mycelium/releases">Releases</a><span>Android APK, Linux desktop as .deb or .tar.gz, and the node binary, each with a SHA-256.</span></li>
+<li><a href="https://github.com/mycelium-app/mycelium/releases/latest/download/latest">Latest version</a><span>The tag the installer takes, as plain text.</span></li>
+<li><a href="install.md">Install guide</a><span>For you or for your agent. Nix modules and the container image are in it.</span></li>
+</ul>
+</div>
+<p class="install-more">Full steps, written so you can hand them to your agent: <a href="install.md">example.com/mycelium/install.md</a></p>
+</section>
+
 </main>
 </div>
 
