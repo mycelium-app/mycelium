@@ -290,7 +290,7 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
     }
 
     Column(modifier.background(colors.bgPanel)) {
-        TabRow(listOf(WorkspacesMode, ChatsMode), mode, { mode = it }, groupLabel = "Sidebar mode", modifier = Modifier.padding(horizontal = Tokens.Space.S1_5))
+        Segmented(listOf(WorkspacesMode, ChatsMode), mode, { mode = it }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
 
         Hairline()
 

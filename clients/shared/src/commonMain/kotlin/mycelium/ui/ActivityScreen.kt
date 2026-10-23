@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -22,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import mycelium.api.Activity
 import mycelium.api.ActivityRow
 import mycelium.state.ActivityRanges
@@ -36,7 +34,6 @@ import mycelium.state.formatTokens
 import mycelium.state.tokensPerDaySummary
 import mycelium.state.usageNotice
 
-private val KpiWidth = 220.dp
 private val Columns = listOf(TableColumn("", 2f), TableColumn("Turns", 0.7f), TableColumn("Tokens", 0.9f), TableColumn("API equivalent", 1.1f), TableColumn("Time working", 1.1f))
 
 private fun rowCells(row: ActivityRow, name: String = row.name): List<String> =
@@ -94,9 +91,9 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
             }
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Kpi("Tokens", if (loaded.totals.reportedTurns == 0L) "Not reported" else formatTokens(loaded.totals.tokens), Modifier.width(KpiWidth), caption = "${loaded.totals.turns} turns")
-                Kpi("API equivalent", formatCost(loaded.totals.costUsd), Modifier.width(KpiWidth), caption = "as the agents report it, not billed on a subscription")
-                Kpi("Time working", formatDuration(loaded.totals.workingMs), Modifier.width(KpiWidth), caption = "${formatDuration(loaded.totals.workingMs / loaded.totals.turns)} a turn on average")
+                Kpi("Tokens", if (loaded.totals.reportedTurns == 0L) "Not reported" else formatTokens(loaded.totals.tokens), kpiSlot(), caption = "${loaded.totals.turns} turns")
+                Kpi("API equivalent", formatCost(loaded.totals.costUsd), kpiSlot(), caption = "as the agents report it, not billed on a subscription")
+                Kpi("Time working", formatDuration(loaded.totals.workingMs), kpiSlot(), caption = "${formatDuration(loaded.totals.workingMs / loaded.totals.turns)} a turn on average")
             }
 
             usageNotice(loaded)?.let { Label(it, color = colors.textMuted) }

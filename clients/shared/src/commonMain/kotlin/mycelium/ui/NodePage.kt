@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -29,7 +28,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import mycelium.Platform
 import mycelium.api.LoginState
@@ -51,7 +49,6 @@ import mycelium.state.versionWithUpdate
 import kotlin.math.roundToInt
 
 private const val WatchHeartbeatMillis = 15_000L
-private val KpiWidth = 220.dp
 private val Tabs = listOf("Agents", "Resources", "Ports")
 
 @Composable
@@ -149,21 +146,21 @@ private fun ResourcesTab(node: NodeSummary, state: AppState) {
         val cpu = sample.cpuPercent.roundToInt()
         val memoryPercent = percentOf(memoryUsedBytes(sample), sample.memoryTotalBytes)
 
-        Kpi("CPU", "$cpu%", Modifier.width(KpiWidth), caption = "${sample.cores} cores", meterPercent = cpu.coerceIn(0, 100))
+        Kpi("CPU", "$cpu%", kpiSlot(), caption = "${sample.cores} cores", meterPercent = cpu.coerceIn(0, 100))
         Kpi(
             "Memory",
             "${formatBytes(memoryUsedBytes(sample))} of ${formatBytes(sample.memoryTotalBytes)}",
-            Modifier.width(KpiWidth),
+            kpiSlot(),
             caption = if (sample.swapTotalBytes > 0) "Swap ${formatBytes(sample.swapTotalBytes - sample.swapFreeBytes)} of ${formatBytes(sample.swapTotalBytes)}" else null,
             meterPercent = memoryPercent,
         )
 
         for (disk in sample.disks) {
-            Kpi("Disk ${disk.mount}", "${formatBytes(disk.freeBytes)} free", Modifier.width(KpiWidth), caption = "of ${formatBytes(disk.totalBytes)}", meterPercent = 100 - percentOf(disk.freeBytes, disk.totalBytes))
+            Kpi("Disk ${disk.mount}", "${formatBytes(disk.freeBytes)} free", kpiSlot(), caption = "of ${formatBytes(disk.totalBytes)}", meterPercent = 100 - percentOf(disk.freeBytes, disk.totalBytes))
         }
 
         if (sample.load.size == 3) {
-            Kpi("Load", sample.load[0].toString(), Modifier.width(KpiWidth), caption = "5 min ${sample.load[1]}  ·  15 min ${sample.load[2]}")
+            Kpi("Load", sample.load[0].toString(), kpiSlot(), caption = "5 min ${sample.load[1]}  ·  15 min ${sample.load[2]}")
         }
     }
 

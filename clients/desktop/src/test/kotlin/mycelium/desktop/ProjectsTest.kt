@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -21,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
+import mycelium.api.Project
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
@@ -59,6 +61,8 @@ class ProjectsTest {
     val rule = createComposeRule()
 
     private val posts = mutableListOf<Pair<String, String>>()
+    private val patches = mutableListOf<Pair<String, String>>()
+    private var groups = "[]"
     private var forges = ForgesJson
     private var repositories = RepositoriesJson
     private var projects = "[$BackupsProject,$FolderProject]"
@@ -74,11 +78,17 @@ class ProjectsTest {
                 posts += path to body
             }
 
+            if (request.method == HttpMethod.Patch) {
+                patches += path to body
+            }
+
             if (path.endsWith("/repositories")) {
                 delay(20)
             }
 
             when {
+                request.method == HttpMethod.Patch && path.contains("/projects/") -> respond(BackupsProject.replace("\"created_at\"", "\"group_id\":\"g1\",\"created_at\""), HttpStatusCode.OK, json)
+                path.endsWith("/groups") -> respond(groups, HttpStatusCode.OK, json)
                 path.endsWith("/projects") && request.method == HttpMethod.Post -> respond(createProjectAnswer.second, createProjectAnswer.first, json)
                 path.endsWith("/conversations") && request.method == HttpMethod.Post -> respond(ConversationJson, HttpStatusCode.Created, json)
                 path.endsWith("/projects") -> respond(projects, HttpStatusCode.OK, json)
@@ -106,6 +116,7 @@ class ProjectsTest {
         rule.onNodeWithText("acme-org").assertExists()
         rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().let { assertEquals(2, it.size) }
         rule.onNodeWithContentDescription("Set up on laptop").assertExists()
+        rule.onNodeWithText("laptop").assertExists()
         rule.onNodeWithText("homelab").assertExists()
         rule.onNodeWithContentDescription("Set up on atlas").assertExists()
     }
@@ -156,6 +167,39 @@ class ProjectsTest {
         rule.waitUntil { created != null }
         assertEquals("""{"node_id":"$AtlasId","forge_id":"f1","repository":"acme-org/acme-backups"}""", posts.single().second)
         assertEquals("p1", created)
+    }
+
+    @Test
+    fun cloningIntoAGroupFilesTheNewProjectUnderIt() {
+        groups = """[{"id":"g1","name":"work","created_at":"2026-10-22T10:00:00Z"},{"id":"g2","name":"slop","created_at":"2026-10-22T10:00:00Z"}]"""
+        val store = store()
+        var created: Project? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } }
+
+        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("acme-org/acme-backups").performClick()
+        rule.onNodeWithContentDescription("Group work").performClick()
+        rule.onNodeWithText("Clone and open").performClick()
+
+        rule.waitUntil { created != null }
+        assertEquals("""{"group_id":"g1"}""", patches.single().second)
+        assertEquals("g1", created?.groupId)
+    }
+
+    @Test
+    fun cloningWithoutAGroupLeavesTheProjectUngrouped() {
+        groups = """[{"id":"g1","name":"work","created_at":"2026-10-22T10:00:00Z"}]"""
+        val store = store()
+        var created: Project? = null
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it }) } }
+
+        rule.waitUntil { rule.onAllNodesWithText("acme-org/acme-backups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("acme-org/acme-backups").performClick()
+        rule.onNodeWithText("Clone and open").performClick()
+
+        rule.waitUntil { created != null }
+        assertEquals(0, patches.size)
     }
 
     @Test

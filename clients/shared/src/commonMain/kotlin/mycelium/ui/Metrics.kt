@@ -6,11 +6,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -36,6 +39,11 @@ data class TableColumn(val title: String, val weight: Float = 1f)
 private val ChartHeight = 96.dp
 private val MeterHeight = 6.dp
 private const val AttentionPercent = 90
+
+private val KpiWidth = 220.dp
+
+@OptIn(ExperimentalLayoutApi::class)
+fun FlowRowScope.kpiSlot(): Modifier = Modifier.weight(1f).widthIn(min = KpiWidth).fillMaxRowHeight()
 
 @Composable
 fun Kpi(title: String, value: String, modifier: Modifier = Modifier, caption: String? = null, meterPercent: Int? = null) {

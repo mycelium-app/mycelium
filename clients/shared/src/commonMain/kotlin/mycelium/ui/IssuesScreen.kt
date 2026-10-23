@@ -125,98 +125,100 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
 
         Hairline()
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            if (state.projects.values.none { it.forgeId != null }) {
-                Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", color = colors.textMuted)
-            } else {
-                Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    Box(Modifier.weight(0.7f))
-                    Label("Issue", Modifier.weight(4f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Worktree", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Box(Modifier.weight(1.7f))
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
+            TableCard {
+                if (state.projects.values.none { it.forgeId != null }) {
+                    Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+                } else {
+                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(0.7f))
+                        Label("Issue", Modifier.weight(4f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Label("Worktree", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Box(Modifier.weight(1.7f))
+                    }
+
+                    Hairline()
                 }
 
-                Hairline()
-            }
+                for (issue in shown) {
+                    val projects = projectsOfIssue(state.projects.values, issue)
+                    val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
 
-            for (issue in shown) {
-                val projects = projectsOfIssue(state.projects.values, issue)
-                val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Label("#${issue.number}", Modifier.weight(0.7f), Tokens.Type.Code, colors.textFaint, maxLines = 1)
+                        Label(issue.title, Modifier.weight(4f))
 
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Label("#${issue.number}", Modifier.weight(0.7f), Tokens.Type.Code, colors.textFaint, maxLines = 1)
-                    Label(issue.title, Modifier.weight(4f))
+                        Column(Modifier.weight(3f)) {
+                            if (existing.isEmpty()) {
+                                Label("None", color = colors.textFaint)
+                            }
 
-                    Column(Modifier.weight(3f)) {
-                        if (existing.isEmpty()) {
-                            Label("None", color = colors.textFaint)
-                        }
+                            for (worktree in existing) {
+                                val node = state.nodes[state.projects[worktree.projectId]?.nodeId]
 
-                        for (worktree in existing) {
-                            val node = state.nodes[state.projects[worktree.projectId]?.nodeId]
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                                    Label(worktree.branch, Modifier.weight(1f, fill = false), Tokens.Type.Code, maxLines = 1)
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
-                                Label(worktree.branch, Modifier.weight(1f, fill = false), Tokens.Type.Code, maxLines = 1)
-
-                                if (node != null) {
-                                    Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+                                    if (node != null) {
+                                        Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Row(Modifier.weight(1.7f), horizontalArrangement = Arrangement.End) {
-                        if (issue.number in starting) {
-                            Box(Modifier.width(Tokens.Size.NumberField)) {
-                                IndeterminateProgress("Starting a workspace for issue ${issue.number}")
-                            }
-                        } else if (existing.isNotEmpty()) {
-                            MyButton(
-                                { start(projects.first { it.id == existing.first().projectId }, issue) },
-                                text = "Open workspace",
-                                size = ButtonSize.Sm,
-                                description = "Open the workspace for issue ${issue.number}",
-                            )
-                        } else {
-                            Box {
+                        Row(Modifier.weight(1.7f), horizontalArrangement = Arrangement.End) {
+                            if (issue.number in starting) {
+                                Box(Modifier.width(Tokens.Size.NumberField)) {
+                                    IndeterminateProgress("Starting a workspace for issue ${issue.number}")
+                                }
+                            } else if (existing.isNotEmpty()) {
                                 MyButton(
-                                    { if (projects.size == 1) start(projects.first(), issue) else menuFor = issue.number },
-                                    text = "Create workspace",
+                                    { start(projects.first { it.id == existing.first().projectId }, issue) },
+                                    text = "Open workspace",
                                     size = ButtonSize.Sm,
-                                    variant = ButtonVariant.Outline,
-                                    description = "Create a workspace for issue ${issue.number}",
+                                    description = "Open the workspace for issue ${issue.number}",
                                 )
+                            } else {
+                                Box {
+                                    MyButton(
+                                        { if (projects.size == 1) start(projects.first(), issue) else menuFor = issue.number },
+                                        text = "Create workspace",
+                                        size = ButtonSize.Sm,
+                                        variant = ButtonVariant.Outline,
+                                        description = "Create a workspace for issue ${issue.number}",
+                                    )
 
-                                if (menuFor == issue.number) {
-                                    MenuPopup(onDismiss = { menuFor = null }) {
-                                        MenuLabel("Create on")
+                                    if (menuFor == issue.number) {
+                                        MenuPopup(onDismiss = { menuFor = null }) {
+                                            MenuLabel("Create on")
 
-                                        for (project in projects) {
-                                            val node = state.nodes[project.nodeId]
+                                            for (project in projects) {
+                                                val node = state.nodes[project.nodeId]
 
-                                            MenuItem(
-                                                node?.name ?: project.name,
-                                                onClick = { menuFor = null; start(project, issue) },
-                                                leading = node?.let(::nodeIcon),
-                                            )
+                                                MenuItem(
+                                                    node?.name ?: project.name,
+                                                    onClick = { menuFor = null; start(project, issue) },
+                                                    leading = node?.let(::nodeIcon),
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+
+                    Hairline()
                 }
 
-                Hairline()
-            }
-
-            if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
-                Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
+                if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
+                    Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
+                }
             }
         }
     }

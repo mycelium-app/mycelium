@@ -1,5 +1,7 @@
 package mycelium.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -80,7 +85,16 @@ private fun StepRow(position: Int, title: String, key: Boolean, on: Boolean, onC
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Label("${position + 1}", style = Tokens.Type.UiStrong, color = if (on) colors.text else colors.textMuted)
+        Box(
+            Modifier
+                .size(Tokens.Size.ControlSm)
+                .background(if (on) colors.text else Color.Transparent, CircleShape)
+                .border(Tokens.Size.Hairline, if (on) colors.text else colors.textMuted, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Label("${position + 1}", style = Tokens.Type.Meta, color = if (on) colors.bgContent else colors.textMuted)
+        }
+
         Label(title, Modifier.weight(1f), if (key || on) Tokens.Type.UiStrong else Tokens.Type.Ui, if (key || on) colors.text else colors.textMuted)
 
         if (key) {

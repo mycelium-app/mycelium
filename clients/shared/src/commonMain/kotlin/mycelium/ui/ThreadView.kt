@@ -215,7 +215,9 @@ private fun AgentMessage(text: String) {
                         val generated = remember(block.text) { if (block.language == GeneratedUiLanguage) parseGeneratedUi(block.text) else null }
 
                         if (generated != null) {
-                            GeneratedUi(generated)
+                            Box(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3)) {
+                                GeneratedUi(generated)
+                            }
                         } else {
                             Box(
                                 Modifier

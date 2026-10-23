@@ -68,50 +68,52 @@ fun ForgesSettings(store: Store) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Forges", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Label("Forge", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Signed in as", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Organisations", Modifier.weight(2.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                Box(Modifier.weight(1f))
-            }
-
-            Hairline()
-
-            for (forge in forges) {
-                val name = if (forge.kind == "gitlab") "GitLab" else "GitHub"
-                val host = forge.baseUrl.substringAfter("://").trimEnd('/')
-
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
-                        Label(name, maxLines = 1)
-                        Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
-                    }
-
-                    Label(forge.account, Modifier.weight(1.5f), maxLines = 1)
-                    Label(forge.organisations.joinToString(", "), Modifier.weight(2.5f), color = colors.textMuted)
-
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                        MyButton(
-                            {
-                                store.act {
-                                    store.api.disconnectForge(forge.id)
-                                    forges = forges.filter { it.id != forge.id }
-                                }
-                            },
-                            text = "Disconnect",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            description = "Disconnect $name account ${forge.account} on $host",
-                        )
-                    }
+            TableCard {
+                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Forge", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Signed in as", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Organisations", Modifier.weight(2.5f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Box(Modifier.weight(1f))
                 }
 
                 Hairline()
+
+                for (forge in forges) {
+                    val name = if (forge.kind == "gitlab") "GitLab" else "GitHub"
+                    val host = forge.baseUrl.substringAfter("://").trimEnd('/')
+
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
+                            Label(name, maxLines = 1)
+                            Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                        }
+
+                        Label(forge.account, Modifier.weight(1.5f), maxLines = 1)
+                        Label(forge.organisations.joinToString(", "), Modifier.weight(2.5f), color = colors.textMuted)
+
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                            MyButton(
+                                {
+                                    store.act {
+                                        store.api.disconnectForge(forge.id)
+                                        forges = forges.filter { it.id != forge.id }
+                                    }
+                                },
+                                text = "Disconnect",
+                                size = ButtonSize.Sm,
+                                variant = ButtonVariant.Outline,
+                                description = "Disconnect $name account ${forge.account} on $host",
+                            )
+                        }
+                    }
+
+                    Hairline()
+                }
             }
         }
 

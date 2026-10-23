@@ -64,8 +64,8 @@ fun SchedulesScreen(store: Store, state: AppState) {
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                TableCard {
+                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label("Prompt", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
                         Label("Project", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
                         Label("When", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
@@ -84,8 +84,8 @@ fun SchedulesScreen(store: Store, state: AppState) {
             }
 
             if (runs.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                TableCard {
+                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label("Last runs", Modifier.weight(1f).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
                         Label("Conversation", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
                         Label("Result", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
@@ -116,7 +116,7 @@ private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
     val colors = MyTheme.colors
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -145,7 +145,7 @@ private fun RunRow(run: ScheduleRun, state: AppState) {
     val conversation = state.conversations[run.conversationId]
 
     Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
+        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {

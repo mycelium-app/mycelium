@@ -20,6 +20,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.CreateProjectRequest
+import mycelium.api.Group
 import mycelium.api.Project
 import mycelium.api.Repository
 import mycelium.state.AppState
@@ -39,6 +40,8 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var repository by remember { mutableStateOf<Repository?>(null) }
     var folder by remember { mutableStateOf("") }
     var nodeId by remember { mutableStateOf<String?>(null) }
+    var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
+    var groupId by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
 
@@ -48,6 +51,10 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
     LaunchedEffect(query) {
         store.act { found = store.api.repositories(query = query).repositories.take(RepositoryChoices) }
+    }
+
+    LaunchedEffect(Unit) {
+        store.act { groups = store.api.groups() }
     }
 
     fun submit() {
@@ -82,7 +89,10 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
 
         scope.launch {
             try {
-                onCreated(store.createProject(request))
+                val created = store.createProject(request)
+                val chosen = groupId
+
+                onCreated(if (chosen == null) created else store.setProjectGroup(created.id, chosen))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (problem: ApiException) {
@@ -128,6 +138,26 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
                         muted = option.id != node?.id,
                         selected = option.id == node?.id,
                     )
+                }
+            }
+        }
+
+        if (groups.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Group", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    for (group in groups) {
+                        MyButton(
+                            { groupId = if (groupId == group.id) null else group.id },
+                            text = group.name,
+                            description = "Group ${group.name}",
+                            variant = ButtonVariant.Outline,
+                            size = ButtonSize.Sm,
+                            muted = group.id != groupId,
+                            selected = group.id == groupId,
+                        )
+                    }
                 }
             }
         }

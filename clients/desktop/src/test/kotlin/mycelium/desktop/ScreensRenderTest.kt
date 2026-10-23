@@ -83,7 +83,7 @@ private fun withAccents(dark: Boolean, content: @androidx.compose.runtime.Compos
     CompositionLocalProvider(LocalAppearance provides Appearance(dark, Accent.Neutral, Accent.entries.filter { it != Accent.System }, {}), content = content)
 }
 
-private val PlatformStub = object : Platform {
+internal val PlatformStub = object : Platform {
     override val signsInThroughTheBrowser = false
     override val originUrl: String? = null
     override fun loadConnection(): Connection? = null
@@ -96,11 +96,12 @@ private val PlatformStub = object : Platform {
     override fun copyToClipboard(text: String) = Unit
 }
 
-private fun fakeApi(nodes: String = Nodes): MyceliumApi {
+internal fun fakeApi(nodes: String = Nodes, extra: Map<String, String> = emptyMap()): MyceliumApi {
     val json = headersOf(HttpHeaders.ContentType, "application/json")
     val engine = MockEngine { request ->
         val path = request.url.encodedPath
         val body = when {
+            extra.keys.any { path.endsWith(it) } -> extra.entries.first { path.endsWith(it.key) }.value
             path.endsWith("/events") -> Events
             path.endsWith("/queue") -> "[]"
             path.endsWith("/nodes") -> nodes
@@ -116,11 +117,12 @@ private fun fakeApi(nodes: String = Nodes): MyceliumApi {
 }
 
 @OptIn(InternalComposeUiApi::class)
-private fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0, content: @androidx.compose.runtime.Composable () -> Unit): File {
+internal fun renderAt(name: String, dark: Boolean, phone: Boolean, tabs: Int = 0, interact: (ImageComposeScene) -> Unit = {}, content: @androidx.compose.runtime.Composable () -> Unit): File {
     val scene = ImageComposeScene(if (phone) 390 else 1440, if (phone) 844 else 900, Density(1f)) {
         MyceliumTheme(dark) { CompositionLocalProvider(LocalTouch provides phone, content = content) }
     }
     var image = scene.render(0)
+    interact(scene)
 
     repeat(tabs) {
         scene.sendKeyEvent(KeyEvent(Key.Tab, KeyEventType.KeyDown))

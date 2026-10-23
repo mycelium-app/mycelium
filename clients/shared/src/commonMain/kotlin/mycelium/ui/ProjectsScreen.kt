@@ -147,128 +147,130 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
         Hairline()
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            if (forges != null && connected.isEmpty() && folders.isEmpty()) {
-                Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", color = colors.textMuted)
-            } else {
-                Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    Label("Repository", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Forge", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Label("Set up on", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
-                    Box(Modifier.weight(1.5f))
-                }
-
-                Hairline()
-            }
-
-            for (repository in repositories) {
-                val key = "${repository.forgeId}/${repository.fullName}"
-                val setUp = projectsOfRepository(state.projects.values, repository)
-                val forge = connected.firstOrNull { it.id == repository.forgeId }
-                val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
-
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        Label(repository.name, maxLines = 1)
-                        Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(Tokens.Space.S4)) {
+            TableCard {
+                if (forges != null && connected.isEmpty() && folders.isEmpty()) {
+                    Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+                } else {
+                    Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Label("Repository", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Label("Forge", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Label("Set up on", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
+                        Box(Modifier.weight(1.5f))
                     }
 
-                    Label(forge?.let(::forgeName).orEmpty(), Modifier.weight(1.5f), color = colors.textMuted, maxLines = 1)
+                    Hairline()
+                }
 
-                    Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        NodeMarks(setUp, state)
+                for (repository in repositories) {
+                    val key = "${repository.forgeId}/${repository.fullName}"
+                    val setUp = projectsOfRepository(state.projects.values, repository)
+                    val forge = connected.firstOrNull { it.id == repository.forgeId }
+                    val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
 
-                        if (key in cloning) {
-                            Box(Modifier.width(Tokens.Size.NumberField)) {
-                                IndeterminateProgress("Cloning ${repository.fullName}")
-                            }
-                        } else if (elsewhere.isNotEmpty()) {
-                            Box {
-                                MyButton(
-                                    { setUpMenu = key },
-                                    icon = MyIcon.Plus,
-                                    description = if (setUp.isEmpty()) "Set up ${repository.fullName} on a node" else "Set up ${repository.fullName} on another node",
-                                    tooltip = if (setUp.isEmpty()) "Set up on a node" else "Set up on another node",
-                                    size = ButtonSize.Sm,
-                                    muted = true,
-                                )
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
+                            Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                        }
 
-                                if (setUpMenu == key) {
-                                    MenuPopup(onDismiss = { setUpMenu = null }) {
-                                        MenuLabel("Set up on")
+                        Label(forge?.let(::forgeName).orEmpty(), Modifier.weight(1.5f), color = colors.textMuted, maxLines = 1)
 
-                                        for (node in elsewhere) {
-                                            MenuItem(
-                                                node.name,
-                                                onClick = {
-                                                    setUpMenu = null
-                                                    cloning = cloning + key
-                                                    store.act {
-                                                        try {
-                                                            store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
-                                                        } finally {
-                                                            cloning = cloning - key
+                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            NodeMarks(setUp, state)
+
+                            if (key in cloning) {
+                                Box(Modifier.width(Tokens.Size.NumberField)) {
+                                    IndeterminateProgress("Cloning ${repository.fullName}")
+                                }
+                            } else if (elsewhere.isNotEmpty()) {
+                                Box {
+                                    MyButton(
+                                        { setUpMenu = key },
+                                        icon = MyIcon.Plus,
+                                        description = if (setUp.isEmpty()) "Set up ${repository.fullName} on a node" else "Set up ${repository.fullName} on another node",
+                                        tooltip = if (setUp.isEmpty()) "Set up on a node" else "Set up on another node",
+                                        size = ButtonSize.Sm,
+                                        muted = true,
+                                    )
+
+                                    if (setUpMenu == key) {
+                                        MenuPopup(onDismiss = { setUpMenu = null }) {
+                                            MenuLabel("Set up on")
+
+                                            for (node in elsewhere) {
+                                                MenuItem(
+                                                    node.name,
+                                                    onClick = {
+                                                        setUpMenu = null
+                                                        cloning = cloning + key
+                                                        store.act {
+                                                            try {
+                                                                store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
+                                                            } finally {
+                                                                cloning = cloning - key
+                                                            }
                                                         }
-                                                    }
-                                                },
-                                                leading = nodeIcon(node),
-                                            )
+                                                    },
+                                                    leading = nodeIcon(node),
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+
+                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                            if (setUp.isNotEmpty()) {
+                                MyButton(
+                                    { onNewConversation(newConversationProject(setUp, state).id) },
+                                    text = "New conversation",
+                                    size = ButtonSize.Sm,
+                                    variant = ButtonVariant.Outline,
+                                    description = "New conversation in ${repository.fullName}",
+                                )
+                            }
+                        }
                     }
 
-                    Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
-                        if (setUp.isNotEmpty()) {
+                    Hairline()
+                }
+
+                for (folder in folders) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Label(folder.name, Modifier.weight(3f), maxLines = 1)
+                        Box(Modifier.weight(1.5f))
+
+                        Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            NodeMarks(listOf(folder), state)
+                        }
+
+                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
                             MyButton(
-                                { onNewConversation(newConversationProject(setUp, state).id) },
+                                { onNewConversation(folder.id) },
                                 text = "New conversation",
                                 size = ButtonSize.Sm,
                                 variant = ButtonVariant.Outline,
-                                description = "New conversation in ${repository.fullName}",
+                                description = "New conversation in ${folder.name}",
                             )
                         }
                     }
+
+                    Hairline()
                 }
 
-                Hairline()
-            }
-
-            for (folder in folders) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Label(folder.name, Modifier.weight(3f), maxLines = 1)
-                    Box(Modifier.weight(1.5f))
-
-                    Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        NodeMarks(listOf(folder), state)
-                    }
-
-                    Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
-                        MyButton(
-                            { onNewConversation(folder.id) },
-                            text = "New conversation",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            description = "New conversation in ${folder.name}",
-                        )
-                    }
+                if (forges != null && connected.isNotEmpty() && listing != null && repositories.isEmpty() && folders.isEmpty()) {
+                    Label("No repositories match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
                 }
-
-                Hairline()
-            }
-
-            if (forges != null && connected.isNotEmpty() && listing != null && repositories.isEmpty() && folders.isEmpty()) {
-                Label("No repositories match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
             }
         }
     }
@@ -283,8 +285,9 @@ private fun NodeMarks(projects: List<Project>, state: AppState) {
     for (project in projects) {
         val node = state.nodes[project.nodeId] ?: continue
 
-        Box(Modifier.semantics { contentDescription = "Set up on ${node.name}" }) {
+        Row(Modifier.semantics { contentDescription = "Set up on ${node.name}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
             Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconMd)
+            Label(node.name, maxLines = 1)
         }
     }
 }

@@ -284,8 +284,8 @@ fun InstructionsSettings(store: Store) {
             }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+        TableCard {
+            Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                 Label("Node", Modifier.weight(2f), Tokens.Type.MetaStrong, colors.textMuted)
                 Label("Holds", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
                 Label("Sessions on an older version", Modifier.weight(2.5f), Tokens.Type.MetaStrong, colors.textMuted)
@@ -294,7 +294,7 @@ fun InstructionsSettings(store: Store) {
             Hairline()
 
             for (node in state.nodes.values.sortedBy { it.name }) {
-                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1)) {
+                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label(node.name, Modifier.weight(2f), maxLines = 1)
                         Label(heldVersion(node), Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)

@@ -40,91 +40,95 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Clients", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Label("Client", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Last used", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                Box(Modifier.weight(1.5f))
-            }
-
-            Hairline()
-
-            for (session in sessions) {
-                val where = if (session.hostname.isBlank()) session.label else "${session.label} on ${session.hostname}"
-
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (session.kind == "browser") MyIcon.Globe else MyIcon.Laptop, colors.textMuted, Tokens.Size.IconSm)
-                        Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
-
-                        if (session.current) {
-                            Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
-                        }
-                    }
-
-                    Label(session.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
-                    Label(if (session.current) "now" else ago(session.lastUsedAt), Modifier.weight(1f), color = colors.textMuted)
-
-                    Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
-                        MyButton(
-                            {
-                                if (session.current) {
-                                    endingCurrent = session
-                                } else {
-                                    store.act {
-                                        store.api.endSession(session.id)
-                                        sessions = sessions.filter { it.id != session.id }
-                                    }
-                                }
-                            },
-                            text = "End session",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            description = "End session $where",
-                        )
-                    }
+            TableCard {
+                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Client", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Last used", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Box(Modifier.weight(1.5f))
                 }
 
                 Hairline()
+
+                for (session in sessions) {
+                    val where = if (session.hostname.isBlank()) session.label else "${session.label} on ${session.hostname}"
+
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(if (session.kind == "browser") MyIcon.Globe else MyIcon.Laptop, colors.textMuted, Tokens.Size.IconSm)
+                            Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
+
+                            if (session.current) {
+                                Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
+                            }
+                        }
+
+                        Label(session.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
+                        Label(if (session.current) "now" else ago(session.lastUsedAt), Modifier.weight(1f), color = colors.textMuted)
+
+                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                            MyButton(
+                                {
+                                    if (session.current) {
+                                        endingCurrent = session
+                                    } else {
+                                        store.act {
+                                            store.api.endSession(session.id)
+                                            sessions = sessions.filter { it.id != session.id }
+                                        }
+                                    }
+                                },
+                                text = "End session",
+                                size = ButtonSize.Sm,
+                                variant = ButtonVariant.Outline,
+                                description = "End session $where",
+                            )
+                        }
+                    }
+
+                    Hairline()
+                }
             }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Nodes", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Label("Node", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
-                Label("Last seen", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
-                Box(Modifier.weight(1.5f))
-            }
-
-            Hairline()
-
-            for (node in state.nodes.values.sortedBy { it.name }) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
-                        Label(node.name, maxLines = 1)
-                    }
-
-                    Label(node.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
-                    Label(if (node.online) "online" else node.lastSeenAt?.let(::ago) ?: "never", Modifier.weight(1f), color = colors.textMuted)
-
-                    Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
-                        MyButton({ revoking = node }, text = "Revoke", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Revoke ${node.name}")
-                    }
+            TableCard {
+                Row(Modifier.fillMaxWidth().tableHeader(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Node", Modifier.weight(3f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Address", Modifier.weight(1.5f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Label("Last seen", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
+                    Box(Modifier.weight(1.5f))
                 }
 
                 Hairline()
+
+                for (node in state.nodes.values.sortedBy { it.name }) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(Modifier.weight(3f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
+                            Label(node.name, maxLines = 1)
+                        }
+
+                        Label(node.address, Modifier.weight(1.5f), Tokens.Type.Code, colors.textMuted, maxLines = 1)
+                        Label(if (node.online) "online" else node.lastSeenAt?.let(::ago) ?: "never", Modifier.weight(1f), color = colors.textMuted)
+
+                        Row(Modifier.weight(1.5f), horizontalArrangement = Arrangement.End) {
+                            MyButton({ revoking = node }, text = "Revoke", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Revoke ${node.name}")
+                        }
+                    }
+
+                    Hairline()
+                }
             }
         }
     }

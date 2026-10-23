@@ -458,7 +458,7 @@ private fun QueuedMessages(
         ) {
             MyButton(
                 { expanded = !expanded },
-                text = "Queued",
+                text = "${queue.size + sending.size} queued ${if (queue.size + sending.size == 1) "message" else "messages"}",
                 description = if (expanded) "Collapse queued messages" else "Expand queued messages",
                 size = ButtonSize.Sm,
                 muted = true,
@@ -475,20 +475,6 @@ private fun QueuedMessages(
             Hairline()
 
             return@Column
-        }
-
-        for (text in sending) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
-                Label(text, Modifier.weight(1f), maxLines = 1)
-                Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
-
-            Hairline()
         }
 
         for ((index, item) in queue.withIndex()) {
@@ -524,6 +510,20 @@ private fun QueuedMessages(
                         MyButton({ onSendNow(item.id) }, text = "Send now", size = ButtonSize.Sm, muted = true)
                     }
                 }
+            }
+
+            Hairline()
+        }
+
+        for (text in sending) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
+                Label(text, Modifier.weight(1f), maxLines = 1)
+                Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
             Hairline()
