@@ -50,6 +50,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/mcp",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
+    "PUT /api/v1/walkthroughs/{id}/dismissal",
+    "DELETE /api/v1/walkthroughs/{id}/dismissal",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -101,6 +103,9 @@ const SILENT_ROUTES: &[&str] = &[
     "PUT /api/v1/instruction-source",
     "DELETE /api/v1/instruction-source",
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
+    "POST /api/v1/walkthroughs/{id}/notes",
+    "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
+    "POST /api/v1/walkthroughs/{id}/notes/sent",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
