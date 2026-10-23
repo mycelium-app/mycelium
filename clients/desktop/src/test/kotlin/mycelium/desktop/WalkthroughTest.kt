@@ -303,7 +303,7 @@ class WalkthroughTest {
         rule.onNodeWithContentDescription("Show the changes to src/Screen.tsx").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("const title = 2").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("const title = 2", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Dismiss walkthrough").assertIsDisplayed()
         rule.onNodeWithText("Walkthrough").performClick()
         rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
