@@ -135,6 +135,53 @@ class StoreTest {
     }
 
     @Test
+    fun reconnectingRestartsTheStreamAtOnceInsteadOfWaitingOutTheRetryDelay() = runTest {
+        val fetches = MutableStateFlow(0)
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath.endsWith("/conversations")) {
+                fetches.update { it + 1 }
+            }
+
+            respond("[]", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+        store.start()
+
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) {
+                while (fetches.value < 1) {
+                    delay(10)
+                }
+            }
+        }
+
+        store.reconnect()
+
+        withContext(Dispatchers.Default) {
+            withTimeout(800) {
+                while (fetches.value < 2) {
+                    delay(10)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun reconnectingBeforeTheStoreHasStartedDoesNotStartIt() = runTest {
+        val fetches = MutableStateFlow(0)
+        val engine = MockEngine {
+            fetches.update { it + 1 }
+            respond("[]", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.reconnect()
+
+        withContext(Dispatchers.Default) { delay(100) }
+        assertEquals(0, fetches.value)
+    }
+
+    @Test
     fun aCreatedProjectIsHeldInTheStoreByItsId() = runTest {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine {

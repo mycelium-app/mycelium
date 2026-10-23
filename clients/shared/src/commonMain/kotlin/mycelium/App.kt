@@ -156,6 +156,10 @@ private fun AppContent(platform: Platform) {
                             onDispose { store.stop() }
                         }
 
+                        LaunchedEffect(store) {
+                            platform.resumes.collect { store.reconnect() }
+                        }
+
                         Shell(
                             store = store,
                             platform = platform,

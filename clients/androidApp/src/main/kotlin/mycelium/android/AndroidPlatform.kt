@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
@@ -22,6 +24,14 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     override val signsInThroughTheBrowser = false
 
     override val originUrl: String? = null
+
+    private val resumed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    override val resumes: Flow<Unit> = resumed
+
+    fun resume() {
+        resumed.tryEmit(Unit)
+    }
 
     override fun loadConnection(): Connection? {
         val baseUrl = preferences.getString("baseUrl", null)

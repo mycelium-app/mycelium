@@ -39,6 +39,8 @@ sealed interface DevicePoll {
     data class Rejected(val code: String, val message: String) : DevicePoll
 }
 
+private const val StreamPingMillis = 20_000L
+
 class MyceliumApi(
     val baseUrl: String,
     private val clientToken: String? = null,
@@ -53,7 +55,7 @@ class MyceliumApi(
 
     private fun io.ktor.client.HttpClientConfig<*>.configure() {
         install(ContentNegotiation) { json(MyceliumJson) }
-        install(WebSockets)
+        install(WebSockets) { pingIntervalMillis = StreamPingMillis }
         expectSuccess = false
     }
 

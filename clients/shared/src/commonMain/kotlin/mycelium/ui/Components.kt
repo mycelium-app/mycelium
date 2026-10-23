@@ -697,6 +697,24 @@ fun SectionHead(text: String, modifier: Modifier = Modifier, aside: String? = nu
 }
 
 @Composable
+fun ReconnectingBanner(modifier: Modifier = Modifier) {
+    val colors = MyTheme.colors
+
+    Row(
+        modifier
+            .fillMaxWidth()
+            .background(colors.bgPanel)
+            .padding(horizontal = Tokens.Space.S3)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
+        Label("Reconnecting to the server", Modifier.padding(vertical = Tokens.Space.S1_5), Tokens.Type.Meta, colors.textMuted)
+    }
+}
+
+@Composable
 fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
 

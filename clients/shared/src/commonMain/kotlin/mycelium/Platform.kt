@@ -1,5 +1,7 @@
 package mycelium
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import mycelium.state.PickedFile
 
 data class Connection(val baseUrl: String, val token: String)
@@ -12,6 +14,8 @@ interface Platform {
     val originUrl: String?
 
     val reducedMotion: Boolean get() = false
+
+    val resumes: Flow<Unit> get() = emptyFlow()
 
     fun loadConnection(): Connection?
 

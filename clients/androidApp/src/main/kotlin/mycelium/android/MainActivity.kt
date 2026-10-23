@@ -8,16 +8,24 @@ import androidx.activity.enableEdgeToEdge
 import mycelium.App
 
 class MainActivity : ComponentActivity() {
+    private var platform: AndroidPlatform? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        lateinit var platform: AndroidPlatform
-        val picker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris -> platform.picked(uris) }
-        platform = AndroidPlatform(applicationContext) { picker.launch("*/*") }
+        lateinit var created: AndroidPlatform
+        val picker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris -> created.picked(uris) }
+        created = AndroidPlatform(applicationContext) { picker.launch("*/*") }
+        platform = created
 
         setContent {
-            App(platform)
+            App(created)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        platform?.resume()
     }
 }

@@ -107,6 +107,15 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         streaming = null
     }
 
+    fun reconnect() {
+        if (streaming == null) {
+            return
+        }
+
+        stop()
+        start()
+    }
+
     suspend fun refresh() {
         val conversations = api.conversations(archived = false)
         val nodes = api.nodes()
