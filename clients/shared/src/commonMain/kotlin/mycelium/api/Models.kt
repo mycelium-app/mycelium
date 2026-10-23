@@ -772,7 +772,7 @@ data class PatchGoalRequest(val paused: Boolean)
 data class WalkthroughFile(val path: String, val diff: String)
 
 @Serializable
-data class WalkthroughStep(val title: String, val key: Boolean = false, val explanation: String = "", val files: List<WalkthroughFile> = emptyList())
+data class WalkthroughStep(val title: String, val key: Boolean = false, val section: String? = null, val icon: String? = null, val explanation: String = "", val files: List<WalkthroughFile> = emptyList())
 
 @Serializable
 data class Walkthrough(

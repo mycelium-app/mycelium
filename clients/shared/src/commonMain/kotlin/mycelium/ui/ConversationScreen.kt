@@ -198,7 +198,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Hairline()
 
                     if (tab == WalkthroughTab) {
-                        WalkthroughView(walkthrough, Modifier.weight(1f))
+                        WalkthroughView(store, id, walkthrough, Modifier.weight(1f))
 
                         return@Column
                     }

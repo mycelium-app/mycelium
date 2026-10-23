@@ -45,6 +45,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
+    private val mutableWalkthroughScopes = MutableStateFlow<Map<String, WalkthroughScope>>(emptyMap())
+    val walkthroughScopes: StateFlow<Map<String, WalkthroughScope>> = mutableWalkthroughScopes.asStateFlow()
 
     init {
         scope.launch {
@@ -320,6 +322,14 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
                 throw failure
             }
         }
+    }
+
+    fun chooseWalkthroughScope(conversationId: String, walkthroughScope: WalkthroughScope) {
+        mutableWalkthroughScopes.update { it + (conversationId to walkthroughScope) }
+    }
+
+    fun regenerateWalkthrough(conversationId: String) {
+        send(conversationId, regenerateWalkthroughPrompt(mutableWalkthroughScopes.value[conversationId] ?: WalkthroughScope.Branch))
     }
 
     suspend fun attachmentBytes(sha256: String): ByteArray? {

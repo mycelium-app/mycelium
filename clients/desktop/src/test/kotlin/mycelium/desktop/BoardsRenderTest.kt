@@ -306,11 +306,12 @@ class BoardsRenderTest {
         val diff = "@@ -1,5 +1,5 @@\n-  const title = \"Restore your backup\"\n+  const title = strings.restore.title\n   const retry = useRetry(RESTORE_BACKOFF_MS)\n-  const failed = \"Could not restore. Try again.\"\n+  const failed = strings.restore.failed"
         val walkthrough = mapOf(
             "/walkthrough" to """{"id":"wt","conversation_id":"$BackupsId","created_at":"${ago(minutes = 5)}","steps":[
-{"title":"Add the shared strings file"},
-{"title":"Key change: restore reads its copy from strings","key":true,"explanation":"The restore screen no longer holds its own copy.","files":[{"path":"src/restore/Screen.tsx","diff":"${jsonText(diff)}"}]},
-{"title":"Update the retry screen"},{"title":"Tests"}]}""",
+{"title":"Add the shared strings file","section":"Strings","icon":"data"},
+{"title":"Restore reads its copy from strings","key":true,"section":"Strings","icon":"data","explanation":"The restore screen no longer holds its own copy, so a change to the wording reaches every screen at once.","files":[{"path":"src/restore/Screen.tsx","diff":"${jsonText(diff)}"}]},
+{"title":"Update the retry screen","section":"Retry logic","icon":"logic"},{"title":"Cover the restore flow","section":"Tests","icon":"tests"}]}""",
+            "/reads" to "[0]",
         )
-        assertTrue(renderAt("board-walkthrough", true, false, interact = { click(it, 437f, 56f); click(it, 400f, 135f) }, content = shell(Route.Chat(BackupsId), walkthrough)).length() > 1_000)
+        assertTrue(renderAt("board-walkthrough", true, false, interact = { click(it, 437f, 56f); click(it, 330f, 190f) }, content = shell(Route.Chat(BackupsId), walkthrough)).length() > 1_000)
     }
 
     @Test
