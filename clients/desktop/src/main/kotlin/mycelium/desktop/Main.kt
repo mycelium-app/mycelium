@@ -168,7 +168,7 @@ private object DesktopPlatform : Platform {
 
     private fun notifyOnLinux(title: String, body: String, conversationId: String) {
         val clicked = runCatching {
-            val process = ProcessBuilder("notify-send", "--app-name=Mycelium", "--action=open=Open", "--wait", title, body).redirectErrorStream(true).start()
+            val process = ProcessBuilder("notify-send", "--app-name=Mycelium", "--expire-time=5000", "--action=open=Open", "--wait", title, body).redirectErrorStream(true).start()
             val answer = process.inputStream.bufferedReader().readText().trim()
 
             process.waitFor() == 0 && answer == "open"
@@ -176,7 +176,7 @@ private object DesktopPlatform : Platform {
 
         if (clicked.isFailure) {
             runCatching {
-                ProcessBuilder("gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "Mycelium", "0", "", title, body, "[]", "{}", "-1").start().waitFor()
+                ProcessBuilder("gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "Mycelium", "0", "", title, body, "[]", "{}", "5000").start().waitFor()
             }
         }
 
