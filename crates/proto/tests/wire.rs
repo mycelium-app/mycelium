@@ -118,7 +118,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::Ack { conversation_id: id(), seq: 9 }, "ack"),
         (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: false, account: None, instructions: None }, "start_session"),
         (ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) }, "instructions"),
-        (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into() }, "prompt"),
+        (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into(), attachments: vec![] }, "prompt"),
         (ControlToNode::Cancel { conversation_id: id() }, "cancel"),
         (ControlToNode::PermissionResponse { conversation_id: id(), request_id: "r".into(), outcome: json!({"outcome": "selected", "optionId": "allow"}) }, "permission_response"),
         (ControlToNode::SetConfig { conversation_id: id(), mode: Some("plan".into()), model: None, config: Some(config) }, "set_config"),
@@ -347,7 +347,7 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&StartLoginResponse { login_id: id() });
     round_trip(&LoginInputRequest { text: "x".into() });
     round_trip(&DrainRequest { draining: true });
-    round_trip(&PromptRequest { text: "go".into() });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![] });
     round_trip(&PatchQueueRequest { text: "edit".into() });
     round_trip(&Me { id: id(), email: "a@b".into(), name: "n".into() });
 }

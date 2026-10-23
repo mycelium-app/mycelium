@@ -2,7 +2,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::versions::newer;
 use mycelium_proto::api::NodeSummary;
-use mycelium_proto::conversation::{AgentId, AgentInfo, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt};
+use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -172,14 +172,14 @@ pub async fn highest_node_seq(pool: &PgPool, conversation_id: Uuid) -> sqlx::Res
 }
 
 pub async fn queue_of(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<Vec<QueuedPrompt>> {
-    let rows = sqlx::query_as::<_, (Uuid, i32, String, chrono::DateTime<chrono::Utc>)>(
-        "select id, position, text, created_at from queued_prompts where conversation_id = $1 order by position",
+    let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, chrono::DateTime<chrono::Utc>)>(
+        "select id, position, text, attachments, created_at from queued_prompts where conversation_id = $1 order by position",
     )
     .bind(conversation_id)
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|(id, position, text, created_at)| QueuedPrompt { id, conversation_id, position, text, created_at }).collect())
+    Ok(rows.into_iter().map(|(id, position, text, attachments, created_at)| QueuedPrompt { id, conversation_id, position, text, attachments: attachments.0, created_at }).collect())
 }
 
 pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {

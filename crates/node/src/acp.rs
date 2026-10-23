@@ -1,4 +1,5 @@
-use mycelium_proto::link::NodeToControl;
+use crate::attachments::{self, PromptCapabilities, SavedFile};
+use mycelium_proto::link::{NodeToControl, PromptAttachment};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -33,13 +34,14 @@ pub enum Action {
     Emit(i64, NodeToControl),
     Started(NodeToControl),
     Send(Value),
+    SaveAttachments { cwd: String, files: Vec<SavedFile> },
     PromptWritten(Uuid),
     CloseKeeper,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Prompt { prompt_id: Uuid, text: String },
+    Prompt { prompt_id: Uuid, text: String, attachments: Vec<PromptAttachment> },
     Cancel,
     PermissionResponse { request_id: String, outcome: Value },
     SetConfig { mode: Option<String>, model: Option<String>, config: Option<BTreeMap<String, Value>> },
@@ -71,6 +73,10 @@ pub struct SessionSnapshot {
     history_loading: bool,
     unanswered_requests: HashMap<String, Value>,
     permissions: HashMap<String, Value>,
+    #[serde(default)]
+    prompt_capabilities: PromptCapabilities,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 impl SessionSnapshot {
@@ -98,9 +104,11 @@ pub struct SessionState {
     models_advertised: bool,
     config_advertised: bool,
     history_loading: bool,
-    queued_prompts: VecDeque<(Uuid, String)>,
+    queued_prompts: VecDeque<(Uuid, String, Vec<PromptAttachment>)>,
     unanswered_requests: HashMap<String, Value>,
     permissions: HashMap<String, Value>,
+    prompt_capabilities: PromptCapabilities,
+    cwd: Option<String>,
 }
 
 fn request_frame(id: i64, method: &str, params: Value) -> Value {
@@ -138,6 +146,7 @@ impl SessionState {
     pub fn new(conversation_id: Uuid, plan: Option<StartPlan>, acked: i64) -> SessionState {
         SessionState {
             conversation_id,
+            cwd: plan.as_ref().map(|plan| plan.cwd.clone()),
             plan,
             acked,
             head: 0,
@@ -158,6 +167,7 @@ impl SessionState {
             queued_prompts: VecDeque::new(),
             unanswered_requests: HashMap::new(),
             permissions: HashMap::new(),
+            prompt_capabilities: PromptCapabilities::default(),
         }
     }
 
@@ -177,6 +187,8 @@ impl SessionState {
         state.history_loading = snapshot.history_loading;
         state.unanswered_requests = snapshot.unanswered_requests;
         state.permissions = snapshot.permissions;
+        state.prompt_capabilities = snapshot.prompt_capabilities;
+        state.cwd = snapshot.cwd;
 
         state
     }
@@ -197,6 +209,8 @@ impl SessionState {
             history_loading: self.history_loading,
             unanswered_requests: self.unanswered_requests.clone(),
             permissions: self.permissions.clone(),
+            prompt_capabilities: self.prompt_capabilities,
+            cwd: self.cwd.clone(),
         }
     }
 
@@ -267,8 +281,8 @@ impl SessionState {
 
     pub fn on_command(&mut self, command: Command) -> Vec<Action> {
         match command {
-            Command::Prompt { prompt_id, text } => {
-                self.queued_prompts.push_back((prompt_id, text));
+            Command::Prompt { prompt_id, text, attachments } => {
+                self.queued_prompts.push_back((prompt_id, text, attachments));
 
                 self.advance()
             }
@@ -356,8 +370,16 @@ impl SessionState {
         }
 
         if let Some(session_id) = self.session_id.clone() {
-            while let Some((prompt_id, text)) = self.queued_prompts.pop_front() {
-                let params = json!({"sessionId": session_id, "prompt": [{"type": "text", "text": text}]});
+            while let Some((prompt_id, text, attachments)) = self.queued_prompts.pop_front() {
+                let cwd = self.cwd.clone().unwrap_or_default();
+                let rendered = attachments::render(std::path::Path::new(&cwd), prompt_id, &text, &attachments, self.prompt_capabilities);
+                let prompt = if rendered.blocks.is_empty() { vec![json!({"type": "text", "text": text})] } else { rendered.blocks };
+                let params = json!({"sessionId": session_id, "prompt": prompt});
+
+                if !rendered.files.is_empty() {
+                    actions.push(Action::SaveAttachments { cwd, files: rendered.files });
+                }
+
                 actions.push(self.outgoing_request("session/prompt", params));
                 actions.push(Action::PromptWritten(prompt_id));
             }
@@ -508,6 +530,7 @@ impl SessionState {
 
                 self.initialized = true;
                 self.resume_kind = resume_kind_of(&result);
+                self.prompt_capabilities = PromptCapabilities::from_initialize(&result);
                 self.http_mcp = result["agentCapabilities"]["mcpCapabilities"]["http"].as_bool() == Some(true);
 
                 Vec::new()
@@ -737,8 +760,8 @@ mod tests {
     fn prompts_wait_for_the_session_then_go_out_in_order() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         state.on_live();
-        assert!(sent_frames(&state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "one".into() })).is_empty());
-        state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(2), text: "two".into() });
+        assert!(sent_frames(&state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "one".into(), attachments: vec![] })).is_empty());
+        state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(2), text: "two".into(), attachments: vec![] });
 
         state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
         let actions = state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}}));
@@ -795,7 +818,7 @@ mod tests {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         started(&mut state, json!({"sessionId": "s1"}));
 
-        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into() });
+        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into(), attachments: vec![] });
 
         assert!(matches!(&actions[0], Action::Send(frame) if frame["method"] == "session/prompt"));
         assert_eq!(actions[1], Action::PromptWritten(Uuid::from_u128(7)));
@@ -806,7 +829,7 @@ mod tests {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         state.on_live();
 
-        let queued = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into() });
+        let queued = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(7), text: "hi".into(), attachments: vec![] });
         assert!(!queued.iter().any(|action| matches!(action, Action::PromptWritten(_))));
 
         state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
@@ -824,7 +847,7 @@ mod tests {
 
         let mut restored = SessionState::restore(conversation(), snapshot, head);
         restored.on_live();
-        let frames = sent_frames(&restored.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "again".into() }));
+        let frames = sent_frames(&restored.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "again".into(), attachments: vec![] }));
 
         assert_eq!(restored.acp_session_id(), Some("s1"));
         assert_eq!(frames.len(), 1);
@@ -884,11 +907,58 @@ mod tests {
         assert_eq!(new.len(), 1);
     }
 
+    fn started_accepting(state: &mut SessionState, capabilities: Value) {
+        state.on_live();
+        state.on_entry(1, Direction::Out, json!({}));
+        state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"promptCapabilities": capabilities}}}));
+        state.on_entry(3, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "s1"}}));
+    }
+
+    fn png() -> PromptAttachment {
+        PromptAttachment { name: "shot.png".into(), media_type: "image/png".into(), data: "iVBORw==".into() }
+    }
+
+    #[test]
+    fn an_image_reaches_an_agent_that_advertised_image_prompts_as_an_image_block() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started_accepting(&mut state, json!({"image": true, "embeddedContext": true}));
+
+        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "see".into(), attachments: vec![png()] });
+
+        assert_eq!(sent_frames(&actions)[0]["params"]["prompt"], json!([{"type": "text", "text": "see"}, {"type": "image", "data": "iVBORw==", "mimeType": "image/png"}]));
+    }
+
+    #[test]
+    fn an_image_for_an_agent_without_image_prompts_is_saved_and_its_path_is_in_the_prompt() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started_accepting(&mut state, json!({}));
+
+        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "see".into(), attachments: vec![png()] });
+        let saved = actions.iter().find_map(|action| if let Action::SaveAttachments { files, .. } = action { Some(files.clone()) } else { None }).unwrap();
+        let prompt = &sent_frames(&actions)[0]["params"]["prompt"];
+
+        assert_eq!(saved.len(), 1);
+        assert!(prompt[1]["text"].as_str().unwrap().contains(&saved[0].path.display().to_string()));
+    }
+
+    #[test]
+    fn the_prompt_capabilities_survive_a_restore() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started_accepting(&mut state, json!({"image": true}));
+        let snapshot: SessionSnapshot = serde_json::from_value(serde_json::to_value(state.snapshot()).unwrap()).unwrap();
+        let mut restored = SessionState::restore(conversation(), snapshot, 0);
+        restored.on_live();
+
+        let actions = restored.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: String::new(), attachments: vec![png()] });
+
+        assert_eq!(sent_frames(&actions)[0]["params"]["prompt"][0]["type"], "image");
+    }
+
     #[test]
     fn a_prompt_response_becomes_a_turn_end_with_its_stop_reason() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         started(&mut state, json!({"sessionId": "s1"}));
-        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into() });
+        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into(), attachments: vec![] });
         let id = sent_frames(&prompt)[0]["id"].clone();
 
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "cancelled"}}));
@@ -900,7 +970,7 @@ mod tests {
     fn a_prompt_response_carries_the_usage_the_agent_reports() {
         let mut state = SessionState::new(conversation(), plan(None), 0);
         started(&mut state, json!({"sessionId": "s1"}));
-        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into() });
+        let prompt = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into(), attachments: vec![] });
         let id = sent_frames(&prompt)[0]["id"].clone();
 
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 7, "totalTokens": 12}}}));

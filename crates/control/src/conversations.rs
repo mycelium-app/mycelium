@@ -26,8 +26,13 @@ fn forks_natively(parent: &ConversationRow) -> bool {
     parent.agent == enum_text(&AgentId::Claude) && parent.acp_session_id.is_some()
 }
 
-pub fn derived_title(text: &str) -> String {
-    text.lines().next().unwrap_or_default().chars().take(TITLE_LIMIT).collect()
+pub fn derived_title(text: &str, attachments: &[mycelium_proto::conversation::Attachment]) -> String {
+    let first_line = text.lines().next().unwrap_or_default();
+    let fallback = attachments.first().map(|attachment| attachment.name.as_str()).unwrap_or_default();
+
+    let shown = if first_line.is_empty() { fallback } else { first_line };
+
+    shown.chars().take(TITLE_LIMIT).collect()
 }
 
 #[derive(Deserialize)]
@@ -133,7 +138,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     };
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let chosen_title = request.title.as_deref().map(str::trim).filter(|title| !title.is_empty());
-    let predicted_title = prompt.map(derived_title);
+    let predicted_title = prompt.map(|text| derived_title(text, &[]));
     let title = match (chosen_title, &predicted_title) {
         (Some(title), _) => title.to_string(),
         (None, Some(predicted)) => predicted.clone(),

@@ -1,4 +1,5 @@
 mod activity;
+mod attachments;
 mod auth;
 mod boot;
 mod chats;
@@ -41,6 +42,7 @@ pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK,
 
 use anyhow::Result;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{any, delete, get, patch, post, put};
 use state::AppState;
 use std::net::SocketAddr;
@@ -122,6 +124,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))
         .route("/api/v1/terminals/{terminal_id}/resize", post(terminals::resize))
         .route("/api/v1/terminals/{terminal_id}", delete(terminals::stop))
+        .route("/api/v1/conversations/{id}/attachments", post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
+        .route("/api/v1/attachments/{sha256}", get(attachments::get))
         .route("/api/v1/conversations/{id}/prompt", post(prompts::prompt))
         .route("/api/v1/conversations/{id}/queue", get(prompts::queue))
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))

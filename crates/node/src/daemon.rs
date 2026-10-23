@@ -228,7 +228,7 @@ impl Daemon {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
             ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions),
             ControlToNode::Instructions { revision, global } => self.hold_instructions(revision, global),
-            ControlToNode::Prompt { conversation_id, prompt_id, text } => self.prompt(conversation_id, prompt_id, text),
+            ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
@@ -330,11 +330,11 @@ impl Daemon {
         }
     }
 
-    fn prompt(&self, conversation_id: Uuid, prompt_id: Uuid, text: String) {
+    fn prompt(&self, conversation_id: Uuid, prompt_id: Uuid, text: String, attachments: Vec<mycelium_proto::link::PromptAttachment>) {
         let handle = self.sessions.lock().ok().and_then(|sessions| sessions.get(&conversation_id).cloned());
 
         match handle {
-            Some(handle) if !handle.ended() => handle.command(Command::Prompt { prompt_id, text }),
+            Some(handle) if !handle.ended() => handle.command(Command::Prompt { prompt_id, text, attachments }),
             _ => self.refuse(conversation_id, "The agent for this conversation is not running on this node.".to_string()),
         }
     }

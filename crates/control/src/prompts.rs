@@ -1,3 +1,4 @@
+use crate::attachments;
 use crate::auth::AuthUser;
 use crate::chats;
 use crate::error::{ApiError, ApiResult};
@@ -10,7 +11,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{ConfigRequest, PatchQueueRequest, PermissionAnswer, PromptRequest};
-use mycelium_proto::conversation::{ConversationStatus, EventKind, QueuedPrompt};
+use mycelium_proto::conversation::{Attachment, ConversationStatus, EventKind, QueuedPrompt};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -38,20 +39,20 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     }
 
-    let next = sqlx::query_as::<_, (Uuid, String)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 order by position limit 1 for update) returning id, text")
+    let next = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 order by position limit 1 for update) returning id, text, attachments")
         .bind(conversation_id)
         .fetch_optional(&mut *tx)
         .await?;
 
-    let Some((prompt_id, text)) = next else {
+    let Some((prompt_id, text, sqlx::types::Json(attachments))) = next else {
         return Ok(());
     };
 
-    let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id}), None).await?;
+    let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?;
 
     sqlx::query("update conversations set predicted_title = coalesce(predicted_title, $2), title = case when title_user_set then title else coalesce(predicted_title, $2) end where id = $1")
         .bind(conversation_id)
-        .bind(derived_title(&text))
+        .bind(derived_title(&text, &attachments))
         .execute(&mut *tx)
         .await?;
 
@@ -64,8 +65,9 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, fork: false, account, instructions });
     }
 
-    state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone() });
-    state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text });
+    let loaded = attachments::for_node(state, &attachments).await?;
+    state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone(), attachments });
+    state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text, attachments: loaded });
 
     if let Some(event) = event {
         state.publish(Some(owner), StreamMessage::Event(event));
@@ -80,16 +82,17 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<StatusCode> {
     let text = request.text.trim();
 
-    if text.is_empty() {
+    if text.is_empty() && request.attachments.is_empty() {
         return Err(ApiError::bad_request("text_required", "Enter a message to send."));
     }
 
+    let attachments = attachments::confirm(&state, user.id, &request.attachments).await?;
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
 
     if chats::is_chat(&row) {
         drop(tx);
-        chats::send(&state, user.id, id, text).await?;
+        chats::send(&state, user.id, id, text, attachments).await?;
 
         return Ok(StatusCode::NO_CONTENT);
     }
@@ -106,9 +109,10 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(ApiError::conflict("session_failed", "This conversation's session failed. Start a new conversation to continue."));
     }
 
-    sqlx::query("insert into queued_prompts (conversation_id, position, text) select $1, coalesce(max(position), 0) + 1, $2 from queued_prompts where conversation_id = $1")
+    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1")
         .bind(id)
         .bind(text)
+        .bind(sqlx::types::Json(&attachments))
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;

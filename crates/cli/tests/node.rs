@@ -244,7 +244,7 @@ async fn start_conversation(connection: &mut Connection, conversation: Uuid) {
 }
 
 fn prompt(connection: &Connection, conversation: Uuid, text: &str) {
-    connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id: Uuid::new_v4(), text: text.into() });
+    connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id: Uuid::new_v4(), text: text.into(), attachments: vec![] });
 }
 
 fn journalled_prompts(fixture: &Fixture, conversation: Uuid) -> usize {
@@ -779,7 +779,7 @@ async fn a_prompt_is_acknowledged_once_it_is_written_to_the_agent() {
     let prompt_id = Uuid::new_v4();
     start_conversation(&mut connection, conversation).await;
 
-    connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+    connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into(), attachments: vec![] });
 
     let received = connection.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
     assert_eq!(received, NodeToControl::PromptReceived { conversation_id: conversation, prompt_id });
@@ -806,7 +806,7 @@ async fn a_prompt_sent_twice_reaches_the_agent_once_and_is_acknowledged_twice() 
     start_conversation(&mut connection, conversation).await;
 
     for _ in 0..2 {
-        connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+        connection.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into(), attachments: vec![] });
         connection.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
     }
 
@@ -823,7 +823,7 @@ async fn a_prompt_received_before_a_daemon_restart_is_not_written_again_after_it
     let conversation = Uuid::from_u128(18);
     let prompt_id = Uuid::new_v4();
     start_conversation(&mut first, conversation).await;
-    first.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+    first.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into(), attachments: vec![] });
     first.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
 
     daemon.crash();
@@ -831,7 +831,7 @@ async fn a_prompt_received_before_a_daemon_restart_is_not_written_again_after_it
     let mut second = control.accept().await;
     second.next_matching(is_hello).await;
 
-    second.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into() });
+    second.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "hello".into(), attachments: vec![] });
     second.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
 
     assert_eq!(journalled_prompts(&fixture, conversation), 1);

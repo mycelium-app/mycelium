@@ -46,6 +46,7 @@ pub struct UnacknowledgedPrompt {
     pub conversation_id: Uuid,
     pub prompt_id: Uuid,
     pub text: String,
+    pub attachments: Vec<mycelium_proto::conversation::Attachment>,
 }
 
 const RESOURCE_HISTORY: usize = 200;

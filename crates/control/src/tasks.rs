@@ -239,7 +239,7 @@ async fn send(state: &AppState, user: AuthUser, waiting: Task, conversation_id: 
 
     let task = move_to(state, &user, waiting.id, TaskStatus::Open, TaskStatus::Claimed).await?;
     let text = task.prompt.clone().unwrap_or_else(|| task.title.clone());
-    let delivered = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text })).await;
+    let delivered = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
 
     match delivered {
         Ok(_) => {
@@ -278,7 +278,7 @@ pub async fn answer(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(ApiError::conflict("asker_gone", "The conversation that asked this question no longer exists, so it cannot receive an answer."));
     };
 
-    let delivered = prompts::prompt(State(state.clone()), user, Path(source_id), Json(PromptRequest { text: format!("Answer to your question \"{}\": {text}", asked.title) })).await;
+    let delivered = prompts::prompt(State(state.clone()), user, Path(source_id), Json(PromptRequest { text: format!("Answer to your question \"{}\": {text}", asked.title), ..Default::default() })).await;
 
     match delivered {
         Ok(_) => {

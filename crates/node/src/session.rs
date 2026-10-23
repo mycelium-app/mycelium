@@ -1,3 +1,4 @@
+use crate::attachments;
 use crate::acp::{Action, Command, Direction, SessionSnapshot, SessionState, StartPlan};
 use anyhow::{Context, Result, bail};
 use mycelium_keeper::socket_path;
@@ -333,6 +334,11 @@ impl Actor {
                 Action::PromptWritten(prompt_id) => {
                     if connection.writer.is_some() && !self.handle.ended() {
                         self.record_written_prompt(prompt_id);
+                    }
+                }
+                Action::SaveAttachments { cwd, files } => {
+                    if let Err(error) = attachments::save(std::path::Path::new(&cwd), &files) {
+                        tracing::warn!(conversation = %self.conversation_id, "could not save the attachments: {error}");
                     }
                 }
                 Action::CloseKeeper => write_to_keeper(connection, json!({"close": true})).await,

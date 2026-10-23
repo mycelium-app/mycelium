@@ -463,7 +463,7 @@ async fn a_prompt_the_node_never_acknowledged_is_sent_again_when_it_reports_the_
     let mut returned = reconnect_reporting_live(&server, link, conversation_id).await;
 
     match returned.next().await {
-        ControlToNode::Prompt { conversation_id: resent_conversation, prompt_id: resent, text } => {
+        ControlToNode::Prompt { conversation_id: resent_conversation, prompt_id: resent, text, .. } => {
             assert_eq!((resent_conversation, resent, text.as_str()), (conversation_id, prompt_id, "hello"));
         }
         other => panic!("expected the prompt again, got {other:?}"),

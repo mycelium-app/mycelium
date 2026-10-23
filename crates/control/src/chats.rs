@@ -1,15 +1,17 @@
+use crate::attachments;
 use crate::auth::AuthUser;
 use crate::activity::record_turn;
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
-use crate::model_providers::{self, ChatMessage, ProviderRow};
+use crate::model_providers::{self, ChatImage, ChatMessage, ProviderRow};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, find_owned, lock_owned, set_status};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use mycelium_proto::api::CreateChatRequest;
-use mycelium_proto::conversation::{Conversation, ConversationStatus, EventKind, SideKind};
+use base64::Engine;
+use mycelium_proto::conversation::{Attachment, Conversation, ConversationStatus, EventKind, SideKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
 use uuid::Uuid;
@@ -105,12 +107,12 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
     state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
 
     match prompt {
-        Some(text) => send(state, user.id, row.id, text).await,
+        Some(text) => send(state, user.id, row.id, text, Vec::new()).await,
         None => Ok(conversation),
     }
 }
 
-pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<Conversation> {
+pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachments: Vec<Attachment>) -> ApiResult<Conversation> {
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 
@@ -122,13 +124,13 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiRes
         return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Start a new chat with another provider."));
     };
     let model = row.model.clone().unwrap_or_default();
-    let event = append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text}), None).await?;
+    let event = append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "attachments": attachments}), None).await?;
     let title = sqlx::query_scalar::<_, String>(
         "update conversations set predicted_title = coalesce(predicted_title, $2), archived_at = null,
              title = case when title_user_set then title else coalesce(predicted_title, $2) end where id = $1 returning title",
     )
     .bind(id)
-    .bind(derived_title(text))
+    .bind(derived_title(text, &attachments))
     .fetch_one(&mut *tx)
     .await?;
     let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
@@ -144,20 +146,25 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiRes
     state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
 
     let provider = model_providers::find_owned(state, provider_id, owner).await?;
-    let said = sqlx::query_as::<_, (String, String)>(
-        "select e.kind, s.text from search_entries s join events e on e.conversation_id = s.conversation_id and e.seq = s.seq where s.conversation_id = $1 and s.seq > 0 order by s.seq",
+    let said = sqlx::query_as::<_, (String, Option<String>, Option<sqlx::types::Json<Vec<Attachment>>>)>(
+        "select e.kind, s.text, e.payload->'attachments' from events e left join search_entries s on s.conversation_id = e.conversation_id and s.seq = e.seq
+         where e.conversation_id = $1 and e.kind in ('user_message', 'turn_end') and (s.text is not null or coalesce(jsonb_array_length(e.payload->'attachments'), 0) > 0) order by e.seq",
     )
     .bind(id)
     .fetch_all(&state.pool)
     .await?;
     let mut messages: Vec<ChatMessage> = Vec::new();
 
-    for (kind, content) in said {
+    for (kind, text, said_attachments) in said {
         let role = if kind == "user_message" { "user" } else { "assistant" };
+        let (content, images) = chat_content(state, text.unwrap_or_default(), said_attachments.map(|json| json.0).unwrap_or_default()).await?;
 
         match messages.last_mut() {
-            Some(last) if last.role == role => last.content = format!("{}\n\n{content}", last.content),
-            _ => messages.push(ChatMessage { role, content }),
+            Some(last) if last.role == role => {
+                last.content = format!("{}\n\n{content}", last.content).trim().to_string();
+                last.images.extend(images);
+            }
+            _ => messages.push(ChatMessage { role, content, images }),
         }
     }
 
@@ -165,6 +172,25 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiRes
     state.hub.track_chat_turn(id, turn.abort_handle());
 
     Ok(conversation)
+}
+
+async fn chat_content(state: &AppState, text: String, attachments: Vec<Attachment>) -> ApiResult<(String, Vec<ChatImage>)> {
+    let mut content = text;
+    let mut images = Vec::new();
+
+    for attachment in attachments {
+        let bytes = attachments::read(state, &attachment).await?;
+
+        if attachment.media_type.starts_with("image/") {
+            images.push(ChatImage { media_type: attachment.media_type, data: base64::engine::general_purpose::STANDARD.encode(bytes) });
+        } else if let Ok(file_text) = String::from_utf8(bytes) {
+            content = format!("{content}\n\n{}:\n```\n{file_text}\n```", attachment.name).trim().to_string();
+        } else {
+            content = format!("{content}\n\n[Attached file {} ({}), which cannot be read as text.]", attachment.name, attachment.media_type).trim().to_string();
+        }
+    }
+
+    Ok((content, images))
 }
 
 pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {

@@ -494,3 +494,99 @@ async fn chats_that_were_replying_when_the_control_plane_stopped_are_ready_again
 
     assert_eq!(status, "review");
 }
+
+async fn upload_to(server: &Server, chat: &Value, name: &str, media_type: &str, bytes: &[u8]) -> Value {
+    let id = chat["id"].as_str().unwrap();
+    let (status, attachment) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/attachments")).query(&[("name", name)]).header("content-type", media_type).body(bytes.to_vec())).await;
+    assert_eq!(status, 201, "{attachment}");
+
+    attachment
+}
+
+async fn say_with(server: &Server, chat: &Value, text: &str, attachments: Vec<Value>) {
+    let id = chat["id"].as_str().unwrap();
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": text, "attachments": attachments}))).await;
+    assert_eq!(status, 204, "{body}");
+}
+
+#[tokio::test]
+async fn an_image_in_an_openai_compatible_chat_goes_to_the_provider_as_an_image_url_data_url() {
+    let server = Server::start().await;
+    let (router, fake) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let chat = new_chat(&server, &provider, "hi").await;
+    reply_finished(&server, &chat).await;
+    let picture = upload_to(&server, &chat, "shot.png", "image/png", &[137, 80, 78, 71]).await;
+
+    say_with(&server, &chat, "what is this", vec![picture]).await;
+    eventually("the second request", || async { (fake.requests.lock().unwrap().len() == 2).then_some(()) }).await;
+
+    let requests = fake.requests.lock().unwrap();
+    let sent = requests[1]["messages"].as_array().unwrap().last().unwrap().clone();
+
+    assert_eq!(sent["content"][0], json!({"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw=="}}));
+    assert_eq!(sent["content"][1], json!({"type": "text", "text": "what is this"}));
+}
+
+#[tokio::test]
+async fn an_image_in_an_anthropic_chat_goes_to_the_provider_as_an_image_block() {
+    let server = Server::start().await;
+    let (router, fake) = fake_anthropic();
+    let base = serve(router).await;
+    let provider = add_anthropic(&server, &base).await;
+    let chat = new_chat(&server, &provider, "hi").await;
+    reply_finished(&server, &chat).await;
+    let picture = upload_to(&server, &chat, "shot.png", "image/png", &[137, 80, 78, 71]).await;
+
+    say_with(&server, &chat, "what is this", vec![picture]).await;
+    eventually("the second request", || async { (fake.requests.lock().unwrap().len() == 2).then_some(()) }).await;
+
+    let requests = fake.requests.lock().unwrap();
+    let sent = requests[1]["messages"].as_array().unwrap().last().unwrap().clone();
+
+    assert_eq!(sent["content"][0], json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw=="}}));
+}
+
+#[tokio::test]
+async fn a_text_file_in_a_chat_is_sent_inline_and_an_earlier_image_is_still_sent_on_later_turns() {
+    let server = Server::start().await;
+    let (router, fake) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let chat = new_chat(&server, &provider, "hi").await;
+    reply_finished(&server, &chat).await;
+    let picture = upload_to(&server, &chat, "shot.png", "image/png", &[137, 80, 78, 71]).await;
+    let notes = upload_to(&server, &chat, "notes.txt", "text/plain", b"buy milk").await;
+
+    say_with(&server, &chat, "see these", vec![picture, notes]).await;
+    eventually("the second request", || async { (fake.requests.lock().unwrap().len() == 2).then_some(()) }).await;
+    eventually("the second reply", || async { (server.events(chat["id"].as_str().unwrap().parse().unwrap()).await.iter().filter(|event| event["kind"] == "turn_end").count() == 2).then_some(()) }).await;
+    say_with(&server, &chat, "and again", vec![]).await;
+    eventually("the third request", || async { (fake.requests.lock().unwrap().len() == 3).then_some(()) }).await;
+
+    let requests = fake.requests.lock().unwrap();
+    let second = requests[1]["messages"].as_array().unwrap().last().unwrap().clone();
+    let third = requests[2]["messages"].as_array().unwrap().iter().find(|message| message["content"].is_array()).cloned();
+
+    assert_eq!(second["content"][1]["text"], "see these\n\nnotes.txt:\n```\nbuy milk\n```");
+    assert!(third.is_some());
+}
+
+#[tokio::test]
+async fn a_chat_is_told_which_markdown_is_rendered_only_while_rich_markdown_is_on() {
+    let server = Server::start().await;
+    let (router, fake) = fake_anthropic();
+    let base = serve(router).await;
+    let provider = add_anthropic(&server, &base).await;
+
+    let on = new_chat(&server, &provider, "One").await;
+    reply_finished(&server, &on).await;
+    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": true, "rich_markdown": false}))).await;
+    let off = new_chat(&server, &provider, "Two").await;
+    reply_finished(&server, &off).await;
+    let requests = fake.requests.lock().unwrap().clone();
+
+    assert!(requests[0]["system"].as_str().unwrap().contains("Raw HTML is not rendered."));
+    assert!(!requests[1]["system"].as_str().unwrap().contains("Raw HTML is not rendered."));
+}

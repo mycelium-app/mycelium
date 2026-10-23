@@ -264,7 +264,7 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
     let each_run: EachRun = parse_enum(&row.each_run)?;
 
     if let (EachRun::Same, Some(conversation_id)) = (each_run, row.last_conversation_id) {
-        let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone() })).await;
+        let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await;
 
         if queued.is_ok() {
             return Ok(conversation_id);

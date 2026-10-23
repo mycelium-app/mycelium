@@ -235,6 +235,13 @@ pub enum GitCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PromptAttachment {
+    pub name: String,
+    pub media_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlToNode {
     Ack {
@@ -263,6 +270,8 @@ pub enum ControlToNode {
         conversation_id: Uuid,
         prompt_id: Uuid,
         text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<PromptAttachment>,
     },
     Cancel {
         conversation_id: Uuid,

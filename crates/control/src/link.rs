@@ -273,7 +273,8 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     }
 
     for prompt in state.hub.unacknowledged_prompts_on(node_id, &live) {
-        state.hub.send(node_id, ControlToNode::Prompt { conversation_id: prompt.conversation_id, prompt_id: prompt.prompt_id, text: prompt.text });
+        let attachments = crate::attachments::for_node(state, &prompt.attachments).await?;
+        state.hub.send(node_id, ControlToNode::Prompt { conversation_id: prompt.conversation_id, prompt_id: prompt.prompt_id, text: prompt.text, attachments });
     }
 
     crate::instructions::push_to(state, node_id).await?;

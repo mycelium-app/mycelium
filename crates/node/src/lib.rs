@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod agents;
+pub mod attachments;
 pub mod config;
 pub mod daemon;
 pub mod files;

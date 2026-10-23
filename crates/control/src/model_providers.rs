@@ -39,9 +39,38 @@ pub enum ProviderError {
     Stopped(String),
 }
 
+pub struct ChatImage {
+    pub media_type: String,
+    pub data: String,
+}
+
 pub struct ChatMessage {
     pub role: &'static str,
     pub content: String,
+    pub images: Vec<ChatImage>,
+}
+
+impl ChatMessage {
+    fn to_json(&self, kind: ModelProviderKind) -> Value {
+        if self.images.is_empty() {
+            return json!({"role": self.role, "content": self.content});
+        }
+
+        let mut parts: Vec<Value> = self
+            .images
+            .iter()
+            .map(|image| match kind {
+                ModelProviderKind::OpenaiCompatible => json!({"type": "image_url", "image_url": {"url": format!("data:{};base64,{}", image.media_type, image.data)}}),
+                ModelProviderKind::Anthropic => json!({"type": "image", "source": {"type": "base64", "media_type": image.media_type, "data": image.data}}),
+            })
+            .collect();
+
+        if !self.content.is_empty() {
+            parts.push(json!({"type": "text", "text": self.content}));
+        }
+
+        json!({"role": self.role, "content": parts})
+    }
 }
 
 #[derive(Default)]
@@ -133,7 +162,7 @@ impl ProviderRow {
 
     pub async fn stream_reply(&self, http: &reqwest::Client, model: &str, system: &str, messages: &[ChatMessage]) -> ApiResult<Result<ReplyStream, ProviderError>> {
         let kind = self.parsed_kind()?;
-        let turns: Vec<Value> = messages.iter().map(|message| json!({"role": message.role, "content": message.content})).collect();
+        let turns: Vec<Value> = messages.iter().map(|message| message.to_json(kind)).collect();
         let body = match kind {
             ModelProviderKind::OpenaiCompatible => {
                 let mut all = vec![json!({"role": "system", "content": system})];

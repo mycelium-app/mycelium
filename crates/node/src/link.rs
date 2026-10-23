@@ -5,12 +5,14 @@ use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::{Error, Message};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Backoff {
@@ -94,7 +96,7 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
     let mut request = url.as_str().into_client_request()?;
     request.headers_mut().insert("Authorization", format!("Bearer {}", daemon.config().bearer_token()).parse()?);
 
-    let connecting = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(request)).await.context("The control plane did not answer in time.")?;
+    let connecting = tokio::time::timeout(CONNECT_TIMEOUT, connect_async_with_config(request, Some(WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE_BYTES)).max_frame_size(Some(MAX_MESSAGE_BYTES))), false)).await.context("The control plane did not answer in time.")?;
     let mut socket = match connecting {
         Ok((socket, _)) => socket,
         Err(Error::Http(response)) if response.status() == StatusCode::UNAUTHORIZED => return Ok(Ended::Revoked),

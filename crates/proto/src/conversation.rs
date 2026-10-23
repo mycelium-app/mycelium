@@ -136,11 +136,21 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Attachment {
+    pub sha256: String,
+    pub name: String,
+    pub media_type: String,
+    pub size: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueuedPrompt {
     pub id: Uuid,
     pub conversation_id: Uuid,
     pub position: i32,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

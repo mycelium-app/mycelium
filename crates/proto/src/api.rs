@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::conversation::{AgentId, AgentInfo, DeviceKind, LoginInfo, SideKind};
+use crate::conversation::{AgentId, AgentInfo, Attachment, DeviceKind, LoginInfo, SideKind};
 use crate::link::ResourceSample;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -206,9 +206,12 @@ pub struct SessionSummary {
     pub current: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PromptRequest {
+    #[serde(default)]
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
