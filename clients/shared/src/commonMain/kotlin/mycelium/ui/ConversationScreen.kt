@@ -105,6 +105,15 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
+    val groupId = conversation.groupId
+
+    LaunchedEffect(groupId) {
+        if (groupId != null && state.groups[groupId] == null) {
+            store.act { store.refreshGroups() }
+        }
+    }
+
+    val groupName = groupId?.let { state.groups[it]?.name }
     val chat = conversation.isChat
     val node = if (chat) null else state.nodes[conversation.nodeId]
     val sideKind = { kind: String -> if (chat) "side" else kind }
@@ -218,7 +227,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
                         when (panel) {
-                            SidePanel.Details -> Inspector(conversation, node)
+                            SidePanel.Details -> Inspector(conversation, node, groupName)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize()) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize()) }
                             null -> Unit
@@ -234,7 +243,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     if (compact && !chat && panel != null) {
         BottomSheet(onDismiss = { panel = null }) {
             when (panel) {
-                SidePanel.Details -> InspectorContent(conversation, node)
+                SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet)) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 null -> Unit
@@ -400,7 +409,7 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
 }
 
 @Composable
-private fun Inspector(conversation: Conversation, node: NodeSummary?) {
+private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName: String?) {
     val colors = MyTheme.colors
 
     Column(Modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
@@ -409,13 +418,13 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?) {
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
-            InspectorContent(conversation, node)
+            InspectorContent(conversation, node, groupName)
         }
     }
 }
 
 @Composable
-private fun InspectorContent(conversation: Conversation, node: NodeSummary?) {
+private fun InspectorContent(conversation: Conversation, node: NodeSummary?, groupName: String?) {
     val agentInfo = node?.agents?.firstOrNull { it.agent == conversation.agent }
     val login: LoginInfo? = node?.logins?.firstOrNull { it.agent == conversation.agent }
 
@@ -432,6 +441,7 @@ private fun InspectorContent(conversation: Conversation, node: NodeSummary?) {
         "Conversation",
         listOf(
             "Folder" to conversation.cwd,
+            "Group" to (groupName ?: "None"),
             "Status" to statusSectionName(conversation.status),
             "Mode" to (conversation.mode ?: "Default"),
             "Model" to (conversation.model ?: "Not set"),

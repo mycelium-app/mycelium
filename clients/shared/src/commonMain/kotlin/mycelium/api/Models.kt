@@ -324,7 +324,13 @@ data class Project(
 data class PatchProjectRequest(@SerialName("group_id") val groupId: String?)
 
 @Serializable
-data class Group(val id: String, val name: String, @SerialName("created_at") val createdAt: String)
+data class Group(val id: String, val name: String, val folders: List<GroupFolder> = emptyList(), @SerialName("created_at") val createdAt: String)
+
+@Serializable
+data class GroupFolder(val id: String, @SerialName("node_id") val nodeId: String? = null, val prefix: String)
+
+@Serializable
+data class GroupFolderRequest(val prefix: String, @SerialName("node_id") val nodeId: String? = null)
 
 @Serializable
 data class GroupRequest(val name: String)
@@ -657,6 +663,7 @@ data class Conversation(
     @SerialName("side_kind") val sideKind: String? = null,
     @SerialName("provider_id") val providerId: String? = null,
     @SerialName("project_id") val projectId: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
 )
 
 @Serializable

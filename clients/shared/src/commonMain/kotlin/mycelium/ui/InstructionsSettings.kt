@@ -63,6 +63,9 @@ fun InstructionsSettings(store: Store) {
     var sourceRepository by remember { mutableStateOf("") }
     var sourcePath by remember { mutableStateOf("") }
     var forgeMenu by remember { mutableStateOf(false) }
+    var newFolder by remember { mutableStateOf("") }
+    var folderNode by remember { mutableStateOf<String?>(null) }
+    var folderNodeMenu by remember { mutableStateOf(false) }
 
     val layers = document?.layers.orEmpty()
     val layer = layers.firstOrNull { it.layer == selected } ?: layers.firstOrNull()
@@ -89,6 +92,7 @@ fun InstructionsSettings(store: Store) {
             document = store.api.instructions()
             forges = store.api.forges()
             store.refreshProjects()
+            store.refreshGroups()
         }
     }
 
@@ -307,6 +311,71 @@ fun InstructionsSettings(store: Store) {
                 }
 
                 Hairline()
+            }
+        }
+
+        if (layer != null && layer.layer != GlobalLayer) {
+            val folders = state.groups[layer.layer]?.folders.orEmpty()
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Folders in ${layer.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("Conversations without a project, including imported ones, join ${layer.name} when their folder is inside one of these.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                for (folder in folders) {
+                    val nodeName = folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"
+
+                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                        Label(folder.prefix, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
+                        Label(nodeName, color = colors.textMuted, maxLines = 1)
+                        MyButton(
+                            { attempt { store.api.removeGroupFolder(layer.layer, folder.id); store.refreshGroups() } },
+                            text = "Remove",
+                            size = ButtonSize.Sm,
+                            variant = ButtonVariant.Outline,
+                            muted = true,
+                            description = "Remove folder ${folder.prefix} from ${layer.name}",
+                        )
+                    }
+
+                    Hairline()
+                }
+
+                Row(Modifier.widthIn(max = Tokens.Size.FormColumn).padding(top = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
+                    fun addFolder() {
+                        attempt {
+                            store.api.addGroupFolder(layer.layer, newFolder, folderNode)
+                            store.refreshGroups()
+                            newFolder = ""
+                        }
+                    }
+
+                    TextInput(newFolder, { newFolder = it }, label = "Folder", placeholder = "/home/sam/code", mono = true, modifier = Modifier.weight(1f), onSubmit = ::addFolder)
+
+                    Box {
+                        val chosen = state.nodes[folderNode]?.name ?: "Any node"
+
+                        MyButton(
+                            { folderNodeMenu = true },
+                            text = chosen,
+                            description = "Node: $chosen",
+                            variant = ButtonVariant.Outline,
+                            trailingIcon = MyIcon.ChevronDown,
+                        )
+
+                        if (folderNodeMenu) {
+                            MenuPopup(onDismiss = { folderNodeMenu = false }) {
+                                MenuLabel("Node")
+                                MenuItem("Any node", onClick = { folderNode = null; folderNodeMenu = false }, checked = folderNode == null)
+
+                                for (node in state.nodes.values.sortedBy { it.name }) {
+                                    MenuItem(node.name, onClick = { folderNode = node.id; folderNodeMenu = false }, checked = node.id == folderNode)
+                                }
+                            }
+                        }
+                    }
+
+                    MyButton(::addFolder, text = "Add folder", variant = ButtonVariant.Outline)
+                }
             }
         }
 

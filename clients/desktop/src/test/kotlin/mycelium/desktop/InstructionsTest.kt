@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -34,6 +35,9 @@ private const val DocumentJson = """{"source":{"forge_id":"f1","repository":"slo
 {"layer":"g1","name":"slop","path":"AGENTS.slop.md","text":"Use British English.","version":null},
 {"layer":"g2","name":"work","path":"AGENTS.work.md","text":"","version":null}]}"""
 
+private const val GroupsJson = """[{"id":"g1","name":"slop","folders":[{"id":"f1","node_id":null,"prefix":"/home/claude/projects"},{"id":"f2","node_id":"n1","prefix":"/srv/slop"}],"created_at":"2026-10-22T10:00:00Z"},
+{"id":"g2","name":"work","folders":[],"created_at":"2026-10-22T10:00:00Z"}]"""
+
 private const val ProjectsJson = """[{"id":"p1","node_id":"n1","name":"mycelium","path":"/p/mycelium","group_id":null,"created_at":"2026-10-22T10:00:00Z"}]"""
 
 class InstructionsTest {
@@ -43,7 +47,7 @@ class InstructionsTest {
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<HttpMethod, String, String>>())
 
     private fun requestTo(method: HttpMethod, pathEnd: String): Triple<HttpMethod, String, String> {
-        rule.waitUntil(timeoutMillis = 5_000) { requests.toList().any { it.first == method && it.second.endsWith(pathEnd) } }
+        rule.waitUntil(timeoutMillis = 5_000) { requests.toList().any { it.first == method && it.second.endsWith(pathEnd) } || false }
 
         return requests.toList().first { it.first == method && it.second.endsWith(pathEnd) }
     }
@@ -57,6 +61,7 @@ class InstructionsTest {
                 path.endsWith("/conversations") -> "[]"
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/instructions") -> DocumentJson
+                path.endsWith("/groups") && request.method == HttpMethod.Get -> GroupsJson
                 path.endsWith("/projects") -> ProjectsJson
                 path.endsWith("/forges") -> "[]"
                 path.contains("/projects/") -> """{"id":"p1","node_id":"n1","name":"mycelium","path":"/p/mycelium","group_id":"g1","created_at":"2026-10-22T10:00:00Z"}"""
@@ -143,5 +148,38 @@ class InstructionsTest {
 
         val created = requestTo(HttpMethod.Post, "/groups")
         assertEquals("""{"name":"homelab"}""", created.third)
+    }
+
+    @Test
+    fun aGroupListsTheFoldersItClaimsWithTheNodeOrAnyNode() {
+        show()
+
+        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
+
+        rule.onNodeWithText("Folders in slop").assertExists()
+        rule.onNodeWithText("/home/claude/projects").assertExists()
+        assertEquals(2, rule.onAllNodesWithText("Any node").fetchSemanticsNodes().size)
+        rule.onNodeWithText("/srv/slop").assertExists()
+    }
+
+    @Test
+    fun aFolderIsAddedToTheOpenGroupForAnyNode() {
+        show()
+
+        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
+        rule.onNodeWithContentDescription("Folder").performTextInput("/home/claude/other")
+        rule.onNodeWithText("Add folder").performClick()
+
+        assertEquals("""{"prefix":"/home/claude/other"}""", requestTo(HttpMethod.Post, "/groups/g1/folders").third)
+    }
+
+    @Test
+    fun aFolderIsRemovedFromTheOpenGroupByItsName() {
+        show()
+
+        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
+        rule.onNodeWithContentDescription("Remove folder /srv/slop from slop").performClick()
+
+        requestTo(HttpMethod.Delete, "/groups/g1/folders/f2")
     }
 }

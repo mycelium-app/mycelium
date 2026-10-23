@@ -88,4 +88,22 @@ class InstructionsTest {
 
         assertEquals(listOf("""{"group_id":"g1"}""", "{}"), bodies)
     }
+
+    @Test
+    fun aFolderClaimIsPostedToTheGroupWithItsNodeAndDeletedByItsId() = runTest {
+        val seen = mutableListOf<Triple<HttpMethod, String, String>>()
+        val engine = MockEngine { request ->
+            seen += Triple(request.method, request.url.encodedPath, request.body.toByteArray().decodeToString())
+
+            respond("""{"id":"f1","node_id":"n1","prefix":"/srv"}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val api = MyceliumApi("https://mycelium.test", "token", engine)
+
+        val folder = api.addGroupFolder("g1", "/srv", "n1")
+        api.removeGroupFolder("g1", "f1")
+
+        assertEquals("n1", folder.nodeId)
+        assertEquals(Triple(HttpMethod.Post, "/api/v1/groups/g1/folders", """{"prefix":"/srv","node_id":"n1"}"""), seen[0])
+        assertEquals(HttpMethod.Delete to "/api/v1/groups/g1/folders/f1", seen[1].first to seen[1].second)
+    }
 }

@@ -5,6 +5,7 @@ import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.Goal
+import mycelium.api.Group
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
 import mycelium.api.EventKinds
@@ -34,6 +35,7 @@ data class AppState(
     val nodes: Map<String, NodeSummary> = emptyMap(),
     val resources: Map<String, NodeResources> = emptyMap(),
     val projects: Map<String, Project> = emptyMap(),
+    val groups: Map<String, Group> = emptyMap(),
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),

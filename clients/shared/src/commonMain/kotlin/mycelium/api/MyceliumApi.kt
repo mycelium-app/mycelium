@@ -236,6 +236,13 @@ class MyceliumApi(
         call("/groups/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun addGroupFolder(groupId: String, prefix: String, nodeId: String?): GroupFolder =
+        call("/groups/$groupId/folders") { client.post(it) { authorise(); json(GroupFolderRequest(prefix, nodeId)) } }.body()
+
+    suspend fun removeGroupFolder(groupId: String, folderId: String) {
+        call("/groups/$groupId/folders/$folderId") { client.delete(it) { authorise() } }
+    }
+
     suspend fun setProjectGroup(projectId: String, groupId: String?): Project =
         call("/projects/$projectId") { client.patch(it) { authorise(); json(PatchProjectRequest(groupId)) } }.body()
 
