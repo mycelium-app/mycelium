@@ -133,38 +133,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
             modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
         )
 
-        val handle = remember { MutableInteractionSource() }
-        val handleFocused by handle.collectIsFocusedAsState()
-
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .width(Tokens.Size.Hairline)
-                .background(if (handleFocused) colors.focus else colors.border)
-                .semantics { contentDescription = "Resize the sidebar" },
-        ) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .requiredWidth(Tokens.Space.S2)
-                    .pointerHoverIcon(HorizontalResizeIcon)
-                    .draggable(rememberDraggableState { delta -> resize(sidebarWidth + with(density) { delta.toDp() }) }, Orientation.Horizontal)
-                    .onKeyEvent { event ->
-                        val step = when (event.key) {
-                            Key.DirectionLeft -> -Tokens.Space.S4
-                            Key.DirectionRight -> Tokens.Space.S4
-                            else -> null
-                        }
-
-                        if (event.type == KeyEventType.KeyDown && step != null) {
-                            resize(sidebarWidth + step)
-                        }
-
-                        step != null
-                    }
-                    .focusable(interactionSource = handle),
-            )
-        }
+        ResizeHandle("Resize the sidebar") { moved -> resize(sidebarWidth + moved) }
 
         Column(Modifier.weight(1f).fillMaxHeight()) {
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }

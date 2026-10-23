@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.Conversation
@@ -62,6 +63,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var panel by remember { mutableStateOf<SidePanel?>(null) }
+    val platform = LocalPlatform.current
+    var panelWidth by remember { mutableStateOf(platform?.loadPreference(SidePanelWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel) }
+
+    fun resizePanel(width: Dp) {
+        panelWidth = width.coerceIn(Tokens.Size.SidePanelMin, Tokens.Size.SidePanelMax)
+        platform?.savePreference(SidePanelWidthPreference, panelWidth.value.toString())
+    }
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
@@ -205,11 +213,17 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
 
             if (!compact && !chat) {
-                when (panel) {
-                    SidePanel.Details -> Inspector(conversation, node)
-                    SidePanel.Terminal -> key(conversation.id) { TerminalSide(store, state, conversation) }
-                    SidePanel.Git -> key(conversation.id) { GitSide(store, conversation) }
-                    null -> Unit
+                if (panel != null) {
+                    ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
+
+                    Box(Modifier.width(panelWidth).fillMaxHeight()) {
+                        when (panel) {
+                            SidePanel.Details -> Inspector(conversation, node)
+                            SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize()) }
+                            SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize()) }
+                            null -> Unit
+                        }
+                    }
                 }
 
                 Rail(panel) { chosen -> panel = if (panel == chosen) null else chosen }
@@ -386,36 +400,16 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
 }
 
 @Composable
-private fun TerminalSide(store: Store, state: AppState, conversation: Conversation) {
-    Row(Modifier.fillMaxHeight()) {
-        VerticalHairline()
-        TerminalPanel(store, state, conversation, Modifier.width(Tokens.Size.Terminal).fillMaxHeight())
-    }
-}
-
-@Composable
-private fun GitSide(store: Store, conversation: Conversation) {
-    Row(Modifier.fillMaxHeight()) {
-        VerticalHairline()
-        GitPanel(store, conversation, Modifier.width(Tokens.Size.Git).fillMaxHeight())
-    }
-}
-
-@Composable
 private fun Inspector(conversation: Conversation, node: NodeSummary?) {
     val colors = MyTheme.colors
 
-    Row(Modifier.fillMaxHeight()) {
-        VerticalHairline()
+    Column(Modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
+        Bar {
+            BarTitle("Details")
+        }
 
-        Column(Modifier.width(Tokens.Size.Inspector).fillMaxHeight().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
-            Bar {
-                BarTitle("Details")
-            }
-
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
-                InspectorContent(conversation, node)
-            }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
+            InspectorContent(conversation, node)
         }
     }
 }
@@ -486,3 +480,5 @@ private fun InspectorSection(name: String, rows: List<Pair<String, String>>) {
         }
     }
 }
+
+private const val SidePanelWidthPreference = "side-panel-width"
