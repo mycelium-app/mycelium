@@ -126,7 +126,46 @@ pub async fn set_status(tx: &mut Tx<'_>, id: Uuid, status: ConversationStatus) -
         .await
 }
 
+pub fn without_nul(value: &mut Value) {
+    match value {
+        Value::String(text) if text.contains('\0') => *text = text.replace('\0', "\u{FFFD}"),
+        Value::Array(items) => items.iter_mut().for_each(without_nul),
+        Value::Object(fields) => {
+            if fields.keys().any(|key| key.contains('\0')) {
+                let entries = std::mem::take(fields);
+                fields.extend(entries.into_iter().map(|(key, value)| (key.replace('\0', "\u{FFFD}"), value)));
+            }
+
+            fields.values_mut().for_each(without_nul);
+        }
+        _ => {}
+    }
+}
+
+pub fn text_without_nul(text: &str) -> String {
+    text.replace('\0', "\u{FFFD}")
+}
+
+fn has_nul(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.contains('\0'),
+        Value::Array(items) => items.iter().any(has_nul),
+        Value::Object(fields) => fields.iter().any(|(key, value)| key.contains('\0') || has_nul(value)),
+        _ => false,
+    }
+}
+
 pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKind, payload: &Value, node_seq: Option<i64>) -> sqlx::Result<Option<Event>> {
+    let cleaned;
+    let payload = if has_nul(payload) {
+        let mut copy = payload.clone();
+        without_nul(&mut copy);
+        cleaned = copy;
+        &cleaned
+    } else {
+        payload
+    };
+
     let seq = sqlx::query_scalar::<_, i64>(
         "insert into events (conversation_id, seq, kind, payload, node_seq)
          select $1, coalesce(max(seq), 0) + 1, $2, $3, $4 from events where conversation_id = $1

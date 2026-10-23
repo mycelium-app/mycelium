@@ -303,7 +303,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         (_, Some((group_id, name))) => (vec![format!("group:{group_id}")], format!("the {name} group")),
                     };
                     let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning {MEMORY_COLUMNS}")))
-                        .bind(text)
+                        .bind(crate::store::text_without_nul(&text))
                         .bind(&scopes)
                         .bind(format!("{node_name}/{source}"))
                         .bind(conversation.map(|(conversation_id, _)| conversation_id))

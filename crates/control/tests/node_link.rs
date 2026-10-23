@@ -103,6 +103,22 @@ async fn acp_updates_are_stored_acknowledged_and_deduplicated_by_seq_across_reco
 }
 
 #[tokio::test]
+async fn a_nul_in_a_node_update_is_stored_as_a_replacement_character() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 1, update: json!({"sessionUpdate": "tool_call_update", "content": [{"text": "a\u{0}b"}], "raw\u{0}Key": "x"}) }).await;
+    assert_eq!(link.expect_ack().await, (conversation.id, 1));
+
+    let events = server.events(conversation.id).await;
+    assert_eq!(events[0]["payload"]["content"][0]["text"], "a\u{FFFD}b");
+    assert_eq!(events[0]["payload"]["raw\u{FFFD}Key"], "x");
+}
+
+#[tokio::test]
 async fn a_node_cannot_write_into_another_nodes_conversation() {
     let server = Server::start().await;
     let mut owner = server.online_node("laptop").await;
