@@ -162,6 +162,8 @@ fun Composer(
 
             sent = text.text
             text = TextFieldValue("")
+        } else if (queue.isNotEmpty()) {
+            onSendQueuedNow(queue.minBy { it.position }.id)
         }
     }
 
@@ -555,6 +557,10 @@ private fun QueuedMessages(
                         MyButton({ onRemove(item.id) }, icon = MyIcon.Close, description = "Remove queued message", size = ButtonSize.Sm, muted = true)
                         MyButton({ draft = item.text; editing = item.id }, icon = MyIcon.Pencil, description = "Edit queued message", size = ButtonSize.Sm, muted = true)
                         MyButton({ onSendNow(item.id) }, text = "Send now", size = ButtonSize.Sm, muted = true)
+
+                        if (index == 0) {
+                            Label("Enter", style = Tokens.Type.Meta, color = colors.textFaint)
+                        }
                     }
                 }
             }
