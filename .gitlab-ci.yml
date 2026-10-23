@@ -1,3 +1,7 @@
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+
 stages:
   - pages
   - build
@@ -7,6 +11,7 @@ pages:
   stage: pages
   image: alpine:latest
   needs: []
+  interruptible: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
@@ -57,8 +62,16 @@ build:image:
   stage: build
   image: docker:27
   needs: []
+  interruptible: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - Dockerfile
+        - Cargo.toml
+        - Cargo.lock
+        - crates/**/*
+        - clients/**/*
+        - .gitlab-ci.yml
   before_script:
     - echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
   script:
