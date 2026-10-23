@@ -1,5 +1,6 @@
 use crate::acp::Command;
-use crate::agents::{account_env, accounts_dir, detect_agents, find_account, login_command, login_state, new_account};
+use crate::agents::{ALL_AGENTS, account_env, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
+use crate::instructions::deliver;
 use crate::config::{NodeConfig, agent_command, agent_env, config_path};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
@@ -179,7 +180,8 @@ impl Daemon {
     pub fn handle(&self, message: ControlToNode) {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
-            ControlToNode::StartSession { conversation_id, agent, cwd, resume, account } => self.start_session(conversation_id, agent, &cwd, resume, account),
+            ControlToNode::StartSession { conversation_id, agent, cwd, resume, account, instructions } => self.start_session(conversation_id, agent, &cwd, resume, account, instructions),
+            ControlToNode::Instructions { revision, global } => self.hold_instructions(revision, global),
             ControlToNode::Prompt { conversation_id, prompt_id, text } => self.prompt(conversation_id, prompt_id, text),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
@@ -307,7 +309,7 @@ impl Daemon {
         }
     }
 
-    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, account: Option<String>) {
+    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, account: Option<String>, instructions: Option<String>) {
         let existing = self.session_handles();
         if existing.iter().any(|(id, handle)| *id == conversation_id && !handle.ended()) {
             return;
@@ -364,6 +366,7 @@ impl Daemon {
             agent_command,
             agent_env: env,
             mcp_server: self.config.mcp_server(conversation_id),
+            instructions: instructions.filter(|_| agent == AgentId::Claude),
             cwd: folder,
             resume,
         };
@@ -372,6 +375,16 @@ impl Daemon {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.insert(conversation_id, handle);
         }
+    }
+
+    fn hold_instructions(&self, revision: String, global: Option<String>) {
+        let installed: Vec<AgentId> = ALL_AGENTS.into_iter().filter(|agent| (self.options.agent_commands)(*agent).first().and_then(|program| resolve_program(program)).is_some()).collect();
+        let unmanaged = match global {
+            Some(global) => deliver(&self.options.home, &accounts_dir(&self.config.state_dir), &installed, &global),
+            None => Vec::new(),
+        };
+
+        let _ = self.out.send(NodeToControl::InstructionsHeld { revision, unmanaged });
     }
 
     fn refuse(&self, conversation_id: Uuid, message: String) {

@@ -238,7 +238,7 @@ fn seq_of(message: &NodeToControl) -> Option<i64> {
 }
 
 async fn start_conversation(connection: &mut Connection, conversation: Uuid) {
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: None });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: None, instructions: None });
     connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
 }
 
@@ -291,7 +291,7 @@ async fn a_prompt_streams_updates_then_turn_end_and_keeps_reading_the_late_updat
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(1);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: None });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: None, instructions: None });
     let started = connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
     let NodeToControl::SessionStarted { acp_session_id, modes, .. } = started else {
         unreachable!();
@@ -414,7 +414,7 @@ async fn a_missing_folder_fails_the_session_with_a_reason() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(6);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None, instructions: None });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -431,7 +431,7 @@ async fn an_account_the_node_does_not_hold_fails_the_session_with_a_reason() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(8);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: Some("nobody@example.com".into()) });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, account: Some("nobody@example.com".into()), instructions: None });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -453,7 +453,7 @@ async fn a_folder_outside_the_projects_root_is_refused() {
 
     for (index, cwd) in escapes.into_iter().enumerate() {
         let conversation = Uuid::from_u128(100 + index as u128);
-        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: cwd.clone(), resume: None, account: None });
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: cwd.clone(), resume: None, account: None, instructions: None });
 
         let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { conversation_id, .. } if *conversation_id == conversation)).await;
         let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -470,7 +470,7 @@ async fn an_agent_that_is_not_installed_fails_the_session() {
     let _daemon = fixture.start_daemon();
     let mut connection = control.accept().await;
 
-    connection.send(ControlToNode::StartSession { conversation_id: Uuid::from_u128(7), agent: AgentId::Codex, cwd: "demo".into(), resume: None, account: None });
+    connection.send(ControlToNode::StartSession { conversation_id: Uuid::from_u128(7), agent: AgentId::Codex, cwd: "demo".into(), resume: None, account: None, instructions: None });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -741,7 +741,7 @@ async fn repeated_refusals_for_one_conversation_use_increasing_seqs() {
 
     let mut seqs = Vec::new();
     for _ in 0..3 {
-        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None });
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None, instructions: None });
         let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
         seqs.push(seq_of(&failed).unwrap());
     }
@@ -757,7 +757,7 @@ async fn a_session_started_after_a_refusal_continues_above_the_refusal_seq() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(15);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, account: None, instructions: None });
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let refused_at = seq_of(&failed).unwrap();
 
@@ -893,4 +893,37 @@ async fn transcripts_are_sent_from_the_acknowledged_offset() {
 
     let next = connection.next_matching(|message| matches!(message, NodeToControl::Transcript { .. })).await;
     assert!(matches!(next, NodeToControl::Transcript { offset: 8, .. }));
+}
+
+#[tokio::test]
+async fn pushed_instructions_are_written_for_an_installed_agent_and_the_held_version_is_reported() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+
+    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) });
+
+    let held = connection.next_matching(|message| matches!(message, NodeToControl::InstructionsHeld { .. })).await;
+    assert_eq!(held, NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec![] });
+    let written = std::fs::read_to_string(fixture.root.path().join("home").join(".claude").join("CLAUDE.md")).unwrap();
+    assert!(written.ends_with("# Rules\n"), "{written}");
+    assert!(!fixture.root.path().join("home").join(".codex").exists(), "Codex is not installed here");
+}
+
+#[tokio::test]
+async fn pushed_instructions_never_replace_a_file_the_person_wrote() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let own = fixture.root.path().join("home").join(".claude").join("CLAUDE.md");
+    std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+    std::fs::write(&own, "My own rules\n").unwrap();
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+
+    connection.send(ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()) });
+
+    let held = connection.next_matching(|message| matches!(message, NodeToControl::InstructionsHeld { .. })).await;
+    assert_eq!(held, NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec![format!("Claude Code: {}", own.display())] });
+    assert_eq!(std::fs::read_to_string(&own).unwrap(), "My own rules\n");
 }

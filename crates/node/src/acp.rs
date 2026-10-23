@@ -51,6 +51,7 @@ pub struct StartPlan {
     pub cwd: String,
     pub resume: Option<String>,
     pub mcp_server: Value,
+    pub instructions: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,15 +367,23 @@ impl SessionState {
 
     fn start_session_request(&mut self, plan: &StartPlan) -> Action {
         let mcp_servers = if self.http_mcp { json!([plan.mcp_server]) } else { json!([]) };
+        let mut params = json!({"cwd": plan.cwd, "mcpServers": mcp_servers});
+
+        if let Some(instructions) = &plan.instructions {
+            params["_meta"] = json!({"systemPrompt": {"append": instructions}});
+        }
+
         let Some(resume) = &plan.resume else {
-            return self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": mcp_servers}));
+            return self.outgoing_request("session/new", params);
         };
 
-        let params = json!({"sessionId": resume, "cwd": plan.cwd, "mcpServers": mcp_servers});
         match self.resume_kind {
-            ResumeKind::Load => self.outgoing_request("session/load", params),
-            ResumeKind::Resume => self.outgoing_request("session/resume", params),
-            ResumeKind::Unsupported => self.outgoing_request("session/new", json!({"cwd": plan.cwd, "mcpServers": mcp_servers})),
+            ResumeKind::Load | ResumeKind::Resume => {
+                params["sessionId"] = json!(resume);
+
+                self.outgoing_request(if self.resume_kind == ResumeKind::Load { "session/load" } else { "session/resume" }, params)
+            }
+            ResumeKind::Unsupported => self.outgoing_request("session/new", params),
         }
     }
 
@@ -563,7 +572,7 @@ mod tests {
     }
 
     fn plan(resume: Option<&str>) -> Option<StartPlan> {
-        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), mcp_server: json!({"type": "http", "name": "mycelium"}) })
+        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None })
     }
 
     fn sent_frames(actions: &[Action]) -> Vec<Value> {
@@ -609,6 +618,35 @@ mod tests {
 
         let frames = sent_frames(&actions);
         assert_eq!(frames[0]["params"]["mcpServers"], json!([{"type": "http", "name": "mycelium"}]));
+    }
+
+    #[test]
+    fn the_group_instructions_are_appended_to_the_system_prompt_of_a_new_session() {
+        let mut with_instructions = plan(None).unwrap();
+        with_instructions.instructions = Some("Use British English.".into());
+        let mut state = SessionState::new(conversation(), Some(with_instructions), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["method"], "session/new");
+        assert_eq!(frames[0]["params"]["_meta"], json!({"systemPrompt": {"append": "Use British English."}}));
+    }
+
+    #[test]
+    fn the_group_instructions_are_appended_when_resuming_too() {
+        let mut with_instructions = plan(Some("abc")).unwrap();
+        with_instructions.instructions = Some("Use British English.".into());
+        let mut state = SessionState::new(conversation(), Some(with_instructions), 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true}}}));
+
+        let frames = sent_frames(&actions);
+        assert_eq!(frames[0]["method"], "session/load");
+        assert_eq!(frames[0]["params"]["_meta"], json!({"systemPrompt": {"append": "Use British English."}}));
+        assert_eq!(frames[0]["params"]["sessionId"], "abc");
     }
 
     #[test]

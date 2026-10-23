@@ -28,6 +28,7 @@ pub struct Launch {
     pub agent_command: Vec<String>,
     pub agent_env: Vec<(String, String)>,
     pub mcp_server: Value,
+    pub instructions: Option<String>,
     pub cwd: PathBuf,
     pub resume: Option<String>,
 }
@@ -166,7 +167,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     let mut state = match saved {
         Some(saved) => SessionState::restore(spec.conversation_id, saved.state, acked_now),
         None => {
-            let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone(), mcp_server: launch.mcp_server.clone() });
+            let plan = spec.launch.as_ref().map(|launch| StartPlan { cwd: launch.cwd.display().to_string(), resume: launch.resume.clone(), mcp_server: launch.mcp_server.clone(), instructions: launch.instructions.clone() });
 
             SessionState::new(spec.conversation_id, plan, acked_now)
         }
@@ -536,7 +537,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_directory_too_deep_for_a_unix_socket_is_refused_with_the_fix() {
         let dir = PathBuf::from("/tmp").join("d".repeat(120));
-        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, cwd: PathBuf::from("/"), resume: None };
+        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, instructions: None, cwd: PathBuf::from("/"), resume: None };
 
         let error = launch_keeper(&dir, &launch).await.unwrap_err().to_string();
 
