@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.2
+
+- Subagents leave the sidebar. A conversation's subagents are listed in a Subagents panel on its right, with their status.
+
 ## v0.5.1
 
 - A message you send after the agent's turn has ended goes straight to it, even while background agents keep the chat showing as working.
