@@ -63,7 +63,7 @@ async fn an_uploaded_logo_is_read_back_and_replaces_the_named_icon() {
 async fn choosing_a_named_icon_removes_the_uploaded_logo() {
     let server = Server::start().await;
     let id = project(&server).await;
-    upload_logo(&server.user, id, "image/svg+xml", b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec()).await;
+    upload_logo(&server.user, id, "image/png", b"\x89PNG fake".to_vec()).await;
 
     let (_, patched) = server.user.json(server.user.patch(&format!("/api/v1/projects/{id}")).json(&json!({"icon": "leaf"}))).await;
 
@@ -101,7 +101,7 @@ async fn a_logo_that_is_not_an_image_is_refused_with_a_message() {
     let (status, body) = upload_logo(&server.user, id, "text/plain", b"hello".to_vec()).await;
 
     assert_eq!((status, body["error"].clone()), (400, json!("avatar_not_image")), "{body}");
-    assert!(body["message"].as_str().unwrap().contains("PNG, JPEG, WebP or SVG"));
+    assert!(body["message"].as_str().unwrap().contains("PNG, JPEG or WebP"));
     assert_eq!(listed(&server).await["avatar_sha256"], Value::Null);
 }
 

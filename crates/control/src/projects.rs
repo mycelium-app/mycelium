@@ -20,7 +20,7 @@ use uuid::Uuid;
 pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, icon, avatar_sha256, created_at";
 pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
 const MAX_ICON_CHARACTERS: usize = 40;
-const AVATAR_MEDIA_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+const AVATAR_MEDIA_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
 const PROJECTS_FOLDER: &str = "projects";
 
 #[derive(Clone, sqlx::FromRow)]
@@ -244,7 +244,7 @@ pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(i
     let media_type = attachments::media_type_of(&headers);
 
     if !AVATAR_MEDIA_TYPES.contains(&media_type.as_str()) {
-        return Err(ApiError::bad_request("avatar_not_image", "The logo must be a PNG, JPEG, WebP or SVG image. Choose another file."));
+        return Err(ApiError::bad_request("avatar_not_image", "The logo must be a PNG, JPEG or WebP image. Choose another file."));
     }
 
     if body.is_empty() {
