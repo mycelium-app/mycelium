@@ -95,8 +95,8 @@ class MyceliumApi(
 
     suspend fun version(): String = call("/version") { client.get(it) }.body<ServerVersion>().version
 
-    suspend fun startDevice(request: DeviceRequest): DeviceResponse =
-        call("/device") { client.post(it) { json(request) } }.body()
+    suspend fun startDevice(request: DeviceRequest, returnTo: String? = null): DeviceResponse =
+        call("/device") { client.post(it) { json(request); returnTo?.let { target -> parameter("return_to", target) } } }.body()
 
     suspend fun pollDevice(deviceCode: String): DevicePoll {
         val response = client.post("$root/api/v1/device/token") { json(DeviceTokenRequest(deviceCode)) }

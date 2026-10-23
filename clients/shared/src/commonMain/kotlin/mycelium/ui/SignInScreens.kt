@@ -37,6 +37,7 @@ import mycelium.api.MyceliumApi
 import mycelium.api.PendingDevice
 import mycelium.state.SignInRejected
 import mycelium.state.normaliseAddress
+import mycelium.state.signInCallbackFrom
 import mycelium.state.signInWithDeviceCode
 
 @Composable
@@ -52,6 +53,15 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
         platform.navigate("$origin/auth/login?next=${encodeQuery(platform.currentPath())}")
     }
 
+    fun cancelSignIn() {
+        job?.cancel()
+        job = null
+        device = null
+        error = "Sign-in was cancelled. Select Continue to try again."
+    }
+
+    fun openSignInPage(code: DeviceResponse) = platform.openSignIn(code.verificationUriComplete, ::cancelSignIn)
+
     fun beginWithDeviceCode() {
         val normalised = normaliseAddress(address)
 
@@ -66,9 +76,9 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
                 val api = MyceliumApi(normalised)
                 val info = platform.device()
                 val request = DeviceRequest(DeviceKind.Client, info.label, info.hostname, info.os, info.arch)
-                val token = signInWithDeviceCode(api, request) {
+                val token = signInWithDeviceCode(api, request, platform.signInCallback) {
                     device = it
-                    platform.openUrl(it.verificationUriComplete)
+                    openSignInPage(it)
                 }
                 val signedIn = MyceliumApi(normalised, token.token)
                 val me = signedIn.me()
@@ -97,7 +107,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
             val code = device
 
             if (code != null) {
-                DeviceCodePanel(code, platform, onCancel = { job?.cancel(); job = null; device = null })
+                DeviceCodePanel(code, platform, onOpen = { openSignInPage(code) }, onCancel = { job?.cancel(); job = null; device = null })
             } else {
                 if (!platform.signsInThroughTheBrowser) {
                     TextInput(
@@ -126,7 +136,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
 }
 
 @Composable
-private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onCancel: () -> Unit) {
+private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onOpen: () -> Unit, onCancel: () -> Unit) {
     val colors = MyTheme.colors
 
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
@@ -145,7 +155,7 @@ private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onCancel
             MyButton({ platform.copyToClipboard(device.userCode) }, text = "Copy", description = "Copy code ${device.userCode}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
-        MyButton({ platform.openUrl(device.verificationUriComplete) }, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
+        MyButton(onOpen, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
 
         StatusMark("Waiting for you to sign in", Tone.Working, MyIcon.Working)
         MyButton(onCancel, text = "Cancel", size = ButtonSize.Sm, muted = true)
@@ -153,7 +163,7 @@ private fun DeviceCodePanel(device: DeviceResponse, platform: Platform, onCancel
 }
 
 @Composable
-fun ApproveScreen(api: MyceliumApi, code: String, onDone: () -> Unit) {
+fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (String) -> Unit, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<PendingDevice?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -174,6 +184,7 @@ fun ApproveScreen(api: MyceliumApi, code: String, onDone: () -> Unit) {
             try {
                 if (approve) api.approveDevice(code) else api.denyDevice(code)
                 outcome = if (approve) "Approved. You can close this page and go back to the machine." else "Denied. The machine will not be connected."
+                signInCallbackFrom(returnTo)?.let(onReturn)
             } catch (failure: ApiException) {
                 error = failure.message
             } catch (_: Exception) {

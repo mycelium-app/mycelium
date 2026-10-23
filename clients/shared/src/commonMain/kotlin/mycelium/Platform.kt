@@ -13,6 +13,8 @@ interface Platform {
 
     val originUrl: String?
 
+    val signInCallback: String? get() = null
+
     val reducedMotion: Boolean get() = false
 
     val resumes: Flow<Unit> get() = emptyFlow()
@@ -25,11 +27,15 @@ interface Platform {
 
     fun approveCode(): String?
 
+    fun approveReturnTo(): String? = null
+
     fun currentPath(): String
 
     fun navigate(url: String)
 
     fun openUrl(url: String)
+
+    fun openSignIn(url: String, onCancelled: () -> Unit) = openUrl(url)
 
     fun copyToClipboard(text: String)
 

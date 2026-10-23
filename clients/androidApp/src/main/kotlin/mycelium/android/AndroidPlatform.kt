@@ -13,10 +13,13 @@ import mycelium.DeviceInfo
 import mycelium.Platform
 import mycelium.state.MaxAttachmentBytes
 import mycelium.state.PickedFile
+import mycelium.state.SignInCallback
 import mycelium.state.mediaTypeOf
 
-class AndroidPlatform(private val context: Context, private val launchPicker: () -> Unit = {}) : Platform {
+class AndroidPlatform(private val context: Context, private val launchPicker: () -> Unit = {}, private val launchSignIn: (Uri) -> Unit = {}) : Platform {
     private var waitingForPick: ((List<PickedFile>) -> Unit)? = null
+
+    private var waitingForSignIn: (() -> Unit)? = null
 
     private val preferences = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -24,6 +27,8 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     override val signsInThroughTheBrowser = false
 
     override val originUrl: String? = null
+
+    override val signInCallback = SignInCallback
 
     private val resumed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
@@ -68,6 +73,20 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         context.startActivity(intent)
+    }
+
+    override fun openSignIn(url: String, onCancelled: () -> Unit) {
+        waitingForSignIn = onCancelled
+        launchSignIn(Uri.parse(url))
+    }
+
+    fun signInClosed(approved: Boolean) {
+        val cancelled = waitingForSignIn
+        waitingForSignIn = null
+
+        if (!approved) {
+            cancelled?.invoke()
+        }
     }
 
     override fun timeZone(): String? = java.time.ZoneId.systemDefault().id

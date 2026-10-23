@@ -147,7 +147,7 @@ private fun AppContent(platform: Platform) {
                     val code = approveCode
 
                     if (code != null) {
-                        ApproveScreen(current.api, code, onDone = { approveCode = null })
+                        ApproveScreen(current.api, code, platform.approveReturnTo(), platform::navigate, onDone = { approveCode = null })
                     } else {
                         val store = remember(current.api) { Store(current.api, scope) }
 

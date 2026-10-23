@@ -255,3 +255,19 @@ async fn polling_for_a_device_token_too_fast_from_one_address_is_refused() {
 
     assert_eq!((status, body["error"].as_str()), (429, Some("rate_limited")));
 }
+
+#[tokio::test]
+async fn an_app_sign_in_asks_the_approval_page_to_return_to_the_app_and_no_other_target_is_accepted() {
+    let server = Server::start().await;
+    let anonymous = server.anonymous();
+    let body = json!({"kind": "client", "label": "phone", "hostname": "phone", "os": "android", "arch": "arm64"});
+
+    let (status, started) = anonymous.json(anonymous.post("/api/v1/device?return_to=mycelium%3A%2F%2Fsigned-in").json(&body)).await;
+    assert_eq!(status, 200, "{started}");
+    assert!(started["verification_uri_complete"].as_str().unwrap().ends_with("&return_to=mycelium%3A%2F%2Fsigned-in"));
+
+    for target in ["https%3A%2F%2Fevil.example", "mycelium%3A%2F%2Fother", "mycelium%3A%2F%2Fsigned-in%2Fx"] {
+        let (status, refused) = anonymous.json(anonymous.post(&format!("/api/v1/device?return_to={target}")).json(&body)).await;
+        assert_eq!((status, refused["error"].as_str()), (400, Some("return_to_not_allowed")), "{target}");
+    }
+}

@@ -11,6 +11,7 @@ import mycelium.api.DeviceRequest
 import mycelium.api.MyceliumApi
 import mycelium.state.SignInRejected
 import mycelium.state.normaliseAddress
+import mycelium.state.signInCallbackFrom
 import mycelium.state.signInWithDeviceCode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -100,5 +101,33 @@ class DeviceSignInTest {
     fun blankOrSpacedAddressIsRejected() {
         assertNull(normaliseAddress("  "))
         assertNull(normaliseAddress("my host"))
+    }
+}
+
+class SignInCallbackTest {
+    @Test
+    fun onlyTheAppsOwnCallbackIsAcceptedInEitherSpelling() {
+        assertEquals("mycelium://signed-in", signInCallbackFrom("mycelium://signed-in"))
+        assertEquals("mycelium://signed-in", signInCallbackFrom("mycelium%3A%2F%2Fsigned-in"))
+        assertNull(signInCallbackFrom("https://evil.example"))
+        assertNull(signInCallbackFrom("mycelium://signed-in/../x"))
+        assertNull(signInCallbackFrom(null))
+    }
+
+    @Test
+    fun theCallbackIsSentWhenStartingTheDeviceFlow() = runTest {
+        var query: String? = null
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath.endsWith("/device")) {
+                query = request.url.parameters["return_to"]
+                respond(DeviceBody, HttpStatusCode.OK, Json)
+            } else {
+                respond("""{"kind":"client","id":"d1","token":"secret"}""", HttpStatusCode.OK, Json)
+            }
+        }
+
+        signInWithDeviceCode(MyceliumApi("https://x", engine = engine), Request, "mycelium://signed-in") {}
+
+        assertEquals("mycelium://signed-in", query)
     }
 }

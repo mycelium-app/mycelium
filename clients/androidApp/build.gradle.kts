@@ -38,5 +38,6 @@ dependencies {
     implementation(libs.compose.foundation)
     implementation(libs.compose.ui)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.browser)
     implementation(libs.kotlinx.serialization.json)
 }

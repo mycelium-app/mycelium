@@ -3,7 +3,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::{AppState, hash_token, new_token};
 use crate::store::{enum_text, parse_enum, publish_node};
 use axum::Json;
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use mycelium_proto::api::{DeviceRequest, DeviceResponse, DeviceTokenRequest, DeviceTokenResponse, PendingDevice};
 use mycelium_proto::conversation::{DeviceKind, DeviceState};
@@ -14,6 +14,7 @@ use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;
 
 const POLL_INTERVAL_SECONDS: u64 = 5;
+const APP_SIGN_IN_CALLBACK: &str = "mycelium://signed-in";
 const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKMNPQRSTVWXZ";
 
 fn new_user_code() -> String {
@@ -63,14 +64,23 @@ pub fn client_address(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -
     hops.into_iter().rev().find(|address| !trusted(*address)).unwrap_or(peer.ip())
 }
 
-pub async fn start(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(request): Json<DeviceRequest>) -> Result<Json<DeviceResponse>, Response> {
+#[derive(serde::Deserialize)]
+pub struct StartQuery {
+    return_to: Option<String>,
+}
+
+pub async fn start(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: HeaderMap, Query(query): Query<StartQuery>, Json(request): Json<DeviceRequest>) -> Result<Json<DeviceResponse>, Response> {
+    if query.return_to.as_deref().is_some_and(|target| target != APP_SIGN_IN_CALLBACK) {
+        return Err(ApiError::bad_request("return_to_not_allowed", "Only the Mycelium app's own sign-in callback can be returned to.").into_response());
+    }
+
     let address = client_address(&state, &headers, peer);
     state.rate_limiter.take(Limited::StartDevice, address).map_err(IntoResponse::into_response)?;
 
-    start_allowed(state, address, request).await.map_err(IntoResponse::into_response)
+    start_allowed(state, address, request, query.return_to.is_some()).await.map_err(IntoResponse::into_response)
 }
 
-async fn start_allowed(state: AppState, address: IpAddr, request: DeviceRequest) -> ApiResult<Json<DeviceResponse>> {
+async fn start_allowed(state: AppState, address: IpAddr, request: DeviceRequest, returns_to_app: bool) -> ApiResult<Json<DeviceResponse>> {
     let label = if request.label.trim().is_empty() { request.hostname.trim().to_string() } else { request.label.trim().to_string() };
 
     if label.is_empty() {
@@ -106,9 +116,11 @@ async fn start_allowed(state: AppState, address: IpAddr, request: DeviceRequest)
             publish_device(&state, &identity, DeviceState::Pending, None)?;
             tokio::spawn(publish_expiry_when_due(state.clone(), identity));
 
+            let return_to = if returns_to_app { "&return_to=mycelium%3A%2F%2Fsigned-in" } else { "" };
+
             return Ok(Json(DeviceResponse {
                 device_code,
-                verification_uri_complete: format!("{verification_uri}?code={user_code}"),
+                verification_uri_complete: format!("{verification_uri}?code={user_code}{return_to}"),
                 verification_uri,
                 user_code,
                 interval: POLL_INTERVAL_SECONDS,

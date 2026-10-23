@@ -14,9 +14,10 @@ class SignInRejected(override val message: String) : Exception(message)
 suspend fun signInWithDeviceCode(
     api: MyceliumApi,
     request: DeviceRequest,
+    returnTo: String? = null,
     onCode: (DeviceResponse) -> Unit,
 ): DeviceTokenResponse {
-    val device = api.startDevice(request)
+    val device = api.startDevice(request, returnTo)
     onCode(device)
 
     while (true) {

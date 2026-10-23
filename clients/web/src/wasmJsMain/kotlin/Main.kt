@@ -122,6 +122,10 @@ private object WebPlatform : Platform {
         }
     }
 
+    override fun approveReturnTo(): String? = pageQuery().removePrefix("?").split("&").firstNotNullOfOrNull { pair ->
+        pair.takeIf { it.startsWith("return_to=") }?.removePrefix("return_to=")
+    }
+
     override fun currentPath(): String = pagePath() + pageQuery()
 
     override fun navigate(url: String) = goTo(url)
