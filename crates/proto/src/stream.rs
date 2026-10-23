@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{Goal, ImportJob, InstructionProposal, Memory, MoveProgress, NodeSummary, Schedule, Walkthrough};
+use crate::api::{Goal, ImportJob, InstructionProposal, Memory, MoveProgress, NodeSummary, Schedule, Walkthrough, WalkthroughNote};
 use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
@@ -24,6 +24,11 @@ pub enum StreamMessage {
         conversation_id: Uuid,
     },
     Walkthrough(Walkthrough),
+    WalkthroughNotes {
+        conversation_id: Uuid,
+        walkthrough_id: Uuid,
+        notes: Vec<WalkthroughNote>,
+    },
     Schedule(Schedule),
     ScheduleRemoved {
         schedule_id: Uuid,

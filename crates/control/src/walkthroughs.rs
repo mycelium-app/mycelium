@@ -277,22 +277,36 @@ pub async fn add_note(State(state): State<AppState>, user: AuthUser, Path(id): P
         .bind(comment)
         .fetch_one(&state.pool)
         .await?;
+    publish_notes(&state, user.id, id).await?;
 
     Ok((StatusCode::CREATED, Json(row.to_proto())))
+}
+
+async fn load_notes(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Vec<WalkthroughNote>> {
+    let rows = sqlx::query_as::<_, NoteRow>("select id, step, file, line_start, line_end, quote, comment, sent_at, created_at from walkthrough_notes where walkthrough_id = $1 and user_id = $2 order by created_at, id").bind(id).bind(owner).fetch_all(&state.pool).await?;
+
+    Ok(rows.into_iter().map(NoteRow::to_proto).collect())
+}
+
+async fn publish_notes(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+    let conversation_id = sqlx::query_scalar::<_, Uuid>("select conversation_id from walkthroughs where id = $1").bind(id).fetch_one(&state.pool).await?;
+    let notes = load_notes(state, owner, id).await?;
+    state.publish(Some(owner), StreamMessage::WalkthroughNotes { conversation_id, walkthrough_id: id, notes });
+
+    Ok(())
 }
 
 pub async fn notes(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughNote>>> {
     find_owned_walkthrough(&state, id, user.id).await?;
 
-    let rows = sqlx::query_as::<_, NoteRow>("select id, step, file, line_start, line_end, quote, comment, sent_at, created_at from walkthrough_notes where walkthrough_id = $1 and user_id = $2 order by created_at, id").bind(id).bind(user.id).fetch_all(&state.pool).await?;
-
-    Ok(Json(rows.into_iter().map(NoteRow::to_proto).collect()))
+    Ok(Json(load_notes(&state, user.id, id).await?))
 }
 
 pub async fn mark_notes_sent(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     find_owned_walkthrough(&state, id, user.id).await?;
 
     sqlx::query("update walkthrough_notes set sent_at = now() where walkthrough_id = $1 and user_id = $2 and sent_at is null").bind(id).bind(user.id).execute(&state.pool).await?;
+    publish_notes(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -301,6 +315,7 @@ pub async fn remove_note(State(state): State<AppState>, user: AuthUser, Path((id
     find_owned_walkthrough(&state, id, user.id).await?;
 
     sqlx::query("delete from walkthrough_notes where id = $1 and walkthrough_id = $2 and user_id = $3").bind(note_id).bind(id).bind(user.id).execute(&state.pool).await?;
+    publish_notes(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

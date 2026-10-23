@@ -54,6 +54,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/memories/{id}",
     "PUT /api/v1/walkthroughs/{id}/dismissal",
     "DELETE /api/v1/walkthroughs/{id}/dismissal",
+    "POST /api/v1/walkthroughs/{id}/notes",
+    "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
+    "POST /api/v1/walkthroughs/{id}/notes/sent",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -114,9 +117,6 @@ const SILENT_ROUTES: &[&str] = &[
     "PUT /api/v1/instruction-source",
     "DELETE /api/v1/instruction-source",
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
-    "POST /api/v1/walkthroughs/{id}/notes",
-    "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
-    "POST /api/v1/walkthroughs/{id}/notes/sent",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
@@ -970,6 +970,32 @@ async fn a_stored_walkthrough_is_streamed() {
 
     let walkthrough = stream.until(|message| match message { StreamMessage::Walkthrough(walkthrough) => Some(walkthrough), _ => None }).await;
     assert_eq!((walkthrough.conversation_id, walkthrough.steps[0].title.as_str(), walkthrough.steps[0].key), (conversation.id, "One", true));
+}
+
+#[tokio::test]
+async fn a_walkthrough_note_added_and_removed_on_one_client_reaches_another() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let mut writer = server.user.stream().await;
+    let mut reader = server.user.stream().await;
+    let anonymous = server.anonymous();
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "walkthrough", "arguments": {"steps": [{"title": "One", "key": true, "files": [{"path": "a.rs", "diff": "+a"}]}]}}});
+
+    anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).header("x-mycelium-conversation", conversation.id.to_string()).json(&call)).await;
+
+    let walkthrough = writer.until(|message| match message { StreamMessage::Walkthrough(walkthrough) => Some(walkthrough), _ => None }).await;
+    let url = format!("/api/v1/walkthroughs/{}/notes", walkthrough.id);
+    let (_, added) = server.user.json(server.user.post(&url).json(&json!({"step": 0, "comment": "Check this"}))).await;
+    let note_id = added["id"].as_str().unwrap().to_string();
+
+    let notes = reader.until(|message| match message { StreamMessage::WalkthroughNotes { conversation_id, notes, .. } if conversation_id == conversation.id => Some(notes), _ => None }).await;
+    assert_eq!(notes.iter().map(|note| note.comment.as_str()).collect::<Vec<_>>(), ["Check this"]);
+
+    server.user.json(server.user.delete(&format!("{url}/{note_id}"))).await;
+
+    let remaining = reader.until(|message| match message { StreamMessage::WalkthroughNotes { notes, .. } if notes.is_empty() => Some(notes), _ => None }).await;
+    assert!(remaining.is_empty());
 }
 
 #[tokio::test]
