@@ -381,6 +381,23 @@ async fn stop_ends_a_turn_the_agent_is_not_running_so_the_conversation_stops_wor
 }
 
 #[tokio::test]
+async fn stop_ends_a_turn_whose_agent_ignores_it_and_keeps_streaming() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(31);
+    start_conversation(&mut connection, conversation).await;
+
+    prompt(&connection, conversation, "chatty");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("chatty")).await;
+    connection.send(ControlToNode::Cancel { conversation_id: conversation });
+
+    let turn_end = connection.next_matching(|message| matches!(message, NodeToControl::TurnEnd { .. })).await;
+    assert!(matches!(&turn_end, NodeToControl::TurnEnd { stop_reason, .. } if stop_reason == "cancelled"));
+}
+
+#[tokio::test]
 async fn agent_requests_the_client_does_not_support_get_method_not_found() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

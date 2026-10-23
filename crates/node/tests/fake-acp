@@ -2,13 +2,15 @@
 """Fake ACP agent over stdio.
 
 A prompt containing "permission" asks for permission before answering, "readfile" asks the client to read a file and reports whether it was refused, "slow" waits until
-session/cancel arrives, "stuck" streams one update and never answers the prompt, not even a cancel, anything else streams three updates. Every turn is followed by one
+session/cancel arrives, "stuck" streams one update and never answers the prompt, not even a cancel, "chatty" streams an
+update every half second for twenty seconds and never answers the prompt, anything else streams three updates. Every turn is followed by one
 extra update after the prompt response.
 """
 import json
 import queue
 import sys
 import threading
+import time
 
 SESSION_ID = "fake-session-1"
 write_lock = threading.Lock()
@@ -54,6 +56,11 @@ def run_prompt(request_id, params):
             return
     elif "stuck" in text:
         update(session_id, "stuck")
+        return
+    elif "chatty" in text:
+        for _ in range(40):
+            update(session_id, "chatty")
+            time.sleep(0.5)
         return
     elif "readfile" in text:
         send({"jsonrpc": "2.0", "id": 9002, "method": "fs/read_text_file", "params": {"sessionId": session_id, "path": "/etc/hostname"}})
