@@ -544,7 +544,7 @@ async fn nul_characters_and_unreadable_lines_do_not_stop_a_transcript_importing(
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
     let lines = [
-        json!({"type": "user", "sessionId": "nul", "cwd": "/work/a\u{0}pp", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "Run it"}}).to_string(),
+        json!({"type": "user", "sessionId": "nul", "cwd": "/work/a\u{0}pp", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "Run\u{0} it"}}).to_string(),
         "{ not json".to_string(),
         json!({"type": "assistant", "sessionId": "nul", "timestamp": "2026-10-01T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]}}).to_string(),
         json!({"type": "user", "sessionId": "nul", "timestamp": "2026-10-01T10:00:09Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "a\u{0}b"}]}}).to_string(),
@@ -556,6 +556,7 @@ async fn nul_characters_and_unreadable_lines_do_not_stop_a_transcript_importing(
 
     let imported = &imported_conversation(&server, "nul").await;
     assert_eq!(imported["cwd"], "/work/a\u{FFFD}pp");
+    assert_eq!(imported["title"], "Run\u{FFFD} it");
 
     let events = server.events(imported["id"].as_str().unwrap().parse().unwrap()).await;
     assert_eq!(events[2]["payload"]["update"]["content"][0]["content"]["text"], "a\u{FFFD}b");
