@@ -5,6 +5,7 @@ import mycelium.App
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
+import mycelium.state.NotifyFinishedPreference
 import mycelium.state.PickedFile
 import mycelium.state.decodeBase64
 import mycelium.state.mediaTypeOf
@@ -86,6 +87,9 @@ private external fun pageFocused(): Boolean
 
 @JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { Notification.requestPermission(); } }")
 private external fun askNotificationPermission()
+
+@JsFun("() => { if (typeof Notification !== 'undefined' && Notification.permission === 'default') { document.addEventListener('pointerdown', () => Notification.requestPermission(), { once: true }); } }")
+private external fun askNotificationPermissionOnFirstClick()
 
 @JsFun("""(title, body, id, onOpen) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') { return; }
@@ -202,6 +206,10 @@ private external fun hideLoading()
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
+    if (WebPlatform.loadPreference(NotifyFinishedPreference) != false.toString()) {
+        askNotificationPermissionOnFirstClick()
+    }
+
     ComposeViewport {
         LaunchedEffect(Unit) { hideLoading() }
 

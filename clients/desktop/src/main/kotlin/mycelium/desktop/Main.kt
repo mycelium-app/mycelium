@@ -131,6 +131,8 @@ private object DesktopPlatform : Platform {
 
     private var notifiedConversation: String? = null
 
+    private val isLinux = System.getProperty("os.name").orEmpty().startsWith("Linux")
+
     private val trayIcon: TrayIcon? by lazy {
         runCatching {
             if (!SystemTray.isSupported()) {
@@ -156,7 +158,31 @@ private object DesktopPlatform : Platform {
 
     override fun notify(title: String, body: String, conversationId: String, sound: Boolean) {
         notifiedConversation = conversationId
-        trayIcon?.displayMessage(title, body, TrayIcon.MessageType.NONE)
+
+        if (isLinux) {
+            Thread { notifyOnLinux(title, body, conversationId) }.start()
+        } else {
+            trayIcon?.displayMessage(title, body, TrayIcon.MessageType.NONE)
+        }
+    }
+
+    private fun notifyOnLinux(title: String, body: String, conversationId: String) {
+        val clicked = runCatching {
+            val process = ProcessBuilder("notify-send", "--app-name=Mycelium", "--action=open=Open", "--wait", title, body).redirectErrorStream(true).start()
+            val answer = process.inputStream.bufferedReader().readText().trim()
+
+            process.waitFor() == 0 && answer == "open"
+        }
+
+        if (clicked.isFailure) {
+            runCatching {
+                ProcessBuilder("gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify", "Mycelium", "0", "", title, body, "[]", "{}", "-1").start().waitFor()
+            }
+        }
+
+        if (clicked.getOrNull() == true) {
+            notificationOpener?.invoke(conversationId)
+        }
     }
 
     override fun chime() {

@@ -12,6 +12,7 @@
   glib,
   gtk3,
   gsettings-desktop-schemas,
+  libnotify,
   version,
   distributable,
 }:
@@ -40,6 +41,7 @@ stdenvNoCC.mkDerivation {
       --add-flags "-Dcompose.application.configure.swing.globals=true" \
       --add-flags "-Dskiko.library.path=$app" \
       --add-flags "-cp '$app/*' mycelium.desktop.MainKt" \
+      --prefix PATH : ${lib.makeBinPath [ libnotify glib ]} \
       --prefix XDG_DATA_DIRS : ${glib.getSchemaDataDirPath gsettings-desktop-schemas}:${glib.getSchemaDataDirPath gtk3} \
       --prefix LD_LIBRARY_PATH : ${
         lib.makeLibraryPath [
