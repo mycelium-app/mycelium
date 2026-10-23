@@ -75,14 +75,20 @@ build:image:
   before_script:
     - echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
   script:
+    - printf '%s' "${BUILD_CACHE_ACCESS_KEY:-}" > /tmp/build_cache_key
+    - printf '%s' "${BUILD_CACHE_SECRET_KEY:-}" > /tmp/build_cache_secret
     - docker build
         -f Dockerfile
+        --secret id=build_cache_key,src=/tmp/build_cache_key
+        --secret id=build_cache_secret,src=/tmp/build_cache_secret
         --build-arg "MYCELIUM_VERSION=${CI_COMMIT_SHORT_SHA}"
         -t "$IMAGE:${CI_COMMIT_SHORT_SHA}"
         -t "$IMAGE:latest"
         .
     - docker push "$IMAGE:${CI_COMMIT_SHORT_SHA}"
     - docker push "$IMAGE:latest"
+  after_script:
+    - rm -f /tmp/build_cache_key /tmp/build_cache_secret
 
 .binary:
   stage: build
@@ -96,8 +102,16 @@ build:image:
       - .cargo/registry/
       - .cargo/git/
       - target/
+  before_script:
+    - |
+      if [ -n "${BUILD_CACHE_ACCESS_KEY:-}" ]; then
+        curl -fsSL "https://github.com/mozilla/sccache/releases/download/v0.18.0/sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz" | tar -xz -C /usr/local/bin --strip-components=1 sccache-v0.18.0-x86_64-unknown-linux-musl/sccache
+        export RUSTC_WRAPPER=sccache AWS_ACCESS_KEY_ID="$BUILD_CACHE_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$BUILD_CACHE_SECRET_KEY"
+        export SCCACHE_BUCKET=build-cache SCCACHE_ENDPOINT=https://s3.example.com SCCACHE_REGION=garage SCCACHE_S3_KEY_PREFIX="mycelium/sccache/$RUST_TARGET/" SCCACHE_S3_USE_SSL=true
+      fi
   script:
     - MYCELIUM_VERSION="$CI_COMMIT_TAG" cargo build --release --locked --package mycelium-cli --target "$RUST_TARGET"
+    - if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
     - cp "target/$RUST_TARGET/release/mycelium" "$ASSET"
     - sha256sum "$ASSET" | cut -d' ' -f1 > "$ASSET.sha256"
   artifacts:
