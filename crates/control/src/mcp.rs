@@ -122,6 +122,20 @@ fn tool_definitions() -> Value {
     ])
 }
 
+pub fn tools_instructions() -> String {
+    let lines: Vec<String> = tool_definitions()
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| Some(format!("- mcp__mycelium__{}: {}", tool["name"].as_str()?, tool["description"].as_str()?.replace('\n', " "))))
+        .collect();
+
+    format!(
+        "You are running inside Mycelium, and its MCP server, mycelium, gives you these tools. They are MCP tools named mcp__mycelium__<name>, not skills. Your own memory features are off on purpose: use remember and recall instead.\n{}",
+        lines.join("\n")
+    )
+}
+
 async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {
     let claimed = headers.get("x-mycelium-conversation").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<Uuid>().ok());
 

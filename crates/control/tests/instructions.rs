@@ -662,12 +662,12 @@ async fn recall_names_what_other_groups_hold_and_groups_reaches_into_them() {
     assert_eq!(unknown, "No group is called nobody. Use a group name, or groups: \"all\".");
 }
 
-async fn set_extensions(server: &Server, generated_ui: bool, rich_markdown: bool) -> (u16, Value) {
-    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": generated_ui, "rich_markdown": rich_markdown}))).await
+async fn set_extensions(server: &Server, generated_ui: bool, rich_markdown: bool, mycelium_tools: bool) -> (u16, Value) {
+    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": generated_ui, "rich_markdown": rich_markdown, "mycelium_tools": mycelium_tools}))).await
 }
 
 async fn set_generated_ui(server: &Server, on: bool) -> (u16, Value) {
-    set_extensions(server, on, false).await
+    set_extensions(server, on, false, false).await
 }
 
 #[tokio::test]
@@ -679,7 +679,7 @@ async fn generated_ui_is_on_by_default_and_a_new_session_gets_the_schema_with_th
     let (_, instructions) = start_in_folder(&server, &mut link, "/anywhere").await;
     let prompt = instructions.unwrap();
 
-    assert_eq!(extensions, json!({"generated_ui": true, "rich_markdown": true}));
+    assert_eq!(extensions, json!({"generated_ui": true, "rich_markdown": true, "mycelium_tools": true}));
     assert!(prompt.starts_with("When an interface helps"), "{prompt}");
     assert!(prompt.contains("mycelium-ui") && prompt.contains("\"type\":\"bar_chart\"") && prompt.contains("\"type\":\"open_file\""), "{prompt}");
 }
@@ -700,7 +700,7 @@ async fn the_schema_follows_the_group_layer_and_turning_the_switch_off_leaves_on
     let (_, extensions) = server.user.json(server.user.get("/api/v1/extensions")).await;
 
     assert!(on.unwrap().starts_with("Use British English.\n\nWhen an interface helps"));
-    assert_eq!((status, saved, extensions), (200, json!({"generated_ui": false, "rich_markdown": false}), json!({"generated_ui": false, "rich_markdown": false})));
+    assert_eq!((status, saved, extensions), (200, json!({"generated_ui": false, "rich_markdown": false, "mycelium_tools": false}), json!({"generated_ui": false, "rich_markdown": false, "mycelium_tools": false})));
     assert_eq!((off.as_deref(), off_without_group), (Some("Use British English."), None));
 }
 
@@ -709,14 +709,38 @@ async fn rich_markdown_adds_its_note_to_a_new_session_only_while_the_switch_is_o
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
 
+    set_extensions(&server, false, true, false).await;
     let (_, on) = start_in_folder(&server, &mut link, "/anywhere").await;
-    set_extensions(&server, true, false).await;
+    set_extensions(&server, true, false, false).await;
     let (_, off) = start_in_folder(&server, &mut link, "/anywhere").await;
-    set_extensions(&server, false, true).await;
+    set_extensions(&server, false, true, false).await;
     let (_, only_markdown) = start_in_folder(&server, &mut link, "/anywhere").await;
 
     let on = on.unwrap();
     assert!(on.contains("[!WARNING]") && on.contains("^x^") && on.contains("Raw HTML is not rendered."), "{on}");
     assert!(!off.unwrap().contains("[!WARNING]"));
     assert!(only_markdown.unwrap().starts_with("Mycelium renders these Markdown extensions"));
+}
+
+#[tokio::test]
+async fn mycelium_tools_note_lists_every_tool_the_mcp_server_offers_only_while_the_switch_is_on() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, token) = (0, link.token.clone());
+
+    let (_, on) = start_in_folder(&server, &mut link, "/anywhere").await;
+    let (_, listed) = {
+        let anonymous = server.anonymous();
+        let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+        anonymous.json(request).await
+    };
+    set_extensions(&server, true, true, false).await;
+    let (_, off) = start_in_folder(&server, &mut link, "/anywhere").await;
+
+    let on = on.unwrap();
+    for tool in listed["result"]["tools"].as_array().unwrap() {
+        assert!(on.contains(&format!("mcp__mycelium__{}: ", tool["name"].as_str().unwrap())), "{on}");
+    }
+    assert!(on.contains("not skills") && on.contains("memory features are off on purpose"), "{on}");
+    assert!(!off.unwrap().contains("mcp__mycelium__"));
 }

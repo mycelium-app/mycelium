@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::chats::{RICH_MARKDOWN_INSTRUCTIONS, generated_ui_instructions};
+use crate::mcp::tools_instructions;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
 use crate::groups::{self, GroupRow};
@@ -69,10 +70,10 @@ async fn latest(state: &AppState, layer: &str) -> ApiResult<Option<VersionRow>> 
 }
 
 pub async fn extensions_of(state: &AppState, owner: Uuid) -> ApiResult<Extensions> {
-    let stored = sqlx::query_as::<_, (bool, bool)>("select generated_ui, rich_markdown from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
-    let (generated_ui, rich_markdown) = stored.unwrap_or((true, true));
+    let stored = sqlx::query_as::<_, (bool, bool, bool)>("select generated_ui, rich_markdown, mycelium_tools from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let (generated_ui, rich_markdown, mycelium_tools) = stored.unwrap_or((true, true, true));
 
-    Ok(Extensions { generated_ui, rich_markdown })
+    Ok(Extensions { generated_ui, rich_markdown, mycelium_tools })
 }
 
 pub async fn current_revision(state: &AppState) -> ApiResult<Option<String>> {
@@ -188,6 +189,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
         .filter(|text| !text.trim().is_empty())
         .chain(extensions.generated_ui.then(generated_ui_instructions))
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
+        .chain(extensions.mycelium_tools.then(tools_instructions))
         .collect();
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
@@ -285,7 +287,13 @@ pub async fn get_extensions(State(state): State<AppState>, user: AuthUser) -> Ap
 }
 
 pub async fn save_extensions(State(state): State<AppState>, user: AuthUser, Json(request): Json<Extensions>) -> ApiResult<Json<Extensions>> {
-    sqlx::query("insert into user_settings (owner, generated_ui, rich_markdown) values ($1, $2, $3) on conflict (owner) do update set generated_ui = excluded.generated_ui, rich_markdown = excluded.rich_markdown").bind(user.id).bind(request.generated_ui).bind(request.rich_markdown).execute(&state.pool).await?;
+    sqlx::query("insert into user_settings (owner, generated_ui, rich_markdown, mycelium_tools) values ($1, $2, $3, $4)
+         on conflict (owner) do update set generated_ui = excluded.generated_ui, rich_markdown = excluded.rich_markdown, mycelium_tools = excluded.mycelium_tools",
+    )
+    .bind(user.id)
+    .bind(request.generated_ui)
+    .bind(request.rich_markdown)
+    .bind(request.mycelium_tools).execute(&state.pool).await?;
 
     Ok(Json(request))
 }

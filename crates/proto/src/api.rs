@@ -483,6 +483,7 @@ pub struct GroupFolderRequest {
 pub struct Extensions {
     pub generated_ui: bool,
     pub rich_markdown: bool,
+    pub mycelium_tools: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

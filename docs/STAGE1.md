@@ -299,9 +299,9 @@ conversation started with when it sends `start_session`.
 
 `instructions` in `start_session` is the group layer followed by the enabled Mycelium extensions, joined by blank
 lines. Extensions are built-in additions with a per-user switch, `GET`/`PUT /api/v1/extensions`
-`{generated_ui, rich_markdown}`, both on by default (table `user_settings`). `generated_ui` adds the `mycelium-ui`
+`{generated_ui, rich_markdown, mycelium_tools}`, all on by default (table `user_settings`). `generated_ui` adds the `mycelium-ui`
 component schema, the text chats get plus the workspace-only `open_file {path}` action. `rich_markdown` adds a note
-naming the Markdown Mycelium renders and that raw HTML is not rendered; chats get that note too. A switch applies to
+naming the Markdown Mycelium renders and that raw HTML is not rendered; chats get that note too. `mycelium_tools` adds a note that the agent runs inside Mycelium with its MCP server, one line per tool generated from the server's own tool list (`mcp__mycelium__<name>`), and that the agent's own memory is off on purpose; chats do not get it, having no tools. A switch applies to
 sessions started after it changes. Settings, Instructions has a "Mycelium extensions" section below the layers.
 
 ### Forges

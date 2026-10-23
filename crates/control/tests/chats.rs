@@ -582,7 +582,7 @@ async fn a_chat_is_told_which_markdown_is_rendered_only_while_rich_markdown_is_o
 
     let on = new_chat(&server, &provider, "One").await;
     reply_finished(&server, &on).await;
-    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": true, "rich_markdown": false}))).await;
+    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": true, "rich_markdown": false, "mycelium_tools": true}))).await;
     let off = new_chat(&server, &provider, "Two").await;
     reply_finished(&server, &off).await;
     let requests = fake.requests.lock().unwrap().clone();

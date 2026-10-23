@@ -88,7 +88,7 @@ async fn a_remembered_finding_is_recalled_by_another_node() {
     let (_, reader) = server.join("node", "desk").await;
 
     let stored = call(&server, &writer, None, "remember", json!({"text": "The staging database listens on port 5433"})).await;
-    let id = text_of(&stored).trim_start_matches("Remembered as ").trim_end_matches('.').to_string();
+    let id = text_of(&stored).trim_start_matches("Remembered as ").split(',').next().unwrap().to_string();
 
     let found = call(&server, &reader, None, "recall", json!({"query": "staging port"})).await;
 
