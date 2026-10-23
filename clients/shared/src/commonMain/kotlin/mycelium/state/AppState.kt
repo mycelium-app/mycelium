@@ -4,6 +4,7 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
+import mycelium.api.MoveProgress
 import mycelium.api.EventKinds
 import mycelium.api.CpuPoint
 import mycelium.api.NodeResources
@@ -38,6 +39,7 @@ data class AppState(
     val events: Map<String, List<Event>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
+    val moves: Map<String, MoveProgress> = emptyMap(),
     val loginOutput: Map<String, String> = emptyMap(),
     val finishedLogins: Map<String, Boolean> = emptyMap(),
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
@@ -74,6 +76,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
             sending = state.sending + (message.conversationId to waiting),
         )
     }
+
+    is StreamMessage.MoveChanged -> state.copy(moves = state.moves + (message.progress.conversationId to message.progress))
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 

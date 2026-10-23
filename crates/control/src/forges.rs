@@ -7,6 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use futures_util::future::join_all;
 use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, ForgeOrganisation, Issue, Repositories, Repository};
+use mycelium_proto::link::GitCredentials;
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -63,6 +64,12 @@ impl ForgeError {
 }
 
 impl ForgeRow {
+    pub fn git_credentials(&self) -> ApiResult<GitCredentials> {
+        let username = if parse_kind(&self.kind)? == ForgeKind::Github { "x-access-token" } else { "oauth2" };
+
+        Ok(GitCredentials { username: username.to_string(), password: self.token.clone() })
+    }
+
     pub fn to_proto(&self) -> ApiResult<Forge> {
         Ok(Forge {
             id: self.id,

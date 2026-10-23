@@ -142,6 +142,14 @@ pub fn next_failure_seq(dir: &Path) -> i64 {
     seq
 }
 
+pub fn continue_sequence(dir: &Path, after: i64) {
+    let seq = journal_head(dir).max(read_failure_seq(dir)).max(after);
+
+    if let Err(error) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(failure_seq_path(dir), seq.to_string())) {
+        tracing::warn!("could not record where the conversation's numbering continues: {error}");
+    }
+}
+
 pub fn journal_head(dir: &Path) -> i64 {
     let entries = std::fs::read_to_string(dir.join("journal.jsonl")).map(|journal| journal.lines().count() as i64).unwrap_or(0);
 
@@ -544,5 +552,16 @@ mod tests {
 
         assert!(error.contains("Set state_dir in node.toml to a shorter directory"), "{error}");
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_session_directory_told_where_numbering_continues_starts_its_next_journal_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+
+        continue_sequence(dir.path(), 41);
+        let base = start_new_journal_epoch(dir.path());
+        continue_sequence(dir.path(), 5);
+
+        assert_eq!((base, journal_head(dir.path()), next_failure_seq(dir.path())), (41, 41, 42));
     }
 }

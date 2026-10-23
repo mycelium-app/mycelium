@@ -16,6 +16,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
+    if state.hub.is_moving(conversation_id) {
+        return Ok(());
+    }
+
     let mut tx = state.pool.begin().await?;
     let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(
         "select owner, node_id, archived_at is not null,

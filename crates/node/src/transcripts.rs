@@ -47,6 +47,55 @@ fn find_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+pub fn locate(home: &Path, roots: &[PathBuf], session_id: &str) -> Option<(String, u64)> {
+    let mut files = Vec::new();
+
+    for root in roots {
+        find_jsonl_files(root, &mut files);
+    }
+
+    files.sort();
+
+    files.into_iter().find_map(|path| {
+        let stem = path.file_stem()?.to_str()?;
+
+        if stem != session_id && !stem.ends_with(&format!("-{session_id}")) {
+            return None;
+        }
+
+        let relative = path.strip_prefix(home).ok()?.display().to_string();
+
+        Some((relative, std::fs::metadata(&path).ok()?.len()))
+    })
+}
+
+pub fn restore(home: &Path, path: &str, offset: i64, data: &str) -> Result<(), String> {
+    let relative = Path::new(path);
+    let plain = relative.components().all(|component| matches!(component, std::path::Component::Normal(_)));
+    let in_a_transcript_folder = [".claude/projects/", ".codex/sessions/"].iter().any(|folder| path.starts_with(folder)) && path.ends_with(".jsonl");
+
+    if !plain || !in_a_transcript_folder || offset < 0 {
+        return Err(format!("{path} is not a place this node keeps transcripts."));
+    }
+
+    let bytes = STANDARD.decode(data).map_err(|_| "A transcript chunk was not valid base64.".to_string())?;
+    let full = home.join(relative);
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&full)?;
+        file.set_len(offset as u64)?;
+        file.seek(SeekFrom::Start(offset as u64))?;
+        file.write_all(&bytes)
+    };
+
+    write().map_err(|cause| format!("Could not write {path}: {cause}."))
+}
+
 fn workflow_journal(root: &Path, path: &Path) -> Option<WorkflowJournal> {
     let relative = path.strip_prefix(root).ok()?;
     let parts: Vec<&str> = relative.iter().filter_map(|part| part.to_str()).collect();
@@ -235,6 +284,45 @@ mod tests {
         };
 
         (*offset, String::from_utf8(STANDARD.decode(data).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn a_session_is_found_by_its_id_in_claude_and_codex_transcript_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude = dir.path().join(".claude/projects");
+        let codex = dir.path().join(".codex/sessions");
+        append(&claude.join("-work-app").join("abc-123.jsonl"), "one\n");
+        append(&codex.join("2026/10/23").join("rollout-2026-10-23T10-00-00-def-456.jsonl"), "four\n");
+        append(&claude.join("-work-app").join("other.jsonl"), "x\n");
+        let roots = [claude, codex];
+
+        assert_eq!(locate(dir.path(), &roots, "abc-123"), Some((".claude/projects/-work-app/abc-123.jsonl".to_string(), 4)));
+        assert_eq!(locate(dir.path(), &roots, "def-456"), Some((".codex/sessions/2026/10/23/rollout-2026-10-23T10-00-00-def-456.jsonl".to_string(), 5)));
+        assert_eq!(locate(dir.path(), &roots, "missing"), None);
+    }
+
+    #[test]
+    fn restored_chunks_rebuild_the_transcript_and_a_restart_overwrites_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = ".claude/projects/-w-app/abc.jsonl";
+
+        restore(dir.path(), path, 0, &STANDARD.encode("one\n")).unwrap();
+        restore(dir.path(), path, 4, &STANDARD.encode("two\n")).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "one\ntwo\n");
+
+        restore(dir.path(), path, 0, &STANDARD.encode("new\n")).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "new\n");
+    }
+
+    #[test]
+    fn a_transcript_outside_the_agent_folders_or_climbing_out_of_them_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for path in ["../escape.jsonl", ".claude/projects/../../escape.jsonl", "/etc/passwd.jsonl", ".ssh/authorized_keys", ".claude/projects/x/notes.txt"] {
+            assert!(restore(dir.path(), path, 0, &STANDARD.encode("x")).is_err(), "{path}");
+        }
+
+        assert!(!dir.path().join("escape.jsonl").exists());
     }
 
     #[test]

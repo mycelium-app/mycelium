@@ -296,6 +296,16 @@ class MyceliumApi(
     suspend fun startSideChat(id: String, kind: String, text: String?): Conversation =
         call("/conversations/$id/side") { client.post(it) { authorise(); json(StartSideChatRequest(kind, text)) } }.body()
 
+    suspend fun movePlan(id: String, nodeId: String): MovePlan = call("/conversations/$id/move-plan") { client.get(it) { authorise(); parameter("node_id", nodeId) } }.body()
+
+    suspend fun requestMove(id: String, request: MoveRequest): MoveProgress = call("/conversations/$id/move") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun currentMove(id: String): MoveProgress? = call("/conversations/$id/move") { client.get(it) { authorise() } }.body()
+
+    suspend fun cancelMove(id: String) {
+        call("/conversations/$id/move") { client.delete(it) { authorise() } }
+    }
+
     suspend fun markOpened(id: String) {
         call("/conversations/$id/opened") { client.post(it) { authorise() } }
     }

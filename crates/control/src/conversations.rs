@@ -241,7 +241,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     Ok((StatusCode::CREATED, Json(conversation)))
 }
 
-async fn require_signed_in_account(state: &AppState, node_id: Uuid, agent: AgentId, account: &str) -> ApiResult<()> {
+pub async fn require_signed_in_account(state: &AppState, node_id: Uuid, agent: AgentId, account: &str) -> ApiResult<()> {
     let signed_in = sqlx::query_scalar::<_, bool>("select exists (select 1 from logins where node_id = $1 and agent = $2 and account = $3 and state = 'signed_in')")
         .bind(node_id)
         .bind(enum_text(&agent))

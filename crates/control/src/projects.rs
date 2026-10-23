@@ -1,6 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
-use crate::forges::{self, ForgeApi};
+use crate::forges;
 use crate::groups;
 use crate::git::relay;
 use crate::nodes::node_offline;
@@ -8,14 +8,14 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateProjectRequest, ForgeKind, PatchProjectRequest, Project};
-use mycelium_proto::link::{GitCommand, GitCredentials};
+use mycelium_proto::api::{CreateProjectRequest, PatchProjectRequest, Project};
+use mycelium_proto::link::GitCommand;
 use uuid::Uuid;
 
-const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, created_at";
+pub const PROJECT_COLUMNS: &str = "id, node_id, name, path, forge_id, repository, group_id, created_at";
 const PROJECTS_FOLDER: &str = "projects";
 
-#[derive(sqlx::FromRow)]
+#[derive(Clone, sqlx::FromRow)]
 pub struct ProjectRow {
     pub id: Uuid,
     pub node_id: Uuid,
@@ -37,6 +37,14 @@ pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Pr
     let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("select {PROJECT_COLUMNS} from projects where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That project"))
+}
+
+pub async fn clone_repository(state: &AppState, forge: &forges::ForgeRow, repository: &str, node_id: Uuid) -> ApiResult<String> {
+    let credentials = forge.git_credentials()?;
+    let url = format!("{}/{repository}.git", forge.base_url);
+    let answer = relay(state, node_id, format!("{PROJECTS_FOLDER}/{repository}"), GitCommand::Clone { url, credentials: Some(credentials) }).await?;
+
+    Ok(answer["path"].as_str().unwrap_or_default().to_string())
 }
 
 pub fn valid_repository(repository: &str) -> bool {
@@ -69,14 +77,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             }
 
             let forge = forges::find_owned(&state, forge_id, user.id).await?;
-            let api = ForgeApi::from_row(&forge)?;
-            let username = if api.kind == ForgeKind::Github { "x-access-token" } else { "oauth2" };
-            let credentials = GitCredentials { username: username.to_string(), password: forge.token.clone() };
-            let url = format!("{}/{repository}.git", forge.base_url);
-            let answer = relay(&state, request.node_id, format!("{PROJECTS_FOLDER}/{repository}"), GitCommand::Clone { url, credentials: Some(credentials) }).await?;
+            let path = clone_repository(&state, &forge, repository, request.node_id).await?;
             let name = repository.rsplit('/').next().unwrap_or(repository).to_string();
 
-            (name, answer["path"].as_str().unwrap_or_default().to_string(), Some(forge_id), Some(repository.to_string()))
+            (name, path, Some(forge_id), Some(repository.to_string()))
         }
         (None, None, Some(path)) if !path.is_empty() => {
             let answer = relay(&state, request.node_id, path.to_string(), GitCommand::Register).await?;

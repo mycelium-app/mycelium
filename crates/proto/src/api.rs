@@ -622,3 +622,47 @@ pub struct Activity {
     pub models: Vec<ActivityRow>,
     pub unreported_agents: Vec<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MoveRequest {
+    pub node_id: Uuid,
+    #[serde(default)]
+    pub fork: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MovePlan {
+    pub movable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub changed_files: u32,
+    pub project_on_target: bool,
+    pub clones_project: bool,
+    pub agent_session: bool,
+    pub stays_ports: Vec<u16>,
+    pub stays_processes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveState {
+    Waiting,
+    Moving,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MoveProgress {
+    pub conversation_id: Uuid,
+    pub node_id: Uuid,
+    pub fork: bool,
+    pub state: MoveState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_id: Option<Uuid>,
+}

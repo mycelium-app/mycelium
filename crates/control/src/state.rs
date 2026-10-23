@@ -3,7 +3,7 @@ use crate::error::ApiResult;
 use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
-use mycelium_proto::api::{CpuPoint, NodeResources};
+use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
 use mycelium_proto::link::{ControlToNode, GitCommand, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
@@ -72,6 +72,7 @@ pub struct Hub {
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
+    moves: Mutex<HashMap<Uuid, MoveProgress>>,
 }
 
 impl Hub {
@@ -210,6 +211,34 @@ impl Hub {
         if let Ok(mut resources) = self.resources.lock() {
             resources.remove(&node_id);
         }
+    }
+
+    pub fn begin_move(&self, progress: MoveProgress) -> bool {
+        let Ok(mut moves) = self.moves.lock() else {
+            return false;
+        };
+
+        if moves.get(&progress.conversation_id).is_some_and(|current| matches!(current.state, MoveState::Waiting | MoveState::Moving)) {
+            return false;
+        }
+
+        moves.insert(progress.conversation_id, progress);
+
+        true
+    }
+
+    pub fn set_move(&self, progress: MoveProgress) {
+        if let Ok(mut moves) = self.moves.lock() {
+            moves.insert(progress.conversation_id, progress);
+        }
+    }
+
+    pub fn move_of(&self, conversation_id: Uuid) -> Option<MoveProgress> {
+        self.moves.lock().ok().and_then(|moves| moves.get(&conversation_id).cloned())
+    }
+
+    pub fn is_moving(&self, conversation_id: Uuid) -> bool {
+        self.move_of(conversation_id).is_some_and(|progress| progress.state == MoveState::Moving)
     }
 
     pub fn is_replaced(&self, node_id: Uuid, connection_id: Uuid) -> bool {

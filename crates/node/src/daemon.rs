@@ -220,6 +220,12 @@ impl Daemon {
                     transcripts.ack(&path, bytes);
                 }
             }
+            ControlToNode::RestoreTranscript { path, offset, data } => {
+                if let Err(error) = crate::transcripts::restore(&self.options.home, &path, offset, &data) {
+                    tracing::warn!("could not restore a transcript: {error}");
+                }
+            }
+            ControlToNode::ContinueSequence { conversation_id, after } => crate::session::continue_sequence(&self.session_dir(conversation_id), after),
             ControlToNode::ListFiles { request_id, cwd, query } => {
                 let out = self.out.clone();
 
@@ -231,10 +237,22 @@ impl Daemon {
             ControlToNode::Git { request_id, cwd, command } => {
                 let out = self.out.clone();
                 let root = self.config.projects_root.clone();
+                let home = self.options.home.clone();
+                let transcript_roots = self.options.transcript_roots.clone();
 
                 tokio::task::spawn_blocking(move || {
+                    let session_id = match &command {
+                        mycelium_proto::link::GitCommand::Snapshot { session_id } => session_id.clone(),
+                        _ => None,
+                    };
                     let message = match crate::git::run_in(&root, &cwd, command) {
-                        Ok(output) => NodeToControl::GitResult { request_id, ok: true, output, error: None },
+                        Ok(mut output) => {
+                            if let Some((path, bytes)) = session_id.and_then(|session_id| crate::transcripts::locate(&home, &transcript_roots, &session_id)) {
+                                output["transcript"] = serde_json::json!({"path": path, "bytes": bytes});
+                            }
+
+                            NodeToControl::GitResult { request_id, ok: true, output, error: None }
+                        }
                         Err(error) => NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some(error) },
                     };
                     let _ = out.send(message);

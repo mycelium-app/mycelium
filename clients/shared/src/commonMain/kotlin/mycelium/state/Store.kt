@@ -15,6 +15,9 @@ import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
+import mycelium.api.MoveProgress
+import mycelium.api.MoveRequest
+import mycelium.api.MoveState
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.api.Task
@@ -132,6 +135,20 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         mutableState.update { it.copy(projects = it.projects + (project.id to project)) }
 
         return project
+    }
+
+    suspend fun requestMove(conversationId: String, request: MoveRequest): MoveProgress {
+        val progress = api.requestMove(conversationId, request)
+
+        mutableState.update { it.copy(moves = it.moves + (conversationId to progress)) }
+
+        return progress
+    }
+
+    suspend fun cancelMove(conversationId: String) {
+        api.cancelMove(conversationId)
+
+        mutableState.update { held -> held.moves[conversationId]?.let { held.copy(moves = held.moves + (conversationId to it.copy(state = MoveState.Cancelled))) } ?: held }
     }
 
     suspend fun setProjectGroup(projectId: String, groupId: String?): Project {

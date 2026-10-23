@@ -62,6 +62,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var panel by remember { mutableStateOf<SidePanel?>(null) }
     var nodeSheetOpen by remember { mutableStateOf(false) }
+    var moveOpen by remember { mutableStateOf(false) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
@@ -115,6 +116,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     node = node,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
+                    moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     onDetails = { panel = SidePanel.Details },
                     onTerminal = { panel = SidePanel.Terminal },
                     onGit = { panel = SidePanel.Git },
@@ -198,7 +200,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 
     if (compact && nodeSheetOpen) {
-        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() })
+        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true })
+    }
+
+    if (compact && moveOpen) {
+        MoveSheet(store, state, conversation, { moveOpen = false }, onOpenConversation)
     }
 }
 
@@ -208,6 +214,7 @@ private fun ConversationHeader(
     node: NodeSummary?,
     compact: Boolean,
     onNode: () -> Unit,
+    moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
@@ -218,6 +225,8 @@ private fun ConversationHeader(
     var renaming by remember(conversation.id) { mutableStateOf(false) }
     var draft by remember(conversation.title) { mutableStateOf(conversation.title) }
     var menuOpen by remember { mutableStateOf(false) }
+    var nodeMenuOpen by remember { mutableStateOf(false) }
+    var moveOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
 
     Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
@@ -255,11 +264,27 @@ private fun ConversationHeader(
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             Label(
-                listOfNotNull(projectName(conversation.cwd), node?.name).joinToString("  ·  "),
+                projectName(conversation.cwd) + if (node != null) "  ·" else "",
                 style = Tokens.Type.Meta,
                 color = colors.textMuted,
                 maxLines = 1,
             )
+
+            if (node != null) {
+                Box {
+                    MyButton({ nodeMenuOpen = true }, text = node.name, icon = nodeIcon(node), trailingIcon = MyIcon.ChevronDown, description = "Running on ${node.name}, open the node menu", size = ButtonSize.Sm, muted = true)
+
+                    if (nodeMenuOpen) {
+                        MenuPopup(onDismiss = { nodeMenuOpen = false }) {
+                            MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
+                        }
+                    }
+
+                    if (moveOpen) {
+                        moveSheet { moveOpen = false }
+                    }
+                }
+            }
 
             if (archived) {
                 Tag("Archived")
@@ -385,7 +410,7 @@ private fun InspectorContent(conversation: Conversation, node: NodeSummary?) {
 }
 
 @Composable
-private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: () -> Unit) {
+private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: () -> Unit, onMove: () -> Unit) {
     BottomSheet(onDismiss) {
         MenuLabel("Running on")
         InspectorSection(
@@ -396,6 +421,7 @@ private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: ()
                 "Agents" to node?.agents?.filter { it.available }?.joinToString(", ") { agentName(it.agent) }.orEmpty().ifEmpty { "None available" },
             ),
         )
+        MenuItem("Move", onClick = onMove, leading = MyIcon.Move)
         MenuItem("All nodes", onClick = onOpenNodes, leading = MyIcon.Server)
     }
 }

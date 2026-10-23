@@ -188,6 +188,20 @@ pub enum GitCommand {
     AddWorktree {
         branch: String,
     },
+    MovePlan,
+    Snapshot {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+    Apply {
+        branch: String,
+        head: String,
+        patch: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bundle: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        credentials: Option<GitCredentials>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -276,6 +290,15 @@ pub enum ControlToNode {
     TranscriptAck {
         path: String,
         bytes: i64,
+    },
+    RestoreTranscript {
+        path: String,
+        offset: i64,
+        data: String,
+    },
+    ContinueSequence {
+        conversation_id: Uuid,
+        after: i64,
     },
     ListFiles {
         request_id: Uuid,

@@ -20,6 +20,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/logins/{login_id}",
     "POST /api/v1/conversations",
     "POST /api/v1/conversations/{id}/side",
+    "POST /api/v1/conversations/{id}/move",
+    "DELETE /api/v1/conversations/{id}/move",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
@@ -779,4 +781,34 @@ async fn a_prompt_to_an_idle_conversation_is_streamed_as_sent_without_first_show
         })
         .await;
     assert!(!queued_first);
+}
+
+#[tokio::test]
+async fn waiting_to_move_and_cancelling_the_wait_are_streamed() {
+    let server = Server::start().await;
+    let mut source = server.online_node("laptop").await;
+    let target = server.online_node("build").await;
+    let conversation = server.create_conversation(source.id, Some("go")).await;
+    source.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/move", conversation.id)).json(&json!({"node_id": target.id}))).await;
+    assert_eq!(status, 202, "{body}");
+    let waiting = stream
+        .until(|message| match message {
+            StreamMessage::Move(progress) => Some(progress),
+            _ => None,
+        })
+        .await;
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/conversations/{}/move", conversation.id))).await;
+    assert_eq!(status, 204);
+    let cancelled = stream
+        .until(|message| match message {
+            StreamMessage::Move(progress) => Some(progress),
+            _ => None,
+        })
+        .await;
+
+    assert_eq!((waiting.conversation_id, waiting.node_id, waiting.state), (conversation.id, target.id, mycelium_proto::api::MoveState::Waiting));
+    assert_eq!(cancelled.state, mycelium_proto::api::MoveState::Cancelled);
 }
