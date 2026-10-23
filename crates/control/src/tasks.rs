@@ -112,7 +112,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let task = row.to_proto()?;
     let prompt = task.prompt.clone().unwrap_or_else(|| task.title.clone());
-    let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt) };
+    let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt), parent_id: None, side_kind: None };
     let started = conversations::start(&state, &user, request).await;
 
     match started {

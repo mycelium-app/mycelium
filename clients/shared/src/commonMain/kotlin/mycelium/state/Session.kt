@@ -21,6 +21,20 @@ data class SessionOptions(
 
 data class SlashCommand(val name: String, val description: String, val hint: String?)
 
+val SideChatCommands = listOf(
+    SlashCommand("btw", "Ask without changing this conversation", null),
+    SlashCommand("side", "Run a side task", null),
+    SlashCommand("fork", "Copy into a new conversation", null),
+)
+
+private val sideChatCommand = Regex("""^/(btw|side|fork)(?:\s+(.*))?$""", RegexOption.DOT_MATCHES_ALL)
+
+fun sideChatOf(message: String): Pair<String, String>? {
+    val found = sideChatCommand.matchEntire(message.trim()) ?: return null
+
+    return found.groupValues[1] to found.groupValues[2].trim()
+}
+
 fun sessionOptions(conversation: Conversation, events: List<Event>): SessionOptions {
     val stored = conversation.options
     val modes = stored?.get("modes") as? JsonObject

@@ -19,6 +19,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PATCH /api/v1/nodes/{id}",
     "DELETE /api/v1/logins/{login_id}",
     "POST /api/v1/conversations",
+    "POST /api/v1/conversations/{id}/side",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
@@ -540,6 +541,23 @@ async fn starting_a_task_streams_its_conversation() {
 
     let streamed = conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Working).await;
     assert_eq!(streamed.title, "Tidy");
+
+    link.expect_start_session().await;
+}
+
+#[tokio::test]
+async fn starting_a_side_chat_streams_its_conversation_with_its_parent() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let mut stream = server.user.stream().await;
+
+    let (_, side) = server.user.json(server.user.post(&format!("/api/v1/conversations/{}/side", parent.id)).json(&json!({"kind": "side"}))).await;
+    let id: Uuid = side["id"].as_str().unwrap().parse().unwrap();
+
+    let streamed = conversation_where(&mut stream, id, |conversation| conversation.parent_id == Some(parent.id)).await;
+    assert_eq!(streamed.title, "Side chat");
 
     link.expect_start_session().await;
 }

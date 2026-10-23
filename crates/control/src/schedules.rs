@@ -271,7 +271,7 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
         }
     }
 
-    let request = CreateConversationRequest { account: None, node_id: row.node_id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()) };
+    let request = CreateConversationRequest { account: None, node_id: row.node_id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None };
     let conversation = conversations::start(state, user, request).await?;
 
     Ok(conversation.id)

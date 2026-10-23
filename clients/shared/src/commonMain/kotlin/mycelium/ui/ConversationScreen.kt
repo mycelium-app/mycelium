@@ -54,7 +54,7 @@ import mycelium.state.relativeTime
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     var panel by remember { mutableStateOf<SidePanel?>(null) }
@@ -148,6 +148,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 },
                 onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
+                onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, kind, text.ifEmpty { null }).id) } },
             )
         }
 

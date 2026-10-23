@@ -430,6 +430,12 @@ data class CreateConversationRequest(
 )
 
 @Serializable
+data class StartSideChatRequest(
+    val kind: String,
+    val text: String? = null,
+)
+
+@Serializable
 data class PatchConversationRequest(
     val title: String? = null,
     @SerialName("clear_title") val clearTitle: Boolean? = null,
@@ -486,6 +492,8 @@ data class Conversation(
     @SerialName("archived_at") val archivedAt: String? = null,
     val account: String? = null,
     @SerialName("title_user_set") val titleUserSet: Boolean = false,
+    @SerialName("parent_id") val parentId: String? = null,
+    @SerialName("side_kind") val sideKind: String? = null,
 )
 
 @Serializable

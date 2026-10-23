@@ -288,6 +288,9 @@ class MyceliumApi(
     suspend fun patchConversation(id: String, request: PatchConversationRequest): Conversation =
         call("/conversations/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
+    suspend fun startSideChat(id: String, kind: String, text: String?): Conversation =
+        call("/conversations/$id/side") { client.post(it) { authorise(); json(StartSideChatRequest(kind, text)) } }.body()
+
     suspend fun markOpened(id: String) {
         call("/conversations/$id/opened") { client.post(it) { authorise() } }
     }

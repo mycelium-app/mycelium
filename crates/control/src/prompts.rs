@@ -56,7 +56,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     if !state.hub.has_session(node_id, conversation_id) {
         state.add_session(node_id, conversation_id).await?;
         let instructions = instructions::session_layer(state, conversation_id).await?;
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, account, instructions });
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, fork: false, account, instructions });
     }
 
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone() });

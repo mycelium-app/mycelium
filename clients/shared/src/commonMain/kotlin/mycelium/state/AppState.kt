@@ -112,12 +112,26 @@ fun statusSectionName(status: ConversationStatus): String = when (status) {
     ConversationStatus.Done -> "Done"
 }
 
-fun sidebarSections(conversations: Collection<Conversation>): List<SidebarSection> =
-    conversations
-        .filter { it.archivedAt == null }
+fun sidebarSections(conversations: Collection<Conversation>): List<SidebarSection> {
+    val active = conversations.filter { it.archivedAt == null }
+    val activeIds = active.map { it.id }.toSet()
+
+    return active
+        .filter { it.parentId == null || it.parentId !in activeIds }
         .groupBy { it.status }
         .map { (status, rows) -> SidebarSection(status, statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }
         .sortedBy { statusRank(it.status) }
+}
+
+data class SidebarRow(val conversation: Conversation, val depth: Int, val sideChats: Int)
+
+fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversation>, collapsed: Set<String>, depth: Int = 0): List<SidebarRow> =
+    parents.flatMap { parent ->
+        val sideChats = conversations.filter { it.archivedAt == null && it.parentId == parent.id }.sortedByDescending { it.updatedAt }
+        val shown = if (parent.id in collapsed) emptyList() else sidebarRows(sideChats, conversations, collapsed, depth + 1)
+
+        listOf(SidebarRow(parent, depth, sideChats.size)) + shown
+    }
 
 internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
     val current = this[conversationId] ?: return this

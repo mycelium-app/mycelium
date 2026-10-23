@@ -50,6 +50,7 @@ pub enum Command {
 pub struct StartPlan {
     pub cwd: String,
     pub resume: Option<String>,
+    pub fork: bool,
     pub mcp_server: Value,
     pub instructions: Option<String>,
 }
@@ -377,6 +378,12 @@ impl SessionState {
             return self.outgoing_request("session/new", params);
         };
 
+        if plan.fork {
+            params["sessionId"] = json!(resume);
+
+            return self.outgoing_request("session/fork", params);
+        }
+
         match self.resume_kind {
             ResumeKind::Load | ResumeKind::Resume => {
                 params["sessionId"] = json!(resume);
@@ -414,7 +421,7 @@ impl SessionState {
                     self.initialize_sent = true;
                     Pending::Initialize
                 }
-                "session/new" => {
+                "session/new" | "session/fork" => {
                     self.session_requested = true;
                     Pending::NewSession
                 }
@@ -572,7 +579,7 @@ mod tests {
     }
 
     fn plan(resume: Option<&str>) -> Option<StartPlan> {
-        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None })
+        Some(StartPlan { cwd: "/work".into(), resume: resume.map(str::to_string), fork: false, mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None })
     }
 
     fn sent_frames(actions: &[Action]) -> Vec<Value> {
@@ -681,6 +688,22 @@ mod tests {
         let frames = sent_frames(&actions);
         assert_eq!(frames[0]["method"], "session/load");
         assert_eq!(frames[0]["params"]["sessionId"], "abc");
+    }
+
+    #[test]
+    fn a_fork_asks_the_agent_to_fork_the_session_and_adopts_the_session_it_returns() {
+        let forking = Some(StartPlan { cwd: "/work".into(), resume: Some("abc".into()), fork: true, mcp_server: json!({"type": "http", "name": "mycelium"}), instructions: None });
+        let mut state = SessionState::new(conversation(), forking, 0);
+        state.on_live();
+
+        let actions = state.on_entry(1, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"sessionCapabilities": {"fork": {}}}}}));
+        let frames = sent_frames(&actions);
+        assert_eq!((frames[0]["method"].clone(), frames[0]["params"]["sessionId"].clone()), (json!("session/fork"), json!("abc")));
+
+        state.on_entry(2, Direction::Out, frames[0].clone());
+        let ready = state.on_entry(3, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {"sessionId": "forked"}}));
+
+        assert!(ready.iter().any(|action| matches!(action, Action::Started(NodeToControl::SessionStarted { acp_session_id, .. }) if acp_session_id == "forked")));
     }
 
     #[test]

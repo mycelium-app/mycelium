@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
 import mycelium.state.isLaptop
+import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
 import mycelium.state.statusSectionName
 
@@ -212,7 +213,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     CompositionLocalProvider(LocalPlatform provides platform) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
-            is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) })
+            is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
             is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
             Route.Nodes -> NodesScreen(store, state, platform)
@@ -258,6 +259,7 @@ private fun EmptyMain(state: AppState, onNew: () -> Unit) {
 private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
     val sections = sidebarSections(state.conversations.values)
+    var collapsed by remember { mutableStateOf(emptySet<String>()) }
 
     Column(modifier.background(colors.bgPanel)) {
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
@@ -280,8 +282,17 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
                     SectionHeading(section)
                 }
 
-                items(section.rows, key = { it.id }) { row ->
-                    ConversationRow(row, state.nodes[row.nodeId], selected = row.id == (route as? Route.Chat)?.id, onClick = { onRoute(Route.Chat(row.id)) })
+                items(sidebarRows(section.rows, state.conversations.values, collapsed), key = { it.conversation.id }) { row ->
+                    ConversationRow(
+                        row.conversation,
+                        state.nodes[row.conversation.nodeId],
+                        selected = row.conversation.id == (route as? Route.Chat)?.id,
+                        onClick = { onRoute(Route.Chat(row.conversation.id)) },
+                        depth = row.depth,
+                        sideChats = row.sideChats,
+                        expanded = row.conversation.id !in collapsed,
+                        onToggle = { collapsed = if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id },
+                    )
                 }
             }
         }
@@ -339,32 +350,46 @@ private fun SectionHeading(section: SidebarSection) {
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}) {
     val colors = MyTheme.colors
     val statusName = statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
+    val indent = Tokens.Space.S3 * depth
 
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .pressable(
-                onClick,
-                selected = selected,
-                shape = BlockShape,
-                description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}",
-            )
-            .padding(start = Tokens.Space.S2 + Tokens.Space.S3, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
-        Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .pressable(
+                    onClick,
+                    selected = selected,
+                    shape = BlockShape,
+                    description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { ", side chat" }.orEmpty()}",
+                )
+                .padding(start = Tokens.Space.S2 + Tokens.Space.S3 + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
+            Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
-        if (node != null) {
-            Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+            if (node != null) {
+                Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+            }
+
+            Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
         }
 
-        Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+        if (sideChats > 0) {
+            MyButton(
+                onToggle,
+                modifier = Modifier.padding(start = indent),
+                icon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
+                description = if (expanded) "Collapse side chats of ${row.title}" else "Expand side chats of ${row.title}",
+                size = ButtonSize.Sm,
+                muted = true,
+            )
+        }
     }
 }
 

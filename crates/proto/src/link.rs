@@ -146,6 +146,8 @@ pub enum ControlToNode {
         cwd: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resume: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fork: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

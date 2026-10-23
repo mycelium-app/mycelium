@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::conversation::{AgentId, AgentInfo, DeviceKind, LoginInfo};
+use crate::conversation::{AgentId, AgentInfo, DeviceKind, LoginInfo, SideKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorBody {
@@ -160,6 +160,17 @@ pub struct CreateConversationRequest {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_kind: Option<SideKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartSideChatRequest {
+    pub kind: SideKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

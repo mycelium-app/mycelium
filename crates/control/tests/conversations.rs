@@ -836,3 +836,97 @@ async fn a_title_given_at_creation_is_the_users_and_the_agent_does_not_replace_i
     let kept = server.conversation(id).await;
     assert_eq!((kept["title"].as_str(), kept["title_user_set"].as_bool()), (Some("Release"), Some(true)));
 }
+
+async fn start_side(server: &Server, parent: Uuid, body: serde_json::Value) -> (u16, serde_json::Value) {
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{parent}/side")).json(&body)).await
+}
+
+#[tokio::test]
+async fn a_btw_question_opens_a_linked_thread_on_the_same_node_folder_and_agent_and_sends_the_question() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = started_conversation(&server, &mut link, None).await;
+
+    let (status, side) = start_side(&server, parent, json!({"kind": "btw", "text": "What does RESTORE_BACKOFF_MS default to?"})).await;
+
+    assert_eq!(status, 201, "{side}");
+    assert_eq!((side["parent_id"].clone(), side["side_kind"].as_str(), side["cwd"].as_str(), side["agent"].as_str()), (json!(parent), Some("btw"), Some("/work/app"), Some("claude")));
+    assert_eq!(side["title"], "What does RESTORE_BACKOFF_MS default to?");
+    let id: Uuid = side["id"].as_str().unwrap().parse().unwrap();
+    match link.next().await {
+        ControlToNode::StartSession { conversation_id, resume, fork, .. } => assert_eq!((conversation_id, resume, fork), (id, None, false)),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    link.start_session(id, "acp-side").await;
+    assert_eq!(link.expect_prompt().await.1, "What does RESTORE_BACKOFF_MS default to?");
+}
+
+#[tokio::test]
+async fn a_btw_needs_a_question_but_a_side_chat_can_open_empty() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = started_conversation(&server, &mut link, None).await;
+
+    let (status, body) = start_side(&server, parent, json!({"kind": "btw"})).await;
+    assert_eq!((status, body["error"].as_str()), (400, Some("text_required")));
+
+    let (status, side) = start_side(&server, parent, json!({"kind": "side"})).await;
+    assert_eq!((status, side["title"].as_str(), side["status"].as_str()), (201, Some("Side chat"), Some("done")));
+}
+
+#[tokio::test]
+async fn forking_a_claude_conversation_continues_its_session_through_acp() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = started_conversation(&server, &mut link, None).await;
+    common::eventually("the session to be recorded", || async { (!server.conversation(parent).await["acp_session_id"].is_null()).then_some(()) }).await;
+
+    let (status, fork) = start_side(&server, parent, json!({"kind": "fork"})).await;
+
+    assert_eq!((status, fork["side_kind"].as_str(), fork["title"].as_str()), (201, Some("fork"), Some("New conversation (fork)")));
+    match link.next().await {
+        ControlToNode::StartSession { resume, fork, .. } => assert_eq!((resume.as_deref(), fork), (Some("acp-1"), true)),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn forking_a_conversation_the_agent_cannot_fork_starts_a_session_that_is_told_what_was_said() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "codex", "cwd": "/work/app", "prompt": "Fix the flaky test"}))).await;
+    let parent: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+    link.start_session(parent, "acp-1").await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: parent, seq: 1, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Fixed the race in restore"}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: parent, seq: 2, stop_reason: "end_turn".into() }).await;
+    common::eventually("the turn to end", || async { (status_of(&server, parent).await == "review").then_some(()) }).await;
+
+    let (status, fork) = start_side(&server, parent, json!({"kind": "fork", "text": "Now do the Android side"})).await;
+    let id: Uuid = fork["id"].as_str().unwrap().parse().unwrap();
+
+    assert_eq!(status, 201, "{fork}");
+    match link.next().await {
+        ControlToNode::StartSession { resume, fork, .. } => assert_eq!((resume, fork), (None, false)),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    link.start_session(id, "acp-fork").await;
+    let (_, told) = link.expect_prompt().await;
+    assert!(told.contains("User: Fix the flaky test") && told.contains("Agent: Fixed the race in restore") && told.ends_with("Now do the Android side"), "{told}");
+}
+
+#[tokio::test]
+async fn a_side_chat_belongs_to_its_owner_and_its_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = started_conversation(&server, &mut link, None).await;
+    let stranger = server.second_user("other@example.com").await;
+
+    let (status, _) = stranger.json(stranger.post(&format!("/api/v1/conversations/{parent}/side")).json(&json!({"kind": "side"}))).await;
+    assert_eq!(status, 404);
+
+    let other = server.online_node("desktop").await;
+    let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": other.id, "agent": "claude", "cwd": "/work/app", "parent_id": parent, "side_kind": "side"}))).await;
+    assert_eq!((status, body["error"].as_str()), (400, Some("parent_invalid")));
+}

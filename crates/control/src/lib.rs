@@ -91,6 +91,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations", get(conversations::list).post(conversations::create))
         .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
+        .route("/api/v1/conversations/{id}/side", post(conversations::side))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))
         .route("/api/v1/conversations/{id}/files", get(conversations::files))
         .route("/api/v1/conversations/{id}/git/status", get(git::status))

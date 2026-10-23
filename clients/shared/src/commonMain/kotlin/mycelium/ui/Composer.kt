@@ -48,6 +48,8 @@ import androidx.compose.ui.window.PopupProperties
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
 import mycelium.state.SessionOptions
+import mycelium.state.SideChatCommands
+import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
 import mycelium.state.mentionAt
 import kotlinx.coroutines.delay
@@ -95,6 +97,7 @@ fun Composer(
     accounts: List<Choice> = emptyList(),
     accountLocked: Boolean = false,
     onSetAccount: (String) -> Unit = {},
+    onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
 ) {
     val colors = MyTheme.colors
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
@@ -118,7 +121,7 @@ fun Composer(
     }
 
     val matches = when {
-        query != null -> commands.filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
+        query != null -> (SideChatCommands + commands.filterNot { command -> SideChatCommands.any { it.name == command.name } }).filter { it.name.contains(query, ignoreCase = true) }.sortedBy { !it.name.startsWith(query, ignoreCase = true) }
             .map { command -> Completion(command.name, command.description) { insert(0, "/${command.name} ") } }
         mention != null -> files.map { path -> Completion(path, "") { insert(mention.start, "@$path ") } }
         else -> emptyList()
@@ -129,7 +132,14 @@ fun Composer(
         val trimmed = text.text.trim()
 
         if (trimmed.isNotEmpty()) {
-            onSend(trimmed)
+            val side = sideChatOf(trimmed)
+
+            if (side != null) {
+                onSideChat(side.first, side.second)
+            } else {
+                onSend(trimmed)
+            }
+
             text = TextFieldValue("")
         }
     }

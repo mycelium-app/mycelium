@@ -9,8 +9,8 @@ use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, pars
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateConversationRequest, EventsQuery, PatchConversationRequest};
-use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event};
+use mycelium_proto::api::{CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
+use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, SideKind};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
@@ -18,6 +18,12 @@ use serde_json::Value;
 use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 60;
+const SUMMARY_MESSAGES: i64 = 8;
+const SUMMARY_MESSAGE_LIMIT: usize = 1500;
+
+fn forks_natively(parent: &ConversationRow) -> bool {
+    parent.agent == enum_text(&AgentId::Claude) && parent.acp_session_id.is_some()
+}
 
 pub fn derived_title(text: &str) -> String {
     text.lines().next().unwrap_or_default().chars().take(TITLE_LIMIT).collect()
@@ -107,6 +113,23 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
         cwd = worktrees::create(state, project, branch, None).await?.path;
     }
 
+    let parent = match request.parent_id {
+        Some(parent_id) => Some(find_owned(&state.pool, parent_id, user.id).await?),
+        None => None,
+    };
+
+    if parent.as_ref().is_some_and(|parent| parent.node_id != request.node_id) || parent.is_some() != request.side_kind.is_some() {
+        return Err(ApiError::bad_request("parent_invalid", "A side chat runs on the same node as the conversation it belongs to."));
+    }
+
+    let parent_project = match &parent {
+        Some(parent) => sqlx::query_scalar::<_, Option<Uuid>>("select project_id from conversations where id = $1").bind(parent.id).fetch_one(&state.pool).await?,
+        None => None,
+    };
+    let fork_of = match (&parent, request.side_kind) {
+        (Some(parent), Some(SideKind::Fork)) if forks_natively(parent) => parent.acp_session_id.clone(),
+        _ => None,
+    };
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let chosen_title = request.title.as_deref().map(str::trim).filter(|title| !title.is_empty());
     let predicted_title = prompt.map(derived_title);
@@ -115,12 +138,13 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
         (None, Some(predicted)) => predicted.clone(),
         (None, None) => "New conversation".to_string(),
     };
+    let title_user_set = chosen_title.is_some() && parent.is_none();
     let status = if prompt.is_some() { ConversationStatus::Working } else { ConversationStatus::Done };
 
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -131,9 +155,11 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     .bind(&title)
     .bind(enum_text(&status))
     .bind(account)
-    .bind(project.as_ref().map(|project| project.id))
-    .bind(chosen_title.is_some())
+    .bind(project.as_ref().map(|project| project.id).or(parent_project))
+    .bind(title_user_set)
     .bind(&predicted_title)
+    .bind(request.parent_id)
+    .bind(request.side_kind.as_ref().map(enum_text))
     .fetch_one(&mut *tx)
     .await?;
 
@@ -144,7 +170,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     tx.commit().await?;
 
     let instructions = instructions::session_layer(state, row.id).await?;
-    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: None, account: account.map(str::to_string), instructions });
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: fork_of.clone(), fork: fork_of.is_some(), account: account.map(str::to_string), instructions });
 
     if !started {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
@@ -157,6 +183,62 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     publish_queue(state, user.id, row.id).await?;
 
     Ok(conversation)
+}
+
+pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<StartSideChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let parent = find_owned(&state.pool, id, user.id).await?;
+    let text = request.text.as_deref().map(str::trim).filter(|text| !text.is_empty());
+
+    if request.kind == SideKind::Btw && text.is_none() {
+        return Err(ApiError::bad_request("text_required", "Enter a question to ask."));
+    }
+
+    let summary = if request.kind == SideKind::Fork && !forks_natively(&parent) {
+        let said = sqlx::query_as::<_, (String, String)>(
+            "select * from (
+                select e.kind, s.text, s.seq from search_entries s join events e on e.conversation_id = s.conversation_id and e.seq = s.seq
+                where s.conversation_id = $1 order by s.seq desc limit $2
+             ) recent order by seq",
+        )
+        .bind(id)
+        .bind(SUMMARY_MESSAGES)
+        .fetch_all(&state.pool)
+        .await?;
+        let lines: Vec<String> = said
+            .into_iter()
+            .map(|(kind, text)| format!("{}: {}", if kind == "user_message" { "User" } else { "Agent" }, text.chars().take(SUMMARY_MESSAGE_LIMIT).collect::<String>()))
+            .collect();
+
+        Some(format!("Continuing from: {}\n\nThis conversation continues an earlier one. This is what was said most recently:\n\n{}\n\nContinue from here.", parent.title, lines.join("\n\n")))
+    } else {
+        None
+    };
+
+    let prompt = match (summary, text) {
+        (Some(summary), Some(text)) => Some(format!("{summary}\n\n{text}")),
+        (Some(summary), None) => Some(summary),
+        (None, text) => text.map(str::to_string),
+    };
+    let title = match (prompt.is_some(), request.kind) {
+        (true, _) => None,
+        (false, SideKind::Fork) => Some(format!("{} (fork)", parent.title)),
+        (false, _) => Some("Side chat".to_string()),
+    };
+    let started = CreateConversationRequest {
+        node_id: parent.node_id,
+        agent: parse_enum(&parent.agent)?,
+        account: parent.account.clone(),
+        cwd: parent.cwd.clone(),
+        project_id: None,
+        branch: None,
+        title,
+        prompt,
+        parent_id: Some(id),
+        side_kind: Some(request.kind),
+    };
+    let conversation = start(&state, &user, started).await?;
+
+    Ok((StatusCode::CREATED, Json(conversation)))
 }
 
 async fn require_signed_in_account(state: &AppState, node_id: Uuid, agent: AgentId, account: &str) -> ApiResult<()> {
