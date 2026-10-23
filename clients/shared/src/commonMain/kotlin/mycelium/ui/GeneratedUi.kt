@@ -76,9 +76,7 @@ fun GeneratedUi(node: UiNode) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                         Label(bar.label, Modifier.width(110.dp), maxLines = 1)
 
-                        Box(Modifier.weight(1f).height(Tokens.Space.S2).background(colors.bgPanel, ControlShape)) {
-                            Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(colors.accent, ControlShape))
-                        }
+                        Track(share, Modifier.weight(1f))
 
                         Label(bar.display, Modifier.widthIn(min = 60.dp), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
                     }
@@ -98,9 +96,7 @@ fun GeneratedUi(node: UiNode) {
                 Label(node.display, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 
-            Box(Modifier.fillMaxWidth().height(Tokens.Space.S2).background(colors.bgPanel, ControlShape)) {
-                Box(Modifier.fillMaxWidth(node.share).fillMaxHeight().background(colors.accent, ControlShape))
-            }
+            Track(node.share, Modifier.fillMaxWidth())
         }
 
         is UiNode.Button -> {
@@ -129,5 +125,14 @@ fun GeneratedUi(node: UiNode) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun Track(share: Float, modifier: Modifier) {
+    val colors = MyTheme.colors
+
+    Box(modifier.height(Tokens.Space.S2).background(colors.borderControl, ControlShape)) {
+        Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(colors.accent, ControlShape))
     }
 }

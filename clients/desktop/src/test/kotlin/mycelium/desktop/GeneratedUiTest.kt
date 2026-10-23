@@ -1,11 +1,13 @@
 package mycelium.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -16,6 +18,7 @@ import mycelium.ui.GeneratedUiActions
 import mycelium.ui.LocalGeneratedUiActions
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.ThreadView
+import mycelium.ui.Tokens
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -67,6 +70,15 @@ class GeneratedUiTest {
 
         rule.onNodeWithContentDescription("Hours. Full: 4.1 h. Incremental: 9.2 h").assertExists()
         rule.onNodeWithText("9.2 h").assertIsDisplayed()
+    }
+
+    @Test
+    fun anEmptyProgressBarStillShowsItsTrack() {
+        thread(reply("""{"type":"progress","label":"Empty","value":0,"max":10,"display":"0 of 10"}"""))
+
+        val pixels = rule.onNodeWithContentDescription("Empty: 0 of 10").captureToImage().toPixelMap()
+
+        assertEquals(Tokens.Dark.borderControl, pixels[pixels.width / 2, pixels.height - 2])
     }
 
     @Test
