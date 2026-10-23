@@ -112,6 +112,7 @@ fun Composer(
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(TextFieldValue("")) }
+    var sent by remember(conversation.id) { mutableStateOf<String?>(null) }
     val source = remember { MutableInteractionSource() }
     val modes = options.modes.ifEmpty { fallbackModes(conversation.agent) }
     val settings = options.settings.filterNot { (it.category == "mode" && options.modes.isNotEmpty()) || (it.category == "model" && options.models.isNotEmpty()) }
@@ -159,6 +160,7 @@ fun Composer(
                 onSend(trimmed)
             }
 
+            sent = text.text
             text = TextFieldValue("")
         }
     }
@@ -167,7 +169,11 @@ fun Composer(
         Box(fieldModifier) {
             MessageField(
                 text = text,
-                onTextChange = { text = it },
+                onTextChange = { changed ->
+                    val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
+                    sent = null
+                    text = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
+                },
                 source = source,
                 onSubmit = ::submit,
                 onPaste = {
