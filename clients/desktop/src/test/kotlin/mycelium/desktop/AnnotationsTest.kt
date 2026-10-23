@@ -131,6 +131,8 @@ class AnnotationsTest {
             moveTo(Offset(width - 1f, centerY))
             release()
         }
+        rule.onAllNodesWithText("Ctrl+Shift+A", substring = true).assertCountEquals(0)
+        rule.onNodeWithContentDescription("Add to message, Ctrl+Shift+A").assertExists()
         rule.onNodeWithText("Add to message").assertIsDisplayed().performClick()
         rule.onNode(hasSetTextAction()).performTextInput("make this 5000")
         rule.onNodeWithText("Add").performClick()
