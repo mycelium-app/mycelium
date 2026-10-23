@@ -251,20 +251,23 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
     val chats = chatSections(state.conversations.values)
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
-    val openedMode = when {
-        route == Route.NewChat -> ChatsMode
-        route is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
-        else -> null
+    var lastOpened by remember { mutableStateOf(mapOf(WorkspacesMode to Route.New, ChatsMode to Route.NewChat)) }
+    val openedMode = when (route) {
+        Route.NewChat -> ChatsMode
+        is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
+        Route.Settings, Route.Activity, Route.Empty -> null
+        else -> WorkspacesMode
     }
 
-    LaunchedEffect(openedMode) {
+    LaunchedEffect(route, openedMode) {
         if (openedMode != null) {
             mode = openedMode
+            lastOpened = lastOpened + (openedMode to route)
         }
     }
 
     Column(modifier.background(colors.bgPanel)) {
-        Segmented(listOf(WorkspacesMode, ChatsMode), mode, { mode = it }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
+        Segmented(listOf(WorkspacesMode, ChatsMode), mode, { chosen -> mode = chosen; lastOpened[chosen]?.let(onRoute) }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
 
         Hairline()
 
@@ -339,8 +342,11 @@ private fun Sidebar(state: AppState, route: Route, onRoute: (Route) -> Unit, mod
         ) {
             val appearance = LocalAppearance.current
 
-            MyButton({ onRoute(Route.Projects) }, text = "Projects", icon = MyIcon.Folder, muted = true, selected = route == Route.Projects)
-            MyButton({ onRoute(Route.Issues) }, text = "Issues", icon = MyIcon.Issue, muted = true, selected = route == Route.Issues)
+            if (mode == WorkspacesMode) {
+                MyButton({ onRoute(Route.Projects) }, text = "Projects", icon = MyIcon.Folder, muted = true, selected = route == Route.Projects)
+                MyButton({ onRoute(Route.Issues) }, text = "Issues", icon = MyIcon.Issue, muted = true, selected = route == Route.Issues)
+            }
+
             Box(Modifier.weight(1f))
             MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
             MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
