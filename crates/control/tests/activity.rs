@@ -208,4 +208,3 @@ async fn per_conversation_usage_does_not_show_another_persons_conversations() {
 
     assert_eq!(rows, json!([]));
 }
-

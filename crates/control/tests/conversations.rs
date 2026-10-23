@@ -1074,4 +1074,3 @@ async fn a_conversation_whose_idle_session_the_node_closed_resumes_it_on_the_nex
         other => panic!("expected start_session, got {other:?}"),
     }
 }
-
