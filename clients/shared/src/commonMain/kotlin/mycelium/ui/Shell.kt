@@ -404,11 +404,11 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             Icon(agentIcon(row.agent), colors.text, Tokens.Size.IconMd)
             Label(row.title, Modifier.weight(1f), color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
+            Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
             }
-
-            Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
         }
 
         if (sideChats > 0) {
