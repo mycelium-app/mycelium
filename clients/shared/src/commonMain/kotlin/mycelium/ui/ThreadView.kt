@@ -151,16 +151,17 @@ fun ThreadView(
         }
 
         if (!atNewest) {
-            MyButton(
-                onClick = {
-                    following = true
-                    scope.launch { state.animateScrollToItem(0) }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Tokens.Space.S3),
-                icon = MyIcon.ScrollToBottom,
-                description = "Scroll to the newest message",
-                variant = ButtonVariant.Outline,
-            )
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = Tokens.Space.S4, bottom = Tokens.Space.S3)) {
+                MyButton(
+                    onClick = {
+                        following = true
+                        scope.launch { state.animateScrollToItem(0) }
+                    },
+                    icon = MyIcon.ScrollToBottom,
+                    description = "Scroll to the newest message",
+                    variant = ButtonVariant.Outline,
+                )
+            }
         }
     }
 }
