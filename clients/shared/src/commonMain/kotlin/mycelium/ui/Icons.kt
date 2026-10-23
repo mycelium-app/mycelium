@@ -36,6 +36,8 @@ private fun rect(x: Float, y: Float, w: Float, h: Float, r: Float) =
 
 enum class MyIcon(vararg val paths: String) {
     ChevronDown("m6 9 6 6 6-6"),
+    ArrowUp("M12 19V5M5 12l7-7 7 7"),
+    ArrowDown("M12 5v14M19 12l-7 7-7-7"),
     ChevronRight("m9 6 6 6-6 6"),
     Search(circle(11f, 11f, 7f), "m20 20-3.5-3.5"),
     Plus("M12 5v14M5 12h14"),

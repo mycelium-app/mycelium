@@ -229,6 +229,14 @@ pub enum GitCommand {
         options: CommitOptions,
     },
     Fetch,
+    Pull {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        rebase: bool,
+    },
+    Push {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
+    },
     UndoLastCommit,
     Clone {
         url: String,

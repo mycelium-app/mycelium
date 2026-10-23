@@ -2,6 +2,9 @@ package mycelium.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -28,19 +31,35 @@ class GitCommitAreaTest {
     val rule = createComposeRule()
 
     @Test
-    fun fetchSitsAtTheRightEdgeOfTheBranchRow() {
+    fun theRemoteActionsSitAtTheRightEdgeOfTheBranchRow() {
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(330.dp)) {
-                    CommitArea(GitStatus("main", ahead = 2, behind = 0, files = emptyList()), null, "", {}, {}, {}, {})
+                    CommitArea(GitStatus("main", upstream = "origin/main", ahead = 2, behind = 0, files = emptyList()), null, "", {}, {}, {}, {})
                 }
             }
         }
 
-        val fetch = rule.onNodeWithText("Fetch", useUnmergedTree = true).getBoundsInRoot()
+        val actions = rule.onNodeWithContentDescription("More remote actions").getBoundsInRoot()
         val panel = rule.onRoot().getBoundsInRoot()
 
-        assertTrue(panel.right - fetch.right < 24.dp, "Fetch ends ${panel.right - fetch.right} from the right edge")
+        assertTrue(panel.right - actions.right < 24.dp, "The remote actions end ${panel.right - actions.right} from the right edge")
+    }
+
+    @Test
+    fun theRemoteButtonOffersWhatTheBranchNeedsNext() {
+        var status by mutableStateOf(GitStatus("main", upstream = "origin/main", ahead = 0, behind = 0, files = emptyList()))
+        rule.setContent { MyceliumTheme(true) { CommitArea(status, null, "", {}, {}, {}, {}) } }
+
+        fun shown(label: String) = rule.onNodeWithText(label, useUnmergedTree = true).assertExists()
+
+        shown("Fetch")
+        status = status.copy(ahead = 1)
+        shown("Push")
+        status = status.copy(behind = 3)
+        shown("Pull")
+        status = status.copy(upstream = null, ahead = 0, behind = 0)
+        rule.onNodeWithContentDescription("Publish main").assertExists()
     }
 
     @OptIn(ExperimentalTestApi::class)

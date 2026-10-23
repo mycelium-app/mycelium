@@ -66,9 +66,21 @@ pub struct CommitRequest {
     no_verify: bool,
 }
 
+#[derive(Deserialize)]
+pub struct PullRequest {
+    #[serde(default)]
+    rebase: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PushRequest {
+    #[serde(default)]
+    force: bool,
+}
+
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
-        GitCommand::Fetch | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
+        GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
         _ => GIT_TIMEOUT,
     };
@@ -160,6 +172,14 @@ pub async fn commit(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
 pub async fn fetch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     run(&state, &user, id, GitCommand::Fetch).await
+}
+
+pub async fn pull(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PullRequest>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::Pull { rebase: request.rebase }).await
+}
+
+pub async fn push(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PushRequest>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::Push { force: request.force }).await
 }
 
 pub async fn undo(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {

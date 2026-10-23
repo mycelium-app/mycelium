@@ -110,6 +110,30 @@ async fn git_log_diff_and_stage_carry_their_arguments_to_the_node() {
 }
 
 #[tokio::test]
+async fn pull_and_push_carry_rebase_and_force_to_the_node() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let pull = user.json(user.post(&format!("/api/v1/conversations/{id}/git/pull")).json(&json!({}))).await;
+        let rebase = user.json(user.post(&format!("/api/v1/conversations/{id}/git/pull")).json(&json!({"rebase": true}))).await;
+        let push = user.json(user.post(&format!("/api/v1/conversations/{id}/git/push")).json(&json!({}))).await;
+        let force = user.json(user.post(&format!("/api/v1/conversations/{id}/git/push")).json(&json!({"force": true}))).await;
+
+        [pull, rebase, push, force].map(|(status, _)| status)
+    });
+
+    let mut commands = Vec::new();
+
+    for _ in 0..4 {
+        commands.push(answer_next(&mut link, true, json!({}), None).await.1);
+    }
+
+    assert_eq!(commands, vec![GitCommand::Pull { rebase: false }, GitCommand::Pull { rebase: true }, GitCommand::Push { force: false }, GitCommand::Push { force: true }]);
+    assert_eq!(asking.await.unwrap(), [200; 4]);
+}
+
+#[tokio::test]
 async fn a_commit_is_sent_to_the_node_with_its_message_trimmed() {
     let server = Server::start().await;
     let (mut link, id) = conversation_on(&server).await;

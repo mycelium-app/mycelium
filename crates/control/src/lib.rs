@@ -127,6 +127,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/git/stage-all", post(git::stage_all))
         .route("/api/v1/conversations/{id}/git/commit", post(git::commit))
         .route("/api/v1/conversations/{id}/git/fetch", post(git::fetch))
+        .route("/api/v1/conversations/{id}/git/pull", post(git::pull))
+        .route("/api/v1/conversations/{id}/git/push", post(git::push))
         .route("/api/v1/conversations/{id}/git/undo", post(git::undo))
         .route("/api/v1/conversations/{id}/terminal", post(terminals::start))
         .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))

@@ -147,6 +147,22 @@ class GitGraphTest {
     }
 
     @Test
+    fun theRemoteMenuPullsWithRebaseAndForcePushes() {
+        val fake = GitFake()
+        open(fake)
+
+        rule.onNodeWithContentDescription("More remote actions").performClick()
+        rule.onNodeWithText("Pull (rebase)").performClick()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/pull") } }
+        rule.onNodeWithContentDescription("More remote actions").performClick()
+        rule.onNodeWithText("Force push").performClick()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/push") } }
+
+        assertEquals("""{"rebase":true}""", fake.bodyOf("/git/pull"))
+        assertEquals("""{"force":true}""", fake.bodyOf("/git/push"))
+    }
+
+    @Test
     fun aFileWithMoreChangesOnDiskThanStagedIsPartlyStaged() {
         open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":true,"untracked":false,"additions":2,"deletions":0}]}"""))
 

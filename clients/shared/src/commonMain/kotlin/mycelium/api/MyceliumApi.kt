@@ -442,6 +442,14 @@ class MyceliumApi(
         call("/conversations/$id/git/fetch") { client.post(it) { authorise() } }
     }
 
+    suspend fun gitPull(id: String, rebase: Boolean = false) {
+        call("/conversations/$id/git/pull") { client.post(it) { authorise(); json(GitPullRequest(rebase)) } }
+    }
+
+    suspend fun gitPush(id: String, force: Boolean = false) {
+        call("/conversations/$id/git/push") { client.post(it) { authorise(); json(GitPushRequest(force)) } }
+    }
+
     suspend fun gitUndo(id: String): GitUndone = call("/conversations/$id/git/undo") { client.post(it) { authorise() } }.body()
 
     suspend fun events(id: String, after: Long = 0, limit: Int = 500): List<Event> =

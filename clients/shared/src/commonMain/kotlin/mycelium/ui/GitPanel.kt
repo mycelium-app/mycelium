@@ -270,6 +270,8 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 message = message,
                 onMessage = { message = it },
                 onFetch = { run { store.api.gitFetch(id); refresh() } },
+                onPull = { rebase -> run { store.api.gitPull(id, rebase); refresh() } },
+                onPush = { force -> run { store.api.gitPush(id, force); refresh() } },
                 onCommit = {
                     val text = message.ifBlank { status?.preparedMessage.orEmpty() }
                     val problem = commitProblem(text, files)
@@ -484,6 +486,8 @@ fun CommitArea(
     onOpenBranches: () -> Unit = {},
     onSwitch: (BranchEntry) -> Unit = {},
     onAmend: () -> Unit = {},
+    onPull: (rebase: Boolean) -> Unit = {},
+    onPush: (force: Boolean) -> Unit = {},
     signoff: Boolean = false,
     onSignoff: () -> Unit = {},
     skipHooks: Boolean = false,
@@ -492,6 +496,7 @@ fun CommitArea(
     val colors = MyTheme.colors
     var picking by remember { mutableStateOf(false) }
     var options by remember { mutableStateOf(false) }
+    var remoteActions by remember { mutableStateOf(false) }
     val source = remember { MutableInteractionSource() }
     val focused = source.collectIsFocusedAsState()
 
@@ -525,7 +530,29 @@ fun CommitArea(
                 }
             }
 
-            MyButton(onFetch, text = "Fetch", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    status != null && status.upstream == null && status.branch.isNotEmpty() -> MyButton({ onPush(false) }, text = "Publish", icon = MyIcon.ArrowUp, description = "Publish ${status.branch}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    status != null && status.behind > 0 -> MyButton({ onPull(false) }, text = "Pull", icon = MyIcon.ArrowDown, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    status != null && status.ahead > 0 -> MyButton({ onPush(false) }, text = "Push", icon = MyIcon.ArrowUp, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                    else -> MyButton(onFetch, text = "Fetch", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                }
+
+                Box {
+                    MyButton({ remoteActions = true }, icon = MyIcon.ChevronDown, description = "More remote actions", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+
+                    if (remoteActions) {
+                        MenuPopup(onDismiss = { remoteActions = false }) {
+                            MenuItem("Fetch", onClick = { remoteActions = false; onFetch() })
+                            MenuItem("Pull", onClick = { remoteActions = false; onPull(false) })
+                            MenuItem("Pull (rebase)", onClick = { remoteActions = false; onPull(true) })
+                            Hairline()
+                            MenuItem("Push", onClick = { remoteActions = false; onPush(false) })
+                            MenuItem("Force push", onClick = { remoteActions = false; onPush(true) })
+                        }
+                    }
+                }
+            }
         }
 
         BasicTextField(
@@ -563,7 +590,7 @@ fun CommitArea(
             },
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             MyButton(onCommit, Modifier.weight(1f), text = "Commit", variant = ButtonVariant.Primary)
 
             Box {

@@ -38,6 +38,8 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
         GitCommand::Commit { message, options } => commit(cwd, &message, &options),
         GitCommand::Fetch => changed(cwd, &["fetch"], &[]),
+        GitCommand::Pull { rebase } => changed(cwd, if rebase { &["pull", "--rebase"] } else { &["pull"] }, &[]),
+        GitCommand::Push { force } => push(cwd, force),
         GitCommand::UndoLastCommit => undo_last_commit(cwd),
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
@@ -174,6 +176,25 @@ fn commit(cwd: &Path, message: &str, options: &CommitOptions) -> Result<Value, S
         args.push("--no-edit");
     } else {
         args.extend(["-m", message]);
+    }
+
+    changed(cwd, &args, &[])
+}
+
+fn push(cwd: &Path, force: bool) -> Result<Value, String> {
+    let tracking = git(cwd, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], &[]).is_ok();
+    let remotes = String::from_utf8_lossy(&git(cwd, &["remote"], &[])?).lines().map(str::to_string).collect::<Vec<_>>();
+    let remote = remotes.iter().find(|name| *name == "origin").or(remotes.first()).cloned();
+    let mut args = vec!["push"];
+
+    if force {
+        args.push("--force-with-lease");
+    }
+
+    match (tracking, remote.as_deref()) {
+        (true, _) => {}
+        (false, Some(remote)) => args.extend(["--set-upstream", remote, "HEAD"]),
+        (false, None) => return Err("This repository has no remote to push to. Add one with git remote add, then push again.".to_string()),
     }
 
     changed(cwd, &args, &[])
@@ -687,6 +708,65 @@ mod tests {
         let merged = run(dir.path(), GitCommand::Status).unwrap()["prepared_message"].as_str().unwrap().to_string();
 
         assert_eq!(merged, "Merge branch 'feature'");
+    }
+
+    #[test]
+    fn pushing_a_new_branch_publishes_it_and_a_clone_pulls_it_back() {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "-b", "main"], &[]).unwrap();
+        let dir = repository();
+        git(dir.path(), &["remote", "add", "origin", origin.path().to_str().unwrap()], &[]).unwrap();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "first");
+
+        run(dir.path(), GitCommand::Push { force: false }).unwrap();
+
+        assert_eq!(run(dir.path(), GitCommand::Status).unwrap()["upstream"], "origin/main");
+
+        let other = tempfile::tempdir().unwrap();
+        git(other.path(), &["clone", "--quiet", origin.path().to_str().unwrap(), "."], &[]).unwrap();
+        init(other.path());
+        write(&dir, "a.txt", "two\n");
+        commit_all(&dir, "second");
+        run(dir.path(), GitCommand::Push { force: false }).unwrap();
+
+        run(other.path(), GitCommand::Pull { rebase: true }).unwrap();
+
+        assert_eq!(run(other.path(), GitCommand::Log { limit: 1 }).unwrap()[0]["subject"], "second");
+    }
+
+    #[test]
+    fn force_pushing_replaces_a_rewritten_commit_and_a_plain_push_refuses_it() {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "-b", "main"], &[]).unwrap();
+        let dir = repository();
+        git(dir.path(), &["remote", "add", "origin", origin.path().to_str().unwrap()], &[]).unwrap();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "first");
+        write(&dir, "a.txt", "two\n");
+        commit_all(&dir, "second");
+        run(dir.path(), GitCommand::Push { force: false }).unwrap();
+        write(&dir, "a.txt", "three\n");
+        run(dir.path(), GitCommand::StageAll).unwrap();
+        run(dir.path(), GitCommand::Commit { message: "second, rewritten".into(), options: CommitOptions { amend: true, ..Default::default() } }).unwrap();
+
+        assert!(run(dir.path(), GitCommand::Push { force: false }).is_err());
+
+        run(dir.path(), GitCommand::Push { force: true }).unwrap();
+
+        let pushed = String::from_utf8(git(origin.path(), &["log", "-1", "--format=%s", "main"], &[]).unwrap()).unwrap();
+        assert_eq!(pushed.trim(), "second, rewritten");
+    }
+
+    #[test]
+    fn pushing_without_a_remote_says_how_to_add_one() {
+        let dir = repository();
+        write(&dir, "a.txt", "one\n");
+        commit_all(&dir, "first");
+
+        let error = run(dir.path(), GitCommand::Push { force: false }).unwrap_err();
+
+        assert!(error.contains("git remote add"), "{error}");
     }
 
     #[test]
