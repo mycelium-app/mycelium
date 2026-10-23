@@ -71,6 +71,8 @@ build:image:
         - Cargo.lock
         - crates/**/*
         - clients/**/*
+        - editor/**/*
+        - CHANGELOG.md
         - .gitlab-ci.yml
   before_script:
     - echo "$HARBOR_PASSWORD" | docker login "$REGISTRY" -u "$HARBOR_USERNAME" --password-stdin
@@ -276,6 +278,7 @@ publish:flake:
     - ci/s3-upload.sh mycelium-flake.tar.gz
     - export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" AWS_DEFAULT_REGION=us-east-1
     - aws --endpoint-url "$S3_ENDPOINT" s3 cp mycelium-flake.tar.gz "s3://${S3_BUCKET}/${S3_PREFIX}/mycelium-flake.tar.gz"
+    - aws --endpoint-url "$S3_ENDPOINT" s3 cp mycelium-flake.tar.gz "s3://${S3_BUCKET}/${S3_PREFIX}/mycelium-flake-${CI_COMMIT_TAG}.tar.gz"
 
 publish:release:
   stage: release
@@ -284,10 +287,12 @@ publish:release:
   <<: *release_rule
   script:
     - echo "release ${CI_COMMIT_TAG}"
+    - awk -v tag="## ${CI_COMMIT_TAG}" '$0 == tag {on=1; next} /^## / {on=0} on' CHANGELOG.md > release-notes.md
+    - '[ -s release-notes.md ] || echo "mycelium ${CI_COMMIT_TAG}." > release-notes.md'
   release:
     name: "mycelium ${CI_COMMIT_TAG}"
     tag_name: "$CI_COMMIT_TAG"
-    description: "mycelium ${CI_COMMIT_TAG}."
+    description: release-notes.md
     assets:
       links:
         - name: "mycelium-linux-x86_64"

@@ -107,6 +107,13 @@ publishes instead. It installs the released Linux x86_64 binaries and exports
 inputs.mycelium.url = "https://github.com/mycelium-app/mycelium/releases/latest/download/mycelium-flake.tar.gz";
 ```
 
+That URL moves with every release, so a lock file or a root's cached download of it can go stale and
+fail with a hash mismatch. Pin a release instead with its own URL, which is never overwritten:
+
+```nix
+inputs.mycelium.url = "https://github.com/mycelium-app/mycelium/releases/download/mycelium-flake-v0.4.0.tar.gz";
+```
+
 ```nix
 services.mycelium-node = {
   enable = true;
