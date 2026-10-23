@@ -926,7 +926,7 @@ data class GitStatus(
     val ahead: Int,
     val behind: Int,
     val files: List<GitFile>,
-    @SerialName("squash_message") val squashMessage: String? = null,
+    @SerialName("prepared_message") val preparedMessage: String? = null,
 )
 
 @Serializable

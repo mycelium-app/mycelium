@@ -136,14 +136,6 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         }
     }
 
-    LaunchedEffect(status?.squashMessage) {
-        val squash = status?.squashMessage
-
-        if (squash != null && message.isBlank()) {
-            message = squash
-        }
-    }
-
     LaunchedEffect(id, tab) {
         if (tab == GitTab.Graph && graph.isEmpty()) {
             run { refresh() }
@@ -276,12 +268,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 onMessage = { message = it },
                 onFetch = { run { store.api.gitFetch(id); refresh() } },
                 onCommit = {
-                    val problem = commitProblem(message, files)
+                    val text = message.ifBlank { status?.preparedMessage.orEmpty() }
+                    val problem = commitProblem(text, files)
 
                     if (problem != null) {
                         failure = problem
                     } else {
-                        run { store.api.gitCommit(id, message.trim()); message = ""; refresh() }
+                        run { store.api.gitCommit(id, text.trim()); message = ""; refresh() }
                     }
                 },
                 onUndo = {
@@ -546,7 +539,7 @@ fun CommitArea(
             decorationBox = { inner ->
                 Box(Modifier.padding(Tokens.Space.S2)) {
                     if (message.isEmpty()) {
-                        Label("Enter commit message", style = Tokens.Type.Code, color = colors.textFaint)
+                        Label(status?.preparedMessage ?: "Enter commit message", style = Tokens.Type.Code, color = colors.textFaint)
                     }
 
                     inner()

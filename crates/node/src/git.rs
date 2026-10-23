@@ -215,10 +215,19 @@ fn status(cwd: &Path) -> Result<Value, String> {
         }
     }
 
-    let squash_path = String::from_utf8_lossy(&git(cwd, &["rev-parse", "--git-path", "SQUASH_MSG"], &[])?).trim().to_string();
-    let squash_message = std::fs::read_to_string(cwd.join(squash_path)).ok().map(|text| text.trim_end().to_string()).filter(|text| !text.is_empty());
+    let prepared_message = prepared_message(cwd, "MERGE_MSG")?.or(prepared_message(cwd, "SQUASH_MSG")?);
 
-    Ok(json!({"branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "files": files, "squash_message": squash_message}))
+    Ok(json!({"branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "files": files, "prepared_message": prepared_message}))
+}
+
+fn prepared_message(cwd: &Path, name: &str) -> Result<Option<String>, String> {
+    let path = String::from_utf8_lossy(&git(cwd, &["rev-parse", "--git-path", name], &[])?).trim().to_string();
+    let Ok(text) = std::fs::read_to_string(cwd.join(path)) else {
+        return Ok(None);
+    };
+    let message = text.lines().filter(|line| !line.starts_with('#')).collect::<Vec<_>>().join("\n").trim().to_string();
+
+    Ok(Some(message).filter(|message| !message.is_empty()))
 }
 
 fn counts(numstat: &[u8]) -> HashMap<String, (u64, u64)> {
@@ -630,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn status_carries_the_squash_message_while_a_squash_merge_waits_to_be_committed() {
+    fn status_carries_the_prepared_message_while_a_squash_or_merge_waits_to_be_committed() {
         let dir = repository();
         write(&dir, "a.txt", "one\n");
         commit_all(&dir, "first");
@@ -639,12 +648,21 @@ mod tests {
         commit_all(&dir, "feature work");
         git(dir.path(), &["switch", "main"], &[]).unwrap();
 
-        assert_eq!(run(dir.path(), GitCommand::Status).unwrap()["squash_message"], Value::Null);
+        assert_eq!(run(dir.path(), GitCommand::Status).unwrap()["prepared_message"], Value::Null);
 
         git(dir.path(), &["merge", "--squash", "feature"], &[]).unwrap();
-        let message = run(dir.path(), GitCommand::Status).unwrap()["squash_message"].as_str().unwrap().to_string();
+        let squashed = run(dir.path(), GitCommand::Status).unwrap()["prepared_message"].as_str().unwrap().to_string();
 
-        assert!(message.contains("feature work"), "{message}");
+        assert!(squashed.contains("feature work"), "{squashed}");
+
+        git(dir.path(), &["reset", "--hard", "--quiet"], &[]).unwrap();
+        std::fs::remove_file(dir.path().join(".git/SQUASH_MSG")).ok();
+        write(&dir, "b.txt", "main side\n");
+        commit_all(&dir, "main work");
+        git(dir.path(), &["merge", "--no-ff", "--no-commit", "feature"], &[]).unwrap();
+        let merged = run(dir.path(), GitCommand::Status).unwrap()["prepared_message"].as_str().unwrap().to_string();
+
+        assert_eq!(merged, "Merge branch 'feature'");
     }
 
     #[test]

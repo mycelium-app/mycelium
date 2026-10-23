@@ -88,7 +88,9 @@ private class GitFake(val status: String = """{"branch":"main","ahead":0,"behind
         },
     )
 
-    fun switchBody(): String = (requests.last { it.url.encodedPath.endsWith("/git/switch") }.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+    fun bodyOf(route: String): String = (requests.last { it.url.encodedPath.endsWith(route) }.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+
+    fun switchBody(): String = bodyOf("/git/switch")
 }
 
 class GitGraphTest {
@@ -111,10 +113,15 @@ class GitGraphTest {
     }
 
     @Test
-    fun aWaitingSquashMessageFillsTheEmptyCommitBox() {
-        open(GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[],"squash_message":"Squashed commit of the following:\n\n    Add the importer"}"""))
+    fun aPreparedMergeMessageIsThePlaceholderAndIsCommittedWhenTheBoxIsLeftEmpty() {
+        val fake = GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":false,"untracked":false,"additions":1,"deletions":0}],"prepared_message":"Merge branch 'feature'"}""")
+        open(fake)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Squashed commit of the following:", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Merge branch 'feature'").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Commit").performClick()
+        rule.waitUntil(5_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/commit") } }
+
+        assertEquals("""{"message":"Merge branch 'feature'"}""", fake.bodyOf("/git/commit"))
     }
 
     @Test
