@@ -414,6 +414,18 @@ class MyceliumApi(
         call("/walkthroughs/$id/reads/$step") { client.put(it) { authorise() } }
     }
 
+    suspend fun addWalkthroughNote(id: String, request: WalkthroughNoteRequest): WalkthroughNote = call("/walkthroughs/$id/notes") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun walkthroughNotes(id: String): List<WalkthroughNote> = call("/walkthroughs/$id/notes") { client.get(it) { authorise() } }.body()
+
+    suspend fun markWalkthroughNotesSent(id: String) {
+        call("/walkthroughs/$id/notes/sent") { client.post(it) { authorise() } }
+    }
+
+    suspend fun removeWalkthroughNote(id: String, noteId: String) {
+        call("/walkthroughs/$id/notes/$noteId") { client.delete(it) { authorise() } }
+    }
+
     suspend fun dismissWalkthrough(id: String) {
         call("/walkthroughs/$id/dismissal") { client.put(it) { authorise() } }
     }

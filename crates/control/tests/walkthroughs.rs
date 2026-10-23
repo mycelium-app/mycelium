@@ -519,3 +519,73 @@ async fn the_tool_description_says_every_change_must_be_covered() {
     let tool = tools["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "walkthrough").unwrap().clone();
     assert!(tool["description"].as_str().unwrap().contains("Every change in the scope must be covered by a step"));
 }
+
+async fn walkthrough_with_two_steps(server: &Server) -> (Uuid, Uuid) {
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(server, &mut link, Some(conversation.id), steps()).await;
+
+    (conversation.id, stored_id(server, conversation.id).await)
+}
+
+#[tokio::test]
+async fn an_annotation_on_lines_and_a_free_note_are_kept_on_their_steps_and_listed_in_order() {
+    let server = Server::start().await;
+    let (_, id) = walkthrough_with_two_steps(&server).await;
+
+    let (annotated_status, annotated) = server.user.json(server.user.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&json!({"step": 1, "file": "src/Screen.tsx", "line_start": 12, "line_end": 18, "quote": "const title", "comment": "Keep the old copy"}))).await;
+    let (note_status, note) = server.user.json(server.user.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&json!({"step": 0, "comment": "Is this file needed?"}))).await;
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/notes"))).await;
+
+    assert_eq!((annotated_status, note_status), (201, 201));
+    assert_eq!((annotated["file"].clone(), annotated["line_start"].clone(), annotated["line_end"].clone(), annotated["sent"].clone()), (json!("src/Screen.tsx"), json!(12), json!(18), json!(false)));
+    assert_eq!(note["file"], Value::Null);
+    let comments: Vec<&str> = listed.as_array().unwrap().iter().map(|note| note["comment"].as_str().unwrap()).collect();
+    assert_eq!(comments, ["Keep the old copy", "Is this file needed?"]);
+}
+
+#[tokio::test]
+async fn a_note_for_a_step_that_does_not_exist_or_with_nothing_in_it_is_refused_with_how_to_fix_it() {
+    let server = Server::start().await;
+    let (_, id) = walkthrough_with_two_steps(&server).await;
+    let post = |body: Value| {
+        let request = server.user.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&body);
+        server.user.json(request)
+    };
+
+    let (far_status, far) = post(json!({"step": 2, "comment": "x"})).await;
+    let (empty_status, empty) = post(json!({"step": 0, "comment": "  "})).await;
+
+    assert_eq!((far_status, empty_status), (400, 400));
+    assert!(far["message"].as_str().unwrap().contains("Choose a step from 0 to 1"), "{far}");
+    assert!(empty["message"].as_str().unwrap().contains("Write a note"), "{empty}");
+}
+
+#[tokio::test]
+async fn a_note_can_be_removed_and_marking_notes_sent_leaves_them_listed_as_sent() {
+    let server = Server::start().await;
+    let (_, id) = walkthrough_with_two_steps(&server).await;
+    let (_, first) = server.user.json(server.user.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&json!({"step": 0, "comment": "one"}))).await;
+    server.user.json(server.user.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&json!({"step": 1, "comment": "two"}))).await;
+    let note_id = first["id"].as_str().unwrap();
+
+    let (removed, _) = server.user.json(server.user.delete(&format!("/api/v1/walkthroughs/{id}/notes/{note_id}"))).await;
+    let (marked, _) = server.user.json(server.user.post(&format!("/api/v1/walkthroughs/{id}/notes/sent"))).await;
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{id}/notes"))).await;
+
+    assert_eq!((removed, marked), (204, 204));
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!((listed[0]["comment"].clone(), listed[0]["sent"].clone()), (json!("two"), json!(true)));
+}
+
+#[tokio::test]
+async fn only_the_owner_can_read_or_add_walkthrough_notes() {
+    let server = Server::start().await;
+    let (_, id) = walkthrough_with_two_steps(&server).await;
+    let other = server.second_user("other@example.com").await;
+
+    let (read, _) = other.json(other.get(&format!("/api/v1/walkthroughs/{id}/notes"))).await;
+    let (add, _) = other.json(other.post(&format!("/api/v1/walkthroughs/{id}/notes")).json(&json!({"step": 0, "comment": "x"}))).await;
+
+    assert_eq!((read, add), (404, 404));
+}

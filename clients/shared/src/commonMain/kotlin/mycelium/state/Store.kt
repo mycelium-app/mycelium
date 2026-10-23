@@ -29,6 +29,8 @@ import mycelium.api.TaskStatuses
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
 import mycelium.api.StreamMessage
+import mycelium.api.WalkthroughNote
+import mycelium.api.WalkthroughNoteRequest
 import mycelium.api.NodeResources
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
@@ -51,6 +53,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
     private val mutableWalkthroughScopes = MutableStateFlow<Map<String, WalkthroughScope>>(emptyMap())
     val walkthroughScopes: StateFlow<Map<String, WalkthroughScope>> = mutableWalkthroughScopes.asStateFlow()
+    private val mutableWalkthroughNotes = MutableStateFlow<Map<String, List<WalkthroughNote>>>(emptyMap())
+    val walkthroughNotes: StateFlow<Map<String, List<WalkthroughNote>>> = mutableWalkthroughNotes.asStateFlow()
 
     init {
         scope.launch {
@@ -350,6 +354,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         val walkthrough = orNull { api.walkthrough(conversationId) }
         mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
 
+        walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
+
         val conversation = state.value.conversations[conversationId]
 
         if (conversation != null && conversation.status == mycelium.api.ConversationStatus.Review) {
@@ -385,6 +391,33 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
 
     fun regenerateWalkthrough(conversationId: String) {
         send(conversationId, regenerateWalkthroughPrompt(mutableWalkthroughScopes.value[conversationId] ?: WalkthroughScope.Branch))
+    }
+
+    fun addWalkthroughNote(conversationId: String, walkthroughId: String, request: WalkthroughNoteRequest) {
+        act {
+            val note = api.addWalkthroughNote(walkthroughId, request)
+            mutableWalkthroughNotes.update { it + (conversationId to it[conversationId].orEmpty() + note) }
+        }
+    }
+
+    suspend fun loadWalkthroughNotes(conversationId: String, walkthroughId: String) {
+        val notes = orNull { api.walkthroughNotes(walkthroughId) } ?: return
+        mutableWalkthroughNotes.update { it + (conversationId to notes) }
+    }
+
+    fun withWalkthroughNotes(conversationId: String, message: String): String {
+        val walkthrough = state.value.walkthroughs[conversationId] ?: return message
+        val block = walkthroughNotesBlock(walkthrough, mutableWalkthroughNotes.value[conversationId].orEmpty()) ?: return message
+
+        mutableWalkthroughNotes.update { it + (conversationId to it[conversationId].orEmpty().map { note -> note.copy(sent = true) }) }
+        act { api.markWalkthroughNotesSent(walkthrough.id) }
+
+        return listOf(block, message.trim()).filter { it.isNotEmpty() }.joinToString("\n\n")
+    }
+
+    fun removeWalkthroughNote(conversationId: String, walkthroughId: String, note: WalkthroughNote) {
+        mutableWalkthroughNotes.update { it + (conversationId to it[conversationId].orEmpty() - note) }
+        act { api.removeWalkthroughNote(walkthroughId, note.id) }
     }
 
     fun setWalkthroughDismissed(conversationId: String, dismissed: Boolean) {

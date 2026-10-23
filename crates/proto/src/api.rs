@@ -938,6 +938,22 @@ pub struct WalkthroughStep {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughNote {
+    pub id: Uuid,
+    pub step: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_start: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_end: Option<i32>,
+    pub quote: String,
+    pub comment: String,
+    pub sent: bool,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Walkthrough {
     pub id: Uuid,
     pub conversation_id: Uuid,

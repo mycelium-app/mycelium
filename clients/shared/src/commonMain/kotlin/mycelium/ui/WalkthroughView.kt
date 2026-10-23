@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,12 +38,18 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 import mycelium.api.Walkthrough
 import mycelium.api.WalkthroughFile
+import mycelium.api.WalkthroughNote
+import mycelium.api.WalkthroughNoteRequest
 import mycelium.api.WalkthroughStep
+import mycelium.state.Annotation
+import mycelium.state.FileDiff
 import mycelium.state.Store
 import mycelium.state.ToolStatus
 import mycelium.state.WalkthroughScope
 import mycelium.state.stepPosition
 import mycelium.state.walkthroughDiff
+import mycelium.state.walkthroughLines
+import mycelium.state.walkthroughNoteLabel
 import mycelium.state.walkthroughSections
 
 private const val ReadAfterMillis = 1_500L
@@ -62,6 +70,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     var selected by remember(walkthrough.id) { mutableStateOf(0) }
     var reads by remember(walkthrough.id) { mutableStateOf(emptySet<Int>()) }
     val scopes by store.walkthroughScopes.collectAsState()
+    val allNotes by store.walkthroughNotes.collectAsState()
+    val notes = allNotes[conversationId].orEmpty()
     var uncovered by remember(walkthrough.id) { mutableStateOf(emptyList<WalkthroughFile>()) }
     val steps = walkthrough.steps + listOfNotNull(WalkthroughStep(NotCoveredTitle, section = "Not covered", explanation = "These changes are not in any step above.", files = uncovered).takeIf { uncovered.isNotEmpty() })
     val last = steps.lastIndex
@@ -79,6 +89,10 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     LaunchedEffect(walkthrough.id) {
         val stored = runCatching { store.api.walkthroughReads(walkthrough.id) }.getOrDefault(emptyList())
         reads = reads + stored
+    }
+
+    LaunchedEffect(walkthrough.id) {
+        store.loadWalkthroughNotes(conversationId, walkthrough.id)
     }
 
     LaunchedEffect(walkthrough.id) {
@@ -113,7 +127,19 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     val detail: @Composable () -> Unit = {
         if (steps.isNotEmpty()) {
             walkthrough.note?.let { Label(it, color = MyTheme.colors.textMuted) }
-            StepDetail(steps[index], index)
+            StepDetail(
+                step = steps[index],
+                index = index,
+                walkthrough = walkthrough,
+                notes = notes.filter { it.step == index },
+                annotatable = index < walkthrough.steps.size,
+                onAnnotate = { file, diff, annotation ->
+                    val lines = walkthroughLines(diff, annotation.quote)
+                    store.addWalkthroughNote(conversationId, walkthrough.id, WalkthroughNoteRequest(index, file.path, lines?.first, lines?.second, annotation.quote, annotation.comment))
+                },
+                onNote = { text -> store.addWalkthroughNote(conversationId, walkthrough.id, WalkthroughNoteRequest(index, comment = text)) },
+                onRemoveNote = { note -> store.removeWalkthroughNote(conversationId, walkthrough.id, note) },
+            )
         }
     }
     val header: @Composable () -> Unit = {
@@ -261,8 +287,19 @@ private fun NumberChip(position: Int, on: Boolean) {
 }
 
 @Composable
-private fun StepDetail(step: WalkthroughStep, index: Int) {
+private fun StepDetail(
+    step: WalkthroughStep,
+    index: Int,
+    walkthrough: Walkthrough,
+    notes: List<WalkthroughNote>,
+    annotatable: Boolean,
+    onAnnotate: (WalkthroughFile, FileDiff, Annotation) -> Unit,
+    onNote: (String) -> Unit,
+    onRemoveNote: (WalkthroughNote) -> Unit,
+) {
     val colors = MyTheme.colors
+    val outer = LocalAnnotate.current
+    val annotate by rememberUpdatedState(onAnnotate)
 
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
         NumberChip(index, true)
@@ -283,8 +320,57 @@ private fun StepDetail(step: WalkthroughStep, index: Int) {
                 Label(file.path, style = Tokens.Type.UiStrong)
                 Label("No changes to this file in this scope", color = colors.textMuted)
             }
-        } else {
-            DiffCard(walkthroughDiff(file), ToolStatus.Done)
+
+            continue
+        }
+
+        val diff = walkthroughDiff(file)
+
+        if (!annotatable) {
+            DiffCard(diff, ToolStatus.Done)
+
+            continue
+        }
+
+        val actions = remember(index, file.path) { AnnotateActions(onAttach = { annotate(file, diff, it) }, onAsk = outer?.onAsk ?: { _, _ -> }) }
+
+        CompositionLocalProvider(LocalAnnotate provides actions) {
+            DiffCard(diff, ToolStatus.Done)
         }
     }
+
+    if (!annotatable) {
+        return
+    }
+
+    if (notes.isNotEmpty()) {
+        Label("Notes", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        for (note in notes) {
+            val label = walkthroughNoteLabel(walkthrough, note)
+
+            Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "Note: $label" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                Label(label, Modifier.weight(1f))
+                MyButton({ onRemoveNote(note) }, icon = MyIcon.Close, description = "Remove note: $label", size = ButtonSize.Sm, muted = true)
+            }
+        }
+    }
+
+    var draft by remember(index) { mutableStateOf("") }
+    var error by remember(index) { mutableStateOf<String?>(null) }
+
+    fun add() {
+        if (draft.isBlank()) {
+            error = "Enter a note to add to this step."
+
+            return
+        }
+
+        onNote(draft.trim())
+        draft = ""
+        error = null
+    }
+
+    TextInput(draft, { draft = it; error = null }, label = "Note on this step", placeholder = "Add a note for the agent", error = error, onSubmit = ::add)
+    MyButton(::add, text = "Add note", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
 }

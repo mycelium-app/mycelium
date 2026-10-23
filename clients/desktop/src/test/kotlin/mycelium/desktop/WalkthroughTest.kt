@@ -10,11 +10,16 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.geometry.Offset
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +51,7 @@ class WalkthroughTest {
     private val requests = mutableListOf<Pair<String, String>>()
     private var reads = "[]"
     private var uncovered = "[]"
+    private var notes = "[]"
 
     private fun show(walkthrough: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -55,6 +61,8 @@ class WalkthroughTest {
             val reply = when {
                 path.endsWith("/reads") -> reads
                 path.endsWith("/uncovered") -> uncovered
+                path.endsWith("/notes") && request.method == HttpMethod.Get -> notes
+                path.endsWith("/notes") -> String(request.body.toByteArray()).replaceFirst("{", "{\"id\":\"n1\",\"sent\":false,")
                 path.endsWith("/walkthrough") -> walkthrough
                 path.endsWith("/goal") -> "null"
                 path.endsWith("/nodes") -> "[]"
@@ -311,5 +319,87 @@ class WalkthroughTest {
 
         rule.onNodeWithText("Step 1 of 4").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Not covered yet", substring = true).fetchSemanticsNodes().size)
+    }
+
+    private fun noteBody(): String = requests.last { it.first == "POST /api/v1/walkthroughs/w1/notes" }.second
+
+    @Test
+    fun aFreeNoteOnAStepIsSavedAndListedOnTheStep() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithContentDescription("Note on this step").performTextInput("Is this file needed?")
+        rule.onNodeWithText("Add note").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/walkthroughs/w1/notes" } }
+        assertTrue(noteBody().contains("\"step\":0") && noteBody().contains("Is this file needed?"), noteBody())
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file': Is this file needed?").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun addingAnEmptyNoteSaysWhatToDo() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithText("Add note").performClick()
+
+        rule.onNodeWithText("Enter a note to add to this step.").assertIsDisplayed()
+        assertEquals(0, requests.count { it.first == "POST /api/v1/walkthroughs/w1/notes" })
+    }
+
+    @Test
+    fun linesSelectedInAStepsDiffAreAnnotatedWithTheirLineNumbers() {
+        val numbered = Walkthrough.replace("\"diff\":\"+export const strings = {}\"", "\"diff\":\"@@ -1,2 +1,2 @@\\n context line\\n-old title line\\n+new title line\"")
+        show(numbered)
+        openWalkthrough()
+
+        rule.onNodeWithText("new title line").performMouseInput {
+            moveTo(Offset(width * 0.1f, centerY))
+            press()
+            moveTo(Offset(width * 0.5f, centerY))
+            moveTo(Offset(width * 0.9f, centerY))
+            release()
+        }
+        rule.onNodeWithText("Add to message").performClick()
+        rule.onNodeWithContentDescription("Comment").performTextInput("Keep the old copy")
+        rule.onNodeWithText("Add").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/walkthroughs/w1/notes" } }
+        assertTrue(noteBody().contains("\"file\":\"src/strings.ts\"") && noteBody().contains("\"line_start\":2") && noteBody().contains("Keep the old copy"), noteBody())
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file', src/strings.ts line 2: Keep the old copy").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theNextMessageCarriesTheNotesInAClearBlockAndTheyAreMarkedSent() {
+        notes = """[{"id":"n1","step":1,"file":"src/Screen.tsx","line_start":12,"line_end":18,"quote":"const title","comment":"Keep the old copy","sent":false},{"id":"n2","step":0,"comment":"Is this file needed?","sent":false}]"""
+        show(Walkthrough)
+        openWalkthrough()
+        rule.onNodeWithText("Conversation").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNode(hasSetTextAction()).performTextInput("Looks good otherwise")
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
+        val prompt = requests.first { it.first == "POST /api/v1/conversations/c1/prompt" }.second
+        assertTrue(prompt.contains("Notes on the walkthrough:"), prompt)
+        assertTrue(prompt.contains("Step 2 'Restore reads its copy from strings', src/Screen.tsx lines 12-18: Keep the old copy"), prompt)
+        assertTrue(prompt.contains("Step 1 'Add the shared strings file': Is this file needed?") && prompt.contains("Looks good otherwise"), prompt)
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/walkthroughs/w1/notes/sent" } }
+    }
+
+    @Test
+    fun notesAlreadySentAreNotSentAgain() {
+        notes = """[{"id":"n2","step":0,"comment":"Is this file needed?","sent":true}]"""
+        show(Walkthrough)
+        openWalkthrough()
+        rule.onNodeWithText("Conversation").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNode(hasSetTextAction()).performTextInput("Thanks")
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
+        assertEquals(0, requests.count { it.second.contains("Notes on the walkthrough:") })
     }
 }

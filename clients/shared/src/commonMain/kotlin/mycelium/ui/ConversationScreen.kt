@@ -103,7 +103,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val attached = rememberAttachmentDrafts(id)
 
     fun send(text: String) {
-        store.send(id, messageWithAnnotations(annotations, text), attached.drafts.map { it.file })
+        store.send(id, messageWithAnnotations(annotations, store.withWalkthroughNotes(id, text)), attached.drafts.map { it.file })
         annotations = emptyList()
         attached.clear()
     }

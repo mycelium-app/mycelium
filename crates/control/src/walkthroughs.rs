@@ -7,8 +7,9 @@ use crate::walkthrough_diff::{self, Covered, FileChange};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use serde::Deserialize;
 use mycelium_proto::link::GitCommand;
-use mycelium_proto::api::{Walkthrough, WalkthroughFile, WalkthroughStep};
+use mycelium_proto::api::{Walkthrough, WalkthroughFile, WalkthroughNote, WalkthroughStep};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use uuid::Uuid;
@@ -218,4 +219,88 @@ pub async fn dismiss(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
 pub async fn reopen(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     set_dismissed(&state, &user, id, false).await
+}
+
+#[derive(Deserialize)]
+pub struct NoteRequest {
+    step: i32,
+    file: Option<String>,
+    line_start: Option<i32>,
+    line_end: Option<i32>,
+    #[serde(default)]
+    quote: String,
+    #[serde(default)]
+    comment: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct NoteRow {
+    id: Uuid,
+    step: i32,
+    file: Option<String>,
+    line_start: Option<i32>,
+    line_end: Option<i32>,
+    quote: String,
+    comment: String,
+    sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl NoteRow {
+    fn to_proto(self) -> WalkthroughNote {
+        WalkthroughNote { id: self.id, step: self.step, file: self.file, line_start: self.line_start, line_end: self.line_end, quote: self.quote, comment: self.comment, sent: self.sent_at.is_some(), created_at: self.created_at }
+    }
+}
+
+pub async fn add_note(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<NoteRequest>) -> ApiResult<(StatusCode, Json<WalkthroughNote>)> {
+    let count = find_owned_walkthrough(&state, id, user.id).await?;
+
+    if request.step < 0 || request.step as usize >= count {
+        return Err(ApiError::bad_request("no_such_step", format!("This walkthrough has {count} steps. Choose a step from 0 to {}.", count.saturating_sub(1))));
+    }
+
+    let comment = request.comment.trim().to_string();
+    let quote = request.quote.trim_end().to_string();
+
+    if comment.is_empty() && quote.trim().is_empty() {
+        return Err(ApiError::bad_request("note_empty", "Write a note, or select lines to annotate."));
+    }
+
+    let row = sqlx::query_as::<_, NoteRow>("insert into walkthrough_notes (walkthrough_id, user_id, step, file, line_start, line_end, quote, comment) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id, step, file, line_start, line_end, quote, comment, sent_at, created_at")
+        .bind(id)
+        .bind(user.id)
+        .bind(request.step)
+        .bind(request.file)
+        .bind(request.line_start)
+        .bind(request.line_end)
+        .bind(quote)
+        .bind(comment)
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok((StatusCode::CREATED, Json(row.to_proto())))
+}
+
+pub async fn notes(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughNote>>> {
+    find_owned_walkthrough(&state, id, user.id).await?;
+
+    let rows = sqlx::query_as::<_, NoteRow>("select id, step, file, line_start, line_end, quote, comment, sent_at, created_at from walkthrough_notes where walkthrough_id = $1 and user_id = $2 order by created_at, id").bind(id).bind(user.id).fetch_all(&state.pool).await?;
+
+    Ok(Json(rows.into_iter().map(NoteRow::to_proto).collect()))
+}
+
+pub async fn mark_notes_sent(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    find_owned_walkthrough(&state, id, user.id).await?;
+
+    sqlx::query("update walkthrough_notes set sent_at = now() where walkthrough_id = $1 and user_id = $2 and sent_at is null").bind(id).bind(user.id).execute(&state.pool).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn remove_note(State(state): State<AppState>, user: AuthUser, Path((id, note_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
+    find_owned_walkthrough(&state, id, user.id).await?;
+
+    sqlx::query("delete from walkthrough_notes where id = $1 and walkthrough_id = $2 and user_id = $3").bind(note_id).bind(id).bind(user.id).execute(&state.pool).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
