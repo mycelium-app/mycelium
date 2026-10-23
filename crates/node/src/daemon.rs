@@ -2,7 +2,7 @@ use crate::acp::Command;
 use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
 use crate::usage::{USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
 use crate::instructions::deliver;
-use crate::config::{NodeConfig, agent_command, agent_env, config_path};
+use crate::config::{NodeConfig, agent_command, agent_env, config_path, with_developer_instructions};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
@@ -407,6 +407,10 @@ impl Daemon {
         }
 
         let mut env = agent_env(agent);
+
+        if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
+            env = with_developer_instructions(env, text);
+        }
 
         if let Some(label) = account {
             let Some(found) = find_account(&self.options.home, &accounts_dir(&self.config.state_dir), agent, &label) else {

@@ -482,6 +482,7 @@ pub struct GroupFolderRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Extensions {
     pub generated_ui: bool,
+    pub rich_markdown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

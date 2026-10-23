@@ -268,9 +268,10 @@ at `<projects root>/<group>/<project>` on each node, and the node writes the gro
 them. Claude Code reads `CLAUDE.md` from every parent of its working directory, so
 `<projects root>/<group>/CLAUDE.md` is enough. Codex stops at the project root, marked by `.git`
 unless `project_root_markers` says otherwise (codex 0.163.0), so it never sees a file above the
-repo; for Codex the daemon has to add the group layer when it starts the session. No Codex option
-is known that does that without replacing the base instructions (`model_instructions_file` does),
-so the group layer reaches Claude Code only.
+repo; for Codex the daemon adds the layer when it starts the session, through `CODEX_CONFIG` carrying
+`developer_instructions`, which adds a developer message without replacing the base instructions
+(`model_instructions_file` does). The same path carries the built-in Mycelium extensions (generated UI,
+rich Markdown), switched per user in Settings, Instructions.
 
 **Memory.** Every memory has a scope: global, or one or more groups. Global memories stay the
 common case: anything true of the tools, the host or the agents themselves. A scope decides what a

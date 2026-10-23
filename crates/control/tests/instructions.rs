@@ -301,6 +301,7 @@ async fn a_conversation_in_a_group_starts_with_the_group_layer_and_others_do_not
     save(&server, &group.to_string(), "Use British English.").await;
     expect_instructions(&mut link).await;
 
+    set_generated_ui(&server, false).await;
     let (_, with_layer) = start_in(&server, &mut link, grouped).await;
     let (_, without) = start_in(&server, &mut link, loose).await;
 
@@ -528,6 +529,7 @@ async fn a_group_claims_folders_and_says_plainly_when_one_is_wrong_or_taken() {
 #[tokio::test]
 async fn a_conversation_without_a_project_joins_the_group_with_the_longest_matching_folder() {
     let server = Server::start().await;
+    set_generated_ui(&server, false).await;
     let mut link = server.online_node("laptop").await;
     let slop = create_group(&server, "slop").await;
     let mycelium = create_group(&server, "mycelium").await;
@@ -572,6 +574,7 @@ async fn an_imported_conversation_is_in_the_group_that_claims_its_folder_without
 #[tokio::test]
 async fn a_folder_claimed_for_one_node_leaves_the_same_folder_on_another_node_alone() {
     let server = Server::start().await;
+    set_generated_ui(&server, false).await;
     let mut laptop = server.online_node("laptop").await;
     let mut desktop = server.online_node("desktop").await;
     let slop = create_group(&server, "slop").await;
@@ -589,6 +592,7 @@ async fn a_folder_claimed_for_one_node_leaves_the_same_folder_on_another_node_al
 #[tokio::test]
 async fn a_projects_own_group_wins_over_a_folder_claim() {
     let server = Server::start().await;
+    set_generated_ui(&server, false).await;
     let mut link = server.online_node("laptop").await;
     let work = create_group(&server, "work").await;
     let slop = create_group(&server, "slop").await;
@@ -656,4 +660,63 @@ async fn recall_names_what_other_groups_hold_and_groups_reaches_into_them() {
     assert!(own.contains("pinned release") && !own.contains("left out"), "{own}");
     assert_eq!(is_error, json!(true));
     assert_eq!(unknown, "No group is called nobody. Use a group name, or groups: \"all\".");
+}
+
+async fn set_extensions(server: &Server, generated_ui: bool, rich_markdown: bool) -> (u16, Value) {
+    server.user.json(server.user.put("/api/v1/extensions").json(&json!({"generated_ui": generated_ui, "rich_markdown": rich_markdown}))).await
+}
+
+async fn set_generated_ui(server: &Server, on: bool) -> (u16, Value) {
+    set_extensions(server, on, false).await
+}
+
+#[tokio::test]
+async fn generated_ui_is_on_by_default_and_a_new_session_gets_the_schema_with_the_workspace_action() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    let (_, extensions) = server.user.json(server.user.get("/api/v1/extensions")).await;
+    let (_, instructions) = start_in_folder(&server, &mut link, "/anywhere").await;
+    let prompt = instructions.unwrap();
+
+    assert_eq!(extensions, json!({"generated_ui": true, "rich_markdown": true}));
+    assert!(prompt.starts_with("When an interface helps"), "{prompt}");
+    assert!(prompt.contains("mycelium-ui") && prompt.contains("\"type\":\"bar_chart\"") && prompt.contains("\"type\":\"open_file\""), "{prompt}");
+}
+
+#[tokio::test]
+async fn the_schema_follows_the_group_layer_and_turning_the_switch_off_leaves_only_the_group_layer() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let slop = create_group(&server, "slop").await;
+    claim(&server, slop, "/projects", None).await;
+    save(&server, &slop.to_string(), "Use British English.").await;
+    expect_instructions(&mut link).await;
+
+    let (_, on) = start_in_folder(&server, &mut link, "/projects/app").await;
+    let (status, saved) = set_generated_ui(&server, false).await;
+    let (_, off) = start_in_folder(&server, &mut link, "/projects/app").await;
+    let (_, off_without_group) = start_in_folder(&server, &mut link, "/anywhere").await;
+    let (_, extensions) = server.user.json(server.user.get("/api/v1/extensions")).await;
+
+    assert!(on.unwrap().starts_with("Use British English.\n\nWhen an interface helps"));
+    assert_eq!((status, saved, extensions), (200, json!({"generated_ui": false, "rich_markdown": false}), json!({"generated_ui": false, "rich_markdown": false})));
+    assert_eq!((off.as_deref(), off_without_group), (Some("Use British English."), None));
+}
+
+#[tokio::test]
+async fn rich_markdown_adds_its_note_to_a_new_session_only_while_the_switch_is_on() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+
+    let (_, on) = start_in_folder(&server, &mut link, "/anywhere").await;
+    set_extensions(&server, true, false).await;
+    let (_, off) = start_in_folder(&server, &mut link, "/anywhere").await;
+    set_extensions(&server, false, true).await;
+    let (_, only_markdown) = start_in_folder(&server, &mut link, "/anywhere").await;
+
+    let on = on.unwrap();
+    assert!(on.contains("[!WARNING]") && on.contains("^x^") && on.contains("Raw HTML is not rendered."), "{on}");
+    assert!(!off.unwrap().contains("[!WARNING]"));
+    assert!(only_markdown.unwrap().starts_with("Mycelium renders these Markdown extensions"));
 }

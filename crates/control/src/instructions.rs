@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::chats::{RICH_MARKDOWN_INSTRUCTIONS, generated_ui_instructions};
 use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
 use crate::groups::{self, GroupRow};
@@ -8,7 +9,7 @@ use crate::store::publish_node;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{InstructionLayer, InstructionSource, InstructionVersion, Instructions, SaveInstructionsRequest, SetInstructionSourceRequest};
+use mycelium_proto::api::{Extensions, InstructionLayer, InstructionSource, InstructionVersion, Instructions, SaveInstructionsRequest, SetInstructionSourceRequest};
 use mycelium_proto::link::ControlToNode;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -65,6 +66,13 @@ async fn source(state: &AppState) -> ApiResult<Option<SourceRow>> {
 
 async fn latest(state: &AppState, layer: &str) -> ApiResult<Option<VersionRow>> {
     Ok(sqlx::query_as::<_, VersionRow>("select id, text, created_at from instruction_versions where layer = $1 order by seq desc limit 1").bind(layer).fetch_optional(&state.pool).await?)
+}
+
+pub async fn extensions_of(state: &AppState, owner: Uuid) -> ApiResult<Extensions> {
+    let stored = sqlx::query_as::<_, (bool, bool)>("select generated_ui, rich_markdown from user_settings where owner = $1").bind(owner).fetch_optional(&state.pool).await?;
+    let (generated_ui, rich_markdown) = stored.unwrap_or((true, true));
+
+    Ok(Extensions { generated_ui, rich_markdown })
 }
 
 pub async fn current_revision(state: &AppState) -> ApiResult<Option<String>> {
@@ -165,7 +173,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
 
     sqlx::query("update conversations set instructions_revision = $2 where id = $1").bind(conversation_id).bind(revision).execute(&state.pool).await?;
 
-    let text = sqlx::query_scalar::<_, String>(
+    let group = sqlx::query_scalar::<_, String>(
         "select v.text from conversations c
          join instruction_versions v on v.layer = conversation_group(c.cwd, c.node_id, c.project_id)::text
          where c.id = $1 order by v.seq desc limit 1",
@@ -173,8 +181,16 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
     .bind(conversation_id)
     .fetch_optional(&state.pool)
     .await?;
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let extensions = extensions_of(state, owner).await?;
+    let layers: Vec<String> = group
+        .into_iter()
+        .filter(|text| !text.trim().is_empty())
+        .chain(extensions.generated_ui.then(generated_ui_instructions))
+        .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
+        .collect();
 
-    Ok(text.filter(|text| !text.trim().is_empty()))
+    Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Instructions>> {
@@ -262,4 +278,14 @@ pub async fn clear_source(State(state): State<AppState>, _user: AuthUser) -> Api
     sqlx::query("delete from instruction_source").execute(&state.pool).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn get_extensions(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Extensions>> {
+    Ok(Json(extensions_of(&state, user.id).await?))
+}
+
+pub async fn save_extensions(State(state): State<AppState>, user: AuthUser, Json(request): Json<Extensions>) -> ApiResult<Json<Extensions>> {
+    sqlx::query("insert into user_settings (owner, generated_ui, rich_markdown) values ($1, $2, $3) on conflict (owner) do update set generated_ui = excluded.generated_ui, rich_markdown = excluded.rich_markdown").bind(user.id).bind(request.generated_ui).bind(request.rich_markdown).execute(&state.pool).await?;
+
+    Ok(Json(request))
 }

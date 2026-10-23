@@ -117,6 +117,22 @@ pub fn agent_env(agent: AgentId) -> Vec<(String, String)> {
     }
 }
 
+pub fn with_developer_instructions(mut env: Vec<(String, String)>, instructions: &str) -> Vec<(String, String)> {
+    let position = env.iter().position(|(name, _)| name == "CODEX_CONFIG");
+    let held = position.map(|position| env.remove(position).1).or_else(|| std::env::var("CODEX_CONFIG").ok());
+    let mut config = held.and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+    let earlier = config["developer_instructions"].as_str().filter(|text| !text.trim().is_empty());
+    let combined = match earlier {
+        Some(earlier) => format!("{earlier}\n\n{instructions}"),
+        None => instructions.to_string(),
+    };
+
+    config["developer_instructions"] = serde_json::Value::String(combined);
+    env.push(("CODEX_CONFIG".to_string(), config.to_string()));
+
+    env
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +219,24 @@ mod tests {
         let error = NodeConfig::load(Path::new("/nonexistent/node.toml")).unwrap_err();
 
         assert!(format!("{error:#}").contains("mycelium node join"));
+    }
+
+    #[test]
+    fn codex_gets_the_instructions_as_developer_instructions_beside_what_the_config_already_holds() {
+        let held = vec![("CODEX_CONFIG".to_string(), r#"{"model":"gpt-5","developer_instructions":"Be brief."}"#.to_string()), ("OTHER".to_string(), "1".to_string())];
+
+        let env = with_developer_instructions(held, "Use British English.");
+        let config: serde_json::Value = serde_json::from_str(&env.iter().find(|(name, _)| name == "CODEX_CONFIG").unwrap().1).unwrap();
+
+        assert_eq!(config, serde_json::json!({"model": "gpt-5", "developer_instructions": "Be brief.\n\nUse British English."}));
+        assert!(env.contains(&("OTHER".to_string(), "1".to_string())));
+        assert_eq!(env.iter().filter(|(name, _)| name == "CODEX_CONFIG").count(), 1);
+    }
+
+    #[test]
+    fn codex_instructions_replace_a_config_that_is_not_json_object() {
+        let env = with_developer_instructions(vec![("CODEX_CONFIG".to_string(), "not json".to_string())], "Rules.");
+
+        assert_eq!(env, vec![("CODEX_CONFIG".to_string(), r#"{"developer_instructions":"Rules."}"#.to_string())]);
     }
 }

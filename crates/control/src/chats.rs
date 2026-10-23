@@ -3,6 +3,7 @@ use crate::auth::AuthUser;
 use crate::activity::record_turn;
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
+use crate::instructions::extensions_of;
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderRow};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, find_owned, lock_owned, set_status};
@@ -27,6 +28,14 @@ Components, each an object with a \"type\":
 - {\"type\":\"bar_chart\",\"title\":\"...\",\"bars\":[{\"label\":\"...\",\"value\":12,\"display\":\"12 ms\"}]}.
 - {\"type\":\"button\",\"label\":\"...\",\"action\":{...}} where the action is {\"type\":\"send_message\",\"text\":\"...\"}, which sends the text as the person's next message, or {\"type\":\"side_chat\",\"text\":\"...\"}, which opens a linked chat started with that text.
 A button label says what happens when it is pressed.";
+
+pub fn generated_ui_instructions() -> String {
+    let schema = CHAT_INSTRUCTIONS.split_once("When an interface helps").map(|(_, rest)| rest).unwrap_or_default();
+
+    format!("When an interface helps{schema}\n- In a workspace conversation a button may also use the action {{\"type\":\"open_file\",\"path\":\"...\"}}, which opens that file in the workspace.")
+}
+
+pub const RICH_MARKDOWN_INSTRUCTIONS: &str = "Mycelium renders these Markdown extensions, so use them where they help and not otherwise: task lists (- [ ] and - [x]), tables with column alignment, GitHub callouts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]), footnotes ([^1]), superscript (^x^), subscript (~x~), strikethrough, and fenced code with a language for highlighting (kotlin, rust, ts, js, python, shell, json, yaml, toml, diff). Raw HTML is not rendered.";
 
 async fn chat_node(state: &AppState, owner: Uuid) -> ApiResult<Uuid> {
     let existing = sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and hostname = $2 limit 1").bind(owner).bind(CHAT_HOST).fetch_optional(&state.pool).await?;
@@ -224,7 +233,11 @@ async fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow,
 
 async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: &[ChatMessage], usage: &mut (Option<i64>, Option<i64>)) -> ApiResult<()> {
     let address = provider.address().unwrap_or_default();
-    let started = provider.stream_reply(&state.http, model, CHAT_INSTRUCTIONS, messages).await?;
+    let instructions = match extensions_of(state, owner).await?.rich_markdown {
+        true => format!("{CHAT_INSTRUCTIONS}\n{RICH_MARKDOWN_INSTRUCTIONS}"),
+        false => CHAT_INSTRUCTIONS.to_string(),
+    };
+    let started = provider.stream_reply(&state.http, model, &instructions, messages).await?;
     let mut stream = started.map_err(|error| error.into_api(&provider.name, &address))?;
 
     loop {
