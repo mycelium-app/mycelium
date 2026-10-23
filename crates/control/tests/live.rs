@@ -44,6 +44,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/config",
     "POST /api/v1/imports",
     "DELETE /api/v1/terminals/{terminal_id}",
+    "POST /api/v1/mcp",
+    "PATCH /api/v1/memories/{id}",
+    "DELETE /api/v1/memories/{id}",
 ];
 
 const SILENT_ROUTES: &[&str] = &[
@@ -83,7 +86,6 @@ const SILENT_ROUTES: &[&str] = &[
     "PATCH /api/v1/schedules/{id}",
     "PUT /api/v1/me/time-zone",
     "DELETE /api/v1/schedules/{id}",
-    "POST /api/v1/mcp",
     "POST /api/v1/groups",
     "PATCH /api/v1/groups/{id}",
     "DELETE /api/v1/groups/{id}",
@@ -95,8 +97,6 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/instructions/pull",
     "PUT /api/v1/instruction-source",
     "DELETE /api/v1/instruction-source",
-    "PATCH /api/v1/memories/{id}",
-    "DELETE /api/v1/memories/{id}",
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
 ];
 
@@ -1003,4 +1003,40 @@ async fn propose(server: &Server, link: &NodeLink, conversation: Uuid, arguments
         .header("x-mycelium-conversation", conversation.to_string())
         .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "propose_schedule", "arguments": arguments}}));
     anonymous.json(request).await;
+}
+
+#[tokio::test]
+async fn a_remembered_memory_and_its_edit_and_deletion_reach_every_stream_client() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let mut stream = server.user.stream().await;
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {token}"))
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "remember", "arguments": {"text": "Staging listens on 5433"}}}));
+    anonymous.json(request).await;
+
+    let remembered = stream.until(|message| match message {
+        StreamMessage::Memory(memory) => Some(memory),
+        _ => None,
+    })
+    .await;
+    assert_eq!((remembered.text.as_str(), remembered.scopes.as_slice()), ("Staging listens on 5433", ["global".to_string()].as_slice()));
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/memories/{}", remembered.id)).json(&json!({"text": "Staging listens on 5434"}))).await;
+    let edited = stream.until(|message| match message {
+        StreamMessage::Memory(memory) => Some(memory),
+        _ => None,
+    })
+    .await;
+    assert_eq!((status, edited.id, edited.text.as_str()), (200, remembered.id, "Staging listens on 5434"));
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/memories/{}", remembered.id))).await;
+    let removed = stream.until(|message| match message {
+        StreamMessage::MemoryRemoved { memory_id } => Some(memory_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!((status, removed), (204, remembered.id));
 }

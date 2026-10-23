@@ -298,4 +298,19 @@ class ProjectJoinTest {
 
         assertEquals(listOf("app", "zed"), registeredFolders(projects).map { it.name })
     }
+
+    private fun memoryMessage(id: String, text: String) =
+        """{"type":"memory","id":"$id","text":"$text","scopes":["global"],"created_by":"laptop/Fix login","conversation_id":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+
+    @Test
+    fun aStreamedMemoryIsKeptReplacedWhenEditedAndRemembersWhatWasRemoved() {
+        val stored = reduce(AppState(), parseStreamMessage(memoryMessage("m1", "Staging listens on 5433"))!!)
+        val edited = reduce(stored, parseStreamMessage(memoryMessage("m1", "Staging listens on 5434"))!!)
+
+        assertEquals("Staging listens on 5434", edited.memories.getValue("m1").text)
+
+        val removed = reduce(edited, parseStreamMessage("""{"type":"memory_removed","memory_id":"m1"}""")!!)
+
+        assertEquals(Triple(emptySet<String>(), setOf("m1"), 3), Triple(removed.memories.keys, removed.removedMemories, removed.memoryRevision))
+    }
 }

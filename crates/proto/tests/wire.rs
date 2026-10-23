@@ -243,6 +243,19 @@ fn stream_messages_are_tagged_and_flatten_the_conversation_row() {
 }
 
 #[test]
+fn stream_memory_messages_round_trip_under_their_tags() {
+    let now = "2026-10-22T10:00:00Z".parse().unwrap();
+    let memory = Memory { id: id(), text: "Staging listens on 5433".into(), scopes: vec!["global".into()], created_by: "laptop/Fix login".into(), conversation_id: None, created_at: now, updated_at: now };
+
+    let changed = round_trip(&StreamMessage::Memory(memory));
+    assert_eq!((changed["type"].as_str(), changed["text"].as_str(), changed["scopes"][0].as_str()), (Some("memory"), Some("Staging listens on 5433"), Some("global")));
+
+    let removed = round_trip(&StreamMessage::MemoryRemoved { memory_id: id() });
+    assert_eq!(removed["type"], "memory_removed");
+    assert_eq!(removed["memory_id"], id().to_string());
+}
+
+#[test]
 fn stream_login_and_queue_messages_round_trip() {
     let output = round_trip(&StreamMessage::LoginOutput { login_id: id(), data: "x".into() });
     assert_eq!(output["type"], "login_output");

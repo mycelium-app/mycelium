@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ import mycelium.state.relativeTime
 fun MemoriesSettings(store: Store) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
+    val live by store.state.collectAsState()
     var memories by remember { mutableStateOf<List<Memory>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -32,7 +34,17 @@ fun MemoriesSettings(store: Store) {
     var draft by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(query) {
+    val searching = query.isNotBlank()
+    val shown = if (searching) {
+        memories.filter { it.id !in live.removedMemories }
+    } else {
+        val held = memories.map { it.id }.toSet()
+        val arrived = live.memories.values.filter { it.id !in held }.sortedByDescending { it.createdAt }
+
+        (arrived + memories.map { live.memories[it.id] ?: it }).filter { it.id !in live.removedMemories }
+    }
+
+    LaunchedEffect(query, if (searching) live.memoryRevision else 0) {
         val asked = query
 
         store.act {
@@ -64,7 +76,7 @@ fun MemoriesSettings(store: Store) {
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-            if (loaded && memories.isEmpty()) {
+            if (loaded && shown.isEmpty()) {
                 Label(
                     if (query.isBlank()) "Nothing remembered yet. Agents add memories with the remember tool." else "No memories match.",
                     Modifier.padding(Tokens.Space.S4),
@@ -72,7 +84,7 @@ fun MemoriesSettings(store: Store) {
                 )
             }
 
-            for (memory in memories) {
+            for (memory in shown) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
                     if (editing == memory.id) {
                         fun save() {

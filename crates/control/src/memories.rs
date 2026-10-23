@@ -5,11 +5,12 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{Memory, UpdateMemoryRequest};
+use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-const MEMORY_COLUMNS: &str = "id, text, scopes, created_by, conversation_id, created_at, updated_at";
+pub const MEMORY_COLUMNS: &str = "id, text, scopes, created_by, conversation_id, created_at, updated_at";
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -28,7 +29,7 @@ pub struct MemoryRow {
 }
 
 impl MemoryRow {
-    fn to_proto(self) -> Memory {
+    pub fn to_proto(self) -> Memory {
         Memory {
             id: self.id,
             text: self.text,
@@ -90,7 +91,10 @@ pub async fn update(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
         .fetch_optional(&state.pool)
         .await?;
 
-    row.map(|row| Json(row.to_proto())).ok_or_else(|| ApiError::not_found("That memory"))
+    let memory = row.ok_or_else(|| ApiError::not_found("That memory"))?.to_proto();
+    state.publish(None, StreamMessage::Memory(memory.clone()));
+
+    Ok(Json(memory))
 }
 
 pub async fn delete(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
@@ -99,6 +103,8 @@ pub async fn delete(State(state): State<AppState>, _user: AuthUser, Path(id): Pa
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("That memory"));
     }
+
+    state.publish(None, StreamMessage::MemoryRemoved { memory_id: id });
 
     Ok(StatusCode::NO_CONTENT)
 }

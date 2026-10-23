@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
 import mycelium.api.Goal
 import mycelium.api.Group
+import mycelium.api.Memory
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
 import mycelium.api.EventKinds
@@ -41,6 +42,9 @@ data class AppState(
     val tasks: Map<String, Task> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
+    val memories: Map<String, Memory> = emptyMap(),
+    val removedMemories: Set<String> = emptySet(),
+    val memoryRevision: Int = 0,
     val events: Map<String, List<Event>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val queues: Map<String, List<QueuedPrompt>> = emptyMap(),
@@ -109,6 +113,18 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
+
+    is StreamMessage.MemoryChanged -> state.copy(
+        memories = state.memories + (message.memory.id to message.memory),
+        removedMemories = state.removedMemories - message.memory.id,
+        memoryRevision = state.memoryRevision + 1,
+    )
+
+    is StreamMessage.MemoryRemoved -> state.copy(
+        memories = state.memories - message.memoryId,
+        removedMemories = state.removedMemories + message.memoryId,
+        memoryRevision = state.memoryRevision + 1,
+    )
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
 

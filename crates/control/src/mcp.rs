@@ -1,6 +1,6 @@
 use crate::auth::AuthNode;
 use crate::error::ApiResult;
-use crate::memories::{omitted_groups, search};
+use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::state::AppState;
 use crate::tasks;
@@ -10,6 +10,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mycelium_proto::api::{EachRun, TaskStatus};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -275,13 +276,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         (Some("global"), _) | (_, None) => (vec!["global".to_string()], "every conversation".to_string()),
                         (_, Some((group_id, name))) => (vec![format!("group:{group_id}")], format!("the {name} group")),
                     };
-                    let memory_id = sqlx::query_scalar::<_, Uuid>("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning id")
+                    let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning {MEMORY_COLUMNS}")))
                         .bind(text)
                         .bind(&scopes)
                         .bind(format!("{node_name}/{source}"))
                         .bind(conversation.map(|(conversation_id, _)| conversation_id))
                         .fetch_one(&state.pool)
-                        .await?;
+                        .await?
+                        .to_proto();
+                    let memory_id = memory.id;
+                    state.publish(None, StreamMessage::Memory(memory));
 
                     reply(&id, tool_text(&format!("Remembered as {memory_id}, shared with {shared_with}."), false))
                 }

@@ -860,6 +860,10 @@ sealed interface StreamMessage {
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
+    data class MemoryChanged(val memory: Memory) : StreamMessage
+
+    data class MemoryRemoved(val memoryId: String) : StreamMessage
+
     data class NodeChanged(val node: NodeSummary) : StreamMessage
 
     data class NodeRemoved(val nodeId: String) : StreamMessage
@@ -896,6 +900,8 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
+        "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))
+        "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(

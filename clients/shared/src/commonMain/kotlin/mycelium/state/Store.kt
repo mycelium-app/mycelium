@@ -26,6 +26,7 @@ import mycelium.api.Task
 import mycelium.api.TaskStatuses
 import mycelium.api.Project
 import mycelium.api.MyceliumApi
+import mycelium.api.StreamMessage
 import mycelium.api.NodeResources
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
@@ -88,7 +89,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
                     state.value.openedConversations.forEach { open(it) }
                     mutableState.update { it.copy(connected = true) }
                     retry = FirstRetryMillis
-                    api.stream().collect { message -> mutableState.update { reduce(it, message) } }
+                    api.stream().collect { message -> receive(message) }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -100,6 +101,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
                 retry = minOf(retry * 2, LongestRetryMillis)
             }
         }
+    }
+
+    fun receive(message: StreamMessage) {
+        mutableState.update { reduce(it, message) }
     }
 
     fun stop() {
