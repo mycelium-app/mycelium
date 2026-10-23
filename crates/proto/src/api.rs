@@ -674,6 +674,9 @@ pub struct Schedule {
     pub cron: String,
     pub each_run: EachRun,
     pub paused: bool,
+    pub time_zone: String,
+    pub proposed: bool,
+    pub conversation_id: Option<Uuid>,
     pub next_run_at: chrono::DateTime<chrono::Utc>,
     pub last_run_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_conversation_id: Option<Uuid>,
@@ -691,11 +694,28 @@ pub struct CreateScheduleRequest {
     pub prompt: String,
     pub cron: String,
     pub each_run: EachRun,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatchScheduleRequest {
     pub paused: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConfirmScheduleRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub each_run: Option<EachRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetTimeZoneRequest {
+    pub time_zone: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

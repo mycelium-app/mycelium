@@ -110,6 +110,8 @@ private object DesktopPlatform : Platform {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
 
+    override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
+
     override fun loadPreference(key: String): String? = runCatching { Files.readString(configDir.resolve("$key.pref")).trim() }.getOrNull()
 
     override fun savePreference(key: String, value: String) {

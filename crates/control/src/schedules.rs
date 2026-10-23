@@ -10,13 +10,16 @@ use crate::store::{enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use chrono::TimeZone;
+use chrono_tz::Tz;
 use croner::Cron;
 use croner::parser::{CronParser, Seconds};
-use mycelium_proto::api::{CreateConversationRequest, CreateScheduleRequest, EachRun, PatchScheduleRequest, PromptRequest, RunOutcome, Schedule, ScheduleRun};
+use mycelium_proto::api::{ConfirmScheduleRequest, CreateConversationRequest, CreateScheduleRequest, EachRun, PatchScheduleRequest, PromptRequest, RunOutcome, Schedule, ScheduleRun, SetTimeZoneRequest};
+use mycelium_proto::stream::StreamMessage;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, next_run_at, last_run_at, last_conversation_id, created_at";
+const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at";
 const RUN_COLUMNS: &str = "id, schedule_id, ran_at, outcome, reason, conversation_id";
 const DUE_BATCH: i64 = 20;
 const RECENT_RUNS: i64 = 50;
@@ -33,6 +36,9 @@ struct ScheduleRow {
     cron: String,
     each_run: String,
     paused: bool,
+    time_zone: String,
+    proposed: bool,
+    conversation_id: Option<Uuid>,
     next_run_at: chrono::DateTime<chrono::Utc>,
     last_run_at: Option<chrono::DateTime<chrono::Utc>>,
     last_conversation_id: Option<Uuid>,
@@ -51,6 +57,9 @@ impl ScheduleRow {
             cron: self.cron,
             each_run: parse_enum(&self.each_run)?,
             paused: self.paused,
+            time_zone: self.time_zone,
+            proposed: self.proposed,
+            conversation_id: self.conversation_id,
             next_run_at: self.next_run_at,
             last_run_at: self.last_run_at,
             last_conversation_id: self.last_conversation_id,
@@ -75,14 +84,69 @@ impl RunRow {
     }
 }
 
-fn next_run_after(expression: &str, after: chrono::DateTime<chrono::Utc>) -> ApiResult<chrono::DateTime<chrono::Utc>> {
+fn parse_zone(name: &str) -> ApiResult<Tz> {
+    name.trim().parse::<Tz>().map_err(|_| ApiError::bad_request("time_zone_invalid", "Enter a time zone from the IANA list, for example Europe/London."))
+}
+
+pub fn preset_cron(preset: &str) -> Option<String> {
+    let preset = preset.trim().to_lowercase();
+
+    if let Some(time) = preset.strip_prefix("weekdays at ") {
+        let (hour, minute) = parse_time(time)?;
+
+        return Some(format!("{minute} {hour} * * 1-5"));
+    }
+
+    if let Some(time) = preset.strip_prefix("daily at ") {
+        let (hour, minute) = parse_time(time)?;
+
+        return Some(format!("{minute} {hour} * * *"));
+    }
+
+    let interval = preset.strip_prefix("every ")?;
+    let (count, unit) = interval.split_once(' ')?;
+    let count: u32 = count.parse().ok()?;
+
+    match unit {
+        "minutes" if (1..60).contains(&count) => Some(format!("*/{count} * * * *")),
+        "hours" if (1..24).contains(&count) => Some(format!("0 */{count} * * *")),
+        _ => None,
+    }
+}
+
+fn parse_time(text: &str) -> Option<(u32, u32)> {
+    let (hour, minute) = text.trim().split_once(':')?;
+    let hour: u32 = hour.parse().ok()?;
+    let minute: u32 = minute.parse().ok()?;
+
+    (hour < 24 && minute < 60).then_some((hour, minute))
+}
+
+fn next_run_after(expression: &str, zone: Tz, after: chrono::DateTime<chrono::Utc>) -> ApiResult<chrono::DateTime<chrono::Utc>> {
     let cron: Cron = CronParser::builder()
         .seconds(Seconds::Disallowed)
         .build()
         .parse(expression)
         .map_err(|_| ApiError::bad_request("cron_invalid", "Enter the schedule as five cron fields, for example 0 6 * * 1 for Mondays at 06:00."))?;
 
-    cron.find_next_occurrence(&after, false).map_err(|_| ApiError::bad_request("cron_never_runs", "This schedule never runs. Check the day and month fields."))
+    let local = zone.from_utc_datetime(&after.naive_utc());
+
+    cron.find_next_occurrence(&local, false).map(|next| next.with_timezone(&chrono::Utc)).map_err(|_| ApiError::bad_request("cron_never_runs", "This schedule never runs. Check the day and month fields."))
+}
+
+async fn zone_of(state: &AppState, owner: Uuid) -> ApiResult<Tz> {
+    let stored = sqlx::query_scalar::<_, Option<String>>("select time_zone from users where id = $1").bind(owner).fetch_one(&state.pool).await?;
+
+    Ok(stored.and_then(|name| name.parse::<Tz>().ok()).unwrap_or(Tz::UTC))
+}
+
+fn publish(state: &AppState, row: ScheduleRow) -> ApiResult<Schedule> {
+    let owner = row.owner;
+    let schedule = row.to_proto()?;
+
+    state.publish(Some(owner), StreamMessage::Schedule(schedule.clone()));
+
+    Ok(schedule)
 }
 
 async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ScheduleRow> {
@@ -109,7 +173,17 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         return Err(ApiError::bad_request("prompt_required", "Enter the prompt to run on this schedule."));
     }
 
-    let next_run_at = next_run_after(request.cron.trim(), chrono::Utc::now())?;
+    let zone = match request.time_zone.as_deref() {
+        Some(name) => {
+            let zone = parse_zone(name)?;
+
+            sqlx::query("update users set time_zone = $2 where id = $1 and time_zone is null").bind(user.id).bind(zone.name()).execute(&state.pool).await?;
+
+            zone
+        }
+        None => zone_of(&state, user.id).await?,
+    };
+    let next_run_at = next_run_after(request.cron.trim(), zone, chrono::Utc::now())?;
     let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(request.node_id).fetch_one(&state.pool).await?;
 
     if !exists {
@@ -127,7 +201,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     }
 
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning {SCHEDULE_COLUMNS}",
+        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning {SCHEDULE_COLUMNS}",
     )))
     .bind(user.id)
     .bind(request.node_id)
@@ -138,6 +212,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     .bind(request.cron.trim())
     .bind(enum_text(&request.each_run))
     .bind(next_run_at)
+    .bind(zone.name())
     .fetch_one(&state.pool)
     .await?;
 
@@ -146,7 +221,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchScheduleRequest>) -> ApiResult<Json<Schedule>> {
     let found = find_owned(&state, id, user.id).await?;
-    let next_run_at = next_run_after(&found.cron, chrono::Utc::now())?;
+
+    reject_proposed(&found)?;
+
+    let next_run_at = next_run_after(&found.cron, parse_zone(&found.time_zone)?, chrono::Utc::now())?;
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
         "update schedules set paused = $2, next_run_at = case when $2 then next_run_at else $3 end where id = $1 returning {SCHEDULE_COLUMNS}",
     )))
@@ -157,6 +235,112 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .await?;
 
     Ok(Json(row.to_proto()?))
+}
+
+pub async fn confirm(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<ConfirmScheduleRequest>>) -> ApiResult<Json<Schedule>> {
+    let Json(request) = request.unwrap_or_default();
+    let found = find_owned(&state, id, user.id).await?;
+
+    if !found.proposed {
+        return Err(ApiError::conflict("schedule_not_proposed", "This schedule is already confirmed."));
+    }
+
+    let cron = request.cron.as_deref().map(str::trim).unwrap_or(&found.cron);
+    let zone = parse_zone(request.time_zone.as_deref().unwrap_or(&found.time_zone))?;
+    let each_run = request.each_run.map(|each_run| enum_text(&each_run)).unwrap_or(found.each_run);
+    let next_run_at = next_run_after(cron, zone, chrono::Utc::now())?;
+    let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
+        "update schedules set proposed = false, cron = $2, time_zone = $3, each_run = $4, next_run_at = $5,
+         last_conversation_id = case when $4 = 'same' then coalesce(last_conversation_id, conversation_id) else last_conversation_id end
+         where id = $1 returning {SCHEDULE_COLUMNS}",
+    )))
+    .bind(id)
+    .bind(cron)
+    .bind(zone.name())
+    .bind(each_run)
+    .bind(next_run_at)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(publish(&state, row)?))
+}
+
+pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let found = find_owned(&state, id, user.id).await?;
+
+    if !found.proposed {
+        return Err(ApiError::conflict("schedule_not_proposed", "This schedule is already confirmed. Delete it instead."));
+    }
+
+    sqlx::query("delete from schedules where id = $1").bind(id).execute(&state.pool).await?;
+    state.publish(Some(user.id), StreamMessage::ScheduleRemoved { schedule_id: id });
+
+    if let Some(conversation_id) = found.conversation_id {
+        let text = format!("I declined the schedule you proposed to run \"{}\". Do not set it up another way.", found.prompt);
+        let _ = prompts::prompt(State(state.clone()), user, Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn set_time_zone(State(state): State<AppState>, user: AuthUser, Json(request): Json<SetTimeZoneRequest>) -> ApiResult<StatusCode> {
+    let zone = parse_zone(&request.time_zone)?;
+
+    sqlx::query("update users set time_zone = $2 where id = $1").bind(user.id).bind(zone.name()).execute(&state.pool).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub struct ProposedSchedule<'a> {
+    pub cron: String,
+    pub prompt: &'a str,
+    pub each_run: EachRun,
+    pub time_zone: Option<&'a str>,
+}
+
+pub async fn propose(state: &AppState, conversation_id: Uuid, proposal: ProposedSchedule<'_>) -> ApiResult<Result<Schedule, String>> {
+    let (owner, node_id, agent, cwd, project_id) =
+        sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let zone = match proposal.time_zone {
+        Some(name) => match name.trim().parse::<Tz>() {
+            Ok(zone) => zone,
+            Err(_) => return Ok(Err(format!("Nothing was proposed. {name} is not a time zone. Use an IANA name such as Europe/London, or leave it out to use the person's own."))),
+        },
+        None => zone_of(state, owner).await?,
+    };
+    let next_run_at = match next_run_after(&proposal.cron, zone, chrono::Utc::now()) {
+        Ok(next_run_at) => next_run_at,
+        Err(cause) => return Ok(Err(format!("Nothing was proposed. {}", cause.message()))),
+    };
+    let same = proposal.each_run == EachRun::Same;
+    let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
+        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, proposed, conversation_id, last_conversation_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, case when $12 then $11 end) returning {SCHEDULE_COLUMNS}",
+    )))
+    .bind(owner)
+    .bind(node_id)
+    .bind(agent)
+    .bind(cwd)
+    .bind(project_id)
+    .bind(proposal.prompt)
+    .bind(&proposal.cron)
+    .bind(enum_text(&proposal.each_run))
+    .bind(next_run_at)
+    .bind(zone.name())
+    .bind(conversation_id)
+    .bind(same)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Ok(publish(state, row)?))
+}
+
+fn reject_proposed(row: &ScheduleRow) -> ApiResult<()> {
+    if row.proposed {
+        return Err(ApiError::conflict("schedule_proposed", "Confirm this schedule first. It has not been accepted yet."));
+    }
+
+    Ok(())
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
@@ -192,6 +376,8 @@ pub async fn run_now(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::not_found("That schedule"));
     };
 
+    reject_proposed(&row)?;
+
     let run = fire(&state, &mut tx, &row).await?;
     tx.commit().await?;
 
@@ -217,13 +403,13 @@ pub async fn run_regularly(state: AppState) {
 async fn run_due(state: &AppState) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let due = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "select {SCHEDULE_COLUMNS} from schedules where not paused and next_run_at <= now() order by next_run_at limit {DUE_BATCH} for update skip locked",
+        "select {SCHEDULE_COLUMNS} from schedules where not paused and not proposed and next_run_at <= now() order by next_run_at limit {DUE_BATCH} for update skip locked",
     )))
     .fetch_all(&mut *tx)
     .await?;
 
     for row in due {
-        let next_run_at = next_run_after(&row.cron, chrono::Utc::now())?;
+        let next_run_at = next_run_after(&row.cron, parse_zone(&row.time_zone)?, chrono::Utc::now())?;
 
         sqlx::query("update schedules set next_run_at = $2 where id = $1").bind(row.id).bind(next_run_at).execute(&mut *tx).await?;
         fire(state, &mut tx, &row).await?;
@@ -275,4 +461,49 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
     let conversation = conversations::start(state, user, request).await?;
 
     Ok(conversation.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn utc(text: &str) -> chrono::DateTime<chrono::Utc> {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn presets_become_cron_expressions_and_anything_else_is_not_a_preset() {
+        assert_eq!(preset_cron("Weekdays at 20:00").as_deref(), Some("0 20 * * 1-5"));
+        assert_eq!(preset_cron("daily at 9:05").as_deref(), Some("5 9 * * *"));
+        assert_eq!(preset_cron("every 15 minutes").as_deref(), Some("*/15 * * * *"));
+        assert_eq!(preset_cron("every 2 hours").as_deref(), Some("0 */2 * * *"));
+
+        for text in ["weekdays at 25:00", "daily at noon", "every 0 minutes", "every 60 minutes", "every day", "fortnightly"] {
+            assert_eq!(preset_cron(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_schedule_keeps_its_local_time_across_the_clocks_going_forward_and_back() {
+        let london = Tz::Europe__London;
+
+        let before_spring = next_run_after("0 20 * * *", london, utc("2026-03-27T12:00:00Z")).unwrap();
+        let after_spring = next_run_after("0 20 * * *", london, utc("2026-03-28T21:00:00Z")).unwrap();
+        let before_autumn = next_run_after("0 20 * * *", london, utc("2026-10-24T12:00:00Z")).unwrap();
+        let after_autumn = next_run_after("0 20 * * *", london, utc("2026-10-25T21:00:00Z")).unwrap();
+
+        assert_eq!(before_spring, utc("2026-03-27T20:00:00Z"));
+        assert_eq!(after_spring, utc("2026-03-29T19:00:00Z"));
+        assert_eq!(before_autumn, utc("2026-10-24T19:00:00Z"));
+        assert_eq!(after_autumn, utc("2026-10-26T20:00:00Z"));
+    }
+
+    #[test]
+    fn weekday_schedules_skip_the_weekend_in_the_zone_and_not_in_utc() {
+        let sydney = Tz::Australia__Sydney;
+
+        let next = next_run_after("0 8 * * 1-5", sydney, utc("2026-10-23T22:00:00Z")).unwrap();
+
+        assert_eq!(next, utc("2026-10-25T21:00:00Z"));
+    }
 }

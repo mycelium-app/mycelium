@@ -29,6 +29,8 @@ interface Platform {
 
     fun copyToClipboard(text: String)
 
+    fun timeZone(): String? = null
+
     fun loadPreference(key: String): String? = null
 
     fun savePreference(key: String, value: String) = Unit

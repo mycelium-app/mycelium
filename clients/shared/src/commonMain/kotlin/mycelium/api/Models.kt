@@ -455,6 +455,9 @@ data class Schedule(
     val cron: String,
     @SerialName("each_run") val eachRun: String,
     val paused: Boolean,
+    @SerialName("time_zone") val timeZone: String = "UTC",
+    val proposed: Boolean = false,
+    @SerialName("conversation_id") val conversationId: String? = null,
     @SerialName("next_run_at") val nextRunAt: String,
     @SerialName("last_run_at") val lastRunAt: String? = null,
     @SerialName("last_conversation_id") val lastConversationId: String? = null,
@@ -470,10 +473,21 @@ data class CreateScheduleRequest(
     @SerialName("each_run") val eachRun: String,
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
+    @SerialName("time_zone") val timeZone: String? = null,
 )
 
 @Serializable
 data class PatchScheduleRequest(val paused: Boolean)
+
+@Serializable
+data class ConfirmScheduleRequest(
+    val cron: String? = null,
+    @SerialName("each_run") val eachRun: String? = null,
+    @SerialName("time_zone") val timeZone: String? = null,
+)
+
+@Serializable
+data class SetTimeZoneRequest(@SerialName("time_zone") val timeZone: String)
 
 @Serializable
 data class ScheduleRun(
@@ -809,6 +823,10 @@ sealed interface StreamMessage {
 
     data class NodeChanged(val node: NodeSummary) : StreamMessage
 
+    data class ScheduleChanged(val schedule: Schedule) : StreamMessage
+
+    data class ScheduleRemoved(val scheduleId: String) : StreamMessage
+
     data class NodeRemoved(val nodeId: String) : StreamMessage
 
     data class ConversationRemoved(val conversationId: String) : StreamMessage
@@ -843,6 +861,8 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "goal_cleared" -> StreamMessage.GoalCleared(element.requireString("conversation_id"))
         "walkthrough" -> StreamMessage.WalkthroughChanged(MyceliumJson.decodeFromJsonElement(Walkthrough.serializer(), element))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
+        "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
+        "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(
             element.requireString("node_id"),

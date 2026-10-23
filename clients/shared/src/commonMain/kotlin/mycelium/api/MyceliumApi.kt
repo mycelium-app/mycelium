@@ -309,9 +309,20 @@ class MyceliumApi(
 
     suspend fun deleteSchedule(id: String) {
         call("/schedules/$id") { client.delete(it) { authorise() } }
+    suspend fun confirmSchedule(id: String, request: ConfirmScheduleRequest): Schedule =
+        call("/schedules/$id/confirm") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun declineSchedule(id: String) {
+        call("/schedules/$id/decline") { client.post(it) { authorise() } }
+    }
+
     }
 
     suspend fun scheduleRuns(): List<ScheduleRun> = call("/schedule-runs") { client.get(it) { authorise() } }.body()
+
+    suspend fun setTimeZone(timeZone: String) {
+        call("/me/time-zone") { client.put(it) { authorise(); json(SetTimeZoneRequest(timeZone)) } }
+    }
 
     suspend fun issues(query: String = ""): Issues =
         call("/issues") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("q", query.trim()) } }.body()

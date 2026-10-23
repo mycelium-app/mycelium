@@ -24,6 +24,7 @@ import kotlinx.coroutines.runBlocking
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
+import mycelium.ui.ProposedScheduleCard
 import mycelium.ui.SchedulesScreen
 import org.junit.Rule
 import kotlin.test.Test
@@ -157,7 +158,7 @@ class SchedulesTest {
         rule.onNodeWithText("Add schedule").performClick()
 
         rule.waitUntil { sent("POST", "/schedules") != null }
-        assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"0 6 * * 1","each_run":"new","cwd":"/work/app"}""", sent("POST", "/schedules")?.third)
+        assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"0 6 * * 1","each_run":"new","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
     }
 
     @Test
@@ -174,7 +175,7 @@ class SchedulesTest {
         rule.onNodeWithText("Add schedule").performClick()
 
         rule.waitUntil { sent("POST", "/schedules") != null }
-        assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"30 7 * * *","each_run":"same","cwd":"/work/app"}""", sent("POST", "/schedules")?.third)
+        assertEquals("""{"node_id":"n1","agent":"claude","prompt":"Go","cron":"30 7 * * *","each_run":"same","cwd":"/work/app","time_zone":"UTC"}""", sent("POST", "/schedules")?.third)
     }
 
     @Test
@@ -190,5 +191,93 @@ class SchedulesTest {
         rule.onNodeWithText("Enter the prompt to run on this schedule.").assertExists()
         rule.onNodeWithText("Enter the time as hours and minutes, for example 06:30.").assertExists()
         assertTrue(sent("POST", "/schedules") == null)
+    }
+
+    private val proposedJson = """{"id":"s9","node_id":"n1","agent":"claude","cwd":"/work/app","project_id":"p1","prompt":"Run ./deploy.sh","cron":"0 20 * * 1-5","each_run":"same","paused":false,
+"time_zone":"Europe/London","proposed":true,"conversation_id":"c1","next_run_at":"2099-01-01T20:00:00Z","last_run_at":null,"last_conversation_id":"c1","created_at":"2026-10-22T10:00:00Z"}"""
+
+    private fun showProposal(content: @androidx.compose.runtime.Composable (Store, mycelium.state.AppState) -> Unit) {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            requests += Triple(request.method.value, path, String(request.body.toByteArray()))
+
+            when {
+                request.method == HttpMethod.Post && path.endsWith("/confirm") -> respond(proposedJson.replace("\"proposed\":true", "\"proposed\":false"), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/decline") -> respond("", HttpStatusCode.NoContent)
+                path.endsWith("/schedule-runs") -> respond("[]", HttpStatusCode.OK, json)
+                path.endsWith("/schedules") -> respond("[$proposedJson]", HttpStatusCode.OK, json)
+                path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"midden","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
+                path.endsWith("/nodes") -> respond(ScheduleNodes, HttpStatusCode.OK, json)
+                else -> respond("[]", HttpStatusCode.OK, json)
+            }
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+
+        runBlocking { store.refresh(); store.refreshProjects(); store.refreshSchedules() }
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); content(store, state) } }
+    }
+
+    @Test
+    fun aProposedScheduleIsListedAsWaitingWithItsZoneAndReviewAndDeclineActions() {
+        showProposal { store, state -> SchedulesScreen(store, state) }
+
+        rule.onNodeWithText("Waiting for you").assertExists()
+        rule.onNodeWithText("Weekdays 20:00").assertExists()
+        rule.onNodeWithText("Europe/London").assertExists()
+        rule.onNodeWithContentDescription("Review: Run ./deploy.sh").assertExists()
+        rule.onNodeWithContentDescription("Decline: Run ./deploy.sh").assertExists()
+        assertTrue(rule.onAllNodesWithText("Run now").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun theCardInTheConversationSaysWhatRunsWhenAndWhereAndConfirmsWithoutEdits() {
+        showProposal { store, state -> ProposedScheduleCard(store, state.schedules.getValue("s9"), state) }
+
+        rule.onNodeWithText("Run ./deploy.sh").assertExists()
+        rule.onNodeWithText("Weekdays at 20:00, Europe/London.", substring = true).assertExists()
+        rule.onNodeWithText("midden on laptop", substring = true).assertExists()
+
+        rule.onNodeWithText("Confirm schedule").performClick()
+
+        rule.waitUntil { sent("POST", "/schedules/s9/confirm") != null }
+        assertEquals("{}", sent("POST", "/schedules/s9/confirm")?.third)
+    }
+
+    @Test
+    fun changingTheTimeInTheModalSendsOnlyTheEditedCron() {
+        showProposal { store, state -> ProposedScheduleCard(store, state.schedules.getValue("s9"), state) }
+
+        rule.onNodeWithContentDescription("Change the proposed schedule").performClick()
+        rule.onNodeWithContentDescription("At").performTextClearance()
+        rule.onNodeWithContentDescription("At").performTextInput("21:30")
+        rule.onNodeWithText("Weekdays at 21:30, Europe/London.", substring = true).assertExists()
+        rule.onNodeWithContentDescription("Confirm the schedule").performClick()
+
+        rule.waitUntil { sent("POST", "/schedules/s9/confirm") != null }
+        assertEquals("""{"cron":"30 21 * * 1-5"}""", sent("POST", "/schedules/s9/confirm")?.third)
+    }
+
+    @Test
+    fun aTimeThatIsNotHoursAndMinutesIsRefusedInTheModalWithWhatToFix() {
+        showProposal { store, state -> ProposedScheduleCard(store, state.schedules.getValue("s9"), state) }
+
+        rule.onNodeWithContentDescription("Change the proposed schedule").performClick()
+        rule.onNodeWithContentDescription("At").performTextClearance()
+        rule.onNodeWithContentDescription("At").performTextInput("8pm")
+        rule.onNodeWithContentDescription("Confirm the schedule").performClick()
+
+        rule.onNodeWithText("Enter the time as hours and minutes, for example 20:00.").assertExists()
+        assertTrue(sent("POST", "/schedules/s9/confirm") == null)
+    }
+
+    @Test
+    fun decliningFromTheCardPostsTheDeclineAndRemovesTheCard() {
+        showProposal { store, state -> state.schedules["s9"]?.let { ProposedScheduleCard(store, it, state) } }
+
+        rule.onNodeWithContentDescription("Decline the proposed schedule").performClick()
+
+        rule.waitUntil { sent("POST", "/schedules/s9/decline") != null }
+        rule.waitUntil { rule.onAllNodesWithText("Schedule proposed").fetchSemanticsNodes().isEmpty() }
     }
 }

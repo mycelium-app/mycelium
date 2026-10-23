@@ -212,6 +212,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onSuggest = ::send,
                 )
 
+                state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
+
                 Composer(
                     conversation = conversation,
                     working = conversation.status == ConversationStatus.Working,

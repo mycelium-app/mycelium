@@ -107,6 +107,10 @@ sealed interface Route {
 
 @Composable
 fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+    LaunchedEffect(Unit) {
+        platform.timeZone()?.let { zone -> store.act { store.setTimeZone(zone) } }
+    }
+
     if (LocalTouch.current) {
         PhoneShell(store, platform, me, onSignOut, initialRoute)
 

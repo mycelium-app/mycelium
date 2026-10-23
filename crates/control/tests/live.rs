@@ -28,6 +28,8 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/conversations/{id}/goal",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
+    "POST /api/v1/schedules/{id}/confirm",
+    "POST /api/v1/schedules/{id}/decline",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
     "PATCH /api/v1/conversations/{id}",
     "DELETE /api/v1/conversations/{id}",
@@ -74,6 +76,7 @@ const SILENT_ROUTES: &[&str] = &[
     "DELETE /api/v1/tasks/{id}",
     "POST /api/v1/schedules",
     "PATCH /api/v1/schedules/{id}",
+    "PUT /api/v1/me/time-zone",
     "DELETE /api/v1/schedules/{id}",
     "POST /api/v1/mcp",
     "POST /api/v1/groups",
@@ -929,4 +932,56 @@ async fn a_stored_walkthrough_is_streamed() {
 
     let walkthrough = stream.until(|message| match message { StreamMessage::Walkthrough(walkthrough) => Some(walkthrough), _ => None }).await;
     assert_eq!((walkthrough.conversation_id, walkthrough.steps[0].title.as_str(), walkthrough.steps[0].key), (conversation.id, "One", true));
+}
+
+#[tokio::test]
+async fn proposing_confirming_and_declining_a_schedule_are_streamed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Plan the release")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.expect_prompt().await;
+    let mut stream = server.user.stream().await;
+    propose(&server, &link, conversation.id, json!({"prompt": "Go", "preset": "daily at 09:00"})).await;
+
+    let proposed = stream.until(|message| match message {
+        StreamMessage::Schedule(schedule) => Some(schedule),
+        _ => None,
+    })
+    .await;
+    assert!(proposed.proposed);
+
+    server.user.json(server.user.post(&format!("/api/v1/schedules/{}/confirm", proposed.id))).await;
+    let confirmed = stream.until(|message| match message {
+        StreamMessage::Schedule(schedule) if !schedule.proposed => Some(schedule),
+        _ => None,
+    })
+    .await;
+    assert_eq!(confirmed.id, proposed.id);
+
+    propose(&server, &link, conversation.id, json!({"prompt": "Again", "preset": "daily at 10:00"})).await;
+    let second = stream.until(|message| match message {
+        StreamMessage::Schedule(schedule) if schedule.proposed => Some(schedule),
+        _ => None,
+    })
+    .await;
+    server.user.json(server.user.post(&format!("/api/v1/schedules/{}/decline", second.id))).await;
+
+    let removed = stream.until(|message| match message {
+        StreamMessage::ScheduleRemoved { schedule_id } => Some(schedule_id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(removed, second.id);
+}
+
+async fn propose(server: &Server, link: &NodeLink, conversation: Uuid, arguments: Value) {
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {}", link.token))
+        .header("x-mycelium-conversation", conversation.to_string())
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "propose_schedule", "arguments": arguments}}));
+    anonymous.json(request).await;
 }

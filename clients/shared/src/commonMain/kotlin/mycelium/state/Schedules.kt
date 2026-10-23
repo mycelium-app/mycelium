@@ -36,6 +36,7 @@ fun describeCron(cron: String): String {
         calendar && dayOfWeek == "*" && every != null && hour == "*" -> if (every == 1) "Every minute" else "Every $every minutes"
         calendar && dayOfWeek == "*" && minute == "0" && everyHours != null -> if (everyHours == 1) "Every hour" else "Every $everyHours hours"
         calendar && dayOfWeek == "*" -> time(minute, hour)?.let { "Daily $it" } ?: cron
+        calendar && dayOfWeek == "1-5" -> time(minute, hour)?.let { "Weekdays $it" } ?: cron
         calendar -> {
             val day = dayOfWeek.toIntOrNull()?.let { number -> Weekdays.getOrNull((number + 6) % 7) }
             val at = time(minute, hour)
@@ -44,6 +45,32 @@ fun describeCron(cron: String): String {
         }
         else -> cron
     }
+}
+
+fun describeInWords(cron: String, timeZone: String): String {
+    val plain = describeCron(cron)
+    val sentence = Regex("^(\\w+) (\\d\\d:\\d\\d)$").matchEntire(plain)?.let { "${it.groupValues[1]} at ${it.groupValues[2]}" } ?: plain
+
+    return "$sentence, $timeZone"
+}
+
+fun cronTime(cron: String): String? {
+    val fields = cron.trim().split(Regex("\\s+"))
+
+    return if (fields.size == 5) time(fields[0], fields[1]) else null
+}
+
+fun cronWithTime(cron: String, at: String): String? {
+    val fields = cron.trim().split(Regex("\\s+"))
+    val parts = at.trim().split(':')
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..23 }
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..59 }
+
+    if (fields.size != 5 || parts.size != 2 || hour == null || minute == null) {
+        return null
+    }
+
+    return (listOf(minute.toString(), hour.toString()) + fields.drop(2)).joinToString(" ")
 }
 
 fun cronFor(kind: WhenKind, every: Int, hours: Boolean, at: String, weekday: String, custom: String): String? {

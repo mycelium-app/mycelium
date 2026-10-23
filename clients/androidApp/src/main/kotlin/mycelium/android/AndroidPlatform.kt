@@ -60,6 +60,8 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
         context.startActivity(intent)
     }
 
+    override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
+
     override fun loadPreference(key: String): String? = settings.getString(key, null)
 
     override fun savePreference(key: String, value: String) {

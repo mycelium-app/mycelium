@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
+import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
 import mycelium.api.MoveProgress
@@ -258,6 +259,22 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope) {
         refreshSchedules()
 
         return run
+    }
+
+    suspend fun confirmSchedule(schedule: Schedule, request: ConfirmScheduleRequest) {
+        val confirmed = api.confirmSchedule(schedule.id, request)
+
+        mutableState.update { it.copy(schedules = it.schedules + (confirmed.id to confirmed)) }
+    }
+
+    suspend fun declineSchedule(schedule: Schedule) {
+        api.declineSchedule(schedule.id)
+
+        mutableState.update { it.copy(schedules = it.schedules - schedule.id) }
+    }
+
+    suspend fun setTimeZone(timeZone: String) {
+        api.setTimeZone(timeZone)
     }
 
     suspend fun deleteSchedule(schedule: Schedule) {
