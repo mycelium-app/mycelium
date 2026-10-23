@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 const KEEPER_SOCKET_ATTEMPTS: usize = 250;
 const KEEPER_SOCKET_RETRY: Duration = Duration::from_millis(20);
+const CANCEL_GRACE: Duration = Duration::from_secs(3);
 
 const LONGEST_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 103 };
 
@@ -45,6 +46,7 @@ enum Message {
     Command(Command),
     Ack(i64),
     Replay,
+    CancelGrace(u64),
 }
 
 #[derive(Clone)]
@@ -228,6 +230,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
         started,
         received_prompts: HashSet::new(),
         written_prompts: read_written_prompts(&spec.dir),
+        agent_frames: 0,
     };
     tokio::spawn(actor.run(spec, state, inbox));
 
@@ -260,6 +263,7 @@ struct Actor {
     started: Option<NodeToControl>,
     received_prompts: HashSet<Uuid>,
     written_prompts: HashSet<Uuid>,
+    agent_frames: u64,
 }
 
 impl Actor {
@@ -285,6 +289,13 @@ impl Actor {
                 entry = connection.entries.recv(), if stream_open => {
                     let Some(entry) = entry else {
                         stream_open = false;
+
+                        if !self.handle.ended() {
+                            self.handle.ended.store(true, Ordering::SeqCst);
+                            let actions = state.on_keeper_lost();
+                            self.perform(actions, &mut connection).await;
+                        }
+
                         continue;
                     };
 
@@ -309,12 +320,24 @@ impl Actor {
                                 continue;
                             }
 
+                            let cancelling = matches!(command, Command::Cancel);
                             let actions = state.on_command(command);
                             self.perform(actions, &mut connection).await;
                             self.handle.record_activity(&state);
+
+                            if cancelling && state.has_open_turn() {
+                                self.expect_agent_to_answer_cancel();
+                            }
                         }
                         Message::Ack(seq) => self.acknowledge(seq, &mut state),
                         Message::Replay => self.replay(),
+                        Message::CancelGrace(frames_then) => {
+                            if frames_then == self.agent_frames {
+                                let actions = state.end_turn_unanswered();
+                                self.perform(actions, &mut connection).await;
+                                self.handle.record_activity(&state);
+                            }
+                        }
                     }
                 }
             }
@@ -328,7 +351,7 @@ impl Actor {
                     self.outbox.retain(|(entry_seq, _)| *entry_seq > seq);
                 }
                 Message::Replay => self.replay(),
-                Message::Command(_) => {}
+                Message::Command(_) | Message::CancelGrace(_) => {}
             }
         }
     }
@@ -348,6 +371,10 @@ impl Actor {
             return Vec::new();
         };
         let direction = if entry.get("dir").and_then(Value::as_str) == Some("out") { Direction::Out } else { Direction::In };
+
+        if direction == Direction::In {
+            self.agent_frames += 1;
+        }
 
         state.on_entry(self.base + seq, direction, entry.get("frame").cloned().unwrap_or(Value::Null))
     }
@@ -384,6 +411,16 @@ impl Actor {
         {
             *slot = Some(acp_session_id.clone());
         }
+    }
+
+    fn expect_agent_to_answer_cancel(&self) {
+        let frames_now = self.agent_frames;
+        let messages = self.handle.messages.clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(CANCEL_GRACE).await;
+            let _ = messages.send(Message::CancelGrace(frames_now));
+        });
     }
 
     fn is_duplicate_prompt(&mut self, prompt_id: Uuid) -> bool {

@@ -104,6 +104,7 @@ pub struct SessionState {
     models_advertised: bool,
     config_advertised: bool,
     history_loading: bool,
+    requested_session_id: Option<String>,
     queued_prompts: VecDeque<(Uuid, String, Vec<PromptAttachment>)>,
     unanswered_requests: HashMap<String, Value>,
     permissions: HashMap<String, Value>,
@@ -164,6 +165,7 @@ impl SessionState {
             models_advertised: false,
             config_advertised: false,
             history_loading: false,
+            requested_session_id: None,
             queued_prompts: VecDeque::new(),
             unanswered_requests: HashMap::new(),
             permissions: HashMap::new(),
@@ -283,6 +285,16 @@ impl SessionState {
         vec![Action::Emit(self.head + 1, NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq: self.head + 1, message })]
     }
 
+    pub fn on_keeper_lost(&mut self) -> Vec<Action> {
+        if self.closing {
+            return Vec::new();
+        }
+
+        let message = "The agent stopped unexpectedly.".to_string();
+
+        vec![Action::Emit(self.head + 1, NodeToControl::SessionFailed { conversation_id: self.conversation_id, seq: self.head + 1, message })]
+    }
+
     pub fn on_command(&mut self, command: Command) -> Vec<Action> {
         match command {
             Command::Prompt { prompt_id, text, attachments } => {
@@ -319,6 +331,24 @@ impl SessionState {
         }
 
         actions.push(self.outgoing(notification_frame("session/cancel", json!({"sessionId": session_id}))));
+
+        actions
+    }
+
+    pub fn has_open_turn(&self) -> bool {
+        self.pending.values().any(|pending| *pending == Pending::Prompt)
+    }
+
+    pub fn end_turn_unanswered(&mut self) -> Vec<Action> {
+        if !self.has_open_turn() {
+            return Vec::new();
+        }
+
+        self.pending.retain(|_, pending| *pending != Pending::Prompt);
+
+        let seq = self.head + 1;
+        let mut actions = self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason: "cancelled".to_string(), usage: None });
+        actions.extend(self.advance());
 
         actions
     }
@@ -454,6 +484,7 @@ impl SessionState {
                 "session/load" | "session/resume" => {
                     self.session_requested = true;
                     self.history_loading = method == "session/load";
+                    self.requested_session_id = frame.pointer("/params/sessionId").and_then(Value::as_str).map(str::to_string);
                     Pending::ResumeSession
                 }
                 "session/prompt" => Pending::Prompt,
@@ -553,7 +584,7 @@ impl SessionState {
                     return self.fail(seq, format!("The agent could not resume the session: {message}"));
                 }
 
-                let session_id = self.plan.as_ref().and_then(|plan| plan.resume.clone()).unwrap_or_default();
+                let session_id = self.plan.as_ref().and_then(|plan| plan.resume.clone()).or_else(|| self.requested_session_id.clone()).unwrap_or_default();
                 self.session_ready(session_id, &result)
             }
             Pending::Prompt => {
@@ -620,6 +651,24 @@ mod tests {
         state.on_entry(1, Direction::Out, json!({}));
         state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true}}}));
         state.on_entry(3, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": result}));
+    }
+
+    #[test]
+    fn a_session_replayed_after_a_restart_without_a_plan_takes_its_id_from_the_load_it_sent_and_writes_new_prompts() {
+        let mut state = SessionState::new(conversation(), None, 0);
+        state.on_entry(1, Direction::Out, json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
+        state.on_entry(2, Direction::In, json!({"jsonrpc": "2.0", "id": 1, "result": {"agentCapabilities": {"loadSession": true}}}));
+        state.on_entry(3, Direction::Out, json!({"jsonrpc": "2.0", "id": 2, "method": "session/load", "params": {"sessionId": "s9", "cwd": "/work", "mcpServers": []}}));
+        state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 2, "result": {}}));
+        state.on_live();
+
+        let actions = state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(1), text: "go".into(), attachments: vec![] });
+
+        let prompt = actions.iter().find_map(|action| match action {
+            Action::Send(frame) if frame["method"] == "session/prompt" => Some(frame.clone()),
+            _ => None,
+        });
+        assert_eq!(prompt.expect("the prompt is written")["params"]["sessionId"], "s9");
     }
 
     #[test]
@@ -992,6 +1041,41 @@ mod tests {
         let actions = state.on_entry(6, Direction::In, json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 7, "totalTokens": 12}}}));
 
         assert_eq!(actions, [Action::Emit(6, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 6, stop_reason: "end_turn".into(), usage: Some(json!({"inputTokens": 5, "outputTokens": 7, "totalTokens": 12})) })]);
+    }
+
+    #[test]
+    fn a_turn_the_agent_never_answers_ends_as_cancelled_and_lets_a_queued_prompt_out() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+        state.on_command(Command::Prompt { prompt_id: Uuid::from_u128(3), text: "hi".into(), attachments: vec![] });
+        assert!(state.has_open_turn());
+
+        let actions = state.end_turn_unanswered();
+
+        assert_eq!(actions, [Action::Emit(4, NodeToControl::TurnEnd { conversation_id: conversation(), seq: 4, stop_reason: "cancelled".into(), usage: None })]);
+        assert!(!state.has_open_turn());
+        assert!(!state.is_busy());
+    }
+
+    #[test]
+    fn ending_an_unanswered_turn_when_none_is_open_does_nothing() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+
+        assert!(state.end_turn_unanswered().is_empty());
+    }
+
+    #[test]
+    fn a_lost_keeper_fails_the_session_unless_it_was_being_closed() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        state.on_entry(8, Direction::In, json!({"jsonrpc": "2.0", "method": "session/update", "params": {}}));
+
+        let actions = state.on_keeper_lost();
+
+        assert!(matches!(&actions[..], [Action::Emit(9, NodeToControl::SessionFailed { .. })]));
+
+        state.on_command(Command::Close);
+        assert!(state.on_keeper_lost().is_empty());
     }
 
     #[test]

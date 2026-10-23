@@ -364,6 +364,23 @@ async fn cancel_stops_a_running_turn() {
 }
 
 #[tokio::test]
+async fn stop_ends_a_turn_the_agent_is_not_running_so_the_conversation_stops_working() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(30);
+    start_conversation(&mut connection, conversation).await;
+
+    prompt(&connection, conversation, "stuck");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("stuck")).await;
+    connection.send(ControlToNode::Cancel { conversation_id: conversation });
+
+    let turn_end = connection.next_matching(|message| matches!(message, NodeToControl::TurnEnd { .. })).await;
+    assert!(matches!(&turn_end, NodeToControl::TurnEnd { stop_reason, .. } if stop_reason == "cancelled"));
+}
+
+#[tokio::test]
 async fn agent_requests_the_client_does_not_support_get_method_not_found() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);
@@ -636,6 +653,57 @@ async fn a_restarted_daemon_replays_what_it_never_got_acknowledged() {
         texts
     };
     assert_eq!(texts, ["one", "two", "three"]);
+}
+
+#[tokio::test]
+async fn a_daemon_restarted_while_a_session_is_idle_writes_and_acknowledges_a_new_prompt() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let daemon = fixture.start_daemon();
+    let mut first = control.accept().await;
+    let conversation = Uuid::from_u128(31);
+    start_conversation(&mut first, conversation).await;
+    prompt(&first, conversation, "hello");
+    first.next_matching(|message| matches!(message, NodeToControl::TurnEnd { .. })).await;
+
+    daemon.crash();
+    let _restarted = fixture.start_daemon();
+    let mut second = control.accept().await;
+    second.next_matching(is_hello).await;
+    let prompt_id = Uuid::new_v4();
+    second.send(ControlToNode::Prompt { conversation_id: conversation, prompt_id, text: "again".into(), attachments: vec![] });
+
+    let received = second.next_matching(|message| matches!(message, NodeToControl::PromptReceived { .. })).await;
+    assert_eq!(received, NodeToControl::PromptReceived { conversation_id: conversation, prompt_id });
+
+    for _ in 0..500 {
+        if journalled_prompts(&fixture, conversation) == 2 {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(journalled_prompts(&fixture, conversation), 2);
+}
+
+#[tokio::test]
+async fn a_reattached_keeper_that_is_killed_is_reported_as_an_ended_session() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let daemon = fixture.start_daemon();
+    let mut first = control.accept().await;
+    let conversation = Uuid::from_u128(32);
+    start_conversation(&mut first, conversation).await;
+
+    daemon.crash();
+    let _restarted = fixture.start_daemon();
+    let mut second = control.accept().await;
+    second.next_matching(is_hello).await;
+    common::kill_keepers(&fixture.config.sessions_dir());
+
+    let failed = second.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
+    assert!(matches!(failed, NodeToControl::SessionFailed { conversation_id, .. } if conversation_id == conversation));
 }
 
 #[tokio::test]
