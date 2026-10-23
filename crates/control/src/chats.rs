@@ -6,7 +6,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::instructions::extensions_of;
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderRow};
 use crate::state::AppState;
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enum_text, find_owned, lock_owned, set_status};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -15,6 +15,8 @@ use base64::Engine;
 use mycelium_proto::conversation::{Attachment, Conversation, ConversationStatus, EventKind, SideKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::json;
+use std::future::Future;
+use std::pin::Pin;
 use uuid::Uuid;
 
 pub const CHAT_AGENT: &str = "chat";
@@ -184,6 +186,23 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     Ok(conversation)
 }
 
+pub async fn send_or_queue(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, owner).await?;
+
+    if row.status != enum_text(&ConversationStatus::Working) {
+        drop(tx);
+        send(state, owner, id, text, Vec::new()).await?;
+
+        return Ok(());
+    }
+
+    enqueue(&mut tx, id, text, &[]).await?;
+    tx.commit().await?;
+
+    publish_queue(state, owner, id).await
+}
+
 async fn chat_content(state: &AppState, text: String, attachments: Vec<Attachment>) -> ApiResult<(String, Vec<ChatImage>)> {
     let mut content = text;
     let mut images = Vec::new();
@@ -213,23 +232,25 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-async fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model: String, messages: Vec<ChatMessage>) {
-    let mut usage = (None, None);
-    let outcome = relay(&state, owner, id, &provider, &model, &messages, &mut usage).await;
-    let stop_reason = match outcome {
-        Ok(()) => "end_turn",
-        Err(error) => {
-            if let Err(cause) = record_failure(&state, owner, id, error.message()).await {
-                tracing::warn!("could not record the failure of chat {id}: {}", cause.message());
+fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model: String, messages: Vec<ChatMessage>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let mut usage = (None, None);
+        let outcome = relay(&state, owner, id, &provider, &model, &messages, &mut usage).await;
+        let stop_reason = match outcome {
+            Ok(()) => "end_turn",
+            Err(error) => {
+                if let Err(cause) = record_failure(&state, owner, id, error.message()).await {
+                    tracing::warn!("could not record the failure of chat {id}: {}", cause.message());
+                }
+
+                "error"
             }
+        };
 
-            "error"
+        if let Err(cause) = finish(&state, owner, id, stop_reason, Some(usage)).await {
+            tracing::warn!("could not finish the reply of chat {id}: {}", cause.message());
         }
-    };
-
-    if let Err(cause) = finish(&state, owner, id, stop_reason, Some(usage)).await {
-        tracing::warn!("could not finish the reply of chat {id}: {}", cause.message());
-    }
+    })
 }
 
 async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: &[ChatMessage], usage: &mut (Option<i64>, Option<i64>)) -> ApiResult<()> {
@@ -297,7 +318,21 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
 
     let reported = usage.filter(|(input, output)| input.is_some() || output.is_some()).map(|(input, output)| json!({"inputTokens": input.unwrap_or(0), "outputTokens": output.unwrap_or(0)}));
 
-    record_turn(state, id, reported.as_ref()).await
+    record_turn(state, id, reported.as_ref()).await?;
+
+    let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 order by position limit 1 for update) returning text, attachments")
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    let Some((text, sqlx::types::Json(attachments))) = queued else {
+        return Ok(());
+    };
+
+    publish_queue(state, owner, id).await?;
+    send(state, owner, id, &text, attachments).await?;
+
+    Ok(())
 }
 
 pub fn is_chat(row: &ConversationRow) -> bool {

@@ -191,6 +191,17 @@ pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid)
     Ok(())
 }
 
+pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &str, attachments: &[Attachment]) -> sqlx::Result<()> {
+    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1")
+        .bind(conversation_id)
+        .bind(text)
+        .bind(sqlx::types::Json(attachments))
+        .execute(tx)
+        .await?;
+
+    Ok(())
+}
+
 #[derive(sqlx::FromRow)]
 struct NodeRow {
     id: Uuid,

@@ -225,24 +225,30 @@ async fn send(state: &AppState, user: AuthUser, waiting: Task, conversation_id: 
         return Err(ApiError::not_found("That task"));
     }
 
-    if target.project_id != waiting.project_id {
+    let chat = chats::is_chat(&target);
+
+    if !chat && target.project_id != waiting.project_id {
         return Err(ApiError::conflict("conversation_not_in_project", "This conversation belongs to a different project from the task. Choose a conversation from the task's project."));
     }
 
-    if chats::is_chat(&target) || target.archived_at.is_some() || !target.is_idle() {
-        return Err(ApiError::conflict("conversation_busy", "This conversation is not waiting for a message. Choose an idle conversation, or start a new one."));
+    if target.archived_at.is_some() {
+        return Err(ApiError::conflict("conversation_archived", "This conversation is archived. Choose another, or start a new one."));
     }
 
-    if !state.hub.is_online(target.node_id) {
+    if !chat && !state.hub.is_online(target.node_id) {
         return Err(node_offline());
     }
 
     let task = move_to(state, &user, waiting.id, TaskStatus::Open, TaskStatus::Claimed).await?;
     let text = task.prompt.clone().unwrap_or_else(|| task.title.clone());
-    let delivered = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+    let delivered = if chat {
+        chats::send_or_queue(state, user.id, conversation_id, &text).await
+    } else {
+        prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await.map(|_| ())
+    };
 
     match delivered {
-        Ok(_) => {
+        Ok(()) => {
             sqlx::query("update tasks set conversation_id = $2 where id = $1").bind(task.id).bind(conversation_id).execute(&state.pool).await?;
             let sent = store::find_owned(&state.pool, conversation_id, user.id).await?;
 

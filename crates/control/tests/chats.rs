@@ -365,6 +365,66 @@ async fn stopping_a_chat_ends_the_turn_keeps_what_was_said_and_frees_the_chat() 
     assert_eq!(again, 204);
 }
 
+async fn open_task(server: &Server, title: &str) -> Value {
+    let link = server.online_node("laptop").await;
+    let (status, task) = server.user.json(server.user.post("/api/v1/tasks").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "title": title}))).await;
+    assert_eq!(status, 201, "{task}");
+
+    task
+}
+
+fn user_messages(events: &[Value]) -> Vec<String> {
+    events.iter().filter(|event| event["kind"] == "user_message").filter_map(|event| event["payload"]["text"].as_str().map(String::from)).collect()
+}
+
+#[tokio::test]
+async fn a_task_sent_to_an_idle_chat_is_asked_of_it_and_claimed() {
+    let server = Server::start().await;
+    let (router, fake) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let chat = new_chat(&server, &provider, "hello").await;
+    reply_finished(&server, &chat).await;
+    let task = open_task(&server, "Tidy up").await;
+
+    let (status, sent) = server.user.json(server.user.post(&format!("/api/v1/tasks/{}/start", task["id"].as_str().unwrap())).json(&json!({"conversation_id": chat["id"]}))).await;
+    assert_eq!((status, sent["id"].clone()), (200, chat["id"].clone()), "{sent}");
+
+    eventually("the task to be asked of the chat", || async { (fake.requests.lock().unwrap().len() == 2).then_some(()) }).await;
+    assert_eq!(last_text(&fake.requests.lock().unwrap()[1]), "Tidy up");
+    let (_, tasks) = server.user.json(server.user.get("/api/v1/tasks")).await;
+    assert_eq!((tasks[0]["status"].clone(), tasks[0]["conversation_id"].clone()), (json!("claimed"), chat["id"].clone()));
+}
+
+#[tokio::test]
+async fn a_task_sent_to_a_replying_chat_waits_in_its_queue_and_is_asked_when_the_reply_ends() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let chat = new_chat(&server, &provider, "wait for it").await;
+    let id = chat["id"].as_str().unwrap();
+    eventually("the first words", || async { server.events(id.parse().unwrap()).await.iter().any(|event| event["kind"] == "acp_update").then_some(()) }).await;
+    let task = open_task(&server, "Tidy up").await;
+
+    let (status, sent) = server.user.json(server.user.post(&format!("/api/v1/tasks/{}/start", task["id"].as_str().unwrap())).json(&json!({"conversation_id": id}))).await;
+    assert_eq!(status, 200, "{sent}");
+
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/queue"))).await;
+    assert_eq!(queue.as_array().unwrap().iter().map(|item| item["text"].clone()).collect::<Vec<_>>(), vec![json!("Tidy up")]);
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+
+    let events = eventually("the queued task to be sent", || async {
+        let events = server.events(id.parse().unwrap()).await;
+
+        (user_messages(&events).len() == 2).then_some(events)
+    })
+    .await;
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/queue"))).await;
+    assert_eq!((user_messages(&events)[1].clone(), queue.as_array().unwrap().len()), ("Tidy up".to_string(), 0));
+}
+
 #[tokio::test]
 async fn a_provider_that_fails_mid_chat_leaves_an_error_in_the_thread_and_the_chat_usable() {
     let server = Server::start().await;

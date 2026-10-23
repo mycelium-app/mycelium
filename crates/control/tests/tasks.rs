@@ -429,15 +429,41 @@ async fn a_global_task_is_sent_to_an_idle_conversation_that_has_no_project() {
 }
 
 #[tokio::test]
-async fn a_task_is_refused_by_a_working_conversation_and_stays_open() {
+async fn a_task_sent_to_an_idle_conversation_appears_in_it_as_the_next_user_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = idle_conversation(&server, &mut link, None).await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Rotate the S3 keys", "cwd": "/work/app", "prompt": "Rotate the S3 keys in the release bucket"})).await;
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!(status, 200);
+
+    let messages: Vec<Value> = server.events(conversation).await.into_iter().filter(|event| event["kind"] == "user_message").map(|event| event["payload"]["text"].clone()).collect();
+    assert_eq!(messages.last().unwrap(), &json!("Rotate the S3 keys in the release bucket"));
+    assert_eq!(tasks_with_status(&server, "claimed").await[0]["conversation_id"], json!(conversation));
+}
+
+#[tokio::test]
+async fn a_task_sent_to_a_working_conversation_is_queued_in_it_and_sent_when_its_turn_ends() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let (_, started) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "prompt": "go"}))).await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
     let (_, task) = add_task(&server, link.id, json!({"title": "Tidy", "cwd": "/work/app"})).await;
 
-    let (status, body) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": started["id"]}))).await;
-    assert_eq!((status, body["error"].clone()), (409, json!("conversation_busy")));
-    assert_eq!(open_tasks(&server).await.len(), 1);
+    let (status, body) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!((status, body["id"].clone()), (200, json!(conversation)), "{body}");
+
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/queue"))).await;
+    assert_eq!(queue.as_array().unwrap().iter().map(|item| item["text"].clone()).collect::<Vec<_>>(), vec![json!("Tidy")]);
+    let claimed = tasks_with_status(&server, "claimed").await;
+    assert_eq!((claimed.len(), claimed[0]["conversation_id"].clone()), (1, json!(conversation)));
+
+    link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    assert_eq!(link.expect_prompt().await.1, "Tidy");
 }
 
 #[tokio::test]

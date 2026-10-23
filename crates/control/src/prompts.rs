@@ -6,7 +6,7 @@ use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
-use crate::store::{CONVERSATION_COLUMNS, append_event, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
+use crate::store::{CONVERSATION_COLUMNS, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -112,12 +112,7 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
     }
 
-    sqlx::query("insert into queued_prompts (conversation_id, position, text, attachments) select $1, coalesce(max(position), 0) + 1, $2, $3 from queued_prompts where conversation_id = $1")
-        .bind(id)
-        .bind(text)
-        .bind(sqlx::types::Json(&attachments))
-        .execute(&mut *tx)
-        .await?;
+    enqueue(&mut tx, id, text, &attachments).await?;
     tx.commit().await?;
 
     pump(&state, id, false).await?;
