@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 
-private fun node(online: Boolean = true, address: String = "10.0.0.5") = NodeSummary("n1", "willow", null, "willow", "linux", "x86_64", "v1", address, null, online, false)
+private fun node(online: Boolean = true, address: String = "10.0.0.5") = NodeSummary("n1", "willow", null, null, "willow", "linux", "x86_64", "v1", address, null, online, false)
 
 private fun sample(at: Long, cpu: Double = 10.0) = ResourceSample(atMs = at, available = true, cpuPercent = cpu)
 
