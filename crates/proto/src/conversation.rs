@@ -118,6 +118,8 @@ pub struct Conversation {
     pub side_kind: Option<SideKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,

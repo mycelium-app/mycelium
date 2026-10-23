@@ -21,6 +21,7 @@ const SESSION_COOKIE: &str = "myc_session";
 const OIDC_COOKIE: &str = "myc_oidc";
 const SESSION_DAYS: i64 = 30;
 
+#[derive(Clone)]
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,

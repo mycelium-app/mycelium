@@ -601,6 +601,11 @@ pub struct AnswerTaskRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartTaskRequest {
+    pub conversation_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateTaskRequest {
     pub node_id: Uuid,
     pub agent: AgentId,

@@ -3,12 +3,14 @@ use crate::conversations;
 use crate::error::{ApiError, ApiResult};
 use crate::projects;
 use crate::prompts;
+use crate::chats;
+use crate::nodes::node_offline;
 use crate::state::AppState;
-use crate::store::{enum_text, parse_enum};
+use crate::store::{self, enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{AnswerTaskRequest, CreateConversationRequest, CreateTaskRequest, PromptRequest, Task, TaskStatus};
+use mycelium_proto::api::{AnswerTaskRequest, CreateConversationRequest, CreateTaskRequest, PromptRequest, StartTaskRequest, Task, TaskStatus};
 use mycelium_proto::conversation::Conversation;
 use uuid::Uuid;
 
@@ -182,7 +184,7 @@ pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus,
     Ok(Ok(load(state, id).await?))
 }
 
-pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<StartTaskRequest>>) -> ApiResult<(StatusCode, Json<Conversation>)> {
     let found = sqlx::query_as::<_, TaskRow>(sqlx::AssertSqlSafe(format!("{TASK_SELECT} where t.id = $1 and t.owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?;
     let Some(row) = found else {
         return Err(ApiError::not_found("That task"));
@@ -191,6 +193,10 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     if waiting.status == TaskStatus::Open && waiting.waits_on > 0 {
         return Err(ApiError::conflict("task_waiting", format!("This task waits on {} other {}. Finish {} first.", waiting.waits_on, if waiting.waits_on == 1 { "task" } else { "tasks" }, if waiting.waits_on == 1 { "it" } else { "them" })));
+    }
+
+    if let Some(Json(target)) = request {
+        return send(&state, user, waiting, target.conversation_id).await;
     }
 
     let task = move_to(&state, &user, id, TaskStatus::Open, TaskStatus::Claimed).await?;
@@ -206,6 +212,44 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         }
         Err(cause) => {
             sqlx::query("update tasks set status = 'open' where id = $1").bind(id).execute(&state.pool).await?;
+
+            Err(cause)
+        }
+    }
+}
+
+async fn send(state: &AppState, user: AuthUser, waiting: Task, conversation_id: Uuid) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    let target = store::find_owned(&state.pool, conversation_id, user.id).await?;
+
+    if waiting.status != TaskStatus::Open {
+        return Err(ApiError::not_found("That task"));
+    }
+
+    if target.project_id != waiting.project_id {
+        return Err(ApiError::conflict("conversation_not_in_project", "This conversation belongs to a different project from the task. Choose a conversation from the task's project."));
+    }
+
+    if chats::is_chat(&target) || target.archived_at.is_some() || !target.is_idle() {
+        return Err(ApiError::conflict("conversation_busy", "This conversation is not waiting for a message. Choose an idle conversation, or start a new one."));
+    }
+
+    if !state.hub.is_online(target.node_id) {
+        return Err(node_offline());
+    }
+
+    let task = move_to(state, &user, waiting.id, TaskStatus::Open, TaskStatus::Claimed).await?;
+    let text = task.prompt.clone().unwrap_or_else(|| task.title.clone());
+    let delivered = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text })).await;
+
+    match delivered {
+        Ok(_) => {
+            sqlx::query("update tasks set conversation_id = $2 where id = $1").bind(task.id).bind(conversation_id).execute(&state.pool).await?;
+            let sent = store::find_owned(&state.pool, conversation_id, user.id).await?;
+
+            Ok((StatusCode::OK, Json(sent.to_proto()?)))
+        }
+        Err(cause) => {
+            sqlx::query("update tasks set status = 'open' where id = $1").bind(task.id).execute(&state.pool).await?;
 
             Err(cause)
         }

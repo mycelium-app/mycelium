@@ -358,3 +358,111 @@ async fn a_proposed_task_can_wait_on_other_tasks_through_the_mcp_tool() {
     assert_eq!(refused["isError"], json!(true));
     assert_eq!(tasks_with_status(&server, "proposed").await.len(), 1);
 }
+
+async fn idle_conversation(server: &Server, link: &mut common::NodeLink, project: Option<Uuid>) -> Uuid {
+    let mut body = json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "prompt": "go"});
+
+    if let Some(project) = project {
+        body["project_id"] = json!(project);
+    }
+
+    let (status, started) = server.user.json(server.user.post("/api/v1/conversations").json(&body)).await;
+    assert_eq!(status, 201, "{started}");
+    let id: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    link.expect_start_session().await;
+    link.start_session(id, "acp-1").await;
+    link.expect_prompt().await;
+    link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: id, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(id, 3).await;
+
+    id
+}
+
+async fn project_on(server: &Server, node_id: Uuid, name: &str) -> Uuid {
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+
+    sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, $3, $4) returning id").bind(owner).bind(node_id).bind(name).bind(format!("/work/{name}")).fetch_one(&server.pool).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_conversation_started_from_a_project_reports_that_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, link.id, "app").await;
+    let id = idle_conversation(&server, &mut link, Some(project)).await;
+
+    assert_eq!(server.conversation(id).await["project_id"], json!(project));
+}
+
+#[tokio::test]
+async fn an_open_task_is_sent_to_an_idle_conversation_of_its_project_and_claimed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_on(&server, link.id, "app").await;
+    let conversation = idle_conversation(&server, &mut link, Some(project)).await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Rebuild install.md", "project_id": project, "prompt": "Rebuild install.md for the new flags"})).await;
+
+    let (status, sent) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!((status, sent["id"].clone()), (200, json!(conversation)), "{sent}");
+
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "Rebuild install.md for the new flags");
+
+    let claimed = tasks_with_status(&server, "claimed").await;
+    assert_eq!((claimed.len(), claimed[0]["conversation_id"].clone()), (1, json!(conversation)));
+    assert_eq!(open_tasks(&server).await.len(), 0);
+}
+
+#[tokio::test]
+async fn a_global_task_is_sent_to_an_idle_conversation_that_has_no_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = idle_conversation(&server, &mut link, None).await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Rotate the S3 keys", "cwd": "/work/app"})).await;
+
+    let (status, _) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!(status, 200);
+
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "Rotate the S3 keys");
+}
+
+#[tokio::test]
+async fn a_task_is_refused_by_a_working_conversation_and_stays_open() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, started) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "prompt": "go"}))).await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Tidy", "cwd": "/work/app"})).await;
+
+    let (status, body) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": started["id"]}))).await;
+    assert_eq!((status, body["error"].clone()), (409, json!("conversation_busy")));
+    assert_eq!(open_tasks(&server).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_task_is_refused_by_a_conversation_of_another_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let app = project_on(&server, link.id, "app").await;
+    let site = project_on(&server, link.id, "site").await;
+    let conversation = idle_conversation(&server, &mut link, Some(site)).await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Tidy", "project_id": app})).await;
+
+    let (status, body) = server.user.json(server.user.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!((status, body["error"].clone()), (409, json!("conversation_not_in_project")));
+    assert_eq!(open_tasks(&server).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_task_cannot_be_sent_to_someone_elses_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = idle_conversation(&server, &mut link, None).await;
+    let other = server.second_user("other@example.com").await;
+    let (_, task) = add_task(&server, link.id, json!({"title": "Tidy", "cwd": "/work/app"})).await;
+
+    let (status, _) = other.json(other.post(&path_of(&task, "start")).json(&json!({"conversation_id": conversation}))).await;
+    assert_eq!(status, 404);
+    assert_eq!(open_tasks(&server).await.len(), 1);
+}

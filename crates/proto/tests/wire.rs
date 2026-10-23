@@ -58,6 +58,7 @@ fn conversation() -> Conversation {
         parent_id: None,
         side_kind: None,
         provider_id: None,
+        project_id: None,
         created_at: now(),
         updated_at: now(),
         archived_at: None,
