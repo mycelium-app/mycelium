@@ -306,7 +306,7 @@ private fun History(log: List<GitCommit>) {
 }
 
 @Composable
-private fun CommitArea(
+fun CommitArea(
     status: GitStatus?,
     lastCommit: GitCommit?,
     message: String,
@@ -320,19 +320,20 @@ private fun CommitArea(
     val focused = source.collectIsFocusedAsState()
 
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
-            Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
 
-            if (status != null && status.ahead > 0) {
-                Label("${status.ahead} ahead", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                if (status != null && status.ahead > 0) {
+                    Label("${status.ahead} ahead", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                }
+
+                if (status != null && status.behind > 0) {
+                    Label("${status.behind} behind", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                }
             }
 
-            if (status != null && status.behind > 0) {
-                Label("${status.behind} behind", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            }
-
-            Box(Modifier.weight(1f))
             MyButton(onFetch, text = "Fetch", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
