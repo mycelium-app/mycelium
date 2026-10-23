@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::error::ApiResult;
+use crate::forge_cache::ForgeCache;
 use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
@@ -466,6 +467,7 @@ pub struct AppState {
     pub latest: Arc<LatestVersions>,
     pub readiness: Arc<Mutex<Readiness>>,
     pub http: reqwest::Client,
+    pub forge_cache: Arc<ForgeCache>,
 }
 
 impl AppState {

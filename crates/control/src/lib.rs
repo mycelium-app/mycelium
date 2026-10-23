@@ -12,6 +12,7 @@ mod goals;
 mod groups;
 mod device;
 mod error;
+mod forge_cache;
 mod forges;
 mod imports;
 mod instructions;
@@ -40,6 +41,7 @@ mod walkthroughs;
 mod web;
 mod worktrees;
 
+pub use forge_cache::FORGE_CACHE_TTL;
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;

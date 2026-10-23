@@ -308,6 +308,7 @@ impl Server {
             npm_registry_url: "http://127.0.0.1:1".into(),
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
             scheduler_tick: mycelium_control::SCHEDULER_TICK,
+            forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

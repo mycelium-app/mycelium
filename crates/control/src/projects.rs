@@ -79,7 +79,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             let forge = forges::find_owned(&state, forge_id, user.id).await?;
 
             if request.new_repository {
-                let api = forges::ForgeApi::from_row(&forge)?;
+                let api = forges::ForgeApi::from_row(&forge)?.cached(&state.forge_cache);
 
                 api.create_repository(&state.http, &forge.account, repository).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
             }

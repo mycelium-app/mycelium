@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::forge_cache::{Cached, ForgeCache};
 use crate::state::AppState;
 use axum::Json;
 use base64::Engine;
@@ -10,6 +11,7 @@ use mycelium_proto::api::{ConnectForgeRequest, Forge, ForgeFailure, ForgeKind, F
 use mycelium_proto::link::GitCredentials;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -24,6 +26,8 @@ pub struct RepositoryQuery {
     organisation: Option<String>,
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    pub refresh: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -94,16 +98,37 @@ impl ForgeRow {
     }
 }
 
+#[derive(Clone)]
 pub struct ForgeApi {
     pub id: Uuid,
     pub kind: ForgeKind,
     pub base_url: String,
     token: String,
+    cache: Option<Arc<ForgeCache>>,
+    refresh: bool,
 }
 
 impl ForgeApi {
     pub fn new(id: Uuid, kind: ForgeKind, base_url: String, token: String) -> ForgeApi {
-        ForgeApi { id, kind, base_url, token }
+        ForgeApi { id, kind, base_url, token, cache: None, refresh: false }
+    }
+
+    pub fn cached(mut self, cache: &Arc<ForgeCache>) -> ForgeApi {
+        self.cache = Some(cache.clone());
+
+        self
+    }
+
+    pub fn refreshing(mut self, refresh: bool) -> ForgeApi {
+        self.refresh = refresh;
+
+        self
+    }
+
+    fn invalidate(&self) {
+        if let Some(cache) = &self.cache {
+            cache.invalidate(self.id);
+        }
     }
 
     pub fn from_row(row: &ForgeRow) -> ApiResult<ForgeApi> {
@@ -140,7 +165,7 @@ impl ForgeApi {
         }
     }
 
-    pub async fn get(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
+    async fn fetch(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
         let request = self.authorised(http.get(format!("{}{path}", self.api_url())));
         let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
         let response = self.refused(response).await?;
@@ -151,6 +176,46 @@ impl ForgeApi {
         }
 
         response.json().await.map_err(|_| ForgeError::Failed(status.as_u16()))
+    }
+
+    async fn fetch_and_store(&self, cache: &ForgeCache, http: &reqwest::Client, path: &str, key: String) -> Result<Value, ForgeError> {
+        let epoch = cache.epoch(self.id);
+        let value = self.fetch(http, path).await?;
+
+        cache.store(self.id, key, value.clone(), epoch);
+
+        Ok(value)
+    }
+
+    pub async fn get(&self, http: &reqwest::Client, path: &str) -> Result<Value, ForgeError> {
+        let Some(cache) = &self.cache else {
+            return self.fetch(http, path).await;
+        };
+        let key = ForgeCache::key(self.id, &format!("{}{path}", self.api_url()));
+
+        if !self.refresh {
+            match cache.lookup(&key) {
+                Cached::Fresh(value) => return Ok(value),
+                Cached::Stale(value) => {
+                    if cache.claim_refresh(&key) {
+                        let api = self.clone();
+                        let http = http.clone();
+                        let path = path.to_string();
+                        let cache = cache.clone();
+
+                        tokio::spawn(async move {
+                            api.fetch_and_store(&cache, &http, &path, key.clone()).await.ok();
+                            cache.finish_refresh(&key);
+                        });
+                    }
+
+                    return Ok(value);
+                }
+                Cached::Miss => {}
+            }
+        }
+
+        self.fetch_and_store(cache, http, path, key).await
     }
 
     pub async fn pages(&self, http: &reqwest::Client, path: &str) -> Result<Vec<Value>, ForgeError> {
@@ -226,12 +291,12 @@ impl ForgeApi {
 impl ForgeApi {
     pub async fn file(&self, http: &reqwest::Client, repository: &str, path: &str) -> Result<Option<ForgeFile>, ForgeError> {
         let body = match self.kind {
-            ForgeKind::Github => self.get(http, &format!("/repos/{repository}/contents/{}", encode_segments(path))).await,
+            ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}/contents/{}", encode_segments(path))).await,
             ForgeKind::Gitlab => {
-                let project = self.get(http, &format!("/projects/{}", encode_path(repository))).await?;
+                let project = self.fetch(http, &format!("/projects/{}", encode_path(repository))).await?;
                 let branch = project["default_branch"].as_str().unwrap_or("main");
 
-                self.get(http, &format!("/projects/{}/repository/files/{}?ref={}", encode_path(repository), encode_path(path), encode_path(branch))).await
+                self.fetch(http, &format!("/projects/{}/repository/files/{}?ref={}", encode_path(repository), encode_path(path), encode_path(branch))).await
             }
         };
         let body = match body {
@@ -244,7 +309,7 @@ impl ForgeApi {
         let text = String::from_utf8(bytes).map_err(|_| ForgeError::Failed(200))?;
         let commit = match self.kind {
             ForgeKind::Github => {
-                let commits = self.get(http, &format!("/repos/{repository}/commits?per_page=1&path={}", encode_segments(path))).await?;
+                let commits = self.fetch(http, &format!("/repos/{repository}/commits?per_page=1&path={}", encode_segments(path))).await?;
 
                 commits[0]["sha"].as_str().ok_or(ForgeError::Failed(200))?.to_string()
             }
@@ -279,7 +344,11 @@ impl ForgeApi {
             }
         };
         let request = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body);
-        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let sent = request.send().await;
+
+        self.invalidate();
+
+        let response = sent.map_err(|_| ForgeError::Unreachable)?;
         let response = self.refused(response).await?;
         let status = response.status();
 
@@ -412,7 +481,11 @@ impl ForgeApi {
             }
         };
         let request = self.authorised(http.post(format!("{}{path}", self.api_url()))).json(&body);
-        let response = request.send().await.map_err(|_| ForgeError::Unreachable)?;
+        let sent = request.send().await;
+
+        self.invalidate();
+
+        let response = sent.map_err(|_| ForgeError::Unreachable)?;
         let response = self.refused(response).await?;
         let status = response.status();
 
@@ -523,6 +596,8 @@ pub async fn connect(State(state): State<AppState>, user: AuthUser, Json(request
     .fetch_one(&state.pool)
     .await?;
 
+    state.forge_cache.invalidate(row.id);
+
     Ok((StatusCode::CREATED, Json(row.to_proto()?)))
 }
 
@@ -532,6 +607,8 @@ pub async fn disconnect(State(state): State<AppState>, user: AuthUser, Path(id):
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("That forge"));
     }
+
+    state.forge_cache.invalidate(id);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -544,7 +621,7 @@ pub async fn repositories(State(state): State<AppState>, user: AuthUser, Query(q
     }
 
     let fetched = join_all(rows.iter().map(|row| async {
-        let api = ForgeApi::from_row(row)?;
+        let api = ForgeApi::from_row(row)?.cached(&state.forge_cache).refreshing(query.refresh);
         let repositories = api.repositories(&state.http).await;
         let organisations = api.organisations(&state.http, &row.account).await.unwrap_or_else(|_| row.organisations.clone());
 

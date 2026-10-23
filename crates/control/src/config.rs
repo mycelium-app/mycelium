@@ -66,6 +66,7 @@ pub struct Config {
     pub npm_registry_url: String,
     pub version_check_interval: Duration,
     pub scheduler_tick: Duration,
+    pub forge_cache_ttl: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -128,6 +129,7 @@ impl Config {
             npm_registry_url: optional(lookup, "MYCELIUM_NPM_REGISTRY_URL").unwrap_or_else(|| "https://registry.npmjs.org".into()),
             version_check_interval: VERSION_CHECK_INTERVAL,
             scheduler_tick: SCHEDULER_TICK,
+            forge_cache_ttl: crate::forge_cache::FORGE_CACHE_TTL,
         })
     }
 }

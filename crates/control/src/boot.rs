@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::forge_cache::ForgeCache;
 use crate::rate_limit::RateLimiter;
 use crate::state::{AppState, Hub, Readiness};
 use crate::versions::LatestVersions;
@@ -25,6 +26,7 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 pub fn new_state(config: Config) -> Result<AppState> {
     let pool = PgPoolOptions::new().max_connections(10).acquire_timeout(Duration::from_secs(3)).connect_lazy(&config.database_url)?;
     let (stream, _) = broadcast::channel(1024);
+    let forge_cache = Arc::new(ForgeCache::new(config.forge_cache_ttl));
 
     Ok(AppState {
         pool,
@@ -35,6 +37,7 @@ pub fn new_state(config: Config) -> Result<AppState> {
         latest: Arc::new(LatestVersions::default()),
         readiness: Arc::new(Mutex::new(Readiness::Migrating)),
         http: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
+        forge_cache,
     })
 }
 

@@ -24,6 +24,8 @@ const PULL_REQUEST_LOOKUPS: usize = 8;
 pub struct IssueQuery {
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    refresh: bool,
 }
 
 fn slug(title: &str) -> String {
@@ -44,7 +46,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     let mut result = Issues { issues: Vec::new(), failures: Vec::new() };
     let fetched = join_all(repositories.iter().map(|(forge_id, repository)| async {
         let forge = forges::find_owned(&state, *forge_id, user.id).await?;
-        let api = ForgeApi::from_row(&forge)?;
+        let api = ForgeApi::from_row(&forge)?.cached(&state.forge_cache).refreshing(query.refresh);
         let issues = match api.issues(&state.http, repository, &query.q).await {
             Ok(found) => Ok(stream::iter(found)
                 .map(|mut issue| async {
@@ -78,7 +80,7 @@ pub async fn start_workspace(State(state): State<AppState>, user: AuthUser, Path
     };
 
     let forge = forges::find_owned(&state, forge_id, user.id).await?;
-    let api = ForgeApi::from_row(&forge)?;
+    let api = ForgeApi::from_row(&forge)?.cached(&state.forge_cache);
     let found = api.issue(&state.http, repository, number).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
     let Some(issue) = found else {
         return Err(ApiError::not_found("That issue"));

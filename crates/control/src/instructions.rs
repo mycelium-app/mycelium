@@ -124,7 +124,7 @@ async fn describe(state: &AppState, user: &AuthUser) -> ApiResult<Instructions> 
 async fn forge_for(state: &AppState, user: &AuthUser, source: &SourceRow) -> ApiResult<ForgeApi> {
     let forge = forges::find_owned(state, source.forge_id, user.id).await?;
 
-    ForgeApi::from_row(&forge)
+    Ok(ForgeApi::from_row(&forge)?.cached(&state.forge_cache))
 }
 
 async fn record(state: &AppState, user: &AuthUser, layer: &Layer, text: &str, forge_commit: Option<String>) -> ApiResult<()> {

@@ -46,6 +46,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
         npm_registry_url: "http://127.0.0.1:1".into(),
         version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
         scheduler_tick: mycelium_control::SCHEDULER_TICK,
+            forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
         };
 
         tokio::spawn(mycelium_control::run(config, listener));
@@ -154,6 +155,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
         npm_registry_url: "http://127.0.0.1:1".into(),
         version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
         scheduler_tick: mycelium_control::SCHEDULER_TICK,
+            forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
     };
 
     tokio::spawn(mycelium_control::run(config, listener));
