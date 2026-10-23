@@ -47,6 +47,24 @@ class GitCommitAreaTest {
     }
 
     @Test
+    fun openingTheBranchPickerLeavesTheBranchRowWhereItWas() {
+        rule.setContent {
+            MyceliumTheme(true) {
+                Box(Modifier.width(360.dp)) {
+                    CommitArea(GitStatus("feat/job-status-ui", upstream = "origin/feat/job-status-ui", ahead = 23, behind = 0, files = emptyList()), null, "", {}, {}, {}, {})
+                }
+            }
+        }
+
+        val before = rule.onNodeWithText("23 ahead", useUnmergedTree = true).getBoundsInRoot()
+        rule.onNodeWithContentDescription("Switch branch", substring = true).performClick()
+        rule.waitForIdle()
+        val after = rule.onNodeWithText("23 ahead", useUnmergedTree = true).getBoundsInRoot()
+
+        assertEquals(before, after)
+    }
+
+    @Test
     fun theRemoteButtonOffersWhatTheBranchNeedsNext() {
         var status by mutableStateOf(GitStatus("main", upstream = "origin/main", ahead = 0, behind = 0, files = emptyList()))
         rule.setContent { MyceliumTheme(true) { CommitArea(status, null, "", {}, {}, {}, {}) } }

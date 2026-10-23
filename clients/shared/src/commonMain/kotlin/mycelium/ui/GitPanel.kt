@@ -503,18 +503,19 @@ fun CommitArea(
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                Row(
-                    Modifier
-                        .weight(1f, fill = false)
-                        .heightIn(min = touchMin(Tokens.Size.ControlMd))
-                        .pressable({ picking = true; onOpenBranches() }, description = "Switch branch, current branch ${status?.branch.orEmpty()}", shape = ControlShape)
-                        .padding(horizontal = Tokens.Space.S1),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
-                    Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
-                    Icon(MyIcon.ChevronDown, colors.textMuted, Tokens.Size.IconSm)
+                Box(Modifier.weight(1f, fill = false)) {
+                    Row(
+                        Modifier
+                            .heightIn(min = touchMin(Tokens.Size.ControlMd))
+                            .pressable({ picking = true; onOpenBranches() }, description = "Switch branch, current branch ${status?.branch.orEmpty()}", shape = ControlShape)
+                            .padding(horizontal = Tokens.Space.S1),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                        Label(status?.branch.orEmpty(), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+                        Icon(MyIcon.ChevronDown, colors.textMuted, Tokens.Size.IconSm)
+                    }
 
                     if (picking) {
                         BranchPicker(branches, onSwitch = { picking = false; onSwitch(it) }, onDismiss = { picking = false })
