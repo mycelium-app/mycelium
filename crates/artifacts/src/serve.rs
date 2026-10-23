@@ -219,7 +219,8 @@ fn editor_media_type(path: &std::path::Path) -> &'static str {
 
 async fn editor_asset(state: &AppState, uri: &Uri) -> Response {
     let directory = &state.config().editor_dir;
-    let requested = std::path::Path::new(uri.path().trim_start_matches('/'));
+    let path = uri.path().strip_prefix("/design").unwrap_or(uri.path());
+    let requested = std::path::Path::new(path.trim_start_matches('/'));
     let plain = requested.components().all(|component| matches!(component, std::path::Component::Normal(_)));
     let asset = directory.join(requested);
     let wanted = if plain && !requested.as_os_str().is_empty() && asset.is_file() { asset } else { directory.join("index.html") };

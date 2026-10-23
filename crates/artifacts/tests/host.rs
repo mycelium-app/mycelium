@@ -132,6 +132,8 @@ impl Harness {
 
         let editor = tempfile::tempdir().unwrap();
         std::fs::write(editor.path().join("index.html"), "<!doctype html><title>Design viewer</title>").unwrap();
+        std::fs::create_dir(editor.path().join("assets")).unwrap();
+        std::fs::write(editor.path().join("assets/index.js"), "export {};").unwrap();
 
         let config = Config {
             domain: DOMAIN.into(),
@@ -358,6 +360,16 @@ async fn a_design_opens_the_editor_in_view_mode_and_serves_its_document() {
     assert_eq!(root.headers()["location"], "/?view=1");
     assert!(viewer.text().await.unwrap().contains("Design viewer"));
     assert_eq!(document.json::<Value>().await.unwrap(), json!({"pages": []}));
+}
+
+#[tokio::test]
+async fn a_design_loads_the_viewer_assets_from_the_path_the_editor_was_built_for() {
+    let harness = Harness::start().await;
+
+    let script = harness.get("layout", "/design/assets/index.js", None).await;
+
+    assert_eq!(script.headers()["content-type"], "text/javascript; charset=utf-8");
+    assert_eq!(script.text().await.unwrap(), "export {};");
 }
 
 #[tokio::test]
