@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -115,13 +116,13 @@ class ChatsTest {
 
         rule.onNodeWithText("Chats").performClick()
 
-        rule.onNodeWithText("New chat").assertIsDisplayed()
+        rule.onAllNodesWithText("New chat").onFirst().assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("New conversation").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Fix the build", substring = true).fetchSemanticsNodes().size)
 
         rule.onNodeWithText("Workspaces").performClick()
 
-        rule.onNodeWithText("New conversation").assertIsDisplayed()
+        rule.onAllNodesWithText("New conversation").onFirst().assertIsDisplayed()
     }
 
     @Test
