@@ -137,6 +137,8 @@ object Tokens {
         val IconMd: Dp = 16.dp
         val Dot: Dp = 6.dp
         val Sidebar: Dp = 280.dp
+        val DrawerEdge: Dp = 24.dp
+        const val DrawerFlingVelocity = 400f
         val SidebarMin: Dp = 200.dp
         val SidebarMax: Dp = 480.dp
         val SidePanel: Dp = 400.dp

@@ -1,10 +1,16 @@
 package mycelium.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -157,10 +163,33 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     val problem by store.problem.collectAsState()
     var route by remember { mutableStateOf(initialRoute) }
     var drawerOpen by remember { mutableStateOf(false) }
+    val progress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val reducedMotion = LocalReducedMotion.current
+    val drawerShown by remember { derivedStateOf { progress.value > 0f } }
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val gestureInset = with(density) { WindowInsets.systemGestures.getLeft(density, layoutDirection).toDp() }
+
+    suspend fun settle(open: Boolean) {
+        drawerOpen = open
+        val target = if (open) 1f else 0f
+        if (reducedMotion) progress.snapTo(target) else progress.animateTo(target)
+    }
+
+    LaunchedEffect(drawerOpen) { settle(drawerOpen) }
 
     BackHandler(enabled = drawerOpen) { drawerOpen = false }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
+        val drawerWidth = minOf(Tokens.Size.Sidebar + Tokens.Space.S8 * 2, maxWidth * 0.86f)
+        val drawerWidthPx = with(density) { drawerWidth.toPx() }
+        val drag = Modifier.draggable(
+            state = rememberDraggableState { delta -> scope.launch { progress.snapTo((progress.value + delta / drawerWidthPx).coerceIn(0f, 1f)) } },
+            orientation = Orientation.Horizontal,
+            onDragStopped = { velocity -> settle(velocity > Tokens.Size.DrawerFlingVelocity || (velocity > -Tokens.Size.DrawerFlingVelocity && progress.value > 0.5f)) },
+        )
+
         CompositionLocalProvider(LocalOpenList provides { drawerOpen = true }) {
             Column(Modifier.fillMaxSize()) {
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
@@ -171,21 +200,29 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
             }
         }
 
-        AnimatedVisibility(drawerOpen, enter = fadeIn(), exit = fadeOut()) {
+        if (!drawerShown) {
+            Box(Modifier.padding(start = gestureInset).width(Tokens.Size.DrawerEdge).fillMaxHeight().then(drag))
+        }
+
+        if (drawerShown) {
             Box(
                 Modifier
                     .fillMaxSize()
+                    .graphicsLayer { alpha = progress.value }
                     .background(Color.Black.copy(alpha = 0.32f))
+                    .then(drag)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClickLabel = "Close conversations") { drawerOpen = false },
             )
-        }
 
-        AnimatedVisibility(drawerOpen, enter = slideInHorizontally { -it }, exit = slideOutHorizontally { -it }) {
             Sidebar(
                 state = state,
                 route = route,
                 onRoute = { route = it; drawerOpen = false },
-                modifier = Modifier.width(minOf(Tokens.Size.Sidebar + Tokens.Space.S8 * 2, maxWidth * 0.86f)).fillMaxHeight(),
+                modifier = Modifier
+                    .width(drawerWidth)
+                    .fillMaxHeight()
+                    .offset { IntOffset((-(1f - progress.value) * drawerWidthPx).roundToInt(), 0) }
+                    .then(drag),
             )
         }
     }
