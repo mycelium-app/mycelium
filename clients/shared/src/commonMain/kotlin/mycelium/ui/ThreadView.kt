@@ -92,15 +92,6 @@ fun ThreadView(
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
-    val oldest = items.lastIndex
-    val atTop by remember(oldest) {
-        derivedStateOf {
-            val last = state.layoutInfo.visibleItemsInfo.lastOrNull()
-
-            last == null || (last.index == oldest && last.offset + last.size <= state.layoutInfo.viewportEndOffset)
-        }
-    }
-
     val atNewest by remember { derivedStateOf { state.firstVisibleItemIndex == 0 && state.firstVisibleItemScrollOffset == 0 } }
     var following by remember { mutableStateOf(true) }
 
@@ -116,6 +107,12 @@ fun ThreadView(
         if (following) {
             state.scrollToItem(0)
         }
+    }
+
+    suspend fun showTopOf(target: Int) {
+        state.animateScrollToItem(target)
+        val placed = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target } ?: return
+        state.animateScrollBy(-(state.layoutInfo.viewportEndOffset - placed.offset - placed.size).toFloat())
     }
 
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -143,15 +140,8 @@ fun ThreadView(
                         suggestions = if (index == items.lastIndex && item.stopReason == "end_turn") suggestedReplies(answer) else emptyList(),
                         onSuggest = onSuggest,
                         onCopy = if (answer.isEmpty()) null else ({ clipboard.setText(AnnotatedString(answer)) }),
-                        onScrollToMessage = if (asked < 0) null else ({
-                            scope.launch {
-                                val target = items.lastIndex - asked
-                                state.animateScrollToItem(target)
-                                val placed = state.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target } ?: return@launch
-                                state.animateScrollBy(-(state.layoutInfo.viewportEndOffset - placed.offset - placed.size).toFloat())
-                            }
-                        }),
-                        onScrollToTop = if (atTop) null else ({ scope.launch { state.animateScrollToItem(oldest) } }),
+                        onScrollToMessage = if (asked < 0) null else ({ scope.launch { showTopOf(items.lastIndex - asked) } }),
+                        onScrollToTop = if (asked + 1 >= index) null else ({ scope.launch { showTopOf(items.lastIndex - (asked + 1)) } }),
                     )
                 } else {
                     ThreadRow(item, onAnswer, onStopWorkflow)
@@ -825,7 +815,7 @@ private fun TurnEnd(item: ThreadItem.TurnEnd, suggestions: List<String>, onSugge
         }
 
         if (onScrollToTop != null) {
-            MyButton(onScrollToTop, icon = MyIcon.ScrollToTop, description = "Scroll to top", size = ButtonSize.Sm, muted = true)
+            MyButton(onScrollToTop, icon = MyIcon.ScrollToTop, description = "Scroll to the top of this reply", size = ButtonSize.Sm, muted = true)
         }
     }
 }

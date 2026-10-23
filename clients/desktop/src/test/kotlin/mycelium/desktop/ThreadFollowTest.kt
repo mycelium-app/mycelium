@@ -7,6 +7,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.platform.testTag
 import kotlin.test.assertTrue
@@ -50,5 +52,19 @@ class ThreadFollowTest {
 
         rule.onNodeWithContentDescription("Scroll to the newest message").performClick()
         rule.onNodeWithText("Message 31").assertIsDisplayed()
+    }
+
+    @Test
+    fun scrollingToTheTopOfAReplyShowsItsFirstMessageNotTheStartOfTheChat() {
+        val earlier = listOf(ThreadItem.UserMessage("u0", "First question"), ThreadItem.AgentMessage("a0", "First answer"), ThreadItem.TurnEnd("t0", "end_turn"))
+        val reply = (1..30).map { ThreadItem.AgentMessage("r$it", "Reply part $it") }
+        val items = earlier + ThreadItem.UserMessage("u1", "Second question") + reply + ThreadItem.TurnEnd("t1", "end_turn")
+        rule.setContent { MyceliumTheme(true) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(300.dp).testTag("thread")) } }
+
+        rule.onAllNodesWithContentDescription("Scroll to the top of this reply").onLast().performClick()
+        rule.waitForIdle()
+
+        rule.onNodeWithText("Reply part 1").assertIsDisplayed()
+        rule.onNodeWithText("First answer").assertDoesNotExist()
     }
 }
