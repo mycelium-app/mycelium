@@ -27,7 +27,10 @@ async fn fake_forge(kind: &str) -> String {
     let router = if kind == "github" {
         Router::new().route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) })).route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
     } else {
-        Router::new().route("/api/v4/user", get(|| async { Json(json!({"username": "sam"})) })).route("/api/v4/groups", get(|| async { (StatusCode::OK, Json(json!([]))) }))
+        Router::new()
+            .route("/api/v4/user", get(|| async { Json(json!({"username": "sam"})) }))
+            .route("/api/v4/groups", get(|| async { (StatusCode::OK, Json(json!([]))) }))
+            .route("/api/v4/projects/{project}", get(|Path(project): Path<String>| async move { Json(json!({"ssh_url_to_repo": format!("ssh://git@ssh.forge.test:2222/{project}.git")})) }))
     };
 
     serve(router).await
@@ -406,6 +409,20 @@ async fn an_existing_folder_whose_remote_is_the_repository_becomes_the_project_o
 
     let ((other, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "acme-org/acme-backups", "path": "/second"}), Ok(json!({"path": "/second", "repository": true, "remotes": [format!("{github}/acme-org/acme-backups")]}))).await;
     assert_eq!(other, 201);
+}
+
+#[tokio::test]
+async fn an_existing_folder_cloned_over_the_forges_own_ssh_host_becomes_the_project() {
+    let server = Server::start().await;
+    let gitlab = fake_forge("gitlab").await;
+    let forge_id = connect_forge(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    let mut link = server.online_node("laptop").await;
+
+    let ((status, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "sam/nix", "path": "/nix"}), Ok(json!({"path": "/nix", "repository": true, "remotes": ["ssh://git@ssh.forge.test:2222/sam/nix.git"]}))).await;
+    assert_eq!(status, 201);
+
+    let ((refused, _), _) = create_project(&server, &mut link, json!({"forge_id": forge_id, "repository": "sam/nix", "path": "/elsewhere"}), Ok(json!({"path": "/elsewhere", "repository": true, "remotes": ["ssh://git@unrelated.test/sam/nix.git"]}))).await;
+    assert_eq!(refused, 400);
 }
 
 #[tokio::test]

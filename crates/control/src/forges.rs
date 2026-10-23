@@ -300,6 +300,19 @@ impl ForgeApi {
 }
 
 impl ForgeApi {
+    pub async fn clone_urls(&self, http: &reqwest::Client, repository: &str) -> Vec<String> {
+        let project = match self.kind {
+            ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}")).await,
+            ForgeKind::Gitlab => self.fetch(http, &format!("/projects/{}", encode_path(repository))).await,
+        };
+
+        let Ok(project) = project else {
+            return Vec::new();
+        };
+
+        ["ssh_url_to_repo", "http_url_to_repo", "ssh_url", "clone_url"].iter().filter_map(|field| project[*field].as_str()).map(str::to_string).collect()
+    }
+
     pub async fn file(&self, http: &reqwest::Client, repository: &str, path: &str) -> Result<Option<ForgeFile>, ForgeError> {
         let body = match self.kind {
             ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}/contents/{}", encode_segments(path))).await,

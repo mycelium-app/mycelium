@@ -68,7 +68,7 @@ fn remote_location(url: &str) -> Option<(String, String)> {
     (!host.is_empty()).then_some((host, path))
 }
 
-fn check_checkout(answer: &Value, registered: &str, base_url: &str, repository: &str) -> ApiResult<()> {
+fn check_checkout(answer: &Value, registered: &str, base_url: &str, clone_urls: &[String], repository: &str) -> ApiResult<()> {
     let choose = format!("Choose the folder that holds {repository}.");
 
     if answer["repository"] != true {
@@ -78,11 +78,14 @@ fn check_checkout(answer: &Value, registered: &str, base_url: &str, repository: 
     let forge_host = remote_location(base_url).map(|(host, _)| host).unwrap_or_default();
     let remotes: Vec<(String, String)> = answer["remotes"].as_array().into_iter().flatten().filter_map(|remote| remote.as_str().and_then(remote_location)).collect();
 
-    if remotes.iter().any(|(host, path)| *host == forge_host && path.eq_ignore_ascii_case(repository)) {
+    let clones: Vec<(String, String)> = clone_urls.iter().filter_map(|url| remote_location(url)).collect();
+    let on_forge = |host: &str| host == forge_host || clones.iter().any(|(clone_host, _)| clone_host == host);
+
+    if remotes.iter().any(|(host, path)| on_forge(host) && path.eq_ignore_ascii_case(repository)) {
         return Ok(());
     }
 
-    match remotes.iter().find(|(host, _)| *host == forge_host) {
+    match remotes.iter().find(|(host, _)| on_forge(host)) {
         Some((_, other)) => Err(ApiError::bad_request("folder_other_repository", format!("The folder at {registered} is a checkout of {other}, not {repository}. {choose}"))),
         None => Err(ApiError::bad_request("folder_other_repository", format!("The folder at {registered} has no remote on {forge_host}, so Mycelium cannot tell it holds {repository}. {choose}"))),
     }
@@ -143,7 +146,9 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
             let answer = relay(&state, request.node_id, path.to_string(), GitCommand::Register).await?;
             let registered = answer["path"].as_str().unwrap_or_default().to_string();
 
-            check_checkout(&answer, &registered, &forge.base_url, repository)?;
+            let clone_urls = forges::ForgeApi::from_row(&forge)?.clone_urls(&state.http, repository).await;
+
+            check_checkout(&answer, &registered, &forge.base_url, &clone_urls, repository)?;
 
             let name = repository.rsplit('/').next().unwrap_or(repository).to_string();
 
