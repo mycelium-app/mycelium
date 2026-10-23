@@ -121,7 +121,7 @@ binary:x86_64:
 
 build:clients:
   stage: build
-  image: eclipse-temurin:21-jdk
+  image: eclipse-temurin:21.0.12_8-jdk
   needs: []
   <<: *release_rule
   variables:
