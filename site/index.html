@@ -84,14 +84,12 @@
 <h2 id="shots-h">In use</h2>
 <div class="shot-grid">
 <figure class="shot shot-3"><div class="shot-frame"><img style="--shift:-38%" src="shots/tasks-board.webp" width="1440" height="866" alt="The Tasks board with Questions, Proposed, Open and Claimed columns, each card showing its project, agent and model, with Answer, Approve, Start and Stop buttons." loading="lazy"></div><figcaption><strong>Tasks board.</strong> Agents propose work and ask questions here. You approve, answer or start it in any idle conversation.</figcaption></figure>
-<figure class="shot shot-2"><div class="shot-frame"><img src="shots/conversation.webp" width="1114" height="750" alt="A conversation in which the agent recalls a memory, changes package.json in a diff, runs commands, asks permission to commit and shows a workflow's progress." loading="lazy"></div><figcaption><strong>One thread.</strong> Memory recalls, diffs, commands, permission prompts and workflow progress, live.</figcaption></figure>
-<figure class="shot shot-1"><div class="shot-frame"><img src="shots/walkthrough.webp" width="560" height="600" alt="A walkthrough step titled Restore reads its copy from strings, with a diff of src/restore/Screen.tsx and two notes left for the agent." loading="lazy"></div><figcaption><strong>Walkthroughs.</strong> A diff explained step by step, with notes you leave for the agent.</figcaption></figure>
 <figure class="shot shot-3 shot-wide"><div class="shot-frame"><img style="--shift:-72%" src="shots/chat-generated-ui.webp" width="1440" height="866" alt="A chat with a plain model answering with a bar chart of restore times and two follow-up buttons, with the model picker in the composer." loading="lazy"></div><figcaption><strong>Chats.</strong> Plain models alongside the agents, with generated interfaces in the reply and the model switchable mid-chat.</figcaption></figure>
 </div>
 </section>
 
-<section class="wrap feature">
-<div class="copy"><span class="stage stage-1">Sessions</span><h2>Every machine, one list.</h2><p>Conversations from all your nodes, sorted by what needs you. The group and the machine sit quietly at the end of each row.</p></div>
+<section class="wrap focus" aria-labelledby="f-list">
+<div class="copy"><span class="stage stage-1">Sessions</span><h2 id="f-list">Every machine, one list.</h2><p>Claude Code and Codex on all your nodes, sorted by what needs you.</p></div>
 <div class="show show-1" aria-hidden="true">
 <div class="frame" style="width: 300px">
 <div class="my-sidebar" style="width: 100%; resize: none; border-right: 0">
@@ -109,24 +107,45 @@
 </div>
 </section>
 
-<section class="wrap feature flip">
-<div class="copy"><span class="stage stage-1">Queue</span><h2>Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
-<div class="show show-1" aria-hidden="true">
-<div class="frame" style="width: 560px">
-<div class="my-composer" style="border-top: 0">
-<div class="my-composer__queue">
-<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Also bump @acme/ui in the docs site if it drifts</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
-<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Then open a merge request and ask me before pushing</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
+<section class="wrap focus" aria-labelledby="f-usage">
+<div class="copy"><span class="stage stage-3">Usage</span><h2 id="f-usage">Every account&rsquo;s usage, at a glance.</h2><p>Pin the Usage card to the sidebar and see each login&rsquo;s 5-hour and weekly windows, when they reset, and whether you will run out first.</p></div>
+<div class="show show-3" aria-hidden="true">
+<div class="frame usage" style="width: 340px">
+<div class="usage__head">Usage</div>
+<div class="usage__block">
+<div class="usage__acct"><strong>example.com</strong><span class="usage__tag">This chat</span></div>
+<div class="usage__win"><span>5-hour window</span><span class="my-muted">82% used</span></div>
+<div class="meter"><i class="meter--att" style="width: 82%"></i></div>
+<div class="my-muted">At this rate, runs out about 16:40, resets 17:00</div>
+<div class="usage__win"><span>Weekly window</span><span class="my-muted">41% used</span></div>
+<div class="meter"><i style="width: 41%"></i></div>
+<div class="my-muted">At this rate, lasts until it resets, resets Mon 09:00</div>
 </div>
-<div class="my-composer__input fake-input">Ask, plan or build</div>
-<div class="my-composer__bar"><span class="my-btn my-btn--icon my-btn--muted"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-attention); font-weight: 500">Auto</span><span class="my-btn my-btn--muted">Opus 5.5</span><span class="my-btn my-btn--outline my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+<div class="usage__block">
+<div class="usage__acct"><strong>example.org</strong></div>
+<div class="usage__win"><span>5-hour window</span><span class="my-muted">18% used</span></div>
+<div class="meter"><i style="width: 18%"></i></div>
+<div class="my-muted">At this rate, lasts until it resets, resets 19:30</div>
 </div>
 </div>
 </div>
 </section>
 
-<section class="wrap feature">
-<div class="copy"><span class="stage stage-1">Workflows</span><h2>Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
+<section class="wrap focus" aria-labelledby="f-move">
+<div class="copy"><span class="stage stage-2">Machines</span><h2 id="f-move">Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
+<div class="show show-2" aria-hidden="true">
+<div class="my-menu" style="width: 300px">
+<div class="my-menu__label">Run on</div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>laptop<span class="my-menu__hint">Here</span></div>
+<div class="my-menu__item" style="background: var(--bg-hover)"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>server<span class="my-menu__hint">3 running</span></div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>work-laptop<span class="my-menu__hint">Draining</span></div>
+<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>build-vm<span class="my-menu__hint">Offline, waits</span></div>
+</div>
+</div>
+</section>
+
+<section class="wrap focus" aria-labelledby="f-wf">
+<div class="copy"><span class="stage stage-1">Workflows</span><h2 id="f-wf">Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
 <div class="show show-1" aria-hidden="true">
 <div class="frame my-card" style="width: 560px; border-radius: var(--radius-float)">
 <div class="my-card__head" style="font-family: var(--font-sans); height: var(--size-bar); padding: 0 6px 0 10px"><span class="st-work" style="display: inline-flex"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><strong style="font-weight: 600; font-size: 13px">Build flow screens, then verify each</strong><span class="my-muted" style="font-size: 12px">6 of 10 agents · 4m 05s</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Stop</span></div>
@@ -142,26 +161,39 @@
 </div>
 </section>
 
-<section class="wrap feature flip">
-<div class="copy"><span class="stage stage-2">Machines</span><h2>Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
-<div class="show show-2" aria-hidden="true">
-<div class="my-menu" style="width: 300px">
-<div class="my-menu__label">Run on</div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>laptop<span class="my-menu__hint">Here</span></div>
-<div class="my-menu__item" style="background: var(--bg-hover)"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>server<span class="my-menu__hint">3 running</span></div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>work-laptop<span class="my-menu__hint">Draining</span></div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>build-vm<span class="my-menu__hint">Offline, waits</span></div>
-</div>
-</div>
+<section class="wrap focus" aria-labelledby="f-walk">
+<div class="copy"><span class="stage stage-2">Walkthroughs</span><h2 id="f-walk">Have the change explained to you.</h2><p>The agent walks you through every changed hunk, step by step, and the notes you leave on its lines reach it with your next message.</p></div>
+<div class="show show-2"><img class="focus-shot" src="shots/walkthrough.webp" width="560" height="600" alt="A walkthrough step titled Restore reads its copy from strings, with a diff of src/restore/Screen.tsx and two notes left for the agent." loading="lazy"></div>
 </section>
 
-<section class="wrap feature">
-<div class="copy"><span class="stage stage-3">Phone</span><h2>Pick it up anywhere.</h2><p>The same list and the same conversation on your phone. Swipe from the left edge for the list, and it reconnects the moment you return to the app.</p></div>
+<section class="wrap focus" aria-labelledby="f-mem">
+<div class="copy"><span class="stage stage-1">Memory</span><h2 id="f-mem">What one session learns, the next one knows.</h2><p>Agents remember what they worked out and recall it in any later session, on any machine, kept apart by group.</p></div>
+<div class="show show-1"><img class="focus-shot" src="shots/conversation.webp" width="1114" height="750" alt="A conversation in which the agent recalls a memory, changes package.json in a diff, runs commands, asks permission to commit and shows a workflow's progress." loading="lazy"></div>
+</section>
+
+<section class="wrap focus" aria-labelledby="f-phone">
+<div class="copy"><span class="stage stage-3">Phone</span><h2 id="f-phone">Pick it up anywhere.</h2><p>The same list and the same conversation on your phone. Swipe from the left edge for the list, and it reconnects the moment you return to the app.</p></div>
 <div class="show show-3"><img class="phone-shot" src="shots/phone-conversation.webp" width="390" height="810" alt="The conversation on a phone, with a diff, a running test and a permission prompt." loading="lazy"></div>
 </section>
 
-<section class="wrap feature flip">
-<div class="copy"><span class="stage stage-4">Goals</span><h2>Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met, or a token, time or usage limit stops it.</p></div>
+<section class="wrap focus" aria-labelledby="f-queue">
+<div class="copy"><span class="stage stage-1">Queue</span><h2 id="f-queue">Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
+<div class="show show-1" aria-hidden="true">
+<div class="frame" style="width: 560px">
+<div class="my-composer" style="border-top: 0">
+<div class="my-composer__queue">
+<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Also bump @acme/ui in the docs site if it drifts</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
+<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Then open a merge request and ask me before pushing</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
+</div>
+<div class="my-composer__input fake-input">Ask, plan or build</div>
+<div class="my-composer__bar"><span class="my-btn my-btn--icon my-btn--muted"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-attention); font-weight: 500">Auto</span><span class="my-btn my-btn--muted">Opus 5.5</span><span class="my-btn my-btn--outline my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap focus" aria-labelledby="f-goal">
+<div class="copy"><span class="stage stage-4">Goals</span><h2 id="f-goal">Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met, or a token, time or usage limit stops it.</p></div>
 <div class="show show-4" aria-hidden="true">
 <div class="frame" style="width: 560px">
 <div class="my-composer" style="border-top: 0">
@@ -193,8 +225,9 @@
 <div class="wrap">
 <h2 id="stages-h">What is new</h2>
 <div class="stage-grid">
-<article class="show show-1"><span class="stage stage-1">Released in 0.3.8</span><h3>Git, chats and groups</h3><ul><li>Amend, sign off, push, pull and publish from the git panel</li><li>Branch picker and a graph of every branch</li><li>Chats with OpenRouter, mid-chat model switching and claude.ai imports</li><li>Pinned conversations and project groups</li><li>Node colours</li><li>Edge swipe and reconnect on Android</li></ul></article>
-<article class="show show-2"><span class="stage stage-2">Next release</span><h3>Reviewable by you</h3><ul><li>Memory, tasks and schedules shown as cards in the thread</li><li>An agent proposes an edit to your instructions, and you review the diff</li><li>Questions answered where they are asked</li><li>Walkthroughs that cover every changed hunk, with line notes</li><li>Select text to add it to a message or ask in a side chat</li><li>Text size, density and chat width</li></ul></article>
+<article class="show show-1"><span class="stage stage-1">Released in 0.3.11</span><h3>Usage, icons and drafts</h3><ul><li>A Usage card in the sidebar with every account&rsquo;s windows</li><li>Project icons, from a set or your own logo</li><li>Working, attention and failed badges on sidebar rows</li><li>Rename and archive from a row&rsquo;s menu</li><li>An image viewer with zoom and panning</li><li>Each conversation keeps its own draft</li><li>Schedules can be edited</li></ul></article>
+<article class="show show-1"><span class="stage stage-1">Released in 0.3.9 and 0.3.10</span><h3>Reviewable by you</h3><ul><li>Memory, tasks and schedules shown as cards in the thread</li><li>An agent proposes an edit to your instructions, and you review the diff</li><li>Questions answered where they are asked</li><li>Walkthroughs that cover every changed hunk, with line notes</li><li>Select text to add it to a message or ask in a side chat</li><li>Text size, density and chat width</li><li>Chats call MCP tools, and ask before each call</li></ul></article>
+<article class="show show-2"><span class="stage stage-2">Next release</span><h3>Beside the chat, and on your phone</h3><ul><li>Workflow cards and interface blocks pinned beside the chat</li><li>A notification and a chime on desktop and phone when an agent finishes</li><li>Walkthrough notes that appear live on every device</li><li>A terminal in the web client</li></ul></article>
 <article class="show show-3"><span class="stage stage-3">Still to come</span><h3>More clients</h3><ul><li>iPhone and iPad</li><li>Zed as a client</li></ul></article>
 </div>
 </div>
@@ -202,12 +235,13 @@
 
 <section id="compare" class="wrap compare">
 <h2>How it compares</h2>
-<p class="compare-lead">Checked against each project's own documentation on 23 October 2026. "Not documented" means we found nothing either way. The Mycelium column describes the latest release.</p>
+<p class="compare-lead">Checked against each project's own documentation on 23 October 2026. "Not documented" means we found nothing either way. The Mycelium column describes the latest release, and marks what the next release adds.</p>
 <svg class="sr-only" aria-hidden="true" focusable="false">
 <symbol id="st-yes" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.3l1.9 1.9 3.7-4.1"/></symbol>
 <symbol id="st-partly" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 1.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></symbol>
 <symbol id="st-no" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/></symbol>
 <symbol id="st-unknown" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" stroke-dasharray="2 2.4"/></symbol>
+<symbol id="st-next" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.6V8l2.4 1.5"/></symbol>
 </svg>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Comparison with similar tools">
 <table class="matrix">
@@ -238,23 +272,34 @@
 <tr><th scope="row">Images and files in messages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Through plugins</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
 <tr><th scope="row">Chats with plain models</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Ollama, Anthropic, OpenRouter</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Generated UI in replies</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Status badges in the conversation list</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">On the project icon</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Grouped by state</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Working, waiting, finished, failed</span></td></tr>
+<tr><th scope="row">Rename and archive from the list</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">From a row&rsquo;s menu</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">A draft kept per conversation</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Text, files and chips</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Image viewer with zoom</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Wheel, pinch, arrow keys</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Project icons</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">A set of 49 or your logo</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
+<tr><th scope="row">Notifications when an agent finishes</th><td><span class="st st-next"><svg aria-hidden="true"><use href="#st-next"/></svg>Next release</span><span class="q">Desktop and phone, with a chime</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Desktop, web and mobile</span></td></tr>
+<tr><th scope="row">Pinned workflow cards and interface blocks</th><td><span class="st st-next"><svg aria-hidden="true"><use href="#st-next"/></svg>Next release</span><span class="q">Beside the chat</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 </tbody>
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Workspace tools</span></th></tr>
 <tr><th scope="row">Terminal panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">On tmux</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
+<tr><th scope="row">Terminal in the browser</th><td><span class="st st-next"><svg aria-hidden="true"><use href="#st-next"/></svg>Next release</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Reattach from the web</span></td></tr>
 <tr><th scope="row">Git panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, push, graph</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Diffs and PRs</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, history</span></td></tr>
 <tr><th scope="row">Projects from GitHub and GitLab</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Clone or create</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">GitHub, no clone</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Worktrees</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
 <tr><th scope="row">Start from a forge issue</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Issues through Hub</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">GitHub, GitLab</span></td></tr>
 <tr><th scope="row">Diff walkthroughs</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
+<tr><th scope="row">Walkthrough notes live on every device</th><td><span class="st st-next"><svg aria-hidden="true"><use href="#st-next"/></svg>Next release</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Machine pages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Resources, ports, Docker</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 </tbody>
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Planning and automation</span></th></tr>
 <tr><th scope="row">Tasks board</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Agents propose tasks</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Todos, no board</span></td></tr>
 <tr><th scope="row">Schedules</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron, agent-proposed</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td></tr>
+<tr><th scope="row">Edit a schedule</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Prompt, cadence, time zone</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
 <tr><th scope="row">Goals</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Token, time and usage limits</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With a token budget</span></td></tr>
 <tr><th scope="row">Activity</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Tokens, cost, usage windows</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cost, quotas</span></td></tr>
+<tr><th scope="row">Usage of every account at a glance</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Usage card in the sidebar</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Provider limits, one account</span></td></tr>
 </tbody>
 <tbody>
 <tr><th scope="rowgroup" colspan="4"><span>Knowledge</span></th></tr>
