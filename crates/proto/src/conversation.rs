@@ -66,6 +66,7 @@ pub enum EventKind {
     TurnEnd,
     Error,
     Workflow,
+    ModelChanged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

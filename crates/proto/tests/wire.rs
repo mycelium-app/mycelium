@@ -214,6 +214,7 @@ fn event_kinds_use_the_documented_names() {
         EventKind::TurnEnd,
         EventKind::Error,
         EventKind::Workflow,
+        EventKind::ModelChanged,
     ]
     .iter()
     .map(|kind| serde_json::to_value(kind).unwrap())
@@ -221,7 +222,7 @@ fn event_kinds_use_the_documented_names() {
 
     assert_eq!(
         names,
-        vec!["user_message", "acp_update", "permission_request", "permission_resolved", "turn_end", "error", "workflow"]
+        vec!["user_message", "acp_update", "permission_request", "permission_resolved", "turn_end", "error", "workflow", "model_changed"]
     );
 }
 

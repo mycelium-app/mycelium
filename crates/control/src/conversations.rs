@@ -2,20 +2,21 @@ use crate::auth::AuthUser;
 use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions;
+use crate::model_providers;
 use crate::nodes::node_offline;
 use crate::projects;
 use crate::state::AppState;
 use crate::worktrees;
-use crate::store::{CONVERSATION_COLUMNS, enum_text, find_owned, lock_owned, parse_enum, publish_queue, ConversationRow};
+use crate::store::{CONVERSATION_COLUMNS, append_event, enum_text, find_owned, lock_owned, parse_enum, publish_queue, ConversationRow};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{CreateChatRequest, CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
-use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, SideKind};
+use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, EventKind, SideKind};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 60;
@@ -197,7 +198,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 
     if chats::is_chat(&parent) {
         let Some(provider_id) = parent.provider_id else {
-            return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Start a new chat with another provider."));
+            return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
         let started = CreateChatRequest { provider_id, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
         let conversation = chats::start(&state, &user, started, Some(request.kind)).await?;
@@ -302,11 +303,33 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         require_signed_in_account(&state, before.node_id, parse_enum(&before.agent)?, account).await?;
     }
 
+    let chosen_model = request.model.as_deref().map(str::trim);
+    let mut switched_to = None;
+
+    if request.provider_id.is_some() || chosen_model.is_some() {
+        if !chats::is_chat(&before) {
+            return Err(ApiError::bad_request("not_a_chat", "Only a chat can change its model."));
+        }
+
+        let Some(provider_id) = request.provider_id else {
+            return Err(ApiError::bad_request("provider_required", "Choose a model provider for this chat."));
+        };
+        let provider = model_providers::find_owned(&state, provider_id, user.id).await?;
+        let Some(model) = chosen_model.filter(|model| !model.is_empty()) else {
+            return Err(ApiError::bad_request("model_required", "Choose a model for this chat."));
+        };
+
+        switched_to = Some((provider, model.to_string()));
+    }
+
+    let switched_provider = switched_to.as_ref().map(|(provider, _)| provider.id);
+    let switched_model = switched_to.as_ref().map(|(_, model)| model.as_str());
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
         "update conversations set title = case when $6 then coalesce(predicted_title, title) else coalesce($2, title) end,
              title_user_set = case when $6 then false when $2::text is not null then true else title_user_set end,
              account = case when $5 then null else coalesce($4, account) end,
+             provider_id = coalesce($7, provider_id), model = coalesce($8, model),
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
@@ -318,9 +341,21 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(account)
     .bind(use_default)
     .bind(request.clear_title == Some(true))
+    .bind(switched_provider)
+    .bind(switched_model)
     .fetch_one(&mut *tx)
     .await?;
+    let model_change = match &switched_to {
+        Some((provider, model)) if before.provider_id != Some(provider.id) || before.model.as_deref() != Some(model.as_str()) => {
+            append_event(&mut tx, id, EventKind::ModelChanged, &json!({"provider_id": provider.id, "provider_name": provider.name, "model": model}), None).await?
+        }
+        _ => None,
+    };
     tx.commit().await?;
+
+    if let Some(event) = model_change {
+        state.publish(Some(user.id), StreamMessage::Event(event));
+    }
 
     if title.is_some() && chats::is_chat(&row) {
         chats::index_title(&state, id, &row.title).await?;

@@ -460,7 +460,7 @@ async fn a_chat_needs_a_provider_you_own_and_a_model() {
 }
 
 #[tokio::test]
-async fn a_chat_whose_provider_was_removed_says_to_start_a_new_one() {
+async fn a_chat_whose_provider_was_removed_says_to_choose_another_model() {
     let server = Server::start().await;
     let (router, _) = fake_openai(None);
     let base = serve(router).await;
@@ -472,6 +472,107 @@ async fn a_chat_whose_provider_was_removed_says_to_start_a_new_one() {
     let (status, error) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "hello"}))).await;
 
     assert_eq!((status, error["error"].clone()), (409, json!("provider_removed")));
+    assert_eq!(error["message"], "This chat's model provider was removed. Choose another model in the message box to carry on.");
+}
+
+fn switch_to(provider: &Value, model: &str) -> Value {
+    json!({"provider_id": provider["id"], "model": model})
+}
+
+#[tokio::test]
+async fn switching_a_chat_to_another_provider_and_model_carries_the_history_and_records_where_it_changed() {
+    let server = Server::start().await;
+    let (openai, _) = fake_openai(None);
+    let (anthropic, claude) = fake_anthropic();
+    let openai_base = serve(openai).await;
+    let anthropic_base = serve(anthropic).await;
+    let ollama = add_openai(&server, &openai_base, None).await;
+    let claude_provider = add_anthropic(&server, &anthropic_base).await;
+    let chat = new_chat(&server, &ollama, "Plan the rollout").await;
+    let id = chat["id"].as_str().unwrap();
+    reply_finished(&server, &chat).await;
+
+    let (status, switched) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&switch_to(&claude_provider, "claude-opus-5-5"))).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "And the office"}))).await;
+    eventually("the second reply", || async { (server.events(id.parse().unwrap()).await.iter().filter(|event| event["kind"] == "turn_end").count() == 2).then_some(()) }).await;
+    let request = claude.requests.lock().unwrap()[0].clone();
+    let events = server.events(id.parse().unwrap()).await;
+    let changes: Vec<&Value> = events.iter().filter(|event| event["kind"] == "model_changed").collect();
+    let order: Vec<&str> = events.iter().map(|event| event["kind"].as_str().unwrap()).collect();
+
+    assert_eq!(status, 200, "{switched}");
+    assert_eq!((switched["provider_id"].clone(), switched["model"].clone()), (claude_provider["id"].clone(), json!("claude-opus-5-5")));
+    assert_eq!(request["model"], "claude-opus-5-5");
+    assert_eq!(request["messages"], json!([{"role": "user", "content": "Plan the rollout"}, {"role": "assistant", "content": "Hello there"}, {"role": "user", "content": "And the office"}]));
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0]["payload"]["provider_name"], "Anthropic");
+    assert_eq!(changes[0]["payload"]["model"], "claude-opus-5-5");
+    assert_eq!(&order[order.len() - 6..order.len() - 4], ["turn_end", "model_changed"]);
+}
+
+#[tokio::test]
+async fn choosing_the_model_a_chat_already_uses_records_nothing() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let (_, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"], "model": "qwen3:8b"}))).await;
+    let id = chat["id"].as_str().unwrap();
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&switch_to(&provider, "qwen3:8b"))).await;
+    let events = server.events(id.parse().unwrap()).await;
+
+    assert_eq!(status, 200);
+    assert!(events.iter().all(|event| event["kind"] != "model_changed"));
+}
+
+#[tokio::test]
+async fn a_chat_whose_provider_was_removed_carries_on_once_another_model_is_chosen() {
+    let server = Server::start().await;
+    let (gone, _) = fake_openai(None);
+    let (anthropic, claude) = fake_anthropic();
+    let gone_base = serve(gone).await;
+    let anthropic_base = serve(anthropic).await;
+    let removed = add_openai(&server, &gone_base, None).await;
+    let claude_provider = add_anthropic(&server, &anthropic_base).await;
+    let chat = new_chat(&server, &removed, "Plan the rollout").await;
+    let id = chat["id"].as_str().unwrap();
+    reply_finished(&server, &chat).await;
+    server.user.json(server.user.delete(&format!("/api/v1/model-providers/{}", removed["id"].as_str().unwrap()))).await;
+
+    let (status, _) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&switch_to(&claude_provider, "claude-sonnet-5-5"))).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Carry on"}))).await;
+    eventually("the second reply", || async { (server.events(id.parse().unwrap()).await.iter().filter(|event| event["kind"] == "turn_end").count() == 2).then_some(()) }).await;
+    let request = claude.requests.lock().unwrap()[0].clone();
+
+    assert_eq!(status, 200);
+    assert_eq!(request["messages"][0]["content"], "Plan the rollout");
+    assert_eq!(request["messages"][2]["content"], "Carry on");
+}
+
+#[tokio::test]
+async fn switching_a_chat_needs_a_provider_you_own_a_model_and_a_chat() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let chat = new_chat(&server, &provider, "Hello").await;
+    let id = chat["id"].as_str().unwrap();
+    let other = server.second_user("someone@example.com").await;
+    let theirs = other.json(other.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "Theirs", "base_url": format!("{base}/v1")}))).await.1;
+    let patch = |body: Value| server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&body));
+
+    let (not_theirs, _) = patch(switch_to(&theirs, "llama3.2")).await;
+    let (_, empty) = patch(json!({"provider_id": provider["id"], "model": "  "})).await;
+    let (_, no_model) = patch(json!({"provider_id": provider["id"]})).await;
+    let (_, no_provider) = patch(json!({"model": "llama3.2"})).await;
+
+    assert_eq!(not_theirs, 404);
+    assert_eq!(empty["error"], "model_required");
+    assert_eq!(empty["message"], "Choose a model for this chat.");
+    assert_eq!(no_model["error"], "model_required");
+    assert_eq!(no_provider["error"], "provider_required");
+    assert_eq!(no_provider["message"], "Choose a model provider for this chat.");
 }
 
 #[tokio::test]

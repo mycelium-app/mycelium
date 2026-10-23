@@ -192,6 +192,10 @@ pub struct PatchConversationRequest {
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_default_account: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

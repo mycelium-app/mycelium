@@ -131,7 +131,7 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     }
 
     let Some(provider_id) = row.provider_id else {
-        return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Start a new chat with another provider."));
+        return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
     };
     let model = row.model.clone().unwrap_or_default();
     let event = append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "attachments": attachments}), None).await?;
