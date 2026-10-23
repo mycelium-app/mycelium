@@ -146,6 +146,7 @@ data class NodeSummary(
     val id: String,
     val name: String,
     val icon: String? = null,
+    val colour: String? = null,
     val hostname: String,
     val os: String,
     val arch: String,
@@ -167,7 +168,7 @@ data class NodeSummary(
 data class DrainRequest(val draining: Boolean)
 
 @Serializable
-data class UpdateNodeRequest(val name: String? = null, val icon: String? = null)
+data class UpdateNodeRequest(val name: String? = null, val icon: String? = null, val colour: String? = null)
 
 @Serializable
 data class DiskUsage(

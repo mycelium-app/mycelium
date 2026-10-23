@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
@@ -112,6 +114,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
                     onDrain = { store.act { api.drainNode(node.id, !node.draining) } },
                     onRename = { name -> store.act { api.updateNode(node.id, UpdateNodeRequest(name = name)) } },
                     onIcon = { icon -> store.act { api.updateNode(node.id, UpdateNodeRequest(icon = icon)) } },
+                    onColour = { colour -> store.act { api.updateNode(node.id, UpdateNodeRequest(colour = colour)) } },
                     onAskRevoke = { revoking = node.id },
                     onCancelRevoke = { revoking = null },
                     onRevoke = {
@@ -160,6 +163,7 @@ private fun NodeGroup(
     onDrain: () -> Unit,
     onRename: (String) -> Unit,
     onIcon: (String) -> Unit,
+    onColour: (String) -> Unit,
     onAskRevoke: () -> Unit,
     onCancelRevoke: () -> Unit,
     onRevoke: () -> Unit,
@@ -178,7 +182,7 @@ private fun NodeGroup(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
+            Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
             val draft = renaming
 
             if (draft != null) {
@@ -235,6 +239,24 @@ private fun NodeGroup(
                         Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
                             for ((key, icon) in NodeIcons) {
                                 MyButton({ moreOpen = false; onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
+                            }
+                        }
+                        MenuLabel("Colour")
+                        Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                            val current = nodeColour(node)
+
+                            for (accent in NodeColours) {
+                                val colour = if (LocalAppearance.current.dark) accent.dark else accent.light
+                                val name = accent.name.lowercase()
+
+                                Box(
+                                    Modifier
+                                        .size(touchMin(Tokens.Size.ControlMd))
+                                        .pressable({ moreOpen = false; onColour(name) }, description = "Use the $name colour", shape = ControlShape, selected = colour == current, stateDescription = if (colour == current) "Chosen" else null),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Box(Modifier.size(Tokens.Size.IconMd).background(colour, CircleShape))
+                                }
                             }
                         }
                         MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { moreOpen = false; onDrain() })

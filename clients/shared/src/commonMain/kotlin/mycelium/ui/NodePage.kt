@@ -71,7 +71,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
                 Label("This node no longer exists.", color = colors.textMuted)
             } else {
                 Label("/", color = colors.textFaint)
-                Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+                Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
                 Label(node.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
 
                 if (!LocalTouch.current) {

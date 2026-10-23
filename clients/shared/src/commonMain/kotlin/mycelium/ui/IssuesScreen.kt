@@ -163,7 +163,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                                     Label(worktree.branch, Modifier.weight(1f, fill = false), Tokens.Type.Code, maxLines = 1)
 
                                     if (node != null) {
-                                        Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+                                        Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
                                     }
                                 }
                             }

@@ -277,7 +277,7 @@ private fun NodeMarks(projects: List<Project>, state: AppState) {
         val node = state.nodes[project.nodeId] ?: continue
 
         Row(Modifier.semantics { contentDescription = "Set up on ${node.name}" }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconMd)
+            Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconMd)
             Label(node.name, maxLines = 1)
         }
     }

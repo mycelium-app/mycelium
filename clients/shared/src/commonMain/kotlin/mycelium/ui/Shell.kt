@@ -410,7 +410,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
             Label(relativeTime(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
 
             if (node != null) {
-                Icon(nodeIcon(node), nodeColour(node.name), Tokens.Size.IconSm)
+                Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
             }
         }
 
@@ -427,10 +427,11 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, selected: Boo
     }
 }
 
+val NodeColours = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
+
 @Composable
-fun nodeColour(name: String): Color {
-    val choices = Accent.entries.filter { it != Accent.System && it != Accent.Neutral }
-    val accent = choices[name.hashCode().mod(choices.size)]
+fun nodeColour(node: NodeSummary): Color {
+    val accent = NodeColours.firstOrNull { it.name.lowercase() == node.colour } ?: NodeColours[node.name.hashCode().mod(NodeColours.size)]
 
     return if (LocalAppearance.current.dark) accent.dark else accent.light
 }
