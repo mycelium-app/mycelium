@@ -22,6 +22,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/side",
     "POST /api/v1/conversations/{id}/move",
     "DELETE /api/v1/conversations/{id}/move",
+    "PUT /api/v1/conversations/{id}/goal",
+    "PATCH /api/v1/conversations/{id}/goal",
+    "DELETE /api/v1/conversations/{id}/goal",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/projects/{id}/issues/{number}/workspace",
@@ -811,4 +814,42 @@ async fn waiting_to_move_and_cancelling_the_wait_are_streamed() {
 
     assert_eq!((waiting.conversation_id, waiting.node_id, waiting.state), (conversation.id, target.id, mycelium_proto::api::MoveState::Waiting));
     assert_eq!(cancelled.state, mycelium_proto::api::MoveState::Cancelled);
+}
+
+#[tokio::test]
+async fn setting_pausing_and_clearing_a_goal_is_streamed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Build it")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    let mut stream = server.user.stream().await;
+    let url = format!("/api/v1/conversations/{}/goal", conversation.id);
+
+    server.user.json(server.user.put(&url).json(&json!({"text": "Tests pass", "token_budget": 100}))).await;
+    let set = stream.until(|message| match message { StreamMessage::Goal(goal) => Some(goal), _ => None }).await;
+    assert_eq!((set.text.as_str(), set.state), ("Tests pass", mycelium_proto::api::GoalState::Active));
+
+    server.user.json(server.user.patch(&url).json(&json!({"paused": true}))).await;
+    let paused = stream.until(|message| match message { StreamMessage::Goal(goal) => Some(goal), _ => None }).await;
+    assert_eq!(paused.state, mycelium_proto::api::GoalState::Paused);
+
+    server.user.json(server.user.delete(&url)).await;
+    let cleared = stream.until(|message| match message { StreamMessage::GoalCleared { conversation_id } => Some(conversation_id), _ => None }).await;
+    assert_eq!(cleared, conversation.id);
+}
+
+#[tokio::test]
+async fn a_stored_walkthrough_is_streamed() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let mut stream = server.user.stream().await;
+    let anonymous = server.anonymous();
+    let call = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "walkthrough", "arguments": {"steps": [{"title": "One", "key": true, "files": [{"path": "a.rs", "diff": "+a"}]}]}}});
+
+    anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).header("x-mycelium-conversation", conversation.id.to_string()).json(&call)).await;
+
+    let walkthrough = stream.until(|message| match message { StreamMessage::Walkthrough(walkthrough) => Some(walkthrough), _ => None }).await;
+    assert_eq!((walkthrough.conversation_id, walkthrough.steps[0].title.as_str(), walkthrough.steps[0].key), (conversation.id, "One", true));
 }

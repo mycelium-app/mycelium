@@ -2,6 +2,7 @@ use crate::auth::AuthNode;
 use crate::error::ApiResult;
 use crate::memories::search;
 use crate::state::AppState;
+use crate::walkthroughs;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -51,6 +52,42 @@ fn tool_definitions() -> Value {
                     "scope": {"type": "string", "enum": ["global", "group"], "description": "global (default) is recalled in every conversation. group is recalled only in conversations whose project is in the same group."},
                 },
                 "required": ["text"],
+            },
+        },
+        {
+            "name": "walkthrough",
+            "description": "Write a diff walkthrough for this conversation when the person asks for one: the change read in order, as numbered steps, with the key step marked. The person reads it in a Walkthrough tab beside the conversation. Calling it again replaces the previous walkthrough.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "The steps in reading order.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "A short title for the step."},
+                                "key": {"type": "boolean", "description": "True for the step that carries the change. Mark one."},
+                                "explanation": {"type": "string", "description": "What this step does and why."},
+                                "files": {
+                                    "type": "array",
+                                    "description": "The files this step changes.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": {"type": "string", "description": "The file's path."},
+                                            "diff": {"type": "string", "description": "The unified diff for this file in this step, one line per diff line with + and - prefixes."},
+                                            "hunks": {"type": "array", "items": {"type": "string"}, "description": "The diff as hunks, used when diff is not given."},
+                                        },
+                                        "required": ["path"],
+                                    },
+                                },
+                            },
+                            "required": ["title"],
+                        },
+                    },
+                },
+                "required": ["steps"],
             },
         },
     ])
@@ -143,7 +180,18 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     reply(&id, tool_text(&format!("Remembered as {memory_id}."), false))
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall or remember."),
+                Some("walkthrough") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was stored. A walkthrough belongs to a conversation, and this call did not come from one.", true)));
+                    };
+                    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+
+                    match walkthroughs::record(&state, owner, conversation_id, &arguments).await? {
+                        Ok(walkthrough) => reply(&id, tool_text(&format!("Walkthrough stored with {} steps. The person can read it in the Walkthrough tab.", walkthrough.steps.len()), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember or walkthrough."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

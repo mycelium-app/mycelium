@@ -666,3 +666,58 @@ pub struct MoveProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_id: Option<Uuid>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalState {
+    Active,
+    Paused,
+    Met,
+    Stuck,
+    OverBudget,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Goal {
+    pub conversation_id: Uuid,
+    pub text: String,
+    pub token_budget: i64,
+    pub tokens_used: i64,
+    pub turns: i64,
+    pub state: GoalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetGoalRequest {
+    pub text: String,
+    pub token_budget: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchGoalRequest {
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughFile {
+    pub path: String,
+    pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughStep {
+    pub title: String,
+    pub key: bool,
+    pub explanation: String,
+    pub files: Vec<WalkthroughFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Walkthrough {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub steps: Vec<WalkthroughStep>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}

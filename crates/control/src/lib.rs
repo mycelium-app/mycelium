@@ -4,6 +4,7 @@ mod boot;
 mod config;
 mod conversations;
 mod git;
+mod goals;
 mod groups;
 mod device;
 mod error;
@@ -29,6 +30,7 @@ mod tasks;
 mod terminals;
 mod transcripts;
 mod versions;
+mod walkthroughs;
 mod web;
 mod worktrees;
 
@@ -96,6 +98,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}", get(conversations::get).patch(conversations::patch))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
+        .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
+        .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
         .route("/api/v1/conversations/{id}/move-plan", get(moves::plan))
         .route("/api/v1/conversations/{id}/move", get(moves::current).post(moves::request).delete(moves::cancel))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))

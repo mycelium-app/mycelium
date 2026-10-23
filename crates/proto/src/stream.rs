@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{MoveProgress, NodeSummary};
+use crate::api::{Goal, MoveProgress, NodeSummary, Walkthrough};
 use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
@@ -15,6 +15,11 @@ pub enum StreamMessage {
         queue: Vec<QueuedPrompt>,
     },
     Move(MoveProgress),
+    Goal(Goal),
+    GoalCleared {
+        conversation_id: Uuid,
+    },
+    Walkthrough(Walkthrough),
     Node(NodeSummary),
     NodeRemoved {
         node_id: Uuid,

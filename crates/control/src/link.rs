@@ -158,6 +158,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 crate::moves::session_failed(state, owner, conversation_id);
             }
 
+            if let Err(error) = crate::goals::session_failed(state, conversation_id).await {
+                tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
+            }
+
             record(state, node_id, conversation_id, Some(seq), EventKind::Error, json!({"message": message}), Some(ConversationStatus::Failed)).await.map(|_| ())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
@@ -385,6 +389,11 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     state.hub.forget_prompts_of(conversation_id);
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     crate::moves::turn_ended(state, owner, conversation_id).await;
+
+    if let Err(error) = crate::goals::turn_ended(state, conversation_id, &stop_reason).await {
+        tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());
+    }
+
 
     let send_now = state.hub.take_send_now(conversation_id);
     let archived = sqlx::query_scalar::<_, bool>("select archived_at is not null from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;

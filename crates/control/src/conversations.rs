@@ -39,7 +39,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     let rows = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
         "select {CONVERSATION_COLUMNS}
-         from conversations where owner = $1 and (archived_at is not null) = $2 order by updated_at desc",
+         from conversations where owner = $1 and (archived_at is not null) = $2 and side_kind is distinct from 'check' order by updated_at desc",
     )),
     )
     .bind(user.id)
