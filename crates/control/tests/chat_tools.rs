@@ -593,3 +593,16 @@ async fn a_switched_off_server_is_not_searched_and_the_token_never_reaches_the_t
     assert_eq!(updates(&events, "tool_call_update")[0]["rawOutput"]["loaded"], json!([]));
     assert!(!serde_json::to_string(&events).unwrap().contains(MCP_TOKEN));
 }
+
+#[tokio::test]
+async fn a_very_long_tool_result_is_cut_before_it_is_stored_or_sent_to_the_model() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "x".repeat(60_000)})), Reply::Say("Long.")]).await;
+    let id = rig.chat("Weather?").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+    let sent = rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().to_string();
+
+    assert!(sent.chars().count() < 51_000);
+    assert!(sent.ends_with("[Cut: the result was longer than 50000 characters.]"));
+}

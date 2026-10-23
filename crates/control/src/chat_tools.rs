@@ -16,6 +16,7 @@ pub const TOOL_SEARCH: &str = "tool_search";
 pub const TOOLS_INSTRUCTIONS: &str = "You can use tools. Only tool_search and the tools it has returned are loaded: call tool_search with a few keywords for what you need, then call the tool it returns by its name. Each tool call waits for the person to approve it, so call a tool only when it helps.";
 const SEARCH_RESULTS: usize = 5;
 const MAX_TOOL_NAME: usize = 64;
+const MAX_RESULT_CHARS: usize = 50_000;
 const ALLOW_ONCE: &str = "allow_once";
 const ALLOW_ALWAYS: &str = "allow_always";
 const DECLINE: &str = "reject_once";
@@ -191,6 +192,10 @@ pub async fn run_calls(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut To
 
     for call in calls {
         let (content, is_error, loaded) = outcome_of(state, owner, id, toolbox, call).await?;
+        let content = match content.chars().count() > MAX_RESULT_CHARS {
+            true => format!("{}\n[Cut: the result was longer than {MAX_RESULT_CHARS} characters.]", content.chars().take(MAX_RESULT_CHARS).collect::<String>()),
+            false => content,
+        };
         let mut update = json!({"sessionUpdate": "tool_call_update", "toolCallId": call.id, "status": if is_error { "failed" } else { "completed" }, "content": text_content(&content)});
 
         if let Some(loaded) = loaded {
