@@ -71,7 +71,7 @@ import mycelium.state.highlight
 import mycelium.state.MarkdownBlock
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseGeneratedUi
-import mycelium.state.markdownBlocks
+import mycelium.state.parsedMarkdown
 import mycelium.state.DiffLine
 import mycelium.state.FileDiff
 import mycelium.state.PlanStatus
@@ -139,7 +139,7 @@ fun ThreadView(
             ),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
         ) {
-            itemsIndexed(items.asReversed(), key = { _, item -> item.key }) { reversedIndex, item ->
+            itemsIndexed(items.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
                 val index = items.lastIndex - reversedIndex
 
                 if (item is ThreadItem.TurnEnd) {
@@ -224,7 +224,7 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
 @Composable
 private fun AgentMessage(text: String) {
     Annotatable {
-        MarkdownBlocks(markdownBlocks(text))
+        MarkdownBlocks(parsedMarkdown(text))
     }
 }
 
@@ -364,7 +364,9 @@ private fun inlineText(text: String, color: Color): AnnotatedString {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
-    return inlineMarkup(text, color, colors.accent, LocalFonts.current.mono, platform?.let { { url -> it.openUrl(url) } })
+    val mono = LocalFonts.current.mono
+
+    return remember(text, color, colors.accent, mono, platform) { inlineMarkup(text, color, colors.accent, mono, platform?.let { { url -> it.openUrl(url) } }) }
 }
 
 @Composable

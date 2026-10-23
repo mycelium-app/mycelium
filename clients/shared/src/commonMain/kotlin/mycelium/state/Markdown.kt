@@ -51,6 +51,20 @@ private fun cells(line: String): List<String> = line.trim().removePrefix("|").re
 private fun startsTable(lines: List<String>, index: Int): Boolean =
     lines[index].contains('|') && index + 1 < lines.size && lines[index + 1].contains('-') && TableDivider.matches(lines[index + 1])
 
+private const val ParsedMessageLimit = 512
+private val parsedMessages = LinkedHashMap<String, List<MarkdownBlock>>()
+
+fun parsedMarkdown(text: String): List<MarkdownBlock> {
+    val blocks = parsedMessages.remove(text) ?: markdownBlocks(text)
+    parsedMessages[text] = blocks
+
+    if (parsedMessages.size > ParsedMessageLimit) {
+        parsedMessages.remove(parsedMessages.keys.first())
+    }
+
+    return blocks
+}
+
 fun markdownBlocks(text: String): List<MarkdownBlock> {
     val blocks = mutableListOf<MarkdownBlock>()
     val notes = mutableListOf<Footnote>()
