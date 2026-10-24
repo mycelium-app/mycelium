@@ -104,6 +104,7 @@ fun ComposerCard(
                 },
                 onKey = { false },
                 modifier = Modifier.heightIn(min = 88.dp).padding(top = Tokens.Space.S1),
+                alignment = Alignment.TopStart,
                 placeholder = placeholder,
             )
 

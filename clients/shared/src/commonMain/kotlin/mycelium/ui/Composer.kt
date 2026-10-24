@@ -384,7 +384,7 @@ fun Composer(
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart) {
     val colors = MyTheme.colors
 
     BasicTextField(
@@ -416,7 +416,7 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                 enter
             },
         decorationBox = { inner ->
-            Box(contentAlignment = Alignment.CenterStart) {
+            Box(contentAlignment = alignment) {
                 if (text.text.isEmpty()) {
                     Label(placeholder, style = Tokens.Type.Prose, color = colors.textFaint)
                 }
