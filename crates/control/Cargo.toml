@@ -27,6 +27,7 @@ reqwest.workspace = true
 url.workspace = true
 semver.workspace = true
 croner.workspace = true
+chromiumoxide.workspace = true
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["query"] }

@@ -2,6 +2,7 @@ use crate::attachments::{self, MAX_ATTACHMENT_BYTES};
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
+use crate::snapshots;
 use crate::state::AppState;
 use crate::store::find_owned;
 use axum::Json;
@@ -33,7 +34,7 @@ const MOST_READ_CHARACTERS: usize = 100_000;
 const ARTBOARD_GAP: i64 = 80;
 const ARTBOARD_WIDTH: i64 = 1440;
 const ARTBOARD_HEIGHT: i64 = 900;
-const COLUMNS: &str = "id, owner, conversation_id, kind, title, slug, public, latest_version, created_at, updated_at";
+const COLUMNS: &str = "id, owner, conversation_id, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type";
 const COMMENT_COLUMNS: &str = "id, artifact_id, author_name, body, anchor, resolved, created_at";
 
 #[derive(sqlx::FromRow)]
@@ -48,6 +49,8 @@ struct ArtifactRow {
     latest_version: i32,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    thumbnail_version: Option<i32>,
+    media_type: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -158,6 +161,8 @@ impl ArtifactRow {
             slug: self.slug,
             public: self.public,
             latest_version: self.latest_version,
+            thumbnail_version: self.thumbnail_version,
+            media_type: self.media_type,
             created_at: self.created_at,
             updated_at: self.updated_at,
             versions,
@@ -186,6 +191,18 @@ impl DataRow {
 
 fn announce(state: &AppState, artifact: &Artifact) {
     state.publish(Some(artifact.owner), StreamMessage::Artifact(artifact.clone()));
+}
+
+pub(crate) async fn republish(state: &AppState, id: Uuid) -> ApiResult<()> {
+    let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where id = $1"))).bind(id).fetch_optional(&state.pool).await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let artifact = full(state, row).await?;
+
+    announce(state, &artifact);
+
+    Ok(())
 }
 
 async fn owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
@@ -362,6 +379,7 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
 
     let artifact = full(state, row).await?;
     announce(state, &artifact);
+    snapshots::spawn(state, &artifact);
 
     Ok(artifact)
 }
@@ -402,6 +420,7 @@ async fn add_version(state: &AppState, row: &ArtifactRow, author: ArtifactAuthor
 
     let artifact = full(state, updated).await?;
     announce(state, &artifact);
+    snapshots::spawn(state, &artifact);
 
     Ok(artifact)
 }
@@ -473,6 +492,27 @@ pub async fn content(State(state): State<AppState>, user: AuthUser, Path((id, ve
     let bytes = tokio::fs::read(attachments::path_of(&state, &sha256)).await.map_err(|_| ApiError::not_found("That content"))?;
 
     Ok(content_response(&row.kind, &media_type, &sha256, bytes))
+}
+
+pub async fn thumbnail(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Response> {
+    let row = owned(&state, id, user.id).await?;
+    let sha256 = sqlx::query_scalar::<_, String>("select thumbnail_sha256 from artifact_versions where artifact_id = $1 and thumbnail_sha256 is not null order by version desc limit 1").bind(row.id).fetch_optional(&state.pool).await?;
+    let Some(sha256) = sha256 else {
+        return Err(ApiError::not_found("That snapshot"));
+    };
+    let bytes = tokio::fs::read(attachments::path_of(&state, &sha256)).await.map_err(|_| ApiError::not_found("That snapshot"))?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "image/png".to_string()),
+            (header::CACHE_CONTROL, "private, no-cache".to_string()),
+            (header::ETAG, format!("\"{sha256}\"")),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            (header::CONTENT_SECURITY_POLICY, "sandbox".to_string()),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchArtifactRequest>) -> ApiResult<Json<Artifact>> {
@@ -602,7 +642,7 @@ pub async fn data(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 pub async fn host_artifact(State(state): State<AppState>, _host: ArtifactHost, Path(slug): Path<String>) -> ApiResult<Json<HostedArtifact>> {
     let row = with_slug(&state, &slug).await?;
     let latest = latest_version_of(&state, &row).await?;
-    let artifact = full(&state, row).await?;
+    let artifact = Artifact { media_type: None, ..full(&state, row).await? };
 
     Ok(Json(HostedArtifact { artifact, media_type: latest.media_type, sha256: latest.sha256 }))
 }

@@ -62,6 +62,7 @@ pub struct Config {
     pub editor_dir: PathBuf,
     pub artifact_domain: Option<String>,
     pub artifact_host_token: Option<String>,
+    pub browser_url: Option<String>,
     pub skip_migrations: bool,
     pub trusted_proxies: Vec<Cidr>,
     pub device_code_lifetime: Duration,
@@ -125,6 +126,7 @@ impl Config {
             editor_dir: optional(lookup, "MYCELIUM_EDITOR_DIR").unwrap_or_else(|| "/usr/share/mycelium/editor".into()).into(),
             artifact_domain: optional(lookup, "MYCELIUM_ARTIFACT_DOMAIN").map(|domain| domain.trim().trim_matches('.').to_lowercase()).filter(|domain| !domain.is_empty()),
             artifact_host_token: optional(lookup, "MYCELIUM_ARTIFACT_HOST_TOKEN"),
+            browser_url: optional(lookup, "MYCELIUM_BROWSER_URL"),
             skip_migrations: optional(lookup, "MYCELIUM_SKIP_MIGRATIONS").is_some_and(|value| value == "true" || value == "1"),
             trusted_proxies: optional(lookup, "MYCELIUM_TRUSTED_PROXIES")
                 .map(|ranges| ranges.split(',').map(str::trim).filter(|range| !range.is_empty()).map(Cidr::parse).collect::<Result<Vec<_>>>())

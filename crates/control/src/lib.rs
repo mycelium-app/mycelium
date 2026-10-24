@@ -39,6 +39,7 @@ mod rate_limit;
 mod schedules;
 mod search;
 mod sessions;
+mod snapshots;
 mod ssh_access;
 mod state;
 mod store;
@@ -169,6 +170,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/artifacts/{id}", get(artifacts::get).patch(artifacts::patch).delete(artifacts::delete))
         .route("/api/v1/artifacts/{id}/versions", post(artifacts::create_version).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
         .route("/api/v1/artifacts/{id}/versions/{version}/content", get(artifacts::content))
+        .route("/api/v1/artifacts/{id}/thumbnail", get(artifacts::thumbnail))
         .route("/api/v1/artifacts/{id}/comments", get(artifacts::comments).post(artifacts::create_comment))
         .route("/api/v1/artifacts/{id}/comments/{comment_id}", patch(artifacts::patch_comment))
         .route("/api/v1/artifacts/{id}/data", get(artifacts::data))

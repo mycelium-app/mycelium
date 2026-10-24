@@ -196,6 +196,35 @@ The entry shows in Workspaces mode, where History lives. Whether Chats mode gets
 - **TLS.** One certificate covering `<domain>` and `*.<domain>`, terminated in front of the host, which speaks plain HTTP. A wildcard needs a DNS-01 challenge.
 - **OIDC redirect URI.** Register `https://<domain>/_auth/callback` with the provider. Sign-in always runs on the bare domain and the session cookie is scoped to `.<domain>`, so one sign-in covers every artifact.
 
+## Snapshots
+
+The control plane renders a PNG of each new version of a `page` or `design` artefact, shown as its thumbnail. It drives a headless browser over the Chrome DevTools protocol, so the browser runs as its own service.
+
+| Variable | Meaning |
+|---|---|
+| `MYCELIUM_BROWSER_URL` | The browser's DevTools endpoint on the control plane, such as `http://browser:9222` or a `ws://` URL. Empty means no snapshots: everything else works and `thumbnail_version` stays null. |
+
+```yaml
+services:
+  browser:
+    image: chromedp/headless-shell:156.0.8078.48
+    restart: unless-stopped
+    networks: [browser]
+  control:
+    environment:
+      MYCELIUM_BROWSER_URL: http://browser:9222
+    networks: [default, browser]
+
+networks:
+  browser:
+    internal: true
+```
+
+- **No internet route.** The `browser` network is `internal: true`, so the browser can reach only the control plane. Artefact HTML is untrusted: the control plane also fails every request a page makes that is not a `data:` URL before it leaves the browser, and the network is the second wall.
+- **Hostname.** The browser refuses a DevTools request whose host is a name, so the control plane resolves `browser` to its address before it connects.
+- **Limits.** A snapshot gives up after 15 seconds, and two render at once. A failure logs one warning and leaves the artefact without a snapshot.
+- **Viewport.** A page is rendered at 1280 by 800, a design's first artboard at its own size up to 1600 by 1200, both at half scale.
+
 ## Publishing online
 
 - Publishing creates an `artifact_publications` row and the URL `<artifact_url>/p/<token>`. The token is unguessable. The page is never at a guessable path.

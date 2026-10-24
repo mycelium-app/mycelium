@@ -1200,6 +1200,10 @@ pub struct Artifact {
     pub slug: String,
     pub public: bool,
     pub latest_version: i32,
+    #[serde(default)]
+    pub thumbnail_version: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
     pub url: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
