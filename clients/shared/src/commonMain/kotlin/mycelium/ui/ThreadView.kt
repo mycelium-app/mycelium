@@ -76,6 +76,8 @@ import mycelium.state.myceliumCall
 import mycelium.state.toolSearchText
 import mycelium.state.myceliumTool
 import mycelium.state.MarkdownBlock
+import mycelium.state.PastedSegment
+import mycelium.state.parsePasted
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseUiBlock
 import mycelium.state.pinnedCards
@@ -301,13 +303,33 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
         ) {
-            if (text.isNotEmpty()) {
-                Label(text, style = Tokens.Type.Prose)
+            for (segment in remember(text) { parsePasted(text) }) {
+                when (segment) {
+                    is PastedSegment.Plain -> if (segment.text.isNotBlank()) {
+                        Label(segment.text.trim('\n'), style = Tokens.Type.Prose)
+                    }
+                    is PastedSegment.Pasted -> PastedMessageBlock(segment)
+                }
             }
 
             if (files.isNotEmpty() || images.isNotEmpty()) {
                 MessageAttachments(files, images)
             }
+        }
+    }
+}
+
+@Composable
+private fun PastedMessageBlock(pasted: PastedSegment.Pasted) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.padding(vertical = Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Box(Modifier.border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape)) {
+            PastedBadge(pasted.lines, expanded, onClick = { expanded = !expanded })
+        }
+
+        if (expanded) {
+            Label(pasted.text, style = Tokens.Type.Code)
         }
     }
 }

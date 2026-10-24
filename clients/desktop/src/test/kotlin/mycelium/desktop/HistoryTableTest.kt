@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -18,8 +19,11 @@ import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
+import mycelium.api.Conversation
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
+import mycelium.api.MyceliumJson
+import mycelium.api.StreamMessage
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
@@ -85,10 +89,12 @@ class HistoryTableTest {
         return store
     }
 
-    private fun showHistory() {
+    private fun showHistory(): Store {
         val store = store()
         rule.setContent { MyceliumTheme(true) { Shell(store, HistoryTablePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Zebra fixes").fetchSemanticsNodes().isNotEmpty() }
+
+        return store
     }
 
     private fun rowTitles(): List<String> = listOf("Plan the rollout", "Audit logs", "Zebra fixes")
@@ -99,6 +105,21 @@ class HistoryTableTest {
     private fun pickMenuItem(button: String, item: String) {
         rule.onNodeWithContentDescription(button).performClick()
         rule.onAllNodes(hasText(item) and hasClickAction()).let { nodes -> nodes[nodes.fetchSemanticsNodes().size - 1] }.performClick()
+    }
+
+    @Test
+    fun rowsAlreadyShownStayInLineWithANewRowThatWidensAColumn() {
+        val store = showHistory()
+        val widening = MyceliumJson.decodeFromString(Conversation.serializer(), archivedJson("c4", LaptopId, "/home/sam/projects/a-project-with-a-far-longer-name-than-the-rest", "Newest", "2026-10-23T10:00:00Z").replace(""""archived_at":"2026-10-23T10:00:00Z"""", """"archived_at":null"""))
+
+        store.receive(StreamMessage.ConversationChanged(widening))
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Newest").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitForIdle()
+
+        val newest = rule.onNodeWithText("a-project-with-a-far-longer-name-than-the-rest").fetchSemanticsNode().positionInRoot.x
+        val older = rule.onAllNodesWithText("okapi").fetchSemanticsNodes().map { it.positionInRoot.x }
+
+        assertEquals(listOf(newest, newest), older)
     }
 
     @Test

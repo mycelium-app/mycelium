@@ -26,6 +26,7 @@ import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
 import mycelium.api.ApiAccessRequest
+import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
@@ -374,6 +375,30 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val declined = api.declineApiAccessRequest(request.id)
 
         mutableState.update { it.copy(apiAccessRequests = it.apiAccessRequests + (declined.id to declined)) }
+    }
+
+    suspend fun refreshSshAccessRequests() {
+        val requests = api.sshAccessRequests()
+
+        mutableState.update { it.copy(sshAccessRequests = requests.associateBy { request -> request.id }) }
+    }
+
+    suspend fun approveSshAccessRequest(request: SshAccessRequest, minutes: Int) {
+        val approved = api.approveSshAccessRequest(request.id, minutes)
+
+        mutableState.update { it.copy(sshAccessRequests = it.sshAccessRequests + (approved.id to approved)) }
+    }
+
+    suspend fun declineSshAccessRequest(request: SshAccessRequest) {
+        val declined = api.declineSshAccessRequest(request.id)
+
+        mutableState.update { it.copy(sshAccessRequests = it.sshAccessRequests + (declined.id to declined)) }
+    }
+
+    suspend fun revokeSshAccessRequest(request: SshAccessRequest) {
+        val revoked = api.revokeSshAccessRequest(request.id)
+
+        mutableState.update { it.copy(sshAccessRequests = it.sshAccessRequests + (revoked.id to revoked)) }
     }
 
     suspend fun refreshArtifacts() {

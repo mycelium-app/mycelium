@@ -323,6 +323,17 @@ class MyceliumApi(
     suspend fun declineApiAccessRequest(id: String): ApiAccessRequest =
         call("/api-access-requests/$id/decline") { client.post(it) { authorise() } }.body()
 
+    suspend fun sshAccessRequests(): List<SshAccessRequest> = call("/ssh-access-requests") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveSshAccessRequest(id: String, minutes: Int): SshAccessRequest =
+        call("/ssh-access-requests/$id/approve") { client.post(it) { authorise(); json(ApproveSshAccessRequest(minutes)) } }.body()
+
+    suspend fun declineSshAccessRequest(id: String): SshAccessRequest =
+        call("/ssh-access-requests/$id/decline") { client.post(it) { authorise() } }.body()
+
+    suspend fun revokeSshAccessRequest(id: String): SshAccessRequest =
+        call("/ssh-access-requests/$id/revoke") { client.post(it) { authorise() } }.body()
+
     suspend fun setInstructionSource(request: SetInstructionSourceRequest): Instructions =
         call("/instruction-source") { client.put(it) { authorise(); json(request) } }.body()
 

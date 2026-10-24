@@ -169,4 +169,17 @@ class MyceliumToolsTest {
     fun requestApiAccessWithoutAReasonFallsBackToTheGenericCard() {
         assertNull(myceliumCall(call("mcp__mycelium__request_api_access", """{"scopes":["nodes:read"]}""")))
     }
+
+    @Test
+    fun requestSshAccessShowsTheNodeTheMinutesTheReasonAndTheRequestItWaitsOn() {
+        val output = "Waiting for the person to approve SSH access to build box (request 44444444-4444-4444-4444-444444444444)."
+        val parsed = assertIs<MyceliumCall.RequestSshAccess>(myceliumCall(call("mcp__mycelium__request_ssh_access", """{"node":"build box","minutes":45,"reason":"Find the full disk"}""", output)))
+
+        assertEquals(MyceliumCall.RequestSshAccess("build box", 45, "Find the full disk", "44444444-4444-4444-4444-444444444444"), parsed)
+    }
+
+    @Test
+    fun requestSshAccessWithoutANodeFallsBackToTheGenericCard() {
+        assertNull(myceliumCall(call("mcp__mycelium__request_ssh_access", """{"reason":"Find the full disk"}""")))
+    }
 }

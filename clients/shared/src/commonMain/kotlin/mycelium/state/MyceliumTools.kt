@@ -15,6 +15,7 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     FindConversations("find_conversations", "Find conversations", "Finding conversations"),
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
     RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
+    RequestSshAccess("request_ssh_access", "Request SSH access", "Requesting SSH access"),
     CreateArtifact("create_artifact", "Create artifact", "Creating an artifact"),
     UpdateArtifact("update_artifact", "Update artifact", "Updating an artifact"),
     DesignSetArtboard("design_set_artboard", "Set artboard", "Setting an artboard"),
@@ -64,6 +65,10 @@ sealed interface MyceliumCall {
         override val tool = MyceliumTool.RequestApiAccess
     }
 
+    data class RequestSshAccess(val node: String, val minutes: Int?, val reason: String, val requestId: String? = null) : MyceliumCall {
+        override val tool = MyceliumTool.RequestSshAccess
+    }
+
     data class CreateArtifact(val kind: String, val title: String, val artifactId: String?, val version: Int?) : MyceliumCall {
         override val tool = MyceliumTool.CreateArtifact
     }
@@ -89,6 +94,7 @@ private val askedQuestion = Regex("^Question (\\S+) asked")
 private val foundConversation = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val waitingToSend = Regex("^Waiting for the person to approve sending this to (.+?)(?: \\(proposal ([0-9a-fA-F-]{36})\\))?\\.$")
 private val waitingForApiAccess = Regex("^Waiting for the person to approve API access \\(request ([0-9a-fA-F-]{36})\\)\\.$")
+private val waitingForSshAccess = Regex("^Waiting for the person to approve SSH access to (.+?) \\(request ([0-9a-fA-F-]{36})\\)\\.$")
 private val createdArtifact = Regex("^Created (\\S+) \"(.*)\" \\(artifact ([^,)\\s]+), version (\\d+)\\)\\.$")
 private val updatedArtifact = Regex("^Updated \"(.*)\" to version (\\d+)\\.$")
 private val savedVersion = Regex("version (\\d+)")
@@ -188,6 +194,13 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val reason = fields.requiredString("reason", input) ?: return null
 
             MyceliumCall.RequestApiAccess(fields.strings("scopes").orEmpty(), (fields["hours"] as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt(), reason, waitingForApiAccess.matchEntire(output.trim())?.groupValues?.get(1))
+        }
+
+        MyceliumTool.RequestSshAccess -> {
+            val reason = fields.requiredString("reason", input) ?: return null
+            val node = fields.requiredString("node", input) ?: return null
+
+            MyceliumCall.RequestSshAccess(node, (fields["minutes"] as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt(), reason, waitingForSshAccess.matchEntire(output.trim())?.groupValues?.get(2))
         }
 
         MyceliumTool.CreateArtifact -> {

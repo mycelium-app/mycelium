@@ -19,9 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import mycelium.Platform
 import mycelium.api.ApiAccessRequest
+import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
@@ -33,11 +35,14 @@ import mycelium.state.Store
 import mycelium.state.apiAccessDuration
 import mycelium.state.apiScopeLabel
 import mycelium.state.artifactOpenUrl
+import mycelium.state.sshAccessDuration
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 
 private const val CollapsedLimit = 3
 private const val ExcerptLines = 3
+private const val DefaultSshMinutes = 30
+private val SshMinuteChoices = listOf(15, 30, 60, 120, 240)
 
 class QuestionAnswers(val tasks: Map<String, Task>, val refresh: suspend () -> Unit, val answer: suspend (Task, String) -> Unit)
 
@@ -57,6 +62,25 @@ val LocalApiAccessRequests = compositionLocalOf<ApiAccessRequests?> { null }
 
 fun apiAccessRequests(store: Store, state: AppState) =
     ApiAccessRequests(state.apiAccessRequests, { store.refreshApiAccessRequests() }, { request, scopes -> store.approveApiAccessRequest(request, scopes) }, { request -> store.declineApiAccessRequest(request) })
+
+class SshAccessRequests(
+    val requests: Map<String, SshAccessRequest>,
+    val refresh: suspend () -> Unit,
+    val approve: suspend (SshAccessRequest, Int) -> Unit,
+    val decline: suspend (SshAccessRequest) -> Unit,
+    val revoke: suspend (SshAccessRequest) -> Unit,
+)
+
+val LocalSshAccessRequests = compositionLocalOf<SshAccessRequests?> { null }
+
+fun sshAccessRequests(store: Store, state: AppState) =
+    SshAccessRequests(
+        state.sshAccessRequests,
+        { store.refreshSshAccessRequests() },
+        { request, minutes -> store.approveSshAccessRequest(request, minutes) },
+        { request -> store.declineSshAccessRequest(request) },
+        { request -> store.revokeSshAccessRequest(request) },
+    )
 
 class ArtifactOpener(val artifacts: Map<String, Artifact>, val open: (id: String, kind: String, version: Int) -> Unit)
 
@@ -81,6 +105,15 @@ private fun requestedAccess(parsed: MyceliumCall): ApiAccessRequest? {
     val requests = LocalApiAccessRequests.current?.requests ?: return null
 
     return asking.requestId?.let { requests[it] } ?: requests.values.filter { it.reason == asking.reason }.maxByOrNull { it.createdAt }
+}
+
+@Composable
+private fun requestedSshAccess(parsed: MyceliumCall): SshAccessRequest? {
+    val asking = parsed as? MyceliumCall.RequestSshAccess ?: return null
+
+    val requests = LocalSshAccessRequests.current?.requests ?: return null
+
+    return asking.requestId?.let { requests[it] } ?: requests.values.filter { it.reason == asking.reason && it.nodeName.equals(asking.node, ignoreCase = true) }.maxByOrNull { it.createdAt }
 }
 
 @Composable
@@ -111,10 +144,12 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.FindConversations -> MyIcon.Search
         is MyceliumCall.SendToConversation -> MyIcon.Send
         is MyceliumCall.RequestApiAccess -> MyIcon.Key
+        is MyceliumCall.RequestSshAccess -> MyIcon.Terminal
         is MyceliumCall.CreateArtifact, is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
     val proposal = proposedMessage(parsed)
     val access = requestedAccess(parsed)
+    val sshAccess = requestedSshAccess(parsed)
     val answered = askedTask(parsed)?.status == TaskStatuses.Done
     val waiting = when (parsed) {
         is MyceliumCall.ProposeTask -> "Waiting for approval"
@@ -123,6 +158,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         is MyceliumCall.SendToConversation -> "Waiting for approval"
         is MyceliumCall.RequestApiAccess -> "Waiting for approval"
+        is MyceliumCall.RequestSshAccess -> "Waiting for approval"
         else -> null
     }
 
@@ -140,6 +176,9 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && access?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
                 finished && access?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+                finished && sshAccess?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
+                finished && sshAccess?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+                finished && sshAccess?.state == "revoked" -> StatusMark("Revoked", Tone.Muted, MyIcon.Close)
                 finished && waiting != null -> StatusMark(waiting, Tone.Muted, MyIcon.Clock)
             }
         }
@@ -171,6 +210,7 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
     is MyceliumCall.RequestApiAccess -> "Asked for API access"
+    is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
     is MyceliumCall.CreateArtifact -> "Created ${parsed.kind.ifEmpty { "artifact" }} “${parsed.title}”"
     is MyceliumCall.UpdateArtifact -> (parsed.title ?: artifacts[parsed.artifactId]?.title)?.let { "Updated “$it”" } ?: "Updated an artifact"
@@ -262,6 +302,8 @@ private fun MyceliumBody(parsed: MyceliumCall) {
         is MyceliumCall.SendToConversation -> SendToConversationBody(parsed)
 
         is MyceliumCall.RequestApiAccess -> RequestApiAccessBody(parsed)
+
+        is MyceliumCall.RequestSshAccess -> RequestSshAccessBody(parsed)
 
         is MyceliumCall.Walkthrough -> Collapsible(parsed.steps.mapIndexed { index, title -> "${index + 1}. $title" }, "steps") { Label(it, style = Tokens.Type.Ui, maxLines = 1) }
 
@@ -355,30 +397,12 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     val colors = MyTheme.colors
     val access = LocalApiAccessRequests.current
     val request = requestedAccess(parsed)
-    val scope = rememberCoroutineScope()
+    val deciding = rememberDeciding()
     var ticked by remember(request?.id) { mutableStateOf(request?.scopes.orEmpty().toSet()) }
-    var running by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(request == null) {
         if (access != null && request == null) {
             access.refresh()
-        }
-    }
-
-    fun decide(decision: suspend (ApiAccessRequest) -> Unit) {
-        val deciding = request
-
-        if (running || deciding == null) {
-            return
-        }
-
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt { decision(deciding) }
-            running = false
         }
     }
 
@@ -398,25 +422,96 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     (request?.hours ?: parsed.hours)?.let { Label("For ${apiAccessDuration(it)}", style = Tokens.Type.Meta, color = colors.textMuted) }
     Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
-    failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
 
     if (access != null && request != null && waiting) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             MyButton(
                 {
                     if (ticked.isEmpty()) {
-                        failure = "Choose at least one kind of access to approve, or decline the request."
+                        deciding.failure = "Choose at least one kind of access to approve, or decline the request."
                     } else {
-                        decide { access.approve(it, request.scopes.filter { name -> name in ticked }) }
+                        deciding.decide(request) { access.approve(it, request.scopes.filter { name -> name in ticked }) }
                     }
                 },
                 text = "Approve",
                 variant = ButtonVariant.Primary,
                 size = ButtonSize.Sm,
             )
-            MyButton({ decide(access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ deciding.decide(request, access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
+}
+
+@Composable
+private fun RequestSshAccessBody(parsed: MyceliumCall.RequestSshAccess) {
+    val colors = MyTheme.colors
+    val access = LocalSshAccessRequests.current
+    val request = requestedSshAccess(parsed)
+    val deciding = rememberDeciding()
+    val requested = request?.minutes ?: parsed.minutes ?: DefaultSshMinutes
+    var chosen by remember(request?.id) { mutableStateOf(requested) }
+
+    LaunchedEffect(request == null) {
+        if (access != null && request == null) {
+            access.refresh()
+        }
+    }
+
+    val waiting = access != null && request != null && request.waiting
+
+    Label("Node ${request?.nodeName ?: parsed.node}", style = Tokens.Type.Ui)
+
+    if (waiting) {
+        val durations = (SshMinuteChoices.filter { it < requested } + requested).associateBy { sshAccessDuration(it) }
+
+        Segmented(durations.keys.toList(), sshAccessDuration(chosen), { label -> durations[label]?.let { chosen = it } }, "Duration")
+    } else {
+        Label("For ${sshAccessDuration(request?.minutes ?: requested)}", style = Tokens.Type.Meta, color = colors.textMuted)
+
+        request?.expiresAt?.takeIf { request.state == "approved" }?.let { Label("Until ${it.substring(11, 16)} UTC", style = Tokens.Type.Meta, color = colors.textMuted) }
+    }
+
+    Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
+
+    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
+
+    if (access != null && request != null && waiting) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            MyButton({ deciding.decide(request) { access.approve(it, chosen) } }, text = "Approve", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+            MyButton({ deciding.decide(request, access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        }
+    }
+
+    if (access != null && request != null && request.state == "approved") {
+        MyButton({ deciding.decide(request, access.revoke) }, text = "Revoke", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+    }
+}
+
+private class Deciding(private val scope: CoroutineScope) {
+    var running by mutableStateOf(false)
+    var failure by mutableStateOf<String?>(null)
+
+    fun <T : Any> decide(subject: T, decision: suspend (T) -> Unit) {
+        if (running) {
+            return
+        }
+
+        failure = null
+        running = true
+
+        scope.launch {
+            failure = attempt { decision(subject) }
+            running = false
+        }
+    }
+}
+
+@Composable
+private fun rememberDeciding(): Deciding {
+    val scope = rememberCoroutineScope()
+
+    return remember { Deciding(scope) }
 }
 
 @Composable

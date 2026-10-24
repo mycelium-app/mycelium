@@ -290,7 +290,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(store, state, platform), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(store, state, platform), LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -623,29 +623,31 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     shape = BlockShape,
                     description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
                 )
-                .padding(start = Tokens.Space.S2 + Tokens.Space.S3 + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
+                .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
-                if (row.isSubagent) {
-                    Icon(MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
-                } else {
-                    ProjectIcon(project, Tokens.Size.IconSm)
-                }
+            val badge = when (row.status) {
+                ConversationStatus.Working -> colors.statusWorking
+                ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
+                ConversationStatus.Failed -> if (row.resumeAt != null) colors.statusAttention else colors.statusFailed
+                ConversationStatus.Done -> null
+            }
 
-                val badge = when (row.status) {
-                    ConversationStatus.Working -> colors.statusWorking
-                    ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
-                    ConversationStatus.Failed -> if (row.resumeAt != null) colors.statusAttention else colors.statusFailed
-                    ConversationStatus.Done -> null
-                }
+            if (!row.isChat) {
+                Box {
+                    if (row.isSubagent) {
+                        Icon(MyIcon.Agent, colors.textMuted, Tokens.Size.IconSm)
+                    } else {
+                        ProjectIcon(project, Tokens.Size.IconSm)
+                    }
 
-                if (badge != null) {
-                    val onIcon = project?.icon != null || project?.avatarSha256 != null
-                    val placement = if (onIcon) Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5) else Modifier.align(Alignment.Center)
+                    if (badge != null) {
+                        val onIcon = project?.icon != null || project?.avatarSha256 != null
+                        val placement = if (onIcon) Modifier.align(Alignment.BottomEnd).offset(x = Tokens.Space.S0_5, y = Tokens.Space.S0_5) else Modifier.align(Alignment.Center)
 
-                    Box(placement.size(Tokens.Space.S2).background(badge, CircleShape))
+                        Box(placement.size(Tokens.Space.S2).background(badge, CircleShape))
+                    }
                 }
             }
 
@@ -663,7 +665,16 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label(timestamp(row.updatedAt), style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
             }
 
-            Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm)
+            if (row.isChat) {
+                val unread = when (row.status) {
+                    ConversationStatus.Input, ConversationStatus.Review -> colors.text
+                    else -> badge
+                }
+
+                Box(Modifier.size(Tokens.Space.S2).background(unread ?: Color.Transparent, CircleShape))
+            } else {
+                Icon(agentIcon(row.agent), colors.textMuted, Tokens.Size.IconSm)
+            }
 
             if (node != null) {
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)

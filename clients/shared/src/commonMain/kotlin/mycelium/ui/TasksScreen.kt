@@ -304,7 +304,8 @@ private fun CollapsedLane(lane: Lane, count: Int, onExpand: () -> Unit) {
 private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: kotlin.time.Instant, onOpen: (String) -> Unit, onAnswer: (Task) -> Unit) {
     val colors = MyTheme.colors
     val conversation = card.conversation
-    val permission = conversation?.let { pendingPermission(state.events[it.id].orEmpty()) }
+    val events = conversation?.let { state.events[it.id] }
+    val permission = remember(events) { events?.let { pendingPermission(it) } }
     var explained by remember { mutableStateOf(false) }
     var startMenu by remember { mutableStateOf(false) }
 

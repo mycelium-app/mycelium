@@ -33,6 +33,8 @@ private class ColumnWidths(val columns: List<ColumnSpec>) {
 
 private val LocalColumnWidths = compositionLocalOf<ColumnWidths?> { null }
 
+private val LocalResolvedWidths = compositionLocalOf<List<Int>?> { null }
+
 @Composable
 fun ContentTable(columns: List<ColumnSpec>, modifier: Modifier = Modifier, card: Boolean = true, content: @Composable () -> Unit) {
     val widths = remember(columns) { ColumnWidths(columns) }
@@ -80,17 +82,19 @@ fun FixedWidthColumns(columns: List<ColumnSpec>, natural: List<Dp>, modifier: Mo
         natural.forEachIndexed { index, width -> widths.natural[index] = with(density) { width.roundToPx() } }
         resolveColumnWidths(columns.map { with(density) { it.min.roundToPx() } }, columns.map { with(density) { it.max.roundToPx() } }, columns.map { it.flexible }, widths.natural, available, widths.resolved)
 
-        CompositionLocalProvider(LocalColumnWidths provides widths, content = content)
+        CompositionLocalProvider(LocalColumnWidths provides widths, LocalResolvedWidths provides widths.resolved.toList(), content = content)
     }
 }
 
 @Composable
 fun ContentRow(modifier: Modifier = Modifier, header: Boolean = false, minHeight: Dp = rowHeight(), content: @Composable () -> Unit) {
     val widths = LocalColumnWidths.current
+    val resolved = LocalResolvedWidths.current
     val gap = Tokens.Space.S3
     val look = if (header) Modifier.background(MyTheme.colors.bgPanel) else Modifier
+    val policy = remember(widths, resolved, gap) { ContentRowPolicy(widths, gap) }
 
-    Layout(content, Modifier.heightIn(min = minHeight).then(modifier).then(look).padding(horizontal = gap), ContentRowPolicy(widths, gap))
+    Layout(content, Modifier.heightIn(min = minHeight).then(modifier).then(look).padding(horizontal = gap), policy)
 }
 
 private class ContentRowPolicy(private val widths: ColumnWidths?, private val gap: Dp) : MeasurePolicy {

@@ -334,6 +334,25 @@ data class ApiAccessRequest(
 data class ApproveApiAccessRequest(val scopes: List<String>? = null)
 
 @Serializable
+data class SshAccessRequest(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String,
+    @SerialName("node_id") val nodeId: String,
+    @SerialName("node_name") val nodeName: String,
+    val minutes: Int,
+    val reason: String,
+    val state: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("decided_at") val decidedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+) {
+    val waiting: Boolean get() = state == "requested"
+}
+
+@Serializable
+data class ApproveSshAccessRequest(val minutes: Int? = null)
+
+@Serializable
 data class UpdateMemoryRequest(val text: String)
 
 @Serializable
@@ -1043,6 +1062,8 @@ sealed interface StreamMessage {
 
     data class ApiAccessRequestChanged(val request: ApiAccessRequest) : StreamMessage
 
+    data class SshAccessRequestChanged(val request: SshAccessRequest) : StreamMessage
+
     data class MemoryChanged(val memory: Memory) : StreamMessage
 
     data class MemoryRemoved(val memoryId: String) : StreamMessage
@@ -1098,6 +1119,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))
         "message_proposal" -> StreamMessage.MessageProposalChanged(MyceliumJson.decodeFromJsonElement(MessageProposal.serializer(), element))
         "api_access_request" -> StreamMessage.ApiAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ApiAccessRequest.serializer(), element))
+        "ssh_access_request" -> StreamMessage.SshAccessRequestChanged(MyceliumJson.decodeFromJsonElement(SshAccessRequest.serializer(), element))
         "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))
         "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))

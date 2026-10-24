@@ -46,7 +46,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import mycelium.state.Choice
@@ -59,6 +64,13 @@ import mycelium.state.SideChatCommands
 import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
 import mycelium.state.mentionAt
+import mycelium.state.expandedPastes
+import mycelium.state.freePasteMarker
+import mycelium.state.isPasteMarker
+import mycelium.state.pastedLabel
+import mycelium.state.pastedLineCount
+import mycelium.state.pasteInsertion
+import mycelium.state.serialisedPastes
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.widthIn
@@ -116,10 +128,15 @@ fun Composer(
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(initialText) }
+    var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
     val reportText by rememberUpdatedState(onTextChange)
 
     LaunchedEffect(conversation.id) {
-        snapshotFlow { text }.collect { reportText(it) }
+        snapshotFlow { text to pastes }.collect { (value, held) ->
+            val expanded = expandedPastes(value.text, held)
+
+            reportText(if (expanded == value.text) value else TextFieldValue(expanded, TextRange(expanded.length)))
+        }
     }
 
     var sent by remember(conversation.id) { mutableStateOf<String?>(null) }
@@ -159,7 +176,7 @@ fun Composer(
     }
 
     fun submit() {
-        val trimmed = text.text.trim()
+        val trimmed = serialisedPastes(text.text, pastes).trim()
 
         if (trimmed.isNotEmpty() || annotations.isNotEmpty() || attachments?.drafts?.isNotEmpty() == true) {
             val side = sideChatOf(trimmed)
@@ -172,43 +189,73 @@ fun Composer(
 
             sent = text.text
             text = TextFieldValue("")
+            pastes = emptyMap()
         } else if (queue.isNotEmpty()) {
             onSendQueuedNow(queue.minBy { it.position }.id)
         }
     }
 
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
-        Box(fieldModifier) {
-            MessageField(
-                text = text,
-                onTextChange = { changed ->
-                    val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
-                    sent = null
-                    text = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
-                },
-                source = source,
-                onSubmit = ::submit,
-                onPaste = {
-                    val pasted = platform?.clipboardFiles().orEmpty()
+        Column(fieldModifier) {
+            PastedChips(
+                markers = text.text.filter(::isPasteMarker).filter { it in pastes }.toList(),
+                pastes = pastes,
+                onExpand = { marker ->
+                    val at = text.text.indexOf(marker)
+                    val full = pastes.getValue(marker)
 
-                    attachments?.onAdd?.invoke(pasted)
-                    attachments != null && pasted.isNotEmpty()
+                    text = TextFieldValue(text.text.replaceRange(at, at + 1, full), TextRange(at + full.length))
                 },
-                onKey = { key ->
-                    when {
-                        key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
-                        matches.isEmpty() -> false
-                        key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
-                        key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
-                        key == Key.Tab || key == Key.Enter -> { matches[highlighted.coerceIn(matches.indices)].apply(); true }
-                        key == Key.Escape -> { text = TextFieldValue(""); true }
-                        else -> false
-                    }
+                onRemove = { marker ->
+                    val at = text.text.indexOf(marker)
+
+                    text = TextFieldValue(text.text.removeRange(at, at + 1), TextRange(at))
                 },
             )
 
-            if (matches.isNotEmpty()) {
-                CompletionPopup(if (query != null) "Commands" else "Files", matches, highlighted.coerceIn(matches.indices))
+            Box {
+                MessageField(
+                    text = text,
+                    visualTransformation = PasteMarkerTransformation,
+                    onTextChange = { changed ->
+                        val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
+                        sent = null
+
+                        val next = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
+                        val range = pasteInsertion(text.text, next.text)
+                        val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+
+                        if (range == null || marker == null) {
+                            text = next
+                        } else {
+                            pastes = pastes + (marker to next.text.substring(range.first, range.last + 1).filterNot(::isPasteMarker))
+                            text = TextFieldValue(next.text.replaceRange(range, marker.toString()), TextRange(range.first + 1))
+                        }
+                    },
+                    source = source,
+                    onSubmit = ::submit,
+                    onPaste = {
+                        val pasted = platform?.clipboardFiles().orEmpty()
+
+                        attachments?.onAdd?.invoke(pasted)
+                        attachments != null && pasted.isNotEmpty()
+                    },
+                    onKey = { key ->
+                        when {
+                            key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
+                            matches.isEmpty() -> false
+                            key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
+                            key == Key.DirectionUp -> { highlighted = (highlighted - 1 + matches.size) % matches.size; true }
+                            key == Key.Tab || key == Key.Enter -> { matches[highlighted.coerceIn(matches.indices)].apply(); true }
+                            key == Key.Escape -> { text = TextFieldValue(""); true }
+                            else -> false
+                        }
+                    },
+                )
+
+                if (matches.isNotEmpty()) {
+                    CompletionPopup(if (query != null) "Commands" else "Files", matches, highlighted.coerceIn(matches.indices))
+                }
             }
         }
     }
@@ -336,7 +383,7 @@ fun Composer(
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build") {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None) {
     val colors = MyTheme.colors
 
     BasicTextField(
@@ -345,6 +392,7 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
         textStyle = Tokens.Type.Prose.themed().copy(color = colors.text),
         cursorBrush = SolidColor(colors.text),
         interactionSource = source,
+        visualTransformation = visualTransformation,
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = Tokens.Size.ComposerInput)
@@ -376,6 +424,75 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
             }
         },
     )
+}
+
+private const val PasteInlineLabel = "Pasted text"
+
+private object PasteMarkerTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val original = text.text
+        val shown = original.map { if (isPasteMarker(it)) PasteInlineLabel else it.toString() }.joinToString("")
+
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int =
+                offset + original.take(offset).count(::isPasteMarker) * (PasteInlineLabel.length - 1)
+
+            override fun transformedToOriginal(offset: Int): Int {
+                var shownAt = 0
+
+                for ((index, char) in original.withIndex()) {
+                    if (offset <= shownAt) {
+                        return index
+                    }
+
+                    shownAt += if (isPasteMarker(char)) PasteInlineLabel.length else 1
+                }
+
+                return original.length
+            }
+        }
+
+        return TransformedText(AnnotatedString(shown), mapping)
+    }
+}
+
+@Composable
+private fun PastedChips(markers: List<Char>, pastes: Map<Char, String>, onExpand: (Char) -> Unit, onRemove: (Char) -> Unit) {
+    if (markers.isEmpty()) {
+        return
+    }
+
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.S1),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (marker in markers) {
+            val lines = pastedLineCount(pastes.getValue(marker))
+
+            Row(
+                Modifier.border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PastedBadge(lines, expanded = false, onClick = { onExpand(marker) })
+                MyButton({ onRemove(marker) }, icon = MyIcon.Close, description = "Remove pasted text, $lines ${if (lines == 1) "line" else "lines"}", size = ButtonSize.Sm, muted = true)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PastedBadge(lines: Int, expanded: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .heightIn(min = Tokens.Size.ControlSm)
+            .pressable(onClick, role = Role.Button, description = pastedLabel(lines), shape = ControlShape, stateDescription = if (expanded) "Expanded" else "Collapsed")
+            .padding(horizontal = Tokens.Space.S2),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Label(pastedLabel(lines), style = Tokens.Type.Meta, maxLines = 1)
+    }
 }
 
 @Composable

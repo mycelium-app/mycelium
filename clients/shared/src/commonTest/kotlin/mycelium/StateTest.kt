@@ -280,6 +280,17 @@ class HistoryTest {
         assertEquals(setOf("review", "done", "working", "old"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.All, "").map { it.id }.toSet())
         assertEquals(listOf("done"), mycelium.ui.pastConversations(current, archived, mycelium.ui.PastFilter.Done, "").map { it.id })
     }
+
+    @Test
+    fun subagentsAreLeftOutOfHistoryWhetherCurrentOrArchived() {
+        val subagent = conversation("helper", ConversationStatus.Done).copy(parentId = "done", sideKind = "subagent")
+        val current = listOf(conversation("done", ConversationStatus.Done), subagent)
+        val archived = listOf(subagent.copy(id = "old-helper", archivedAt = "2026-10-20T10:00:00Z"))
+
+        for (filter in mycelium.ui.PastFilter.entries) {
+            assertEquals(listOf(), mycelium.ui.pastConversations(current, archived, filter, "").map { it.id }.filter { it.contains("helper") })
+        }
+    }
 }
 
 private fun project(id: String, node: String, forge: String?, repository: String?, name: String = id) =

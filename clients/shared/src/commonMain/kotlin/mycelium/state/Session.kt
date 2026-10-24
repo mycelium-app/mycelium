@@ -39,15 +39,10 @@ fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<J
     val stored = conversation.options
     val modes = stored?.get("modes") as? JsonObject
     val models = stored?.get("models") as? JsonObject
-    var settings = settingsFrom(stored?.get("config_options"))
-    var currentMode = conversation.mode ?: modes?.string("currentModeId")
-
-    for (update in kept + sessionUpdates(events)) {
-        when (update.string("sessionUpdate")) {
-            "config_option_update" -> settings = settingsFrom(update["configOptions"])
-            "current_mode_update" -> currentMode = update.string("currentModeId") ?: currentMode
-        }
-    }
+    val configUpdate = latestUpdate(events, kept, "config_option_update")
+    val settings = if (configUpdate != null) settingsFrom(configUpdate["configOptions"]) else settingsFrom(stored?.get("config_options"))
+    val modeUpdate = latestUpdate(events, kept, "current_mode_update") { it.string("currentModeId") != null }
+    val currentMode = modeUpdate?.string("currentModeId") ?: conversation.mode ?: modes?.string("currentModeId")
 
     return SessionOptions(
         modes = choicesFrom(modes?.get("availableModes"), "id"),
@@ -59,7 +54,7 @@ fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<J
 }
 
 fun slashCommands(events: List<Event>, kept: List<JsonObject> = emptyList()): List<SlashCommand> {
-    val latest = (kept + sessionUpdates(events)).lastOrNull { it.string("sessionUpdate") == "available_commands_update" } ?: return emptyList()
+    val latest = latestUpdate(events, kept, "available_commands_update") ?: return emptyList()
     val commands = latest["availableCommands"] as? JsonArray ?: return emptyList()
 
     return commands.mapNotNull { element ->
@@ -71,8 +66,15 @@ fun slashCommands(events: List<Event>, kept: List<JsonObject> = emptyList()): Li
     }
 }
 
-private fun sessionUpdates(events: List<Event>): List<JsonObject> =
-    events.filter { it.kind == EventKinds.AcpUpdate }.sortedBy { it.seq }.mapNotNull { ((it.payload as? JsonObject)?.get("update")) as? JsonObject }
+private fun latestUpdate(events: List<Event>, kept: List<JsonObject>, kind: String, accept: (JsonObject) -> Boolean = { true }): JsonObject? {
+    val fromEvents = events.asReversed().firstNotNullOfOrNull { event ->
+        val update = if (event.kind == EventKinds.AcpUpdate) (event.payload as? JsonObject)?.get("update") as? JsonObject else null
+
+        update?.takeIf { it.string("sessionUpdate") == kind && accept(it) }
+    }
+
+    return fromEvents ?: kept.lastOrNull { it.string("sessionUpdate") == kind && accept(it) }
+}
 
 private fun settingsFrom(element: JsonElement?): List<Setting> {
     val list = element as? JsonArray ?: return emptyList()

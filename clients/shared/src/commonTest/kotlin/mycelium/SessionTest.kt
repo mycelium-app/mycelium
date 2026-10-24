@@ -109,6 +109,18 @@ class SessionTest {
         assertEquals(listOf(SlashCommand("compact", "Shrink", null)), slashCommands(events, kept))
         assertEquals("default", sessionOptions(conversation(offered), events, kept).currentMode)
     }
+
+    @Test
+    fun theLatestOfSeveralUpdatesWinsAndKeptValuesApplyOnlyWhenEventsHoldNone() {
+        val kept = listOf(MyceliumJson.parseToJsonElement("""{"sessionUpdate": "current_mode_update", "currentModeId": "plan"}""").jsonObject)
+        val events = listOf(
+            update(1, """{"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "old", "description": "Old"}]}"""),
+            update(2, """{"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "new", "description": "New"}]}"""),
+        )
+
+        assertEquals(listOf(SlashCommand("new", "New", null)), slashCommands(events))
+        assertEquals("plan", sessionOptions(conversation(offered), events, kept).currentMode)
+    }
 }
 
 class MentionTest {

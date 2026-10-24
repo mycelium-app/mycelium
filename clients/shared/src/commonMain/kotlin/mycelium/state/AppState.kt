@@ -11,6 +11,7 @@ import mycelium.api.Group
 import mycelium.api.InstructionProposal
 import mycelium.api.Memory
 import mycelium.api.ApiAccessRequest
+import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
@@ -50,6 +51,7 @@ data class AppState(
     val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
     val messageProposals: Map<String, MessageProposal> = emptyMap(),
     val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
+    val sshAccessRequests: Map<String, SshAccessRequest> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
@@ -140,6 +142,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.ApiAccessRequestChanged -> state.copy(apiAccessRequests = state.apiAccessRequests + (message.request.id to message.request))
+    is StreamMessage.SshAccessRequestChanged -> state.copy(sshAccessRequests = state.sshAccessRequests + (message.request.id to message.request))
 
     is StreamMessage.MemoryChanged -> state.copy(
         memories = state.memories + (message.memory.id to message.memory),
