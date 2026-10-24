@@ -101,7 +101,7 @@ fun AccountsSettings(store: Store) {
                         Label("Signed out on ${split.signedOutNodes.joinToString(", ")}", color = colors.textMuted)
 
                         for (node in signInNodes.filter { it.name in split.signedOutNodes }) {
-                            MyButton({ startSignIn(node, agent) }, text = "Sign in", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on ${node.name}")
+                            MyButton({ startSignIn(node, agent) }, text = "Sign in on ${node.name}", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on ${node.name}")
                         }
                     }
                 }
