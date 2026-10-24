@@ -50,6 +50,7 @@ fn conversation() -> Conversation {
         title: "t".into(),
         title_user_set: false,
         status: ConversationStatus::Input,
+        agent_active: false,
         acp_session_id: Some("s".into()),
         mode: None,
         model: Some("m".into()),

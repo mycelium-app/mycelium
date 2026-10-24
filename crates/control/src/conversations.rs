@@ -339,6 +339,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              account = case when $5 then null else coalesce($4, account) end,
              provider_id = coalesce($7, provider_id), model = coalesce($8, model),
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
+             agent_active = case when $3::bool is true then false else agent_active end,
              pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end
          where id = $1
          returning {CONVERSATION_COLUMNS}",

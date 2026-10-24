@@ -99,7 +99,7 @@ agents           node_id, agent text ('claude'|'codex'), version text, available
 logins           id uuid pk, node_id, agent, account text null, method text, state text, usage_left, usage_windows jsonb, usage_read_at
 login_usage_history  node_id, agent, account, read_at, windows jsonb: one row per reading, the last 8 days kept
                  ('signed_in'|'signed_out'|'expired'|'unknown'), updated_at, unique(node_id, agent, coalesce(account, ''))
-conversations    id uuid pk, owner uuid, node_id, agent, cwd text, title text, status text, acp_session_id text null,
+conversations    id uuid pk, owner uuid, node_id, agent, cwd text, title text, status text, agent_active bool, last_activity_at null, acp_session_id text null,
                  mode text null, model text null, account text null, created_at, updated_at, archived_at null
 events           id bigserial pk, conversation_id, seq bigint, kind text, payload jsonb, created_at,
                  unique(conversation_id, seq)
@@ -150,6 +150,21 @@ One of `working`, `input` (a permission request or question is waiting), `review
 and the person has not opened it since), `failed`, `done` (opened after the turn ended). Archived
 is `archived_at` set, independent of status. The sidebar orders: input, failed, review, working,
 done.
+
+`agent_active` (boolean on the conversation, default false) is true while the main agent itself is busy:
+from the moment a prompt is sent to the node until its turn ends, and while the agent streams output it
+was not prompted for (`agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`,
+`plan`), as Claude Code does when its background tasks finish. It is cleared by a turn end of any stop
+reason, a failed or closed session, closing and archiving. `last_activity_at` (not on the wire) is
+written with it, at most every 5 seconds per conversation. Unprompted output on a `review` or `done`
+conversation sets it `working` again. Status is `working` while `agent_active` or a workflow agent of the
+conversation is alive. A workflow agent (journal `agentId`) is alive when it has a `started` line and no
+`result` or `failed` line, and its mirrored transcript (`agent-<agentId>.jsonl` under the conversation's
+`acp_session_id` folder, same node) changed in the last 15 minutes, or, with no transcript yet, it
+started in the last 15 minutes; lines without an `agentId` count only while younger than 15 minutes. A
+sweep every 10 seconds (`scheduler_tick` when shorter) clears `agent_active` once the turn has ended and
+nothing was streamed for 30 seconds, and returns a `working` conversation with no active agent and no
+live workflow agent to `review`.
 
 ### HTTP API
 

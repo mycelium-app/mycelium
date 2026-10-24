@@ -2,6 +2,7 @@
 
 mod account_usage;
 mod activity;
+mod activity_sweep;
 mod api_access;
 mod artifacts;
 mod attachments;
@@ -87,6 +88,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(versions::refresh_regularly(state.clone()));
     tokio::spawn(schedules::run_regularly(state.clone()));
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
+    tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())

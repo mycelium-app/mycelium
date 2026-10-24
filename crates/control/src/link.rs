@@ -7,7 +7,7 @@ use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
-use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
+use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -33,6 +33,10 @@ const UPDATE_BATCH_WINDOW: Duration = Duration::from_millis(200);
 const UPDATE_BATCH_LIMIT: usize = 256;
 const TOOL_UPDATE_CACHE_LIMIT: usize = 2048;
 const MERGEABLE_CHUNKS: [&str; 2] = ["agent_message_chunk", "agent_thought_chunk"];
+
+const AGENT_ACTIVITY: [&str; 5] = ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"];
+const ACTIVITY_REFRESH_SECONDS: i32 = 5;
+const TRAILING_OUTPUT_SECONDS: i32 = 3;
 
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
@@ -162,7 +166,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             record(state, node_id, conversation_id, Some(seq), EventKind::PermissionRequest, payload, Some(ConversationStatus::Input)).await.map(|_| ())
         }
         NodeToControl::TurnEnd { conversation_id, seq, stop_reason, usage } => turn_end(state, node_id, conversation_id, seq, stop_reason, usage).await,
-        NodeToControl::SessionClosed { conversation_id } => state.remove_session(node_id, conversation_id).await,
+        NodeToControl::SessionClosed { conversation_id } => {
+            sqlx::query("update conversations set agent_active = false where id = $1 and node_id = $2 and agent_active").bind(conversation_id).bind(node_id).execute(&state.pool).await?;
+
+            state.remove_session(node_id, conversation_id).await
+        }
         NodeToControl::SessionFailed { conversation_id, seq, message } => {
             state.remove_session(node_id, conversation_id).await?;
             state.hub.forget_prompts_of(conversation_id);
@@ -194,7 +202,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::Workflow { conversation_id, run_id, line } => {
             record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await?;
 
-            let idle = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED}")))
+            let idle = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED} and not coalesce((select agent_active from conversations where id = $1), false)")))
             .bind(conversation_id)
             .fetch_one(&state.pool)
             .await?;
@@ -401,6 +409,10 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     let event = append_event(&mut tx, conversation_id, kind, &payload, seq).await?;
     let mut updated = None;
 
+    if event.is_some() && kind == EventKind::TurnEnd {
+        sqlx::query("update conversations set agent_active = false where id = $1").bind(conversation_id).execute(&mut *tx).await?;
+    }
+
     if event.is_some()
         && let Some(status) = transition
         && row.status != enum_text(&ConversationStatus::Failed)
@@ -469,6 +481,7 @@ impl UpdateBatch {
             }
         }
 
+        let active = if stored.iter().any(|(_, update)| is_agent_activity(update)) { note_agent_activity(&mut tx, conversation_id).await? } else { None };
         tx.commit().await?;
 
         if self.last_tool_updates.len() > TOOL_UPDATE_CACHE_LIMIT {
@@ -482,6 +495,10 @@ impl UpdateBatch {
         let highest = highest_node_seq(&state.pool, conversation_id).await?;
         state.hub.send(node_id, ControlToNode::Ack { conversation_id, seq: highest.max(newest) });
 
+        if let Some(active) = active.filter(|active| !row.agent_active || active.status != row.status) {
+            state.publish(Some(row.owner), StreamMessage::Conversation(active.to_proto()?));
+        }
+
         for (event, update) in stored {
             state.publish(Some(row.owner), StreamMessage::Event(event));
             after_update(state, node_id, conversation_id, update).await?;
@@ -489,6 +506,28 @@ impl UpdateBatch {
 
         Ok(())
     }
+}
+
+fn is_agent_activity(update: &Value) -> bool {
+    update["update"]["sessionUpdate"].as_str().is_some_and(|kind| AGENT_ACTIVITY.contains(&kind))
+}
+
+async fn note_agent_activity(tx: &mut crate::store::Tx<'_>, conversation_id: Uuid) -> ApiResult<Option<ConversationRow>> {
+    let updated = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set agent_active = true, last_activity_at = now(),
+             updated_at = case when status in ('review', 'done') then now() else updated_at end,
+             status = case when status in ('review', 'done') then 'working' else status end
+         where id = $1 and (not agent_active or last_activity_at is null or last_activity_at < now() - make_interval(secs => {ACTIVITY_REFRESH_SECONDS}))
+           and (agent_active or not exists (
+               select 1 from events where conversation_id = $1 and kind = 'turn_end' and created_at > now() - make_interval(secs => {TRAILING_OUTPUT_SECONDS})
+                 and seq = (select max(seq) from events where conversation_id = $1 and kind in ('turn_end', 'user_message'))))
+         returning {CONVERSATION_COLUMNS}",
+    )))
+    .bind(conversation_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    Ok(updated)
 }
 
 fn coalesce_updates(conversation_id: Uuid, items: Vec<(i64, Value)>, last_tool_updates: &HashMap<(Uuid, String), Value>) -> (Vec<(i64, Value)>, i64, HashMap<String, Value>) {
@@ -599,14 +638,9 @@ async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, up
 }
 
 async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
-    let out = sqlx::query_scalar::<_, i64>(
-        "select count(*) filter (where payload->'line'->>'type' = 'started') - count(*) filter (where payload->'line'->>'type' in ('result', 'failed')) from events where conversation_id = $1 and kind = 'workflow'",
-    )
-    .bind(conversation_id)
-    .fetch_one(&state.pool)
-    .await?;
+    let out = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {}", has_live_workflow_agent("$1")))).bind(conversation_id).fetch_one(&state.pool).await?;
 
-    Ok(out > 0)
+    Ok(out)
 }
 
 async fn settle_background_work(state: &AppState, conversation_id: Uuid, from: ConversationStatus, to: ConversationStatus) -> ApiResult<()> {
@@ -625,17 +659,15 @@ async fn settle_background_work(state: &AppState, conversation_id: Uuid, from: C
 }
 
 async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i64, stop_reason: String, usage: Option<Value>) -> ApiResult<()> {
-    let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(ConversationStatus::Review)).await?;
+    let keeps_working = stop_reason != "cancelled" && has_agents_out(state, conversation_id).await?;
+    let status = if keeps_working { ConversationStatus::Working } else { ConversationStatus::Review };
+    let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::TurnEnd, json!({"stop_reason": stop_reason}), Some(status)).await?;
 
     if !inserted {
         return Ok(());
     }
 
     record_turn(state, conversation_id, usage.as_ref()).await?;
-
-    if stop_reason != "cancelled" && has_agents_out(state, conversation_id).await? {
-        settle_background_work(state, conversation_id, ConversationStatus::Review, ConversationStatus::Working).await?;
-    }
 
     sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await?;
     state.hub.forget_prompts_of(conversation_id);

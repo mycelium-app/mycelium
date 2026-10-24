@@ -6,7 +6,7 @@ use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
-use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -56,7 +56,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         .execute(&mut *tx)
         .await?;
 
-    let row = set_status(&mut tx, conversation_id, ConversationStatus::Working).await?;
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = 'working', agent_active = true, last_activity_at = now(), updated_at = now() where id = $1 returning {CONVERSATION_COLUMNS}")))
+        .bind(conversation_id)
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     if !state.hub.has_session(node_id, conversation_id) {
@@ -109,7 +112,7 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     }
 
     if row.archived_at.is_some() {
-        let restored = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
+        let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
@@ -344,7 +347,7 @@ pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(node_offline());
     }
 
-    let updated = sqlx::query_as::<_, crate::store::ConversationRow>(
+    let updated = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
         "update conversations set mode = coalesce($2, mode), model = coalesce($3, model) where id = $1
          returning {CONVERSATION_COLUMNS}",

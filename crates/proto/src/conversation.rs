@@ -107,6 +107,8 @@ pub struct Conversation {
     #[serde(default)]
     pub title_user_set: bool,
     pub status: ConversationStatus,
+    #[serde(default)]
+    pub agent_active: bool,
     pub acp_session_id: Option<String>,
     pub mode: Option<String>,
     pub model: Option<String>,

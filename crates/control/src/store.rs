@@ -12,8 +12,41 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
+
+pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
+
+pub fn turn_has_ended_of(conversation: &str) -> String {
+    TURN_HAS_ENDED.replace("$1", conversation)
+}
+
+pub fn has_live_workflow_agent(conversation: &str) -> String {
+    format!(
+        "(exists (
+             select 1 from events started
+             left join lateral (
+                 select max(t.updated_at) as at from transcripts t join conversations owner_of on owner_of.id = started.conversation_id
+                 where t.node_id = owner_of.node_id and owner_of.acp_session_id is not null
+                   and position('/' || owner_of.acp_session_id || '/' in t.path) > 0
+                   and right(t.path, length('/agent-' || (started.payload->'line'->>'agentId') || '.jsonl')) = '/agent-' || (started.payload->'line'->>'agentId') || '.jsonl'
+             ) mirrored on true
+             where started.conversation_id = {conversation} and started.kind = 'workflow' and started.payload->'line'->>'type' = 'started'
+               and started.payload->'line'->>'agentId' is not null
+               and not exists (
+                   select 1 from events finished
+                   where finished.conversation_id = started.conversation_id and finished.kind = 'workflow'
+                     and finished.payload->'line'->>'agentId' = started.payload->'line'->>'agentId'
+                     and finished.payload->'line'->>'type' in ('result', 'failed')
+               )
+               and coalesce(mirrored.at, started.created_at) > now() - make_interval(secs => {WORKFLOW_AGENT_QUIET_SECONDS})
+         ) or (
+             select count(*) filter (where payload->'line'->>'type' = 'started' and created_at > now() - make_interval(secs => {WORKFLOW_AGENT_QUIET_SECONDS}))
+                  - count(*) filter (where payload->'line'->>'type' in ('result', 'failed'))
+             from events where conversation_id = {conversation} and kind = 'workflow' and payload->'line'->>'agentId' is null
+         ) > 0)"
+    )
+}
 
 pub fn enum_text<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
@@ -36,6 +69,7 @@ pub struct ConversationRow {
     pub title: String,
     pub title_user_set: bool,
     pub status: String,
+    pub agent_active: bool,
     pub acp_session_id: Option<String>,
     pub mode: Option<String>,
     pub model: Option<String>,
@@ -64,6 +98,7 @@ impl ConversationRow {
             title: self.title.clone(),
             title_user_set: self.title_user_set,
             status: self.parsed_status()?,
+            agent_active: self.agent_active,
             acp_session_id: self.acp_session_id.clone(),
             mode: self.mode.clone(),
             model: self.model.clone(),
@@ -120,7 +155,7 @@ pub async fn lock_on_node(tx: &mut Tx<'_>, id: Uuid, node_id: Uuid) -> sqlx::Res
 }
 
 pub async fn set_status(tx: &mut Tx<'_>, id: Uuid, status: ConversationStatus) -> sqlx::Result<ConversationRow> {
-    sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = $2, updated_at = now() where id = $1 returning {CONVERSATION_COLUMNS}")))
+    sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = $2, agent_active = agent_active and $2 not in ('review', 'failed', 'done'), updated_at = now() where id = $1 returning {CONVERSATION_COLUMNS}")))
         .bind(id)
         .bind(enum_text(&status))
         .fetch_one(&mut **tx)
