@@ -339,6 +339,10 @@ impl SessionState {
         self.pending.values().any(|pending| *pending == Pending::Prompt)
     }
 
+    pub fn open_turn(&self) -> Option<String> {
+        self.pending.iter().find(|(_, pending)| **pending == Pending::Prompt).map(|(id, _)| id.clone())
+    }
+
     pub fn end_turn_unanswered(&mut self) -> Vec<Action> {
         if !self.has_open_turn() {
             return Vec::new();

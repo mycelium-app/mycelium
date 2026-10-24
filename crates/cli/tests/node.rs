@@ -398,6 +398,33 @@ async fn stop_ends_a_turn_whose_agent_ignores_it_and_keeps_streaming() {
 }
 
 #[tokio::test]
+async fn a_prompt_sent_right_after_a_stopped_turn_is_not_ended_by_that_stops_timer() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(32);
+    start_conversation(&mut connection, conversation).await;
+
+    prompt(&connection, conversation, "slow first");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
+    connection.send(ControlToNode::Cancel { conversation_id: conversation });
+    connection.next_matching(|message| matches!(message, NodeToControl::TurnEnd { .. })).await;
+
+    prompt(&connection, conversation, "slow second");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
+    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+
+    let mut ended = false;
+
+    while let Some(message) = connection.nothing_more().await {
+        ended |= matches!(message, NodeToControl::TurnEnd { .. });
+    }
+
+    assert!(!ended, "the second turn was ended by the first turn's stop timer");
+}
+
+#[tokio::test]
 async fn agent_requests_the_client_does_not_support_get_method_not_found() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

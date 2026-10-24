@@ -46,7 +46,7 @@ enum Message {
     Command(Command),
     Ack(i64),
     Replay,
-    CancelGrace,
+    CancelGrace(String),
 }
 
 #[derive(Clone)]
@@ -323,13 +323,17 @@ impl Actor {
                             self.perform(actions, &mut connection).await;
                             self.handle.record_activity(&state);
 
-                            if cancelling && state.has_open_turn() {
-                                self.expect_agent_to_answer_cancel();
+                            if let Some(turn) = state.open_turn().filter(|_| cancelling) {
+                                self.expect_agent_to_answer_cancel(turn);
                             }
                         }
                         Message::Ack(seq) => self.acknowledge(seq, &mut state),
                         Message::Replay => self.replay(),
-                        Message::CancelGrace => {
+                        Message::CancelGrace(turn) => {
+                            if state.open_turn().as_deref() != Some(turn.as_str()) {
+                                continue;
+                            }
+
                             let actions = state.end_turn_unanswered();
                             self.perform(actions, &mut connection).await;
                             self.handle.record_activity(&state);
@@ -347,7 +351,7 @@ impl Actor {
                     self.outbox.retain(|(entry_seq, _)| *entry_seq > seq);
                 }
                 Message::Replay => self.replay(),
-                Message::Command(_) | Message::CancelGrace => {}
+                Message::Command(_) | Message::CancelGrace(_) => {}
             }
         }
     }
@@ -405,12 +409,12 @@ impl Actor {
         }
     }
 
-    fn expect_agent_to_answer_cancel(&self) {
+    fn expect_agent_to_answer_cancel(&self, turn: String) {
         let messages = self.handle.messages.clone();
 
         tokio::spawn(async move {
             tokio::time::sleep(CANCEL_GRACE).await;
-            let _ = messages.send(Message::CancelGrace);
+            let _ = messages.send(Message::CancelGrace(turn));
         });
     }
 
