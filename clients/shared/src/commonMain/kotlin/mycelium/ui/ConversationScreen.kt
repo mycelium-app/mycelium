@@ -85,7 +85,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val conversation = state.conversations[id] ?: fetched
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
     var panel by remember(id) {
-        val saved = if (compact) null else platform?.loadPreference(SidePanelPreference)
+        val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
         mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved })
     }
@@ -99,7 +99,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         panel = chosen
 
         if (!compact) {
-            platform?.savePreference(SidePanelPreference, chosen?.name.orEmpty())
+            platform?.savePreference("$SidePanelPreference:$id", chosen?.name.orEmpty())
         }
     }
 

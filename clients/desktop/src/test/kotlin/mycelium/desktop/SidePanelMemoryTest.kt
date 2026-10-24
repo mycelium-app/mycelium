@@ -93,18 +93,17 @@ class SidePanelMemoryTest {
     }
 
     @Test
-    fun theOpenSidePanelStaysOpenWhenSwitchingToAnotherConversation() {
+    fun eachConversationReopensTheSidePanelItHadOpen() {
         show()
         rule.onNodeWithContentDescription("Open details").performClick()
 
         shown = "b1"
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Close details").assertExists()
-        rule.onNodeWithContentDescription("Close details").performClick()
-
-        shown = "a2"
-        rule.waitForIdle()
         rule.onNodeWithContentDescription("Open details").assertExists()
+
+        shown = "a1"
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Close details").assertExists()
     }
 
     @Test
@@ -120,6 +119,7 @@ class SidePanelMemoryTest {
 
         shown = "b1"
         rule.waitForIdle()
+        rule.onNodeWithContentDescription("Open details").performClick()
         val other = rule.onNodeWithContentDescription("Resize the side panel")
         other.onChildren().onFirst().requestFocus()
         other.onChildren().onFirst().performKeyInput { pressKey(Key.DirectionRight); pressKey(Key.DirectionRight) }
@@ -128,6 +128,7 @@ class SidePanelMemoryTest {
 
         shown = "a2"
         rule.waitForIdle()
+        rule.onNodeWithContentDescription("Open details").performClick()
         val back = rule.onNodeWithContentDescription("Resize the side panel").getBoundsInRoot().left
 
         assertNotEquals(before, widened)
