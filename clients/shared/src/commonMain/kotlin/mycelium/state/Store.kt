@@ -52,6 +52,7 @@ private const val EventPageSize = 500
 private const val FirstRetryMillis = 1_000L
 private const val LongestRetryMillis = 15_000L
 private const val MaxCachedAttachments = 20
+private const val MaxCachedPreviews = 200
 
 class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform? = null) {
     private val mutableState = MutableStateFlow(AppState())
@@ -59,6 +60,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private var streaming: Job? = null
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
+    private val previewCache = LinkedHashMap<String, ByteArray>()
 
     val composerDrafts = ComposerDrafts()
     val pinDismissals = PinDismissals()
@@ -653,6 +655,28 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
 
         attachmentCache[sha256] = bytes
+
+        return bytes
+    }
+
+    suspend fun artifactThumbnail(artifact: Artifact): ByteArray? {
+        val version = artifact.thumbnailVersion ?: return null
+
+        return cachedPreview("thumbnail:${artifact.id}:$version") { api.artifactThumbnail(artifact.id) }
+    }
+
+    suspend fun artifactContent(artifact: Artifact): ByteArray? = cachedPreview("content:${artifact.id}:${artifact.latestVersion}") { api.artifactContent(artifact.id, artifact.latestVersion) }
+
+    private suspend fun cachedPreview(key: String, fetch: suspend () -> ByteArray): ByteArray? {
+        previewCache[key]?.let { return it }
+
+        val bytes = runCatching { fetch() }.getOrNull() ?: return null
+
+        if (previewCache.size >= MaxCachedPreviews) {
+            previewCache.remove(previewCache.keys.first())
+        }
+
+        previewCache[key] = bytes
 
         return bytes
     }

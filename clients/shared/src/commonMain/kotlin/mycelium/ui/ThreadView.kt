@@ -369,7 +369,7 @@ private fun AgentMessage(text: String) {
 }
 
 @Composable
-private fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
+internal fun MarkdownBlocks(blocks: List<MarkdownBlock>) {
     val colors = MyTheme.colors
     val clipboard = LocalClipboardManager.current
 

@@ -1,33 +1,50 @@
 package mycelium.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import org.jetbrains.compose.resources.decodeToImageBitmap
 import mycelium.Platform
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
 import mycelium.api.Me
+import mycelium.state.MarkdownBlock
 import mycelium.state.AllArtifacts
+import mycelium.state.ArtifactPreview
 import mycelium.state.AppState
 import mycelium.state.ArtifactKindFilters
 import mycelium.state.ArtifactTabs
@@ -35,11 +52,26 @@ import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.artifactKindName
 import mycelium.state.artifactOpenUrl
+import mycelium.state.artifactPreview
+import mycelium.state.PreviewLines
+import mycelium.state.parsedMarkdown
 import mycelium.state.visibleArtifacts
 
 private const val AnyKind = "All kinds"
 
 private val CardMinWidth = 260.dp
+
+private const val PreviewAspectRatio = 16f / 10f
+
+private val PreviewIconSize = 32.dp
+
+private const val PreviewTextScale = 12f / 14f
+
+private const val MaxDecodedPreviews = 200
+
+private val decodedPreviews = LinkedHashMap<String, ImageBitmap>()
+
+private val PreviewShape = RoundedCornerShape(topStart = Tokens.Radius.Block, topEnd = Tokens.Radius.Block)
 
 internal fun artifactIcon(kind: String): MyIcon = when (kind) {
     ArtifactKinds.Design -> MyIcon.Layers
@@ -101,12 +133,68 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform) {
 }
 
 @Composable
+private fun ArtifactPreviewArea(artifact: Artifact, store: Store) {
+    val colors = MyTheme.colors
+    val preview = artifactPreview(artifact)
+    val pictureKey = "${preview.name}:${artifact.id}:${artifact.thumbnailVersion}:${artifact.latestVersion}"
+    val picture by produceState<ImageBitmap?>(decodedPreviews[pictureKey], pictureKey) {
+        if (value != null) {
+            return@produceState
+        }
+
+        val bytes = when (preview) {
+            ArtifactPreview.Snapshot -> store.artifactThumbnail(artifact)
+            ArtifactPreview.Picture -> store.artifactContent(artifact)
+            else -> null
+        }
+        val decoded = bytes?.let { runCatching { it.decodeToImageBitmap() }.getOrNull() }
+
+        if (decoded != null) {
+            if (decodedPreviews.size >= MaxDecodedPreviews) {
+                decodedPreviews.remove(decodedPreviews.keys.first())
+            }
+
+            decodedPreviews[pictureKey] = decoded
+        }
+
+        value = decoded
+    }
+    val text by produceState<List<MarkdownBlock>?>(null, artifact.id, artifact.latestVersion) {
+        val markdown = if (preview == ArtifactPreview.Text) store.artifactContent(artifact)?.decodeToString() else null
+
+        value = markdown?.let { parsedMarkdown(it.lines().take(PreviewLines).joinToString("\n")) }
+    }
+    val drawn = picture
+    val excerpt = text
+
+    Box(Modifier.fillMaxWidth().aspectRatio(PreviewAspectRatio).clip(PreviewShape).background(colors.bgPanel), contentAlignment = Alignment.Center) {
+        if (drawn != null) {
+            Image(drawn, contentDescription = null, Modifier.fillMaxSize(), alignment = Alignment.TopCenter, contentScale = ContentScale.Crop)
+        } else if (excerpt != null) {
+            val density = LocalDensity.current
+
+            CompositionLocalProvider(LocalDensity provides Density(density.density * PreviewTextScale, density.fontScale)) {
+                Box(Modifier.fillMaxSize().padding(Tokens.Space.S2)) {
+                    MarkdownBlocks(excerpt)
+                }
+            }
+
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to colors.bgPanel)))
+        } else {
+            Icon(artifactIcon(artifact.kind), colors.textMuted, PreviewIconSize)
+        }
+    }
+}
+
+@Composable
 private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, mine: Boolean) {
     val colors = MyTheme.colors
     var renaming by remember(artifact.id) { mutableStateOf(false) }
     var deleting by remember(artifact.id) { mutableStateOf(false) }
 
     Card {
+        ArtifactPreviewArea(artifact, store)
+
         Row(Modifier.padding(Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Column(
                 Modifier

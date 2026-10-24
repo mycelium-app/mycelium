@@ -634,6 +634,8 @@ data class Artifact(
     val slug: String = "",
     @SerialName("public") val isPublic: Boolean = false,
     @SerialName("latest_version") val latestVersion: Int = 1,
+    @SerialName("thumbnail_version") val thumbnailVersion: Int? = null,
+    @SerialName("media_type") val mediaType: String? = null,
     val url: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,

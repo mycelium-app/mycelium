@@ -376,6 +376,10 @@ class MyceliumApi(
 
     suspend fun artifact(id: String): Artifact = call("/artifacts/$id") { client.get(it) { authorise() } }.body()
 
+    suspend fun artifactThumbnail(id: String): ByteArray = call("/artifacts/$id/thumbnail") { client.get(it) { authorise() } }.body()
+
+    suspend fun artifactContent(id: String, version: Int): ByteArray = call("/artifacts/$id/versions/$version/content") { client.get(it) { authorise() } }.body()
+
     suspend fun editArtifact(id: String, request: PatchArtifactRequest): Artifact =
         call("/artifacts/$id") { client.patch(it) { authorise(); json(request) } }.body()
 

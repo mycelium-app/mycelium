@@ -33,8 +33,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private fun artifact(id: String, kind: String, title: String, owner: String, isPublic: Boolean = false, url: String? = null) =
-    """{"id":"$id","owner":"$owner","conversation_id":null,"kind":"$kind","title":"$title","slug":"$id-ab12","public":$isPublic,"latest_version":2,"url":${url?.let { "\"$it\"" } ?: "null"},
+private fun artifact(id: String, kind: String, title: String, owner: String, isPublic: Boolean = false, url: String? = null, thumbnailVersion: Int? = null) =
+    """{"id":"$id","owner":"$owner","conversation_id":null,"kind":"$kind","title":"$title","slug":"$id-ab12","public":$isPublic,"latest_version":2,"thumbnail_version":${thumbnailVersion ?: "null"},"url":${url?.let { "\"$it\"" } ?: "null"},
 "created_at":"2026-10-22T09:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
 private val Artifacts = "[" + listOf(
@@ -42,6 +42,8 @@ private val Artifacts = "[" + listOf(
     artifact("a2", "page", "Planning board", "u1"),
     artifact("a3", "markdown", "Release notes", "u2", isPublic = true),
 ).joinToString(",") + "]"
+
+private val TinyPng = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
 private class ArtifactsPlatform : Platform {
     val navigated = mutableListOf<String>()
@@ -69,7 +71,7 @@ class ArtifactsScreenTest {
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
     private val platform = ArtifactsPlatform()
 
-    private fun showArtifacts() {
+    private fun showArtifacts(list: String = Artifacts) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -78,7 +80,8 @@ class ArtifactsScreenTest {
             when {
                 request.method == HttpMethod.Patch -> respond(artifact("a1", "design", "Landing sketch", "u1", isPublic = true), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
-                path.endsWith("/artifacts") -> respond(Artifacts, HttpStatusCode.OK, json)
+                path.endsWith("/thumbnail") -> respond(TinyPng, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "image/png"))
+                path.endsWith("/artifacts") -> respond(list, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
@@ -91,7 +94,7 @@ class ArtifactsScreenTest {
                 ArtifactsScreen(store, state, Me("u1", "person@example.test", "Person"), platform)
             }
         }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Landing sketch").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Edited", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun shown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
@@ -225,5 +228,25 @@ class ArtifactsScreenTest {
         rule.onNodeWithContentDescription("More for Landing sketch").performClick()
 
         rule.onNodeWithText("Copy private link").assertDoesNotExist()
+    }
+
+    @Test
+    fun aSnapshotIsRequestedOnceAndTheCardStillOpens() {
+        showArtifacts("[" + artifact("a2", "page", "Planning board", "u1", thumbnailVersion = 1) + "]")
+
+        rule.waitUntil(5_000) { sent("GET", "/artifacts/a2/thumbnail") != null }
+        rule.onNodeWithContentDescription("Open Planning board").performClick()
+
+        assertEquals(1, requests.toList().count { it.second.endsWith("/artifacts/a2/thumbnail") })
+        assertEquals(listOf("https://mycelium.test/api/v1/artifacts/a2/versions/2/content"), platform.navigated)
+    }
+
+    @Test
+    fun noSnapshotIsRequestedWhenTheArtifactHasNone() {
+        showArtifacts("[" + artifact("a2", "page", "Planning board", "u1") + "]")
+
+        rule.waitForIdle()
+
+        assertEquals(0, requests.toList().count { it.second.endsWith("/thumbnail") })
     }
 }

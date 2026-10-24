@@ -7,6 +7,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.MyceliumApi
@@ -14,6 +15,9 @@ import mycelium.api.MyceliumJson
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
 import mycelium.state.AppState
+import mycelium.state.ArtifactPreview
+import mycelium.state.artifactPreview
+import mycelium.api.Artifact
 import mycelium.state.MyceliumCall
 import mycelium.state.MyceliumTool
 import mycelium.state.Store
@@ -197,5 +201,91 @@ class ArtifactsTest {
     fun readArtifactNeedsAnArtifactOnceTheInputIsKnown() {
         assertNull(myceliumCall(call("mycelium.read_artifact", """{"artboard":"b2"}""")))
         assertEquals(MyceliumCall.ReadArtifact("a1", "b2"), myceliumCall(call("mycelium.read_artifact", """{"artifact":"a1","artboard":"b2"}""", "<!doctype html>")))
+    }
+}
+
+private fun artifactWith(kind: String, thumbnailVersion: Int? = null, mediaType: String? = null) =
+    MyceliumJson.decodeFromString(
+        Artifact.serializer(),
+        artifactJson("a1", kind).replace("\"latest_version\"", "\"thumbnail_version\":${thumbnailVersion ?: "null"},\"media_type\":${mediaType?.let { "\"$it\"" } ?: "null"},\"latest_version\""),
+    )
+
+class ArtifactPreviewTest {
+    @Test
+    fun aPageOrDesignWithASnapshotPreviewsAsTheSnapshot() {
+        assertEquals(ArtifactPreview.Snapshot, artifactPreview(artifactWith("page", 1)))
+        assertEquals(ArtifactPreview.Snapshot, artifactPreview(artifactWith("design", 2)))
+    }
+
+    @Test
+    fun aPageWithoutASnapshotPreviewsAsItsIcon() {
+        assertEquals(ArtifactPreview.Icon, artifactPreview(artifactWith("page")))
+    }
+
+    @Test
+    fun markdownPreviewsAsText() {
+        assertEquals(ArtifactPreview.Text, artifactPreview(artifactWith("markdown")))
+    }
+
+    @Test
+    fun anImageFilePreviewsAsAPicture() {
+        assertEquals(ArtifactPreview.Picture, artifactPreview(artifactWith("file", mediaType = "image/png")))
+    }
+
+    @Test
+    fun aFileThatIsNotAnImagePreviewsAsItsIcon() {
+        assertEquals(ArtifactPreview.Icon, artifactPreview(artifactWith("file", mediaType = "application/pdf")))
+        assertEquals(ArtifactPreview.Icon, artifactPreview(artifactWith("file")))
+    }
+}
+
+class ArtifactPreviewFetchTest {
+    private val paths = mutableListOf<String>()
+
+    private fun TestScope.store(): Store {
+        val engine = MockEngine { request ->
+            paths += request.url.encodedPath
+
+            respond("bytes", HttpStatusCode.OK)
+        }
+
+        return Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+    }
+
+    @Test
+    fun aSnapshotIsFetchedOnceForTheSameVersionAndAgainForANewOne() = runTest {
+        val store = store()
+
+        store.artifactThumbnail(artifactWith("page", 1))
+        store.artifactThumbnail(artifactWith("page", 1))
+        store.artifactThumbnail(artifactWith("page", 2))
+
+        assertEquals(listOf("/api/v1/artifacts/a1/thumbnail", "/api/v1/artifacts/a1/thumbnail"), paths)
+    }
+
+    @Test
+    fun noSnapshotIsFetchedWithoutAThumbnailVersion() = runTest {
+        val store = store()
+
+        assertNull(store.artifactThumbnail(artifactWith("page")))
+        assertEquals(emptyList(), paths)
+    }
+
+    @Test
+    fun theLatestContentIsFetchedOncePerVersion() = runTest {
+        val store = store()
+
+        assertEquals("bytes", store.artifactContent(artifactWith("markdown"))?.decodeToString())
+        store.artifactContent(artifactWith("markdown"))
+
+        assertEquals(listOf("/api/v1/artifacts/a1/versions/3/content"), paths)
+    }
+
+    @Test
+    fun aFailedFetchGivesNoBytes() = runTest {
+        val engine = MockEngine { respond("", HttpStatusCode.NotFound) }
+        val store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        assertNull(store.artifactThumbnail(artifactWith("page", 1)))
     }
 }
