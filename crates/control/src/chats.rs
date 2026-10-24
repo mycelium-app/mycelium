@@ -130,6 +130,10 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
 }
 
 pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachments: Vec<Attachment>) -> ApiResult<Conversation> {
+    if !crate::boot::is_ready(state) {
+        return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "starting", "The control plane is still starting. Wait a moment, then send your message again."));
+    }
+
     withdraw_waiting_call(state, owner, id).await?;
 
     let mut tx = state.pool.begin().await?;

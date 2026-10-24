@@ -185,6 +185,45 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
 }
 
 #[tokio::test]
+async fn readiness_waits_for_startup_recovery_before_accepting_new_work() {
+    let server = Server::start().await;
+    let provider_base = common::serve(axum::Router::new().route("/v1/models", axum::routing::get(|| async { axum::Json(json!({"data": [{"id": "local"}]})) }))).await;
+    let (created, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "Local", "base_url": format!("{provider_base}/v1")}))).await;
+    assert_eq!(created, 201);
+    let (created, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"]}))).await;
+    assert_eq!(created, 201);
+    let mut blocked = server.pool.begin().await.unwrap();
+    sqlx::query("lock table boot_repairs in access exclusive mode").execute(&mut *blocked).await.unwrap();
+    let (started, address) = tokio::sync::oneshot::channel();
+    let database_url = server.database_url.clone();
+    let restart = tokio::spawn(async move {
+        Server::start_on(database_url, |config| {
+            config.database_url.push_str("?application_name=startup_recovery_test");
+            started.send(config.public_url.clone()).unwrap();
+        }).await
+    });
+    let base = address.await.unwrap();
+    eventually("startup recovery to wait for its database lock", || async {
+        let waiting: bool = sqlx::query_scalar("select exists(select 1 from pg_stat_activity where datname = current_database() and application_name = 'startup_recovery_test' and wait_event_type = 'Lock' and query like 'insert into boot_repairs%')").fetch_one(&server.pool).await.unwrap();
+
+        waiting.then_some(())
+    }).await;
+    let http = reqwest::Client::new();
+    let status = http.get(format!("{base}/readyz")).send().await.unwrap().status();
+    let mut during_startup = server.user.clone();
+    during_startup.base = base;
+    let id = chat["id"].as_str().unwrap();
+    let (prompt_status, _) = during_startup.json(during_startup.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Hello"}))).await;
+    blocked.commit().await.unwrap();
+    let restarted = restart.await.unwrap();
+
+    assert_eq!(status, 503);
+    assert_eq!(prompt_status, 503);
+    assert!(server.events(id.parse().unwrap()).await.is_empty());
+    assert_eq!(restarted.anonymous().json(restarted.anonymous().get("/readyz")).await.0, 200);
+}
+
+#[tokio::test]
 async fn two_control_planes_booting_on_one_database_both_become_ready() {
     let first = Server::start().await;
     let second = Server::start_on(first.database_url.clone(), |_| {}).await;

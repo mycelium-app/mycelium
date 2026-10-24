@@ -59,8 +59,6 @@ pub async fn migrate_until_ready(state: AppState) {
     loop {
         match apply_migrations(&state).await {
             Ok(()) => {
-                set_readiness(&state, Readiness::Ready);
-
                 if let Err(cause) = crate::imports::repair_activity_dates(&state).await {
                     tracing::error!("could not restore the activity dates of imported conversations: {cause:#}");
                 }
@@ -76,6 +74,8 @@ pub async fn migrate_until_ready(state: AppState) {
                 if let Err(cause) = crate::chats::end_interrupted(&state).await {
                     tracing::error!("could not end the chats that were replying when the control plane stopped: {cause:?}");
                 }
+
+                set_readiness(&state, Readiness::Ready);
 
                 return;
             }
