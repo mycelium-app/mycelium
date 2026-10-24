@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -318,6 +319,10 @@ private val ScaleCodes = setOf(
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() = application {
+    LaunchedEffect(Unit) {
+        Thread { jcefAvailable }.start()
+    }
+
     remember {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher { event ->
             if (!event.isControlDown) {

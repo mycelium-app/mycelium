@@ -1,9 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import com.jetbrains.cef.JCefAppConfig
@@ -15,6 +19,7 @@ import org.cef.network.CefCookie
 import org.cef.network.CefCookieManager
 import java.net.URI
 import java.util.Date
+import kotlinx.coroutines.delay
 
 private const val SessionCookie = "mycelium_client"
 
@@ -56,6 +61,20 @@ val jcefAvailable: Boolean by lazy {
 
 @Composable
 fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
+    var ready by remember { mutableStateOf(CefApp.getState() == CefApp.CefAppState.INITIALIZED) }
+
+    LaunchedEffect(Unit) {
+        while (!ready && CefApp.getState() != CefApp.CefAppState.TERMINATED) {
+            delay(100)
+            ready = CefApp.getState() == CefApp.CefAppState.INITIALIZED
+        }
+    }
+
+    if (!ready) {
+        Box(modifier)
+        return
+    }
+
     val client = remember { Jcef.createClient() }
     val browser: CefBrowser = remember { client.createBrowser("about:blank", false, false) }
 
