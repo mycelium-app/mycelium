@@ -828,17 +828,30 @@ async fn a_message_after_closing_a_working_conversation_resumes_the_session() {
 }
 
 #[tokio::test]
-async fn closing_an_idle_conversation_succeeds_and_tells_the_node_nothing() {
+async fn closing_an_idle_conversation_ends_its_running_agent_and_keeps_its_status() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = started_conversation(&server, &mut link, None).await;
-    assert_eq!(status_of(&server, id).await, "done");
+    sqlx::query("update conversations set status = 'review' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    assert_eq!(close(&server, id).await, 204);
+
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
+    assert_eq!(status_of(&server, id).await, "review");
+}
+
+#[tokio::test]
+async fn closing_an_idle_conversation_without_a_running_agent_tells_the_node_nothing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    close(&server, id).await;
+    assert_eq!(link.next().await, ControlToNode::CloseSession { conversation_id: id });
 
     assert_eq!(close(&server, id).await, 204);
 
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
     assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
-    assert_eq!(status_of(&server, id).await, "done");
 }
 
 #[tokio::test]

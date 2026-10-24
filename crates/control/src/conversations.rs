@@ -387,7 +387,8 @@ pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, user.id).await?;
 
-    if chats::is_chat(&row) || !matches!(row.status.as_str(), "working" | "input") {
+    let active = matches!(row.status.as_str(), "working" | "input");
+    if chats::is_chat(&row) || !(active || state.hub.has_session(row.node_id, id)) {
         return Ok(StatusCode::NO_CONTENT);
     }
 
@@ -396,11 +397,13 @@ pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     state.hub.forget_prompts_of(id);
-    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
-    tx.commit().await?;
+    if active {
+        let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+        state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+    }
 
+    tx.commit().await?;
     state.remove_session(row.node_id, id).await?;
-    state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
 
     Ok(StatusCode::NO_CONTENT)
 }
