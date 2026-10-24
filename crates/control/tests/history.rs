@@ -390,6 +390,71 @@ async fn a_subagent_transcript_streamed_live_becomes_a_side_chat_that_grows_with
 }
 
 #[tokio::test]
+async fn a_live_subagents_token_usage_is_counted_in_its_parent_conversations_total() {
+    use base64::Engine;
+
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(parent.id, PARENT_SESSION).await;
+    eventually("session id stored", || async { (server.conversation(parent.id).await["acp_session_id"] == PARENT_SESSION).then_some(()) }).await;
+    let transcript = [
+        json!({"type": "user", "isSidechain": true, "agentId": "aaa", "sessionId": PARENT_SESSION, "cwd": "/work/app", "timestamp": "2026-10-01T10:00:20Z", "message": {"role": "user", "content": "Read the docs and report"}}),
+        json!({"type": "assistant", "isSidechain": true, "agentId": "aaa", "sessionId": PARENT_SESSION, "timestamp": "2026-10-01T10:00:30Z", "message": {"id": "msg_1", "role": "assistant", "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "Docs are current."}], "usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}}),
+    ]
+    .iter()
+    .map(Value::to_string)
+    .collect::<Vec<_>>()
+    .join("\n")
+        + "\n";
+    let data = base64::engine::general_purpose::STANDARD.encode(&transcript);
+
+    link.send(NodeToControl::Transcript { path: subagent_path("aaa"), offset: 0, data, size: Some(transcript.len() as i64) }).await;
+    eventually("the subagent's side chat", || async { (side_chats_of(&server, &parent.id.to_string()).await.len() == 1).then_some(()) }).await;
+
+    let (_, rows) = server.user.json(server.user.get("/api/v1/activity/conversations")).await;
+    let rows = rows.as_array().unwrap();
+
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!((rows[0]["key"].clone(), rows[0]["input_tokens"].clone(), rows[0]["output_tokens"].clone()), (json!(parent.id.to_string()), json!(100), json!(20)));
+}
+
+#[tokio::test]
+async fn a_subagent_transcript_delivered_in_two_chunks_keeps_its_first_events_and_stays_searchable_once() {
+    use base64::Engine;
+
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(parent.id, PARENT_SESSION).await;
+    eventually("session id stored", || async { (server.conversation(parent.id).await["acp_session_id"] == PARENT_SESSION).then_some(()) }).await;
+    let path = subagent_path("aaa");
+    let first = subagent_transcript("aaa", "Audit the zeppelin hangar", "Looking.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z") + "\n";
+    let encode = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
+
+    link.send(NodeToControl::Transcript { path: path.clone(), offset: 0, data: encode(&first), size: Some(first.len() as i64) }).await;
+
+    let side_chat = eventually("the side chat to appear", || async { side_chats_of(&server, &parent.id.to_string()).await.into_iter().next() }).await;
+    let id = Uuid::parse_str(side_chat["id"].as_str().unwrap()).unwrap();
+    let before = server.events(id).await;
+
+    let more = json!({"type": "assistant", "isSidechain": true, "agentId": "aaa", "sessionId": PARENT_SESSION, "timestamp": "2026-10-01T10:00:40Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Docs are current."}]}}).to_string() + "\n";
+    link.send(NodeToControl::Transcript { path: path.clone(), offset: first.len() as i64, data: encode(&more), size: Some((first.len() + more.len()) as i64) }).await;
+
+    let after = eventually("the side chat to carry the new answer", || async {
+        let events = server.events(id).await;
+
+        (events.len() > before.len()).then_some(events)
+    })
+    .await;
+    assert_eq!(after[..before.len()], before[..]);
+    assert_eq!(after.iter().map(|event| event["seq"].clone()).collect::<Vec<_>>(), (1..=after.len()).map(|seq| json!(seq)).collect::<Vec<_>>());
+    assert_eq!(search(&server, "zeppelin").await.len(), 1);
+}
+
+#[tokio::test]
 async fn a_live_subagent_chunk_before_the_upload_is_complete_creates_nothing_yet() {
     use base64::Engine;
 

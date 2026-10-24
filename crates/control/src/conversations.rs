@@ -440,7 +440,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     for sha256 in attachments {
         let still_used = sqlx::query_scalar::<_, bool>(
-            "select exists (select 1 from events e join conversations c on c.id = e.conversation_id where c.owner = $1 and jsonb_typeof(e.payload->'attachments') = 'array' and e.payload->'attachments' @> jsonb_build_array(jsonb_build_object('sha256', $2::text)))
+            "select exists (select 1 from events e join conversations c on c.id = e.conversation_id where c.owner = $1 and e.kind = 'user_message' and jsonb_typeof(e.payload->'attachments') = 'array' and e.payload->'attachments' @> jsonb_build_array(jsonb_build_object('sha256', $2::text)))
                  or exists (select 1 from queued_prompts q join conversations c on c.id = q.conversation_id where c.owner = $1 and q.attachments @> jsonb_build_array(jsonb_build_object('sha256', $2::text)))",
         )
         .bind(user.id)

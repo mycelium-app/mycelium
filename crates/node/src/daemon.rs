@@ -7,6 +7,7 @@ use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
 use crate::resources::Watcher;
+use crate::ssh::SshServer;
 use crate::terminal::{TerminalManager, find_on_path, user_shell};
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
@@ -83,6 +84,7 @@ pub struct Daemon {
     logins: LoginManager,
     usage: Arc<UsageCache>,
     terminals: TerminalManager,
+    ssh: SshServer,
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
     connected: AtomicBool,
@@ -104,6 +106,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         logins: LoginManager::new(out.clone(), login_report),
         usage,
         terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
+        ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
@@ -214,6 +217,7 @@ impl Daemon {
 
     pub fn on_disconnected(&self) {
         self.connected.store(false, Ordering::SeqCst);
+        self.ssh.close_all();
         self.write_status();
     }
 
@@ -308,6 +312,19 @@ impl Daemon {
                 let path = saved.ok().map(|path| path.display().to_string());
                 let _ = self.out.send(NodeToControl::ApiTokenSaved { conversation_id, path });
             }
+            ControlToNode::SshToken { request_id, conversation_id, token } => {
+                let saved = self.config.save_ssh_token(request_id, conversation_id, &token);
+
+                if let Err(error) = &saved {
+                    tracing::warn!("could not save an SSH token for a conversation: {error}");
+                }
+
+                let path = saved.ok().map(|path| path.display().to_string());
+                let _ = self.out.send(NodeToControl::SshTokenSaved { request_id, path });
+            }
+            ControlToNode::SshOpen { session_id } => self.ssh.open(session_id),
+            ControlToNode::SshData { session_id, data } => self.ssh.data(session_id, &data),
+            ControlToNode::SshClose { session_id } => self.ssh.close(session_id),
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }

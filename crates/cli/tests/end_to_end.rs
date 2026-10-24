@@ -204,7 +204,7 @@ impl Api {
     async fn wait_for_event_text(&self, conversation: Uuid, text: &str, occurrences: usize) {
         eventually(&format!("{occurrences} event(s) saying {text}"), || async {
             let events = self.events(conversation).await;
-            let found = events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"].to_string().contains(&format!("\"{text}\""))).count();
+            let found = events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"]["update"]["content"]["text"].as_str().is_some_and(|said| said.contains(text))).count();
 
             (found >= occurrences).then_some(())
         })
@@ -529,7 +529,7 @@ async fn a_prompt_lost_with_the_link_arrives_exactly_once_after_reconnect() {
     api.wait_for_status(conversation, "review").await;
 
     let events = api.events(conversation).await;
-    let turns = events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"].to_string().contains("\"one\"")).count();
+    let turns = events.iter().filter(|event| event["kind"] == "acp_update" && event["payload"]["update"]["content"]["text"].as_str().is_some_and(|said| said.contains("one"))).count();
     assert_eq!(turns, 3, "the lost prompt ran more or less than once");
 
     daemon.kill().await.unwrap();

@@ -5,6 +5,7 @@ use crate::device::client_address;
 use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
+use crate::ssh_access;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
@@ -19,14 +20,19 @@ use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, Log
 use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::{Instant, interval_at};
+use tokio::time::{Instant, interval_at, sleep_until};
 use uuid::Uuid;
 
 const PREDICTED_TITLE_LIMIT: usize = 100;
 const SESSION_STATE_UPDATES: [&str; 3] = ["available_commands_update", "config_option_update", "current_mode_update"];
+
+const UPDATE_BATCH_WINDOW: Duration = Duration::from_millis(200);
+const UPDATE_BATCH_LIMIT: usize = 256;
+const TOOL_UPDATE_CACHE_LIMIT: usize = 2048;
+const MERGEABLE_CHUNKS: [&str; 2] = ["agent_message_chunk", "agent_thought_chunk"];
 
 const PING_INTERVAL: Duration = Duration::from_secs(25);
 const SILENCE_LIMIT: Duration = Duration::from_secs(90);
@@ -48,9 +54,19 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
 
     let mut ping = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
     let mut last_frame = Instant::now();
+    let mut batch = UpdateBatch::default();
 
     loop {
+        let flush_at = batch.deadline;
+        let flush_due = async move {
+            match flush_at {
+                Some(at) => sleep_until(at).await,
+                None => std::future::pending().await,
+            }
+        };
+
         tokio::select! {
+            _ = flush_due => batch.flush(&state, node_id).await,
             message = outgoing.recv() => {
                 let Some(message) = message else {
                     if state.hub.is_replaced(node_id, connection_id) {
@@ -73,7 +89,16 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
                     last_frame = Instant::now();
 
                     match serde_json::from_str::<NodeToControl>(&text) {
+                        Ok(NodeToControl::AcpUpdate { conversation_id, seq, update }) => {
+                            batch.push(conversation_id, seq, update);
+
+                            if batch.len >= UPDATE_BATCH_LIMIT {
+                                batch.flush(&state, node_id).await;
+                            }
+                        }
                         Ok(message) => {
+                            batch.flush(&state, node_id).await;
+
                             if let Err(cause) = handle(&state, node_id, message).await {
                                 tracing::warn!("node {node_id} message failed: {cause:?}");
                             }
@@ -100,6 +125,8 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
         }
     }
 
+    batch.flush(&state, node_id).await;
+
     if state.hub.unregister(node_id, connection_id) {
         state.finish_logins_of_node(node_id);
         let _ = publish_node(&state, node_id).await;
@@ -116,36 +143,9 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::AcpUpdate { conversation_id, seq, update } => {
-            let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
-            let mut session_update = update["update"].clone();
-            without_nul(&mut session_update);
-            let inserted = record(state, node_id, conversation_id, Some(seq), EventKind::AcpUpdate, update, None).await?;
-
-            if inserted && SESSION_STATE_UPDATES.contains(&session_update["sessionUpdate"].as_str().unwrap_or_default()) {
-                sqlx::query("insert into conversation_session_state (conversation_id, update_kind, update) values ($1, $2, $3) on conflict (conversation_id, update_kind) do update set update = excluded.update")
-                    .bind(conversation_id)
-                    .bind(session_update["sessionUpdate"].as_str())
-                    .bind(&session_update)
-                    .execute(&state.pool)
-                    .await?;
-            }
-
-            let (true, Some(title)) = (inserted, predicted) else {
-                return Ok(());
-            };
-
-            let renamed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-                "update conversations set predicted_title = $3, title = case when title_user_set then title else $3 end where id = $1 and node_id = $2 returning {CONVERSATION_COLUMNS}"
-            )))
-            .bind(conversation_id)
-            .bind(node_id)
-            .bind(title)
-            .fetch_optional(&state.pool)
-            .await?;
-
-            if let Some(renamed) = renamed {
-                state.publish(Some(renamed.owner), StreamMessage::Conversation(renamed.to_proto()?));
-            }
+            let mut batch = UpdateBatch::default();
+            batch.push(conversation_id, seq, update);
+            batch.flush(state, node_id).await;
 
             Ok(())
         }
@@ -264,6 +264,9 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             publish_node(state, node_id).await
         }
         NodeToControl::ApiTokenSaved { conversation_id, path } => api_access::token_saved(state, node_id, conversation_id, path).await,
+        NodeToControl::SshTokenSaved { request_id, path } => ssh_access::token_saved(state, node_id, request_id, path).await,
+        NodeToControl::SshData { session_id, data } => ssh_access::node_data(node_id, session_id, data),
+        NodeToControl::SshClosed { session_id } => ssh_access::node_closed(node_id, session_id),
         NodeToControl::Pong => {
             sqlx::query("update nodes set last_seen_at = now() where id = $1 and (last_seen_at is null or last_seen_at < now() - interval '30 seconds')").bind(node_id).execute(&state.pool).await?;
 
@@ -421,6 +424,178 @@ async fn record(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: Opt
     }
 
     Ok(inserted)
+}
+
+#[derive(Default)]
+struct UpdateBatch {
+    pending: HashMap<Uuid, Vec<(i64, Value)>>,
+    last_tool_updates: HashMap<(Uuid, String), Value>,
+    deadline: Option<Instant>,
+    len: usize,
+}
+
+impl UpdateBatch {
+    fn push(&mut self, conversation_id: Uuid, seq: i64, update: Value) {
+        self.pending.entry(conversation_id).or_default().push((seq, update));
+        self.len += 1;
+        self.deadline.get_or_insert_with(|| Instant::now() + UPDATE_BATCH_WINDOW);
+    }
+
+    async fn flush(&mut self, state: &AppState, node_id: Uuid) {
+        self.deadline = None;
+        self.len = 0;
+
+        for (conversation_id, items) in std::mem::take(&mut self.pending) {
+            if let Err(cause) = self.write(state, node_id, conversation_id, items).await {
+                tracing::warn!("node {node_id} update batch failed: {cause:?}");
+            }
+        }
+    }
+
+    async fn write(&mut self, state: &AppState, node_id: Uuid, conversation_id: Uuid, items: Vec<(i64, Value)>) -> ApiResult<()> {
+        let (updates, newest, tool_updates) = coalesce_updates(conversation_id, items, &self.last_tool_updates);
+        let mut tx = state.pool.begin().await?;
+        let Some(row) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
+            return Ok(());
+        };
+
+        let mut stored = Vec::with_capacity(updates.len());
+
+        for (seq, update) in updates {
+            let event = append_event(&mut tx, conversation_id, EventKind::AcpUpdate, &update, Some(seq)).await?;
+
+            if let Some(event) = event {
+                stored.push((event, update));
+            }
+        }
+
+        tx.commit().await?;
+
+        if self.last_tool_updates.len() > TOOL_UPDATE_CACHE_LIMIT {
+            self.last_tool_updates.clear();
+        }
+
+        for (tool_call_id, update) in tool_updates {
+            self.last_tool_updates.insert((conversation_id, tool_call_id), update);
+        }
+
+        let highest = highest_node_seq(&state.pool, conversation_id).await?;
+        state.hub.send(node_id, ControlToNode::Ack { conversation_id, seq: highest.max(newest) });
+
+        for (event, update) in stored {
+            state.publish(Some(row.owner), StreamMessage::Event(event));
+            after_update(state, node_id, conversation_id, update).await?;
+        }
+
+        Ok(())
+    }
+}
+
+fn coalesce_updates(conversation_id: Uuid, items: Vec<(i64, Value)>, last_tool_updates: &HashMap<(Uuid, String), Value>) -> (Vec<(i64, Value)>, i64, HashMap<String, Value>) {
+    let mut kept: Vec<(i64, Value)> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut tool_updates: HashMap<String, Value> = HashMap::new();
+    let mut newest = 0;
+
+    for (seq, update) in items {
+        newest = newest.max(seq);
+
+        if !seen.insert(seq) {
+            continue;
+        }
+
+        if update["update"]["sessionUpdate"] == "tool_call_update"
+            && let Some(tool_call_id) = update["update"]["toolCallId"].as_str()
+        {
+            let previous = tool_updates.get(tool_call_id).or_else(|| last_tool_updates.get(&(conversation_id, tool_call_id.to_string())));
+
+            if previous == Some(&update["update"]) {
+                continue;
+            }
+
+            tool_updates.insert(tool_call_id.to_string(), update["update"].clone());
+        }
+
+        if let Some((last_seq, last)) = kept.last_mut()
+            && seq > *last_seq
+            && merge_chunk(last, &update)
+        {
+            *last_seq = seq;
+            continue;
+        }
+
+        kept.push((seq, update));
+    }
+
+    (kept, newest, tool_updates)
+}
+
+fn merge_chunk(last: &mut Value, next: &Value) -> bool {
+    let kind = &last["update"]["sessionUpdate"];
+
+    if kind != &next["update"]["sessionUpdate"] || !kind.as_str().is_some_and(|kind| MERGEABLE_CHUNKS.contains(&kind)) {
+        return false;
+    }
+
+    let (Some(head), Some(tail)) = (last.pointer("/update/content/text").and_then(Value::as_str), next.pointer("/update/content/text").and_then(Value::as_str)) else {
+        return false;
+    };
+
+    let joined = format!("{head}{tail}");
+
+    if without_text(last) != without_text(next) {
+        return false;
+    }
+
+    if let Some(text) = last.pointer_mut("/update/content/text") {
+        *text = Value::String(joined);
+    }
+
+    true
+}
+
+fn without_text(update: &Value) -> Value {
+    let mut copy = update.clone();
+
+    if let Some(text) = copy.pointer_mut("/update/content/text") {
+        *text = Value::Null;
+    }
+
+    copy
+}
+
+async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, update: Value) -> ApiResult<()> {
+    let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
+    let mut session_update = update["update"].clone();
+    without_nul(&mut session_update);
+
+    if SESSION_STATE_UPDATES.contains(&session_update["sessionUpdate"].as_str().unwrap_or_default()) {
+        sqlx::query("insert into conversation_session_state (conversation_id, update_kind, update) values ($1, $2, $3) on conflict (conversation_id, update_kind) do update set update = excluded.update")
+            .bind(conversation_id)
+            .bind(session_update["sessionUpdate"].as_str())
+            .bind(&session_update)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    let Some(title) = predicted else {
+        return Ok(());
+    };
+
+    let renamed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set predicted_title = $3, title = case when title_user_set then title else $3 end where id = $1 and node_id = $2 returning {CONVERSATION_COLUMNS}"
+    )))
+    .bind(conversation_id)
+    .bind(node_id)
+    .bind(title)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(renamed) = renamed {
+        state.publish(Some(renamed.owner), StreamMessage::Conversation(renamed.to_proto()?));
+    }
+
+    Ok(())
 }
 
 async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {

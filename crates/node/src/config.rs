@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 const NODE_TOKEN_PREFIX: &str = "myc_node_";
 pub const API_TOKEN_FILE: &str = "api-token";
+pub const SSH_HOST_KEY_FILE: &str = "ssh_host_ed25519_key";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -46,15 +47,21 @@ impl NodeConfig {
     }
 
     pub fn save_api_token(&self, conversation_id: Uuid, token: &str) -> Result<PathBuf> {
-        let dir = self.sessions_dir().join(conversation_id.to_string());
-        std::fs::create_dir_all(&dir)?;
-
-        let path = dir.join(API_TOKEN_FILE);
-        let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&path)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        std::io::Write::write_all(&mut file, token.as_bytes())?;
+        let path = self.sessions_dir().join(conversation_id.to_string()).join(API_TOKEN_FILE);
+        write_private_file(&path, token.as_bytes())?;
 
         Ok(path)
+    }
+
+    pub fn save_ssh_token(&self, request_id: Uuid, conversation_id: Uuid, token: &str) -> Result<PathBuf> {
+        let path = self.sessions_dir().join(conversation_id.to_string()).join(format!("ssh-token-{request_id}"));
+        write_private_file(&path, token.as_bytes())?;
+
+        Ok(path)
+    }
+
+    pub fn ssh_host_key_path(&self) -> PathBuf {
+        self.state_dir.join(SSH_HOST_KEY_FILE)
     }
 
     pub fn bearer_token(&self) -> String {
@@ -84,17 +91,56 @@ impl NodeConfig {
     }
 
     pub fn connect_url(&self) -> Result<String> {
-        let base = self.control_plane.trim_end_matches('/');
-        let socket_base = if let Some(rest) = base.strip_prefix("https://") {
-            format!("wss://{rest}")
-        } else if let Some(rest) = base.strip_prefix("http://") {
-            format!("ws://{rest}")
-        } else {
-            anyhow::bail!("The control plane address {base} must start with https:// or http://.");
-        };
+        let socket_base = self.socket_base()?;
 
         Ok(format!("{socket_base}/api/v1/node/connect"))
     }
+
+    pub fn ssh_url(&self, node: &str) -> Result<String> {
+        let socket_base = self.socket_base()?;
+
+        Ok(format!("{socket_base}/api/v1/nodes/{}/ssh", percent_encode(node)))
+    }
+
+    fn socket_base(&self) -> Result<String> {
+        let base = self.control_plane.trim_end_matches('/');
+
+        if let Some(rest) = base.strip_prefix("https://") {
+            return Ok(format!("wss://{rest}"));
+        }
+
+        if let Some(rest) = base.strip_prefix("http://") {
+            return Ok(format!("ws://{rest}"));
+        }
+
+        anyhow::bail!("The control plane address {base} must start with https:// or http://.");
+    }
+}
+
+pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    std::io::Write::write_all(&mut file, bytes)?;
+
+    Ok(())
+}
+
+fn percent_encode(text: &str) -> String {
+    let mut encoded = String::new();
+
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+
+    encoded
 }
 
 pub fn config_path() -> PathBuf {
@@ -192,6 +238,31 @@ mod tests {
         let mut plain = sample();
         plain.control_plane = "http://localhost:8080".into();
         assert_eq!(plain.connect_url().unwrap(), "ws://localhost:8080/api/v1/node/connect");
+    }
+
+    #[test]
+    fn ssh_url_swaps_the_scheme_and_encodes_the_node() {
+        assert_eq!(sample().ssh_url("builder one/é").unwrap(), "wss://mycelium.example/api/v1/nodes/builder%20one%2F%C3%A9/ssh");
+
+        let mut plain = sample();
+        plain.control_plane = "http://localhost:8080".into();
+        assert_eq!(plain.ssh_url("a-b_c.d~e").unwrap(), "ws://localhost:8080/api/v1/nodes/a-b_c.d~e/ssh");
+
+        plain.control_plane = "ftp://nowhere".into();
+        assert!(plain.ssh_url("a").is_err());
+    }
+
+    #[test]
+    fn an_ssh_token_is_saved_privately_beside_the_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = sample();
+        config.state_dir = dir.path().to_path_buf();
+
+        let path = config.save_ssh_token(Uuid::from_u128(2), Uuid::from_u128(3), "myc_ssh_example").unwrap();
+
+        assert_eq!(path, dir.path().join("sessions").join(Uuid::from_u128(3).to_string()).join(format!("ssh-token-{}", Uuid::from_u128(2))));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "myc_ssh_example");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

@@ -91,6 +91,8 @@ nodes            id uuid pk, name text unique, hostname, os, arch, version text,
                  created_by uuid, created_at, last_seen_at, revoked_at null, draining bool default false
 client_tokens    id uuid pk, user_id, label text, hostname, address, token_hash bytea unique, created_at, last_used_at, revoked_at null, scopes text[] null (null is full access), expires_at null, conversation_id null (the conversation that asked)
 api_access_requests  id uuid pk, owner, conversation_id, scopes text[], hours, reason, token_id null, state requested|approved|declined, created_at, decided_at null
+ssh_access_requests  id uuid pk, owner, conversation_id, node_id (the node to reach), minutes, reason, state requested|approved|declined|revoked, token_hash null unique (SHA-256 of the secret), created_at, decided_at null, expires_at null, revoked_at null
+ssh_sessions  id uuid pk, request_id, owner, conversation_id, node_id, started_at, ended_at null
 api_token_calls  id bigint pk, token_id, method, route (the matched route, with `{id}` placeholders), status, called_at; rows older than 30 days are deleted whenever a scoped token makes a call
 agents           node_id, agent text ('claude'|'codex'), version text, available bool, pk(node_id, agent)
 logins           id uuid pk, node_id, agent, account text null, method text, state text, usage_left, usage_windows jsonb, usage_read_at
@@ -264,6 +266,9 @@ Groups and instructions:
 - `POST /api/v1/message-proposals/{id}/approve` queues `From <source title>:`, a blank line and the message on the target conversation exactly as `POST /conversations/{id}/prompt` would, and returns the proposal as `sent` (409 `proposal_not_proposed` once decided, 409 `target_archived` when the target was archived meanwhile). `POST /api/v1/message-proposals/{id}/decline` marks it declined, queues nothing on the target and queues a message on the calling conversation saying it was declined. Both publish `message_proposal` (the proposal); a new proposal publishes it too.
 - `GET /api/v1/api-access-requests` → the caller's requests for temporary API access, waiting ones first then the newest decided, at most 100: `[{id, conversation_id, scopes, hours, reason, state: "requested"|"approved"|"declined", created_at, decided_at}]`. The MCP tool `request_api_access {scopes, hours?, reason}` (scopes from `conversations:read`, `conversations:write`, `nodes:read`, `settings:read`; hours 1 to 24, default 4) records one for the calling conversation and replies `Waiting for the person to approve API access (request <id>).`; it publishes `api_access_request` (the request).
 - `POST /api/v1/api-access-requests/{id}/approve` `{scopes?}` mints a client token limited to the requested scopes, or to the ticked subset when `scopes` is given (400 `scopes_required` when none is left), expiring after the requested hours, sends it to the conversation's node as `api_token` and publishes the request as `approved`. 409 `request_not_requested` once decided, 409 `no_node` for a conversation without a node, 409 `node_offline` (the token is revoked and the request stays open). When the node answers `api_token_saved`, the control plane queues a message on the conversation with the file path, the scopes, the expiry and the API address, never the token; a node that could not save it gets the token revoked and the agent told. `POST /api/v1/api-access-requests/{id}/decline` marks it declined, mints nothing and queues a message saying so. Both publish `api_access_request`.
+- `GET /api/v1/ssh-access-requests` → the caller's requests for temporary SSH access to a node, waiting ones first then the newest, at most 100: `[{id, conversation_id, node_id, node_name, minutes, reason, state: "requested"|"approved"|"declined"|"revoked", created_at, decided_at, expires_at}]`. The MCP tool `request_ssh_access {node, minutes?, reason}` (node is a name or id of one of the person's nodes; minutes 5 to 240, default 30) records one for the calling conversation and replies `Waiting for the person to approve SSH access to <node> (request <id>).`; it publishes `ssh_access_request` (the request).
+- `POST /api/v1/ssh-access-requests/{id}/approve` `{minutes?}` mints a token (`myc_ssh_…`), expiring after `minutes` (at most what was requested, at least 5; 400 `minutes_out_of_range`), sends it to the conversation's node as `ssh_token` and publishes the request as `approved`. 409 `request_not_requested` once decided, 409 `no_node` for a conversation without a node, 409 `node_offline` (the request stays open). When the node answers `ssh_token_saved`, the control plane queues a message with the file path and the `ssh` command, never the token; a node that could not save it gets the request revoked and the agent told. `POST …/{id}/decline` marks it declined and queues a message saying so. `POST …/{id}/revoke` ends approved access at once, closes its open sessions and queues a message saying so (409 `request_not_approved` otherwise). All publish `ssh_access_request`.
+- `GET /api/v1/nodes/{id}/ssh` (WebSocket, `Authorization: Bearer myc_ssh_…`; `{id}` is the node's id or name) relays raw SSH bytes between the agent and the node's in-process SSH server: binary frames carry the bytes both ways, and either side closing ends the session. It also ends when the grant expires, when it is revoked, or when the node goes offline. Refused before the upgrade with 401 (missing, unknown, expired or revoked token), 403 `ssh_wrong_node` (the token covers another node) or 409 `node_offline`. Each session is recorded in `ssh_sessions`.
 - A scoped token passes one check per route group, before the handler: `GET` under `/api/v1/conversations`, `/api/v1/attachments`, `/api/v1/search` and `/api/v1/activity/conversations` needs `conversations:read`; any other method under `/api/v1/conversations` needs `conversations:write`, except the terminal and permission routes; `GET /api/v1/nodes` and `/api/v1/worktrees` need `nodes:read`; `GET` of instructions, extensions, usage-limit, projects, groups and memories needs `settings:read`; `/api/v1/me`, `/api/v1/version` and the health routes need no scope. Every other route, including every route added later, needs a full-access token and answers a scoped one with 403 `scope_not_granted`. An expired token answers 401 like a revoked one. Tokens from the device sign-in have no scopes and are not limited or logged.
 - `PUT /api/v1/instruction-source` `{forge_id, repository: "owner/name", path?}` sets the source (path defaults to `AGENTS.md`; 400 `repository_invalid` or `path_invalid`); `DELETE /api/v1/instruction-source` clears it and keeps the versions. The source is one for the whole control plane and uses the forge of the person who set it.
 - The global layer is the file at `path`. A group's layer is its sibling with the group name before the extension: `AGENTS.md` and group `slop` give `AGENTS.slop.md` (`docs/AGENTS.md` gives `docs/AGENTS.slop.md`). Renaming a group does not move the file already committed.
@@ -405,6 +410,7 @@ only the person who owns the conversation or started the sign-in; the rest reach
 | Artifact created, new version, renamed, made public or private, or deleted (`deleted: true`) | `artifact` (the artifact, with its versions) | owner |
 | Artifact comment added or resolved | `artifact_comment` (the comment) | owner |
 | API access requested, approved or declined | `api_access_request` (the request, never the token) | owner |
+| SSH access requested, approved, declined or revoked | `ssh_access_request` (the request, never the token) | owner |
 | An instruction edit proposed by an agent, approved, declined or superseded, or its layer saved while it waits | `instruction_proposal` (the proposal) | the owner |
 | History imported (`POST /imports`) | `conversation` per new conversation | owner |
 | Import job progress, at most once a second, and when it finishes | `import_job` (the job) | owner |
@@ -461,6 +467,9 @@ Node to control plane:
 | `logins` | `logins: [{agent, account?, method, state, usage_left?, windows?: [{name, used_percent, resets_at?}], usage_read_at?}]` |
 | `instructions_held` | `revision, unmanaged: [label]` |
 | `api_token_saved` | `conversation_id, path?` (answers `api_token`: the file the token was written to, or no path when it could not be written) |
+| `ssh_token_saved` | `request_id, path?` (answers `ssh_token`: the file the token was written to, or no path when it could not be written) |
+| `ssh_data` | `session_id, data` (base64; raw SSH bytes for that session) |
+| `ssh_closed` | `session_id` (the node ended the session, or did not know it) |
 | `login_output` | `login_id, data` (UTF-8 text from the PTY) |
 | `login_finished` | `login_id, ok` |
 | `terminal_output` | `terminal_id, data` (base64; raw bytes from the PTY) |
@@ -496,6 +505,10 @@ Control plane to node:
 | `continue_sequence` | `conversation_id, after` (the session's journal numbering continues after `after`) |
 | `watch` | `seconds` (a lease: the node samples every 3 seconds until it runs out, and does nothing when nobody holds one; asking again extends it) |
 | `api_token` | `conversation_id, token` (written mode 600 to `<state dir>/sessions/<conversation>/api-token`, answered with `api_token_saved`) |
+| `ssh_token` | `request_id, conversation_id, token` (written mode 600 to `<state dir>/sessions/<conversation>/ssh-token-<request>`, answered with `ssh_token_saved`) |
+| `ssh_open` | `session_id` (the node starts an SSH server session, registered before any following `ssh_data`) |
+| `ssh_data` | `session_id, data` (base64; raw SSH bytes for that session) |
+| `ssh_close` | `session_id` (the node ends the session, no reply) |
 | `ping` | |
 | `revoked` | the node deletes its credential and exits 0 |
 
@@ -625,6 +638,14 @@ OpenAI (input, cached input, output): gpt-5.6-sol 4 / 0.4 / 20, gpt-5.6-terra 2 
 gpt-5.5 5 / 0.5 / 30, gpt-5.4 2.5 / 0.25 / 15, gpt-5.4-mini 0.75 / 0.075 / 4.5, gpt-5.4-nano 0.2 / 0.02 / 1.25,
 gpt-5.3-codex and gpt-5.2 1.75 / 0.175 / 14, gpt-5.1 and gpt-5 1.25 / 0.125 / 10, gpt-5-mini 0.25 / 0.025 / 2,
 gpt-5-nano 0.05 / 0.005 / 0.4. Short-context rates; long-context rates are higher and not applied.
+
+### SSH
+
+An in-process SSH server (russh) with no listening port, reached only through the link: `ssh_open` starts a session and `ssh_data` carries its bytes both ways. It accepts any session the control plane opens, with no password or key check, because the control plane already checked the grant. Shells and commands run as the node's user from its home directory, with or without a PTY. Port forwarding and subsystems such as sftp are refused.
+
+The host key is one Ed25519 key per node, generated on first use and kept mode 600 at `<state dir>/ssh_host_ed25519_key`, so it is stable across restarts. The agent's `ssh` trusts it on first use into a `known_hosts` file beside the token, which is safe because the bytes only travel over the node's authenticated link.
+
+`mycelium ssh-proxy <node> --token-file <path>` is the `ProxyCommand` the agent uses: it opens the WebSocket above with the token read from the file and copies stdin and stdout to binary frames.
 
 ### Terminal
 

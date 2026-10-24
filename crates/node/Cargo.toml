@@ -23,6 +23,7 @@ reqwest.workspace = true
 toml.workspace = true
 dirs.workspace = true
 portable-pty.workspace = true
+russh.workspace = true
 rand.workspace = true
 nix.workspace = true
 

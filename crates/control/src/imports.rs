@@ -666,7 +666,7 @@ fn searchable(text: &str) -> String {
     text.chars().take(SEARCH_TEXT_LIMIT).collect()
 }
 
-async fn insert_events(tx: &mut Tx<'_>, conversation_id: Uuid, events: &[(EventKind, Value)]) -> sqlx::Result<()> {
+async fn insert_events(tx: &mut Tx<'_>, conversation_id: Uuid, events: &[(EventKind, Value)], from: usize) -> sqlx::Result<()> {
     let mut seq = 0i64;
     let mut agent_text = String::new();
     let mut entries: Vec<(i64, String)> = Vec::new();
@@ -678,16 +678,17 @@ async fn insert_events(tx: &mut Tx<'_>, conversation_id: Uuid, events: &[(EventK
 
         for (kind, payload) in batch {
             seq += 1;
+            let is_new = seq as usize > from;
 
             match kind {
                 EventKind::UserMessage => {
                     agent_text.clear();
 
-                    if let Some(text) = payload["text"].as_str().map(str::trim).filter(|text| !text.is_empty()) {
+                    if let Some(text) = payload["text"].as_str().map(str::trim).filter(|text| !text.is_empty()).filter(|_| is_new) {
                         entries.push((seq, searchable(text)));
                     }
                 }
-                EventKind::TurnEnd if !agent_text.is_empty() => entries.push((seq, searchable(&agent_text))),
+                EventKind::TurnEnd if is_new && !agent_text.is_empty() => entries.push((seq, searchable(&agent_text))),
                 EventKind::AcpUpdate if payload["update"]["sessionUpdate"] == "agent_message_chunk" => {
                     if agent_text.chars().count() < SEARCH_TEXT_LIMIT {
                         agent_text.push_str(payload["update"]["content"]["text"].as_str().unwrap_or_default());
@@ -696,9 +697,15 @@ async fn insert_events(tx: &mut Tx<'_>, conversation_id: Uuid, events: &[(EventK
                 _ => {}
             }
 
-            seqs.push(seq);
-            kinds.push(enum_text(kind));
-            payloads.push(payload.clone());
+            if is_new {
+                seqs.push(seq);
+                kinds.push(enum_text(kind));
+                payloads.push(payload.clone());
+            }
+        }
+
+        if seqs.is_empty() {
+            continue;
         }
 
         sqlx::query("insert into events (conversation_id, seq, kind, payload) select $1, * from unnest($2::bigint[], $3::text[], $4::jsonb[])")
@@ -807,7 +814,7 @@ async fn import_file(state: AppState, owner: Uuid, node_id: Uuid, agent: AgentId
         return Ok(Outcome::Skipped);
     };
 
-    insert_events(&mut tx, row.id, &events).await.map_err(|cause| store_failure(&path, cause))?;
+    insert_events(&mut tx, row.id, &events, 0).await.map_err(|cause| store_failure(&path, cause))?;
     record_imported_turns(&mut tx, row.id, &turns).await.map_err(|cause| store_failure(&path, cause.message()))?;
     tx.commit().await.map_err(|cause| store_failure(&path, cause))?;
 
@@ -878,9 +885,16 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
         }
 
         let mut tx = state.pool.begin().await.map_err(|cause| store_failure(path, cause))?;
-        sqlx::query("delete from events where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
-        sqlx::query("delete from search_entries where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
-        insert_events(&mut tx, id, &events).await.map_err(|cause| store_failure(path, cause))?;
+        let appended = events.len() > stored as usize;
+
+        if !appended {
+            sqlx::query("delete from events where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
+            sqlx::query("delete from search_entries where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
+        }
+
+        insert_events(&mut tx, id, &events, if appended { stored as usize } else { 0 }).await.map_err(|cause| store_failure(path, cause))?;
+        sqlx::query("delete from usage_turns where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
+        record_imported_turns(&mut tx, id, &turns_of(&parsed.items)).await.map_err(|cause| store_failure(path, cause.message()))?;
         let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set updated_at = $2 where id = $1 returning {CONVERSATION_COLUMNS}")))
             .bind(id)
             .bind(parsed.last_at.unwrap_or_else(Utc::now))
@@ -933,7 +947,8 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
         return Ok(Outcome::Skipped);
     };
 
-    insert_events(&mut tx, row.id, &events).await.map_err(|cause| store_failure(path, cause))?;
+    insert_events(&mut tx, row.id, &events, 0).await.map_err(|cause| store_failure(path, cause))?;
+    record_imported_turns(&mut tx, row.id, &turns_of(&parsed.items)).await.map_err(|cause| store_failure(path, cause.message()))?;
     tx.commit().await.map_err(|cause| store_failure(path, cause))?;
 
     Ok(Outcome::Imported(row.to_proto().map_err(|cause| store_failure(path, cause.message()))?))

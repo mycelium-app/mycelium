@@ -722,6 +722,35 @@ pub struct ApproveApiAccessRequest {
     pub scopes: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SshAccessState {
+    Requested,
+    Approved,
+    Declined,
+    Revoked,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SshAccessRequest {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub node_id: Uuid,
+    pub node_name: String,
+    pub minutes: i32,
+    pub reason: String,
+    pub state: SshAccessState,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApproveSshAccessRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetInstructionSourceRequest {
     pub forge_id: Uuid,

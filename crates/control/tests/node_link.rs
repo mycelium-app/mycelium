@@ -102,6 +102,94 @@ async fn acp_updates_are_stored_acknowledged_and_deduplicated_by_seq_across_reco
     assert_eq!(events[2]["payload"]["sessionUpdate"], "replayed");
 }
 
+fn chunk(kind: &str, text: &str) -> serde_json::Value {
+    json!({"sessionId": "acp-1", "update": {"sessionUpdate": kind, "content": {"type": "text", "text": text}}})
+}
+
+#[tokio::test]
+async fn a_burst_of_message_chunks_is_stored_as_one_event_and_acknowledged_in_full() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    for (seq, text) in [(1, "Hel"), (2, "lo, "), (3, "world")] {
+        link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq, update: chunk("agent_message_chunk", text) }).await;
+    }
+
+    assert_eq!(link.expect_ack().await, (conversation.id, 3));
+
+    let events = server.events(conversation.id).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["payload"]["update"]["content"]["text"], "Hello, world");
+}
+
+#[tokio::test]
+async fn thought_chunks_are_not_merged_into_message_chunks() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 1, update: chunk("agent_thought_chunk", "think ") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 2, update: chunk("agent_thought_chunk", "more") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 3, update: chunk("agent_message_chunk", "say") }).await;
+
+    assert_eq!(link.expect_ack().await, (conversation.id, 3));
+
+    let events = server.events(conversation.id).await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[0]["payload"]["update"]["content"]["text"], "think more");
+    assert_eq!(events[1]["payload"]["update"]["content"]["text"], "say");
+}
+
+#[tokio::test]
+async fn an_identical_repeated_tool_call_update_is_stored_once() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    let progress = |status: &str| json!({"sessionId": "acp-1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": status, "content": [{"type": "text", "text": "running"}]}});
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 1, update: progress("in_progress") }).await;
+    assert_eq!(link.expect_ack().await, (conversation.id, 1));
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 2, update: progress("in_progress") }).await;
+    assert_eq!(link.expect_ack().await, (conversation.id, 2));
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 3, update: progress("completed") }).await;
+    assert_eq!(link.expect_ack().await, (conversation.id, 3));
+
+    let events = server.events(conversation.id).await;
+    let statuses: Vec<_> = events.iter().map(|event| event["payload"]["update"]["status"].clone()).collect();
+    assert_eq!(statuses, vec![json!("in_progress"), json!("completed")]);
+}
+
+#[tokio::test]
+async fn a_turn_end_after_a_burst_is_stored_after_the_merged_chunks() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 1, update: chunk("agent_message_chunk", "one ") }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation.id, seq: 2, update: chunk("agent_message_chunk", "two") }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+
+    assert_eq!(link.expect_ack().await, (conversation.id, 2));
+    assert_eq!(link.expect_ack().await, (conversation.id, 3));
+
+    let events = server.events(conversation.id).await;
+    let kinds: Vec<_> = events.iter().map(|event| event["kind"].as_str().unwrap().to_string()).collect();
+    assert_eq!(kinds, vec!["acp_update", "turn_end"]);
+    assert_eq!(events[0]["payload"]["update"]["content"]["text"], "one two");
+}
+
 #[tokio::test]
 async fn a_nul_in_a_node_update_is_stored_as_a_replacement_character() {
     let server = Server::start().await;

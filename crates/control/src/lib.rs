@@ -39,6 +39,7 @@ mod rate_limit;
 mod schedules;
 mod search;
 mod sessions;
+mod ssh_access;
 mod state;
 mod store;
 mod stream;
@@ -221,6 +222,11 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/api-access-requests", get(api_access::list))
         .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
         .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
+        .route("/api/v1/ssh-access-requests", get(ssh_access::list))
+        .route("/api/v1/ssh-access-requests/{id}/approve", post(ssh_access::approve))
+        .route("/api/v1/ssh-access-requests/{id}/decline", post(ssh_access::decline))
+        .route("/api/v1/ssh-access-requests/{id}/revoke", post(ssh_access::revoke))
+        .route("/api/v1/nodes/{id}/ssh", get(ssh_access::connect))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))

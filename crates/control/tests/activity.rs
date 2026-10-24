@@ -62,6 +62,21 @@ async fn a_turns_tokens_cost_and_time_are_totalled_per_conversation_and_per_day(
 }
 
 #[tokio::test]
+async fn a_later_turns_time_is_measured_from_its_own_user_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    sqlx::query("update events set created_at = now() - interval '1 hour' where kind = 'user_message'").execute(&server.pool).await.unwrap();
+    finish_turn(&mut link, conversation, 1, None, None, None).await;
+    sqlx::query("insert into events (conversation_id, seq, kind, payload, created_at) values ($1, 100, 'user_message', '{\"text\": \"again\"}', now() - interval '5 seconds')").bind(conversation).execute(&server.pool).await.unwrap();
+
+    finish_turn(&mut link, conversation, 101, None, None, None).await;
+
+    let measured = sqlx::query_scalar::<_, Option<i64>>("select working_ms from usage_turns where conversation_id = $1 order by id desc limit 1").bind(conversation).fetch_one(&server.pool).await.unwrap().unwrap();
+    assert!((5_000..60_000).contains(&measured), "{measured}");
+}
+
+#[tokio::test]
 async fn the_agents_running_cost_is_turned_into_a_cost_per_turn() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -141,7 +141,7 @@ fn publish(state: &AppState, owner: Uuid, row: RequestRow) -> ApiAccessRequest {
     request
 }
 
-async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, text: String) {
+pub(crate) async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, text: String) {
     let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
     let _ = prompts::prompt(State(state.clone()), user, Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
 }

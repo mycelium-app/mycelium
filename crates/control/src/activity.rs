@@ -85,7 +85,7 @@ pub async fn record_turn(state: &AppState, conversation_id: Uuid, usage: Option<
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "insert into usage_turns (conversation_id, owner, node_id, agent, project_id, model, day, working_ms, reported, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, cost_total)
          select c.id, c.owner, c.node_id, c.agent, {PROJECT_OF_CONVERSATION}, coalesce($2, c.model), (now() at time zone 'utc')::date,
-                (select (extract(epoch from now() - max(e.created_at)) * 1000)::bigint from events e where e.conversation_id = c.id and e.kind = 'user_message'),
+                (select (extract(epoch from now() - e.created_at) * 1000)::bigint from events e where e.conversation_id = c.id and e.kind = 'user_message' order by e.seq desc limit 1),
                 $3, $4, $5, $6, $7, $8, $9
          from conversations c where c.id = $1"
     )))
@@ -196,11 +196,11 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Query(query): Qu
 
 pub async fn per_conversation(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ActivityRow>>> {
     let rows = sqlx::query_as::<_, TotalsRow>(
-        "select u.conversation_id::text as key, '' as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
+        "select coalesce(case when c.side_kind = 'subagent' then c.parent_id end, u.conversation_id)::text as key, '' as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
                 coalesce(sum(u.working_ms), 0)::bigint as working_ms, coalesce(sum(u.input_tokens), 0)::bigint as input_tokens,
                 coalesce(sum(u.output_tokens), 0)::bigint as output_tokens, coalesce(sum(u.cache_read_tokens), 0)::bigint as cache_read_tokens,
                 coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd, coalesce(bool_or(u.cost_estimated), false) as cost_estimated
-         from usage_turns u where u.owner = $1 group by u.conversation_id",
+         from usage_turns u join conversations c on c.id = u.conversation_id where u.owner = $1 group by 1",
     )
     .bind(user.id)
     .fetch_all(&state.pool)

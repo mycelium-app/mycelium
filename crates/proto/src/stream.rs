@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{ApiAccessRequest, Artifact, ArtifactComment, Goal, ImportJob, InstructionProposal, Memory, MessageProposal, MoveProgress, NodeSummary, Schedule, Walkthrough, WalkthroughNote};
+use crate::api::{ApiAccessRequest, Artifact, ArtifactComment, Goal, ImportJob, InstructionProposal, Memory, MessageProposal, MoveProgress, NodeSummary, Schedule, SshAccessRequest, Walkthrough, WalkthroughNote};
 use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
@@ -36,6 +36,7 @@ pub enum StreamMessage {
     InstructionProposal(InstructionProposal),
     MessageProposal(MessageProposal),
     ApiAccessRequest(ApiAccessRequest),
+    SshAccessRequest(SshAccessRequest),
     Memory(Memory),
     MemoryRemoved {
         memory_id: Uuid,

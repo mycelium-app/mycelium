@@ -1076,3 +1076,23 @@ async fn a_pushed_api_token_is_saved_for_the_conversation_readable_only_by_its_o
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "myc_client_example");
     assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
 }
+
+#[tokio::test]
+async fn a_pushed_ssh_token_is_saved_for_the_conversation_readable_only_by_its_owner() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(7);
+    let request = Uuid::from_u128(8);
+
+    connection.send(ControlToNode::SshToken { request_id: request, conversation_id: conversation, token: "myc_ssh_example".into() });
+    let saved = connection.next_matching(|message| matches!(message, NodeToControl::SshTokenSaved { .. })).await;
+
+    let path = fixture.session_dir(conversation).join(format!("ssh-token-{request}"));
+    assert_eq!(saved, NodeToControl::SshTokenSaved { request_id: request, path: Some(path.display().to_string()) });
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "myc_ssh_example");
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+}

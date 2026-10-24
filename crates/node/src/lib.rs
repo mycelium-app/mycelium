@@ -12,6 +12,8 @@ pub mod link;
 pub mod login;
 pub mod resources;
 pub mod session;
+pub mod ssh;
+pub mod ssh_proxy;
 pub mod status;
 pub mod terminal;
 pub mod transcripts;

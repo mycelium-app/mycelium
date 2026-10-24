@@ -107,6 +107,18 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },
+    SshTokenSaved {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
+    SshData {
+        session_id: Uuid,
+        data: String,
+    },
+    SshClosed {
+        session_id: Uuid,
+    },
     Resources {
         sample: ResourceSample,
     },
@@ -420,6 +432,21 @@ pub enum ControlToNode {
     ApiToken {
         conversation_id: Uuid,
         token: String,
+    },
+    SshToken {
+        request_id: Uuid,
+        conversation_id: Uuid,
+        token: String,
+    },
+    SshOpen {
+        session_id: Uuid,
+    },
+    SshData {
+        session_id: Uuid,
+        data: String,
+    },
+    SshClose {
+        session_id: Uuid,
     },
     Ping,
     Revoked,
