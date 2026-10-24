@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.10
+
+- A project without a chosen icon shows its first letter, so workspace rows show the project by its icon and no longer put its name before the title.
+
 ## v0.6.9
 
 - Close session ends the agent of any conversation that still has one running, including ones waiting for review.
