@@ -185,6 +185,7 @@ class MoveTest {
         waitForPlan()
 
         rule.onNodeWithText("Move after this turn").performClick()
+        waitForText("Cancel move")
         rule.onNodeWithText("Cancel move").performClick()
         rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/conversations/c1/move" } }
 
