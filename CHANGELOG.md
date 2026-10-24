@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.5
+## v0.6.1
 
 - Artefacts open inside the app. A conversation's Artefacts panel shows one beside the chat, and the full view keeps its chat beside it. Both reload when an agent saves a new version. The desktop app now runs on JetBrains Runtime for its built-in browser.
 - Artefact cards show a preview: a snapshot of pages and designs, the opening lines of Markdown, and images themselves.
