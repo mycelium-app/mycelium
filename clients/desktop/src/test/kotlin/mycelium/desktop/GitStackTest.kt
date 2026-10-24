@@ -16,6 +16,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,15 @@ private fun stackJson(townAvailable: Boolean, inferred: Boolean = false, pullReq
     {"name":"one","parent":"main","depth":1,"current":true,"ahead":2,"behind":0,"has_upstream":true,"pushed":true,"subject":"Add the importer",
      "pull_request":{"number":123,"label":"PR #123","title":"Add the importer","url":"https://forge.example/pull/123","state":"draft"}},
     {"name":"two","parent":"one","depth":2,"ahead":1,"behind":3,"has_upstream":false,"pushed":false,"needs_sync":true,"subject":"Wire the importer in"}
+  ]}"""
+
+private val ChainStackJson = """{
+  "current":"one","main":"main","inferred":false,"git_town_available":true,"pull_requests_available":false,
+  "branches":[
+    {"name":"main","depth":0,"main":true,"has_upstream":true,"pushed":true,"subject":"Start the project"},
+    {"name":"one","parent":"main","depth":1,"current":true,"ahead":5,"behind":0,"has_upstream":true,"pushed":true,"subject":"Add the importer"},
+    {"name":"a-much-longer-branch-name-for-the-second-step","parent":"one","depth":2,"ahead":1,"behind":0,"has_upstream":true,"pushed":true,"subject":"Wire the importer in"},
+    {"name":"three","parent":"a-much-longer-branch-name-for-the-second-step","depth":3,"ahead":2,"behind":1,"has_upstream":true,"pushed":true,"subject":"Test the importer"}
   ]}"""
 
 private class StackFake(val stack: String, val townReply: Pair<HttpStatusCode, String> = HttpStatusCode.OK to "{}") {
@@ -112,8 +122,10 @@ class GitStackTest {
         rule.onNodeWithText("Current branch").assertIsDisplayed()
         rule.onNodeWithText("Needs sync").assertIsDisplayed()
         rule.onNodeWithText("Not pushed").assertIsDisplayed()
-        rule.onNodeWithText("2 ahead, 0 behind main · Add the importer").assertIsDisplayed()
-        rule.onNodeWithText("1 ahead, 3 behind one · Wire the importer in").assertIsDisplayed()
+        rule.onNodeWithText("+2 \u22120").assertIsDisplayed()
+        rule.onAllNodesWithText("Add the importer")[0].assertIsDisplayed()
+        rule.onNodeWithText("+1 \u22123").assertIsDisplayed()
+        rule.onNodeWithText("Wire the importer in").assertIsDisplayed()
     }
 
     @Test
@@ -168,6 +180,18 @@ class GitStackTest {
         rule.waitUntil(5_000) { fake.sent("/git/town/propose") }
 
         assertTrue(rule.onAllNodes(hasContentDescription("Propose two")).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun theSwitchButtonsOfAChainShareOneRightEdgeAndAheadBehindReadsPlusAndMinus() {
+        open(StackFake(ChainStackJson))
+
+        val edges = listOf("main", "a-much-longer-branch-name-for-the-second-step", "three").map {
+            rule.onNodeWithContentDescription("Switch to $it").getBoundsInRoot().right
+        }
+
+        assertEquals(1, edges.distinct().size)
+        rule.onNodeWithText("+5 \u22120").assertIsDisplayed()
     }
 
     @Test
