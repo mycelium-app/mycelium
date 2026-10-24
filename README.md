@@ -47,6 +47,7 @@ curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/ins
 
 Releases are at `https://github.com/mycelium-app/mycelium/releases/download/<tag>/`, each file with a `.sha256`, and are linked
 from the GitLab release. Android and desktop sign in with a device code, the same way a node does.
+The desktop app runs on JetBrains Runtime for its embedded browser.
 
 [`docs/DESIGN.md`](docs/DESIGN.md) has the architecture and the stages, [`docs/STAGE1.md`](docs/STAGE1.md) the
 contract stage 1 was built to, and [example.com/mycelium](https://github.com/mycelium-app/mycelium) the short version.

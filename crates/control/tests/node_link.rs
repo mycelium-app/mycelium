@@ -618,3 +618,32 @@ async fn a_second_connection_with_the_same_credential_closes_the_first_and_says_
 
     assert_eq!(first.close_code().await, Some(mycelium_proto::link::REPLACED_CLOSE_CODE));
 }
+
+#[tokio::test]
+async fn a_reconnect_acknowledges_each_conversation_at_its_own_position() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let first = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(first.id, "acp-1").await;
+    let second = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(second.id, "acp-2").await;
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: first.id, seq: 4, update: json!({"sessionUpdate": "agent_message_chunk", "content": {"text": "a"}}) }).await;
+    assert_eq!(link.expect_ack().await, (first.id, 4));
+    link.send(NodeToControl::AcpUpdate { conversation_id: second.id, seq: 9, update: json!({"sessionUpdate": "agent_message_chunk", "content": {"text": "b"}}) }).await;
+    assert_eq!(link.expect_ack().await, (second.id, 9));
+
+    let (id, token) = (link.id, link.token.clone());
+    drop(link);
+
+    let mut reconnected = server.connect_node(id, &token).await;
+    reconnected.hello(vec![]).await;
+    let mut acks = vec![reconnected.expect_ack().await, reconnected.expect_ack().await];
+    acks.sort();
+
+    let mut expected = vec![(first.id, 4), (second.id, 9)];
+    expected.sort();
+    assert_eq!(acks, expected);
+}

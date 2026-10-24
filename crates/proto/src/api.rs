@@ -77,6 +77,8 @@ pub struct NodeSummary {
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_available: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_message: Option<String>,
     pub online: bool,
     pub draining: bool,
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -994,6 +996,8 @@ pub struct ActivityRow {
     pub cost_usd: Option<f64>,
     #[serde(default)]
     pub cost_estimated: bool,
+    #[serde(default)]
+    pub subagent_tokens: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

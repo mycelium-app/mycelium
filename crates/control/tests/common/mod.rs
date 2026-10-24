@@ -212,8 +212,12 @@ impl NodeLink {
     }
 
     pub async fn hello(&mut self, sessions: Vec<(Uuid, i64)>) {
+        self.hello_as(env!("CARGO_PKG_VERSION"), sessions).await;
+    }
+
+    pub async fn hello_as(&mut self, version: &str, sessions: Vec<(Uuid, i64)>) {
         self.send(NodeToControl::Hello {
-            version: "0.1.0".into(),
+            version: version.into(),
             hostname: "laptop".into(),
             os: "linux".into(),
             arch: "x86_64".into(),
@@ -310,6 +314,7 @@ impl Server {
             device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
             release_url: "http://127.0.0.1:1/latest".into(),
             npm_registry_url: "http://127.0.0.1:1".into(),
+            releases_url: "http://127.0.0.1:1".into(),
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
             scheduler_tick: mycelium_control::SCHEDULER_TICK,
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,

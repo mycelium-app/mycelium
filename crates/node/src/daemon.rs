@@ -28,6 +28,7 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+const UPDATE_EXIT_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
 const USAGE_INTERVAL: Duration = Duration::from_secs(310);
 
@@ -328,8 +329,34 @@ impl Daemon {
             ControlToNode::Ping => {
                 let _ = self.out.send(NodeToControl::Pong);
             }
+            ControlToNode::Update { releases_url, version } => self.update(releases_url, version),
             ControlToNode::Revoked => {}
         }
+    }
+
+    fn update(&self, releases_url: String, version: String) {
+        if crate::update::is_current(VERSION, &version) {
+            return;
+        }
+
+        let out = self.out.clone();
+
+        tokio::spawn(async move {
+            let asset = crate::update::asset_name(std::env::consts::OS, std::env::consts::ARCH);
+            let installed = match (asset, crate::update::running_binary()) {
+                (Ok(asset), Ok(target)) => crate::update::install(&reqwest::Client::new(), &releases_url, &version, &asset, &target).await,
+                (Err(message), _) | (_, Err(message)) => Err(message),
+            };
+
+            let ok = installed.is_ok();
+            let message = installed.err().unwrap_or_else(|| format!("Updated to {version}"));
+            let _ = out.send(NodeToControl::UpdateResult { ok, message });
+
+            if ok {
+                tokio::time::sleep(UPDATE_EXIT_DELAY).await;
+                std::process::exit(0);
+            }
+        });
     }
 
     async fn agents(&self) -> Vec<AgentInfo> {

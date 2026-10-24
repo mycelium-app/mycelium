@@ -35,6 +35,18 @@ async fn status_with(server: &Server, token: &str, method: &str, path: &str) -> 
     response.status().as_u16()
 }
 
+#[tokio::test]
+async fn an_embedded_view_signs_in_with_the_client_token_as_a_cookie() {
+    let server = Server::start().await;
+    let (_, token) = insert_token(&server, None, None).await;
+    let anonymous = server.anonymous();
+
+    let with_cookie = anonymous.http.get(format!("{}/api/v1/me", server.base)).header("cookie", format!("mycelium_client={token}")).send().await.unwrap();
+    let with_a_wrong_cookie = anonymous.http.get(format!("{}/api/v1/me", server.base)).header("cookie", "mycelium_client=myc_client_nope").send().await.unwrap();
+
+    assert_eq!((with_cookie.status().as_u16(), with_a_wrong_cookie.status().as_u16()), (200, 401));
+}
+
 async fn tool(server: &Server, link: &NodeLink, conversation: Uuid, name: &str, arguments: Value) -> Value {
     let anonymous = server.anonymous();
     let request = anonymous

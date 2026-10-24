@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "myc_session";
 const OIDC_COOKIE: &str = "myc_oidc";
+const CLIENT_COOKIE: &str = "mycelium_client";
 const SESSION_DAYS: i64 = 30;
 
 #[derive(Clone)]
@@ -61,7 +62,7 @@ impl FromRequestParts<AppState> for AuthUser {
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<AuthUser, ApiError> {
         let address = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(peer)| client_address(state, &parts.headers, *peer).to_string()).unwrap_or_default();
 
-        if let Some(token) = bearer(&parts.headers).and_then(|value| value.strip_prefix("myc_client_")) {
+        if let Some(token) = bearer(&parts.headers).or_else(|| cookie(&parts.headers, CLIENT_COOKIE)).and_then(|value| value.strip_prefix("myc_client_")) {
             let row = sqlx::query_as::<_, (Uuid, String, String, Uuid, Option<Vec<String>>, Option<chrono::DateTime<chrono::Utc>>)>(
                 "select users.id, users.email, users.name, client_tokens.id, client_tokens.scopes, client_tokens.expires_at from client_tokens join users on users.id = client_tokens.user_id
                  where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and (client_tokens.expires_at is null or client_tokens.expires_at > now())",

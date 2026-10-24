@@ -1,9 +1,9 @@
-# The desktop client from the release's distributable, run on nixpkgs' JDK instead of the bundled
-# runtime, which expects a conventional Linux filesystem.
+# The desktop client from the release's distributable, run on nixpkgs' JetBrains Runtime (with JCEF)
+# instead of the bundled runtime, which expects a conventional Linux filesystem.
 {
   lib,
   stdenvNoCC,
-  jdk21,
+  jetbrains,
   makeWrapper,
   libGL,
   fontconfig,
@@ -13,6 +13,20 @@
   gtk3,
   gsettings-desktop-schemas,
   libnotify,
+  nss,
+  nspr,
+  libxkbcommon,
+  libgbm,
+  alsa-lib,
+  cups,
+  libdrm,
+  at-spi2-atk,
+  at-spi2-core,
+  atk,
+  pango,
+  cairo,
+  dbus,
+  expat,
   version,
   distributable,
 }:
@@ -35,11 +49,14 @@ stdenvNoCC.mkDerivation {
 
     # Skia draws through OpenGL and reads fonts through fontconfig, and GTK's file dialog aborts
     # without the GSettings schemas. None of them are found on NixOS without being named here.
-    makeWrapper ${jdk21}/bin/java $out/bin/mycelium-desktop \
+    makeWrapper ${jetbrains.jdk}/bin/java $out/bin/mycelium-desktop \
       --add-flags "-Djpackage.app-version=${version}" \
       --add-flags "-Dcompose.application.resources.dir=$app/resources" \
       --add-flags "-Dcompose.application.configure.swing.globals=true" \
       --add-flags "-Dskiko.library.path=$app" \
+      --add-flags "--add-opens=java.desktop/sun.awt=ALL-UNNAMED" \
+      --add-flags "--add-opens=java.desktop/java.awt.peer=ALL-UNNAMED" \
+      --add-flags "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED" \
       --add-flags "-cp '$app/*' mycelium.desktop.MainKt" \
       --prefix PATH : ${lib.makeBinPath [ libnotify glib ]} \
       --prefix XDG_DATA_DIRS : ${glib.getSchemaDataDirPath gsettings-desktop-schemas}:${glib.getSchemaDataDirPath gtk3} \
@@ -55,6 +72,24 @@ stdenvNoCC.mkDerivation {
           xorg.libXi
           xorg.libXrandr
           xorg.libXcursor
+          xorg.libXcomposite
+          xorg.libXdamage
+          xorg.libXfixes
+          xorg.libxcb
+          nss
+          nspr
+          libxkbcommon
+          libgbm
+          alsa-lib
+          cups
+          libdrm
+          at-spi2-atk
+          at-spi2-core
+          atk
+          pango
+          cairo
+          dbus
+          expat
         ]
       }
 

@@ -7,7 +7,7 @@ use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
-use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, lock_on_node, publish_node, set_status, without_nul};
+use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -202,6 +202,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::Workflow { conversation_id, run_id, line } => {
             record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await?;
 
+            if !matches!(line["type"].as_str(), Some("result" | "failed")) {
+                return Ok(());
+            }
+
             let idle = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {TURN_HAS_ENDED} and not coalesce((select agent_active from conversations where id = $1), false)")))
             .bind(conversation_id)
             .fetch_one(&state.pool)
@@ -261,6 +265,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::UpdateResult { message, .. } => crate::node_updates::record_result(state, node_id, message).await,
         NodeToControl::ProcessStopped { request_id, ok, error } => {
             state.hub.answer_stop(node_id, request_id, ProcessAnswer { ok, error });
 
@@ -288,7 +293,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     let mut tx = state.pool.begin().await?;
     sqlx::query("update nodes set version = $2, hostname = $3, os = $4, arch = $5, last_seen_at = now() where id = $1")
         .bind(node_id)
-        .bind(version)
+        .bind(&version)
         .bind(hostname)
         .bind(os)
         .bind(arch)
@@ -314,8 +319,10 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
 
     let conversations = sqlx::query_scalar::<_, Uuid>("select id from conversations where node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
 
+    let highest = highest_node_seqs(&state.pool, &conversations).await?;
+
     for conversation_id in conversations {
-        let seq = highest_node_seq(&state.pool, conversation_id).await?;
+        let seq = highest.get(&conversation_id).copied().unwrap_or(0);
 
         if seq > 0 || live.contains(&conversation_id) {
             state.hub.send(node_id, ControlToNode::Ack { conversation_id, seq });
@@ -328,6 +335,7 @@ async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: Strin
     }
 
     crate::instructions::push_to(state, node_id, false).await?;
+    crate::node_updates::offer_to_an_older_node(state, node_id, &version);
     publish_node(state, node_id).await?;
 
     let waiting = sqlx::query_scalar::<_, Uuid>("select distinct q.conversation_id from queued_prompts q join conversations c on c.id = q.conversation_id where c.node_id = $1")

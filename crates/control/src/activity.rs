@@ -35,6 +35,8 @@ struct TotalsRow {
     cache_write_tokens: i64,
     cost_usd: Option<f64>,
     cost_estimated: bool,
+    #[sqlx(default)]
+    subagent_tokens: i64,
 }
 
 impl TotalsRow {
@@ -51,6 +53,7 @@ impl TotalsRow {
             cache_write_tokens: self.cache_write_tokens,
             cost_usd: self.cost_usd,
             cost_estimated: self.cost_estimated,
+            subagent_tokens: self.subagent_tokens,
         }
     }
 }
@@ -199,7 +202,8 @@ pub async fn per_conversation(State(state): State<AppState>, user: AuthUser) -> 
         "select coalesce(case when c.side_kind = 'subagent' then c.parent_id end, u.conversation_id)::text as key, '' as name, count(*) as turns, count(*) filter (where u.reported) as reported_turns,
                 coalesce(sum(u.working_ms), 0)::bigint as working_ms, coalesce(sum(u.input_tokens), 0)::bigint as input_tokens,
                 coalesce(sum(u.output_tokens), 0)::bigint as output_tokens, coalesce(sum(u.cache_read_tokens), 0)::bigint as cache_read_tokens,
-                coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd, coalesce(bool_or(u.cost_estimated), false) as cost_estimated
+                coalesce(sum(u.cache_write_tokens), 0)::bigint as cache_write_tokens, sum(u.cost_usd) as cost_usd, coalesce(bool_or(u.cost_estimated), false) as cost_estimated,
+                coalesce(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens) filter (where c.side_kind = 'subagent'), 0)::bigint as subagent_tokens
          from usage_turns u join conversations c on c.id = u.conversation_id where u.owner = $1 group by 1",
     )
     .bind(user.id)

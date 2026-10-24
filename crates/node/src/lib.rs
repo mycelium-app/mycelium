@@ -17,6 +17,7 @@ pub mod ssh_proxy;
 pub mod status;
 pub mod terminal;
 pub mod transcripts;
+pub mod update;
 pub mod usage;
 
 pub use daemon::run;

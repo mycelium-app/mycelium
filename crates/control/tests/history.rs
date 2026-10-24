@@ -418,6 +418,7 @@ async fn a_live_subagents_token_usage_is_counted_in_its_parent_conversations_tot
 
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!((rows[0]["key"].clone(), rows[0]["input_tokens"].clone(), rows[0]["output_tokens"].clone()), (json!(parent.id.to_string()), json!(100), json!(20)));
+    assert_eq!(rows[0]["subagent_tokens"], json!(120));
 }
 
 #[tokio::test]

@@ -150,6 +150,8 @@ build:clients:
     ANDROID_SDK_ROOT: "$CI_PROJECT_DIR/.android-sdk"
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
     APK_NAME: "mycelium-android.apk"
+    JBR_ARCHIVE: "jbrsdk_jcef-21.0.11-linux-x64-b1163.116.tar.gz"
+    JBR_SHA512: "6085bd3823ae88719e9920a43b3fed299d5e0454eb3b9755746f0f4833d1746a2b92aadb9608bf3df2da4c71fd88e6697e08000136885b6098fd30f42c29def8"
   cache:
     key: "clients-$ANDROID_CMDLINE_TOOLS-$ANDROID_COMPILE_SDK-$ANDROID_BUILD_TOOLS"
     paths:
@@ -161,6 +163,14 @@ build:clients:
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends curl unzip git fakeroot binutils libatomic1 > /dev/null
     - *awscli
+    - |
+      mkdir -p /opt/jbr
+      curl -fsSL -o /tmp/jbr.tar.gz "https://cache-redirector.jetbrains.com/intellij-jbr/$JBR_ARCHIVE"
+      echo "$JBR_SHA512  /tmp/jbr.tar.gz" | sha512sum -c -
+      tar -xzf /tmp/jbr.tar.gz -C /opt/jbr --strip-components=1
+      rm /tmp/jbr.tar.gz
+      export MYCELIUM_JBR_HOME=/opt/jbr JAVA_HOME=/opt/jbr
+      export PATH="/opt/jbr/bin:$PATH"
     - |
       if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
         mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"

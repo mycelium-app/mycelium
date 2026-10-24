@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use mycelium_proto::api::{ApiAccessRequest, ApiAccessState, ApproveApiAccessRequest, PromptRequest};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
+use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
 
 pub const SCOPES: [&str; 4] = ["conversations:read", "conversations:write", "nodes:read", "settings:read"];
@@ -19,6 +20,8 @@ const MIN_HOURS: i64 = 1;
 const MAX_HOURS: i64 = 24;
 const LISTED: i64 = 100;
 const CALL_LOG_DAYS: i32 = 30;
+const PURGE_INTERVAL_SECONDS: i64 = 3600;
+static LAST_PURGE: AtomicI64 = AtomicI64::new(0);
 const TOKEN_LABEL: &str = "Agent access";
 
 const REQUEST_COLUMNS: &str = "id, conversation_id, scopes, hours, reason, state, created_at, decided_at";
@@ -119,6 +122,10 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
         tracing::warn!("could not log a call made with a scoped token: {error}");
     }
 
+    if !purge_is_due() {
+        return response;
+    }
+
     let purged = sqlx::query("delete from api_token_calls where called_at < now() - make_interval(days => $1)").bind(CALL_LOG_DAYS).execute(&state.pool).await;
 
     if let Err(error) = purged {
@@ -126,6 +133,13 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     }
 
     response
+}
+
+fn purge_is_due() -> bool {
+    let now = chrono::Utc::now().timestamp();
+    let last = LAST_PURGE.load(Ordering::Relaxed);
+
+    now - last >= PURGE_INTERVAL_SECONDS && LAST_PURGE.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
 }
 
 async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<RequestRow> {

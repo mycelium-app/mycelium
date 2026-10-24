@@ -128,6 +128,10 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    UpdateResult {
+        ok: bool,
+        message: String,
+    },
     Pong,
 }
 
@@ -447,6 +451,10 @@ pub enum ControlToNode {
     },
     SshClose {
         session_id: Uuid,
+    },
+    Update {
+        releases_url: String,
+        version: String,
     },
     Ping,
     Revoked,

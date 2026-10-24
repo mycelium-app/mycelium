@@ -357,6 +357,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         version: "0.1.0".into(),
         address: "100.64.0.2".into(),
         update_available: None,
+        update_message: None,
         online: true,
         draining: false,
         last_seen_at: Some(now()),

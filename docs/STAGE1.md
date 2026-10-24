@@ -68,6 +68,7 @@ release binaries are static musl.
 | `MYCELIUM_SKIP_MIGRATIONS` | `false` | For gated deploys only |
 | `MYCELIUM_RELEASE_URL` | `https://github.com/mycelium-app/mycelium/releases/latest/download/latest` | Plain-text tag of the newest Mycelium release, checked hourly |
 | `MYCELIUM_NPM_REGISTRY_URL` | `https://registry.npmjs.org` | Registry the newest `@agentclientprotocol/claude-agent-acp` and `@agentclientprotocol/codex-acp` are read from, checked hourly |
+| `MYCELIUM_RELEASES_URL` | `https://github.com/mycelium-app/mycelium/releases/download` | Folder of `<version>/mycelium-<os>-<arch>` builds and their `.sha256` that a node downloads when it updates. A node older than the control plane updates itself when it connects; the Update button on a node page does the same on request |
 | `MYCELIUM_TRUSTED_PROXIES` | empty | Comma-separated addresses or CIDR ranges of reverse proxies. `X-Forwarded-For` is read only on connections from these, taking the nearest address that is not itself a proxy. Empty trusts no header |
 
 ### Boot, health and migrations

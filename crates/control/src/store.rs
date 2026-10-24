@@ -250,6 +250,12 @@ pub async fn highest_node_seq(pool: &PgPool, conversation_id: Uuid) -> sqlx::Res
     sqlx::query_scalar::<_, i64>("select coalesce(max(node_seq), 0) from events where conversation_id = $1").bind(conversation_id).fetch_one(pool).await
 }
 
+pub async fn highest_node_seqs(pool: &PgPool, conversation_ids: &[Uuid]) -> sqlx::Result<std::collections::HashMap<Uuid, i64>> {
+    let rows = sqlx::query_as::<_, (Uuid, i64)>("select conversation_id, coalesce(max(node_seq), 0) from events where conversation_id = any($1) group by conversation_id").bind(conversation_ids).fetch_all(pool).await?;
+
+    Ok(rows.into_iter().collect())
+}
+
 pub async fn queue_of(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<Vec<QueuedPrompt>> {
     let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, chrono::DateTime<chrono::Utc>)>(
         "select id, position, text, attachments, created_at from queued_prompts where conversation_id = $1 order by position",
@@ -353,6 +359,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             os: node.os,
             arch: node.arch,
             update_available: newer(&node.version, state.latest.get("mycelium")),
+            update_message: crate::node_updates::message_of(node.id),
             address: node.address,
             version: node.version,
             online: state.hub.is_online(node.id),
