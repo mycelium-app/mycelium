@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.5
+
+- Artefacts open inside the app. A conversation's Artefacts panel shows one beside the chat, and the full view keeps its chat beside it. Both reload when an agent saves a new version. The desktop app now runs on JetBrains Runtime for its built-in browser.
+- Artefact cards show a preview: a snapshot of pages and designs, the opening lines of Markdown, and images themselves.
+- Nodes update themselves when the control plane is newer, and the node page has an Update button.
+- Working statuses are reliable: a chat shows Working while its agent replies, even unprompted, and returns to Review when nothing is running. The composer only shows Stop while the agent itself is answering.
+- The workflow card lists stages before they start, shows each running agent's tokens, turns and time as they change, opens an agent's conversation when you click it, and marks agents that stop responding.
+- The Subagents panel names workflow agents by their label, keeps the parent's list inside a subagent, and shows how long ago each was active.
+- On a phone, swipe right anywhere to open the sidebar, and long conversations load far fewer messages.
+- History hides empty conversations, shows how much of a conversation's tokens ran in subagents, and keeps its columns aligned.
+- The git Stack tab is one column with aligned Switch buttons.
+- Retry tells the agent to continue, and resuming after a usage limit says so.
+- The Design editor uses the app's colours, and keeps text you type when you click away.
+
 ## v0.5.4
 
 - Agents can ask for SSH access to one of your nodes. You approve it in the chat for a set time, and can shorten it or revoke it. The connection goes through the control plane, so the node opens no port.
