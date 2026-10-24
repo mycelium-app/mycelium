@@ -427,7 +427,7 @@ impl Daemon {
 
     fn start_login(&self, login_id: Uuid, agent: AgentId, command: Vec<String>, account: Option<String>) {
         let Some(label) = account else {
-            self.logins.start(login_id, command, Vec::new());
+            self.logins.start(login_id, command, Vec::new(), None);
 
             return;
         };
@@ -435,8 +435,12 @@ impl Daemon {
         let accounts = accounts_dir(&self.config.state_dir);
         let found = find_account(&self.options.home, &accounts, agent, &label);
 
+        let created = found.is_none();
         match found.map(Ok).unwrap_or_else(|| new_account(&accounts, agent, &label)) {
-            Ok(account) => self.logins.start(login_id, command, account_env(agent, &account)),
+            Ok(account) => {
+                let discard_on_failure = created.then(|| account.dir.clone());
+                self.logins.start(login_id, command, account_env(agent, &account), discard_on_failure);
+            }
             Err(error) => self.logins.refuse(login_id, format!("Could not create a place for {label} on this node: {error}.")),
         }
     }

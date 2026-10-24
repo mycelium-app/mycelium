@@ -3,6 +3,7 @@ use mycelium_proto::link::NodeToControl;
 use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -26,8 +27,9 @@ impl LoginManager {
         LoginManager { out, report_state, running: Arc::new(Mutex::new(HashMap::new())) }
     }
 
-    pub fn start(&self, login_id: Uuid, command: Vec<String>, env: Vec<(String, String)>) {
-        if let Err(error) = self.try_start(login_id, &command, &env) {
+    pub fn start(&self, login_id: Uuid, command: Vec<String>, env: Vec<(String, String)>, discard_on_failure: Option<PathBuf>) {
+        if let Err(error) = self.try_start(login_id, &command, &env, discard_on_failure.clone()) {
+            discard(discard_on_failure);
             self.refuse(login_id, format!("{error:#}"));
         }
     }
@@ -58,7 +60,7 @@ impl LoginManager {
         }
     }
 
-    fn try_start(&self, login_id: Uuid, command: &[String], env: &[(String, String)]) -> Result<()> {
+    fn try_start(&self, login_id: Uuid, command: &[String], env: &[(String, String)], discard_on_failure: Option<PathBuf>) -> Result<()> {
         let Some((program, args)) = command.split_first() else {
             anyhow::bail!("This agent has no sign-in command.");
         };
@@ -104,11 +106,21 @@ impl LoginManager {
                 running.remove(&login_id);
             }
 
+            if !ok {
+                discard(discard_on_failure);
+            }
+
             let _ = out.send(NodeToControl::LoginFinished { login_id, ok });
             let _ = out.send(report_state());
         });
 
         Ok(())
+    }
+}
+
+fn discard(dir: Option<PathBuf>) {
+    if let Some(dir) = dir {
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
@@ -162,7 +174,7 @@ mod tests {
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(1);
 
-        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo visit-the-link; read answer; echo got-$answer".into()], vec![]);
+        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo visit-the-link; read answer; echo got-$answer".into()], vec![], None);
 
         let mut seen = String::new();
         while !seen.contains("visit-the-link") {
@@ -194,7 +206,7 @@ mod tests {
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(2);
 
-        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo ready; sleep 30".into()], vec![]);
+        manager.start(login_id, vec!["sh".into(), "-c".into(), "echo ready; sleep 30".into()], vec![], None);
         while !matches!(next_message(&mut messages).await, NodeToControl::LoginOutput { .. }) {}
 
         manager.stop(login_id);
@@ -208,12 +220,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_failed_login_removes_the_account_folder_made_for_it_and_a_successful_one_keeps_it() {
+        let (out, mut messages) = mpsc::unbounded_channel();
+        let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
+        let accounts = tempfile::tempdir().unwrap();
+        let failed = accounts.path().join("failed");
+        let kept = accounts.path().join("kept");
+        std::fs::create_dir_all(&failed).unwrap();
+        std::fs::create_dir_all(&kept).unwrap();
+
+        manager.start(Uuid::from_u128(4), vec!["sh".into(), "-c".into(), "exit 1".into()], vec![], Some(failed.clone()));
+        while !matches!(next_message(&mut messages).await, NodeToControl::LoginFinished { .. }) {}
+        manager.start(Uuid::from_u128(5), vec!["sh".into(), "-c".into(), "true".into()], vec![], Some(kept.clone()));
+        while !matches!(next_message(&mut messages).await, NodeToControl::LoginFinished { .. }) {}
+
+        assert!(!failed.exists());
+        assert!(kept.exists());
+    }
+
+    #[tokio::test]
     async fn a_missing_command_is_reported_as_a_failed_login() {
         let (out, mut messages) = mpsc::unbounded_channel();
         let manager = LoginManager::new(out, Arc::new(|| NodeToControl::Pong));
         let login_id = Uuid::from_u128(3);
 
-        manager.start(login_id, vec!["/nonexistent/agent".into(), "login".into()], vec![]);
+        manager.start(login_id, vec!["/nonexistent/agent".into(), "login".into()], vec![], None);
 
         let NodeToControl::LoginOutput { data, .. } = next_message(&mut messages).await else {
             panic!("expected an explanation first");
