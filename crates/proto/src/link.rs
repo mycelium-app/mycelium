@@ -257,6 +257,9 @@ pub enum GitCommand {
     Stage { paths: Vec<String> },
     Unstage { paths: Vec<String> },
     StageAll,
+    Hunk { path: String, row: u32, fingerprint: String, action: String },
+    File { path: String, content: Option<String>, expected: Option<String> },
+    Remote { action: String, force: bool, url: String, allowed_urls: Vec<String>, credentials: GitCredentials },
     Commit {
         message: String,
         #[serde(default, flatten)]

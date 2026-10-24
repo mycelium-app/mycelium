@@ -684,6 +684,23 @@ pub enum MessageProposalState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConversationConnection {
+    pub id: Uuid,
+    pub source_id: Uuid,
+    pub target_id: Uuid,
+    pub source_title: String,
+    pub target_title: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateConversationConnectionRequest {
+    pub source_id: Uuid,
+    pub target_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessageProposal {
     pub id: Uuid,
     pub conversation_id: Option<Uuid>,
@@ -1083,7 +1100,11 @@ pub struct Goal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekly_limit: Option<u8>,
     pub tokens_used: i64,
+    #[serde(default)]
+    pub tokens_known: bool,
     pub turns: i64,
+    #[serde(default)]
+    pub turn_active: bool,
     pub started_at: chrono::DateTime<chrono::Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub five_hour_used: Option<f64>,
@@ -1199,6 +1220,10 @@ pub struct Artifact {
     pub owner: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<Uuid>,
+    #[serde(default)]
+    pub project_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub conversation_ids: Vec<Uuid>,
     pub kind: ArtifactKind,
     pub title: String,
     pub slug: String,
@@ -1215,6 +1240,40 @@ pub struct Artifact {
     pub versions: Vec<ArtifactVersion>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub deleted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactLink {
+    pub id: Uuid,
+    pub artifact_id: Uuid,
+    pub project_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
+    pub permission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinkArtifactRequest {
+    pub project_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
+    pub permission: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactAccessRequest {
+    pub id: Uuid,
+    pub artifact_id: Uuid,
+    pub conversation_id: Uuid,
+    pub permission: String,
+    pub reason: String,
+    pub state: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ApproveArtifactAccessRequest {
+    #[serde(default)]
+    pub project: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

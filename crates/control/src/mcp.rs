@@ -13,6 +13,7 @@ use crate::state::AppState;
 use crate::tasks;
 use crate::walkthroughs;
 use axum::Json;
+use base64::Engine;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -48,6 +49,9 @@ fn tool_text(text: &str, is_error: bool) -> Value {
 
 pub fn tool_definitions() -> Value {
     json!([
+        {"name":"start_workflow","description":"Start a native workflow or subagent. Steps use ordinary conversations across agents and nodes. Dependencies fan out automatically; gate steps wait for the person. Prompts reference {{step_key.output}} and {{previous}}. Nested workflow steps contain another plan. Use max_rounds (1 to 20) and optional stop_when text for bounded debate loops.","inputSchema":{"type":"object","properties":{"plan":{"type":"object"}},"required":["plan"]}},
+        {"name":"start_subagent","description":"Start a native subagent as an ordinary conversation, independently of the current agent harness. Supply a step with title, prompt, node_id, agent (claude or codex), cwd, optional model, difficulty, account, project_id and branch. Or provider_id and model for a chat-model subagent. Read its conversation and result with get_workflow.","inputSchema":{"type":"object","properties":{"step":{"type":"object"}},"required":["step"]}},
+        {"name":"get_workflow","description":"Read a native workflow, its step conversations, outputs and gates.","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}},
         {
             "name": "recall",
             "description": "Search the shared memory for what earlier conversations learned. Use it before starting work that may have been done or decided before. It searches the global memories and this conversation's group, and says how many matches it left out in other groups. Pass groups to search other groups too.",
@@ -178,6 +182,27 @@ pub fn tool_definitions() -> Value {
             },
         },
         {
+            "name": "get_goal",
+            "description": "Read this conversation's Mycelium goal, active/completed turns, reported token consumption, token/time limits and account usage windows. tokens_known=false means the agent has not reported usage; it does not mean zero consumption.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "get_account_usage",
+            "description": "Read the signed-in agent account's reported usage windows and when they were read. This is account quota usage, separate from goal token consumption. Missing windows mean the node has not reported account usage.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "set_project_icon",
+            "description": "Set this conversation's project logo from an image file inside its working folder. Accepts PNG, JPEG or WebP up to 256 KB. Convert SVG to PNG first so the logo works on every client. This updates the project immediately.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "The image file inside this conversation's working folder."},
+                },
+                "required": ["path"],
+            },
+        },
+        {
             "name": "find_conversations",
             "description": "Look up the person's other conversations, most recent first, to find the one to message with send_to_conversation. Archived conversations are left out. It only reads and needs no approval.",
             "inputSchema": {
@@ -190,7 +215,7 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "send_to_conversation",
-            "description": "Propose a message to send to another of the person's conversations. It never sends directly: it waits for the person to approve it in a card in this conversation, and only then is the message queued in the other conversation, prefixed with the title of this one. Find the target with find_conversations.",
+            "description": "Propose a message to send to another of the person's conversations. An approved connection allows immediate delivery; otherwise the message waits for the person to approve it in a card in this conversation. Messages are prefixed with the source conversation title. Find the target with find_conversations.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -226,6 +251,16 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["node", "reason"],
             },
+        },
+        {
+            "name": "find_artifacts",
+            "description": "Find artefacts this conversation or its project can view or edit. Returns ids, slugs, titles and access. Use request_artifact_access for another known artefact.",
+            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "additionalProperties": false}
+        },
+        {
+            "name": "request_artifact_access",
+            "description": "Ask the person to grant this conversation view or edit access to an artefact. A durable approval card appears in Artefacts. Access is granted only after approval.",
+            "inputSchema": {"type": "object", "properties": {"artifact": {"type": "string"}, "permission": {"type": "string", "enum": ["view", "edit"]}, "reason": {"type": "string"}}, "required": ["artifact", "permission", "reason"], "additionalProperties": false}
         },
         {
             "name": "create_artifact",
@@ -403,6 +438,30 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
             let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
 
             match params.get("name").and_then(Value::as_str) {
+                Some("start_workflow") | Some("start_subagent") | Some("get_workflow") => {
+                    let owner = node_owner(&state, node.id).await?;
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(id, _)| id);
+                    let tool = params.get("name").and_then(Value::as_str);
+                    if tool == Some("start_workflow") || tool == Some("start_subagent") {
+                        let plan = if tool == Some("start_subagent") {
+                            let mut step = arguments.get("step").cloned().unwrap_or(Value::Null);
+                            if let Some(step) = step.as_object_mut() { step.insert("key".into(), json!("subagent")); }
+                            json!({"title":step.get("title").cloned().unwrap_or(json!("Subagent")),"steps":[step]})
+                        } else { arguments.get("plan").cloned().unwrap_or(Value::Null) };
+                        let plan = match serde_json::from_value::<crate::workflows::Plan>(plan) {
+                            Ok(plan) => plan,
+                            Err(error) => return Ok(reply(&id, tool_text(&format!("Enter a workflow plan: {error}"), true))),
+                        };
+                        let workflow = crate::workflows::create_owned(&state, owner, None, conversation, plan).await?;
+                        return Ok(reply(&id, tool_text(&format!("Started workflow {workflow}."), false)));
+                    }
+                    let Some(workflow) = arguments.get("id").and_then(Value::as_str).and_then(|id| id.parse().ok()) else {
+                        return Ok(failure(&id, INVALID_PARAMS, "get_workflow needs a workflow id."));
+                    };
+                    let user = crate::auth::AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+                    let Json(value) = crate::workflows::get(State(state.clone()), user, axum::extract::Path(workflow)).await?;
+                    reply(&id, tool_text(&value.to_string(), false))
+                }
                 Some("recall") => {
                     let Some(query) = arguments.get("query").and_then(Value::as_str) else {
                         return Ok(failure(&id, INVALID_PARAMS, "recall needs a query, a string."));
@@ -595,6 +654,65 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
+                Some("get_goal") | Some("get_account_usage") => {
+                    let Some((conversation, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Read goal and account usage from a conversation.", true)));
+                    };
+                    let owner = node_owner(&state, node.id).await?;
+                    let user = crate::auth::AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+                    let value = if params["name"] == "get_goal" {
+                        let Json(goal) = crate::goals::get(State(state.clone()), user, axum::extract::Path(conversation)).await?;
+                        serde_json::to_value(goal).map_err(crate::error::ApiError::internal)?
+                    } else {
+                        let row = crate::store::find_owned(&state.pool, conversation, owner).await?;
+                        let reading = sqlx::query_as::<_, (Value, Option<chrono::DateTime<chrono::Utc>>)>("select usage_windows, usage_read_at from logins where node_id = $1 and agent = $2 and ($3::text is null or coalesce(account,'') = $3) order by jsonb_array_length(usage_windows) > 0 desc, usage_read_at desc nulls last limit 1").bind(row.node_id).bind(row.agent).bind(row.account).fetch_optional(&state.pool).await?;
+
+                        match reading {
+                            Some((windows, read_at)) => json!({"windows":windows,"read_at":read_at}),
+                            None => json!({"windows":[],"read_at":null}),
+                        }
+                    };
+
+                    reply(&id, tool_text(&value.to_string(), false))
+                }
+                Some("set_project_icon") => {
+                    let path = arguments.get("path").and_then(Value::as_str).map(str::trim).filter(|path| !path.is_empty());
+                    let Some(path) = path else {
+                        return Ok(failure(&id, INVALID_PARAMS, "set_project_icon needs the image file's path."));
+                    };
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Set the logo from a conversation linked to a project.", true)));
+                    };
+                    let owner = node_owner(&state, node.id).await?;
+                    let result = async {
+                        let conversation = crate::store::find_owned(&state.pool, conversation_id, owner).await?;
+                        let project = conversation.project_id.ok_or_else(|| crate::error::ApiError::bad_request("project_required", "This conversation has no project. Link it to a project before setting its logo."))?;
+                        crate::projects::find_owned(&state, project, owner).await?;
+                        let answer = crate::git::relay(&state, conversation.node_id, conversation.cwd, mycelium_proto::link::GitCommand::ReadFile { path: path.to_string() }).await?;
+                        let encoded = answer["data"].as_str().unwrap_or_default();
+                        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(crate::error::ApiError::internal)?;
+                        let media_type = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                            "image/png"
+                        } else if bytes.starts_with(b"\xff\xd8\xff") {
+                            "image/jpeg"
+                        } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+                            "image/webp"
+                        } else {
+                            return Err(crate::error::ApiError::bad_request("avatar_not_image", "Choose a PNG, JPEG or WebP image. Convert SVG to PNG before setting the project logo."));
+                        };
+                        let mut headers = HeaderMap::new();
+                        headers.insert("content-type", axum::http::HeaderValue::from_static(media_type));
+                        let user = crate::auth::AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+                        let Json(project) = crate::projects::upload_avatar(State(state.clone()), user, axum::extract::Path(project), headers, bytes.into()).await?;
+
+                        Ok::<_, crate::error::ApiError>(project)
+                    }.await;
+
+                    match result {
+                        Ok(project) => reply(&id, tool_text(&format!("Set the logo for project {} ({}).", project.name, project.id), false)),
+                        Err(error) => reply(&id, tool_text(error.message(), true)),
+                    }
+                }
                 Some("find_conversations") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                         return Ok(reply(&id, tool_text("The conversations belong to a person, and this call did not come from one of them.", true)));
@@ -642,7 +760,15 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
 
                     match message_proposals::propose(&state, conversation_id, target, message, reason).await? {
-                        Ok(proposal) => reply(&id, tool_text(&format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id), false)),
+                        Ok(proposal) => {
+                            let message = if proposal.state == mycelium_proto::api::MessageProposalState::Sent {
+                                format!("Sent to {} (message {}).", proposal.target_title, proposal.id)
+                            } else {
+                                format!("Waiting for the person to approve sending this to {} (proposal {}).", proposal.target_title, proposal.id)
+                            };
+
+                            reply(&id, tool_text(&message, false))
+                        }
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
@@ -686,7 +812,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
-                Some(tool @ ("create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback")) => {
+                Some(tool @ ("find_artifacts" | "request_artifact_access" | "create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback")) => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                         return Ok(reply(&id, tool_text("An artifact belongs to a conversation, and this call did not come from one.", true)));
                     };

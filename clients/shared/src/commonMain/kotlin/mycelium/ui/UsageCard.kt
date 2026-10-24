@@ -17,14 +17,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
+import kotlin.time.Instant
+import mycelium.api.ModelProviderUsage
 import mycelium.state.AgentAccount
 import mycelium.state.runsOutBeforeReset
 import mycelium.state.usageProjection
 import mycelium.state.windowName
 
 @Composable
-fun UsageCard(accounts: List<Pair<AgentAccount, Boolean>>, modifier: Modifier = Modifier) {
+fun UsageCard(
+    accounts: List<Pair<AgentAccount, Boolean>>,
+    modifier: Modifier = Modifier,
+    providers: List<ModelProviderUsage> = emptyList(),
+    currentProviderId: String? = null,
+) {
     val colors = MyTheme.colors
 
     BoxWithConstraints(modifier) {
@@ -40,7 +49,7 @@ fun UsageCard(accounts: List<Pair<AgentAccount, Boolean>>, modifier: Modifier = 
 
             val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
 
-            if (reported.isEmpty()) {
+            if (reported.isEmpty() && providers.isEmpty()) {
                 Hairline()
                 Label("No account has reported usage yet.", Modifier.padding(Tokens.Space.S1_5), Tokens.Type.Meta, colors.textMuted)
             }
@@ -49,6 +58,44 @@ fun UsageCard(accounts: List<Pair<AgentAccount, Boolean>>, modifier: Modifier = 
                 Hairline()
 
                 UsageBlock(account, thisChat)
+            }
+
+            for (provider in providers.sortedBy { it.providerId != currentProviderId }) {
+                Hairline()
+
+                Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        Label("OpenRouter: ${provider.name}", Modifier.weight(1f), Tokens.Type.UiStrong)
+
+                        if (provider.providerId == currentProviderId) {
+                            Tag("This chat")
+                        }
+                    }
+
+                    Label("Key spend (USD)", style = Tokens.Type.Meta, color = colors.textMuted)
+                    val spend = provider.spend
+
+                    if (spend == null) {
+                        Label("Spend not reported yet.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    } else {
+                        val amounts = listOf("Total" to spend.total, "Today" to spend.daily, "This week" to spend.weekly, "This month" to spend.monthly) +
+                            if (spend.limitRemaining != null) listOf("Key limit remaining" to spend.limitRemaining) else emptyList()
+
+                        for ((label, amount) in amounts) {
+                            val cents = amount?.let { (it * 100).roundToLong() }
+                            val sign = if (cents != null && cents < 0) "-" else ""
+                            val absoluteCents = cents?.absoluteValue
+                            val display = if (absoluteCents == null) "Not reported" else "$sign$${absoluteCents / 100}.${(absoluteCents % 100).toString().padStart(2, '0')}"
+
+                            Row {
+                                Label(label, Modifier.weight(1f), Tokens.Type.Meta)
+                                Label(display, style = Tokens.Type.Meta)
+                            }
+                        }
+                    }
+
+                    UsageUpdatedAt(provider.readAt)
+                }
             }
         }
     }
@@ -70,6 +117,8 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
             }
         }
 
+        UsageUpdatedAt(account.usageReadAt)
+
         for (window in account.windows) {
             val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
@@ -88,5 +137,20 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun UsageUpdatedAt(readAt: String?) {
+    val platform = LocalPlatform.current
+    val updated = readAt?.let { timestamp ->
+        val millis = runCatching { Instant.parse(timestamp).toEpochMilliseconds() }.getOrNull()
+        val local = millis?.let { platform?.localDateTime(it) }
+
+        local?.replace('T', ' ') ?: timestamp
+    }
+
+    if (updated != null) {
+        Label("Last updated $updated", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
     }
 }

@@ -594,3 +594,71 @@ async fn a_goal_on_a_conversation_that_is_not_yours_is_not_found() {
 
     assert_eq!(status, 404);
 }
+
+#[tokio::test]
+async fn a_running_goal_counts_reported_codex_tokens_before_the_turn_ends_without_counting_replayed_samples_twice() {
+    use base64::Engine;
+    for folder in [".codex/sessions", ".local/state/mycelium/accounts/codex/account-test/sessions"] {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let session = Uuid::new_v4();
+    sqlx::query("update conversations set acp_session_id = $2 where id = $1").bind(id).bind(session.to_string()).execute(&server.pool).await.unwrap();
+    let path = format!("{folder}/2026/10/24/rollout-2026-10-24T10-00-00-{session}.jsonl");
+    let sample = |at: chrono::DateTime<chrono::Utc>, total: i64, last: i64| format!("{}\n", json!({"timestamp":at.to_rfc3339(),"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":total},"last_token_usage":{"total_tokens":last}}}}));
+    let old = sample(chrono::Utc::now() - chrono::Duration::minutes(2), 1000, 1000);
+    set_goal(&server, id, "Track the running work", 100_000).await;
+    let live = sample(chrono::Utc::now(), 1300, 300);
+    let text = format!("{old}{live}{live}");
+    link.send(NodeToControl::Transcript { path: path.clone(), offset: 0, data: base64::engine::general_purpose::STANDARD.encode(&text), size: Some(text.len() as i64) }).await;
+    link.barrier(id, 20).await;
+    let goal = goal_of(&server, id).await;
+    assert_eq!(goal["tokens_used"], 300, "{goal}");
+    assert_eq!(goal["turn_active"], true, "{goal}");
+    assert_eq!(goal["tokens_known"], true, "{goal}");
+
+    link.send(NodeToControl::Transcript { path, offset: 0, data: base64::engine::general_purpose::STANDARD.encode(&text), size: Some(text.len() as i64) }).await;
+    link.barrier(id, 21).await;
+    assert_eq!(goal_of(&server, id).await["tokens_used"], 300);
+    }
+}
+
+#[tokio::test]
+async fn fresh_account_usage_is_published_to_an_existing_goal_without_waiting_for_turn_end() {
+    use mycelium_proto::conversation::{AgentId, LoginInfo, LoginState, UsageWindow};
+    use mycelium_proto::stream::StreamMessage;
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal(&server, id, "Track usage", 100_000).await;
+    let mut stream = server.user.stream().await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedIn, usage_left: Some(58), windows: vec![UsageWindow { name: "five_hour".into(), used_percent: 42.0, resets_at: None, rate_per_hour: None, runs_out_at: None }], usage_read_at: Some(chrono::Utc::now()) }] }).await;
+    let updated = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.conversation_id == id && goal.five_hour_used == Some(42.0) => Some(goal), _ => None }).await;
+    assert_eq!(updated.five_hour_used, Some(42.0));
+}
+
+#[tokio::test]
+async fn a_cached_window_that_has_reset_is_visible_but_is_not_used_by_a_goal() {
+    use mycelium_proto::conversation::{AgentId, LoginInfo, LoginState, UsageWindow};
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let read_at = chrono::Utc::now() - chrono::Duration::hours(2);
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo {
+        agent: AgentId::Claude,
+        account: None,
+        method: "token".into(),
+        state: LoginState::SignedIn,
+        usage_left: Some(0),
+        windows: vec![UsageWindow { name: "five_hour".into(), used_percent: 100.0, resets_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), rate_per_hour: None, runs_out_at: None }],
+        usage_read_at: Some(read_at),
+    }] }).await;
+    link.barrier(id, 20).await;
+    set_goal(&server, id, "Use current limits", 100_000).await;
+    let goal = goal_of(&server, id).await;
+    assert!(goal["five_hour_used"].is_null(), "{goal}");
+    let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+    assert_eq!(nodes[0]["logins"][0]["windows"][0]["used_percent"], 100.0);
+    let cached_at: chrono::DateTime<chrono::Utc> = nodes[0]["logins"][0]["usage_read_at"].as_str().unwrap().parse().unwrap();
+    assert_eq!(cached_at.timestamp(), read_at.timestamp());
+}

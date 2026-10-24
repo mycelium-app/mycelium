@@ -36,6 +36,7 @@ class AccountUsageTest {
         assertEquals(1, accounts.size)
         assertEquals(listOf(AccountOnNode("laptop", LoginState.SignedIn), AccountOnNode("nas", LoginState.Expired)), accounts.single().nodes)
         assertEquals(40.0, accounts.single().windows.single().usedPercent)
+        assertEquals("2026-10-23T12:00:00Z", accounts.single().usageReadAt)
     }
 
     @Test

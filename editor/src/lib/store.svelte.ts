@@ -49,6 +49,8 @@ export class Editor
   private knownVersion = 0;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private saving = false;
+  private savePending = false;
+  private pendingSaveNote: string | undefined;
   private closeStream: (() => void) | null = null;
 
   get viewOnly(): boolean
@@ -370,7 +372,8 @@ export class Editor
 
     if (this.saving)
     {
-      this.saveTimer = setTimeout(() => void this.save(note), saveDelayMillis);
+      this.savePending = true;
+      this.pendingSaveNote = note;
       return;
     }
 
@@ -403,6 +406,15 @@ export class Editor
     finally
     {
       this.saving = false;
+
+      if (this.savePending && this.saveState !== 'error')
+      {
+        const pendingNote = this.pendingSaveNote;
+
+        this.savePending = false;
+        this.pendingSaveNote = undefined;
+        void this.save(pendingNote);
+      }
     }
   }
 

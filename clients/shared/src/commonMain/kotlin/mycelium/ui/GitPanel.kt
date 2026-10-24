@@ -281,7 +281,15 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                         },
                     )
                 } else if (tab == GitTab.History) {
-                    History(log)
+                    History(log) { commit ->
+                        if (onOpenDiff != null) {
+                            onOpenDiff(commitDiffTab(commit.hash))
+                        } else {
+                            openCommit = GraphCommit(commit.hash, emptyList(), commit.author, commit.date, emptyList(), commit.subject)
+                            commitDiff = null
+                            run { commitDiff = store.api.gitShow(id, commit.hash) }
+                        }
+                    }
                 } else {
                     GitStackTab(
                         stack = stack,
@@ -502,7 +510,7 @@ fun Checkbox(
 }
 
 @Composable
-private fun History(log: List<GitCommit>) {
+private fun History(log: List<GitCommit>, onOpen: (GitCommit) -> Unit) {
     val colors = MyTheme.colors
 
     if (log.isEmpty()) {
@@ -516,7 +524,7 @@ private fun History(log: List<GitCommit>) {
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5)
-                .semantics(mergeDescendants = true) { contentDescription = "${commit.subject}, ${commit.author}, $committed" },
+                .pressable(onClick = { onOpen(commit) }, description = "Open commit ${commit.subject}, ${commit.author}, $committed", shape = ControlShape),
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
         ) {
             Label(commit.subject, maxLines = 2)

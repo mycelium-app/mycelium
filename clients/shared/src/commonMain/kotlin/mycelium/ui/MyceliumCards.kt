@@ -48,11 +48,11 @@ val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
 
 fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
 
-class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit)
+class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit)
 
 val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
-fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) })
+fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) })
 
 class ApiAccessRequests(val requests: Map<String, ApiAccessRequest>, val refresh: suspend () -> Unit, val approve: suspend (ApiAccessRequest, List<String>) -> Unit, val decline: suspend (ApiAccessRequest) -> Unit)
 
@@ -139,13 +139,15 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeSchedule -> MyIcon.Calendar
         is MyceliumCall.Walkthrough -> MyIcon.List
         is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
+        is MyceliumCall.SetProjectIcon -> MyIcon.Image
         is MyceliumCall.FindConversations -> MyIcon.Search
         is MyceliumCall.SendToConversation -> MyIcon.Send
-        is MyceliumCall.RequestApiAccess -> MyIcon.Key
+        is MyceliumCall.RequestApiAccess, is MyceliumCall.RequestArtifactAccess -> MyIcon.Key
         is MyceliumCall.RequestSshAccess -> MyIcon.Terminal
         is MyceliumCall.CreateArtifact, is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
     val proposal = proposedMessage(parsed)
+    val artifactAccess = LocalArtifactAccessControls.current?.state?.artifactAccessRequests?.values?.firstOrNull { it.id == (parsed as? MyceliumCall.RequestArtifactAccess)?.requestId }
     val access = requestedAccess(parsed)
     val sshAccess = requestedSshAccess(parsed)
     val answered = askedTask(parsed)?.status == TaskStatuses.Done
@@ -155,6 +157,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         is MyceliumCall.SendToConversation -> "Waiting for approval"
+        is MyceliumCall.RequestArtifactAccess -> "Waiting for approval"
         is MyceliumCall.RequestApiAccess -> "Waiting for approval"
         is MyceliumCall.RequestSshAccess -> "Waiting for approval"
         else -> null
@@ -172,6 +175,8 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "sent" -> StatusMark("Sent", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+                finished && artifactAccess?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
+                finished && artifactAccess?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && access?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
                 finished && access?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && sshAccess?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
@@ -199,6 +204,7 @@ private fun runningHeading(parsed: MyceliumCall, verb: String): String = when {
 }
 
 private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>): String = when (parsed) {
+    is MyceliumCall.SetProjectIcon -> "Set the project icon"
     is MyceliumCall.Recall -> "Searched memory for “${parsed.query}”"
     is MyceliumCall.Remember -> "Remembered"
     is MyceliumCall.ProposeTask -> "Proposed a task"
@@ -207,6 +213,7 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
+    is MyceliumCall.RequestArtifactAccess -> "Asked for artefact access"
     is MyceliumCall.RequestApiAccess -> "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
@@ -299,6 +306,23 @@ private fun MyceliumBody(parsed: MyceliumCall) {
 
         is MyceliumCall.SendToConversation -> SendToConversationBody(parsed)
 
+        is MyceliumCall.RequestArtifactAccess -> {
+            val controls = LocalArtifactAccessControls.current
+            val request = controls?.state?.artifactAccessRequests?.values?.firstOrNull { it.id == parsed.requestId }
+
+            LaunchedEffect(parsed.requestId) {
+                controls?.store?.refreshArtifactAccessRequests()
+            }
+
+            if (controls != null && request?.state == "requested") {
+                ArtifactAccessRequestCard(request, controls.store, controls.state)
+            } else {
+                Label(parsed.reason, style = Tokens.Type.Ui)
+            }
+        }
+
+        is MyceliumCall.SetProjectIcon -> Label(parsed.path, style = Tokens.Type.Code)
+
         is MyceliumCall.RequestApiAccess -> RequestApiAccessBody(parsed)
 
         is MyceliumCall.RequestSshAccess -> RequestSshAccessBody(parsed)
@@ -385,8 +409,11 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
     if (proposals != null && proposal != null && proposal.waiting) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+        Label("Connecting allows messages in both directions until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             MyButton({ decide(proposals.approve) }, text = "Send", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+            MyButton({ decide(proposals.connect) }, text = "Send and connect", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             MyButton({ decide(proposals.decline) }, text = "Don't send", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }

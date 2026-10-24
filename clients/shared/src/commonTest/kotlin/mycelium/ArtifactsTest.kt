@@ -48,6 +48,43 @@ private fun streamed(json: String) = assertIs<StreamMessage.ArtifactChanged>(par
 
 class ArtifactsTest {
     @Test
+    fun anOlderArtefactResponseUsesItsOriginalConversationUntilExplicitAccessLinksAreProvided() {
+        val artifact = streamed("""{"type":"artifact",${artifactJson("a1").trim('{', '}')}}""").artifact.copy(conversationId = "c1")
+        val state = AppState(artifacts = mapOf(artifact.id to artifact))
+        assertEquals(listOf(artifact), mycelium.ui.conversationArtefacts(state, "c1"))
+        val revoked = artifact.copy(projectIds = emptyList(), conversationIds = emptyList())
+        assertTrue(mycelium.ui.conversationArtefacts(state.copy(artifacts = mapOf(revoked.id to revoked)), "c1").isEmpty())
+    }
+
+    @Test
+    fun anArtefactAccessToolResultKeepsItsApprovalIdAndRequestedPermission() {
+        val request = myceliumCall(call("mycelium_request_artifact_access", """{"artifact":"roadmap","permission":"edit","reason":"Continue work"}""", "Requested edit access to artefact a1. The person can approve or decline request 00000000-0000-0000-0000-000000000001 in Artefacts. Wait for their decision before using it."))
+        val parsed = assertIs<MyceliumCall.RequestArtifactAccess>(request)
+
+        assertEquals("edit", parsed.permission)
+        assertEquals("00000000-0000-0000-0000-000000000001", parsed.requestId)
+    }
+
+    @Test
+    fun artefactLinksAttachExistingArtefactsAndRevocationRemovesThemFromTheConversation() {
+        val artifact = streamed("""{"type":"artifact",${artifactJson("a1").trim('{', '}')}}""").artifact
+        val linked = artifact.copy(conversationIds = listOf("c1"))
+        val state = AppState(artifacts = mapOf(artifact.id to linked))
+
+        assertEquals(listOf(linked), mycelium.ui.conversationArtefacts(state, "c1"))
+        assertTrue(mycelium.ui.conversationArtefacts(state, "c2").isEmpty())
+        assertTrue(mycelium.ui.conversationArtefacts(state.copy(artifacts = mapOf(artifact.id to artifact)), "c1").isEmpty())
+    }
+
+    @Test
+    fun artefactAccessRequestEventsPersistTheDecisionInState() {
+        val message = parseStreamMessage("""{"type":"artifact_access_request","id":"r1","artifact_id":"a1","conversation_id":"c1","permission":"edit","reason":"Continue work","state":"approved","created_at":"2026-10-24T10:00:00Z"}""")!!
+        val state = reduce(AppState(), message)
+
+        assertEquals("approved", state.artifactAccessRequests.getValue("r1").state)
+    }
+
+    @Test
     fun anArtifactStreamEventAddsOrReplacesTheArtifact() {
         val created = streamed("""{"type":"artifact",${artifactJson("a1").trim('{', '}')}}""")
         val renamed = streamed("""{"type":"artifact",${artifactJson("a1", title = "Pricing").trim('{', '}')}}""")

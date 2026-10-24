@@ -94,6 +94,27 @@ pub fn account_homes(home: &Path, accounts_dir: &Path, agent: AgentId) -> Vec<Ac
     homes
 }
 
+pub fn transcript_roots(home: &Path, accounts: &Path, configured: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = configured.to_vec();
+
+    for agent in [AgentId::Claude, AgentId::Codex] {
+        let folder = match agent {
+            AgentId::Claude => "projects",
+            AgentId::Codex => "sessions",
+        };
+
+        for account in account_homes(home, accounts, agent) {
+            let root = account.dir.join(folder);
+
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
+
+    roots
+}
+
 pub fn account_label(home: &Path, agent: AgentId, account: &AccountHome) -> Option<String> {
     let email = (|| -> Option<String> {
         match agent {
@@ -190,6 +211,24 @@ pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn transcript_discovery_includes_new_managed_accounts_and_keeps_configured_roots() {
+        let home = tempfile::tempdir().unwrap();
+        let accounts = home.path().join(".local/state/mycelium/accounts");
+        let configured = vec![home.path().join("extra-transcripts")];
+        let first = super::transcript_roots(home.path(), &accounts, &configured);
+        assert!(first.contains(&home.path().join(".claude/projects")));
+        assert!(first.contains(&home.path().join(".codex/sessions")));
+        assert!(first.contains(&configured[0]));
+        let codex = accounts.join("codex/account-test");
+        let claude = accounts.join("claude/account-test");
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::create_dir_all(&claude).unwrap();
+        let updated = super::transcript_roots(home.path(), &accounts, &configured);
+        assert!(updated.contains(&codex.join("sessions")));
+        assert!(updated.contains(&claude.join("projects")));
+    }
     use super::*;
     use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE};
 

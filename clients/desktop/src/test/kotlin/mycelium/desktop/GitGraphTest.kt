@@ -114,6 +114,18 @@ class GitGraphTest {
     }
 
     @Test
+    fun openingACommitFromHistoryShowsItsChangedFiles() {
+        val fake = GitFake()
+        open(fake)
+        rule.onNodeWithText("History").performClick()
+        rule.waitUntil(10_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/log") } }
+        rule.onNodeWithContentDescription("Open commit Add the importer", substring = true).performClick()
+        rule.waitUntil(10_000) { fake.requests.any { it.url.encodedPath.endsWith("/git/show") } }
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("src/importer.kt").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("src/importer.kt").assertIsDisplayed()
+    }
+
+    @Test
     fun aPreparedMergeMessageIsThePlaceholderAndIsCommittedWhenTheBoxIsLeftEmpty() {
         val fake = GitFake("""{"branch":"main","ahead":0,"behind":0,"files":[{"path":"a.kt","staged":true,"unstaged":false,"untracked":false,"additions":1,"deletions":0}],"prepared_message":"Merge branch 'feature'"}""")
         open(fake)

@@ -65,6 +65,8 @@ class MessageProposalCardTest {
             requests += request.method to path
             request.body.toByteArray()
             val body = when {
+                path.endsWith("/connect") -> proposal("sent")
+                path.endsWith("/conversation-connections") -> "[]"
                 path.endsWith("/approve") -> proposal("sent")
                 path.endsWith("/decline") -> proposal("declined")
                 path.endsWith("/message-proposals") -> "[${proposal("proposed")}]"
@@ -129,4 +131,13 @@ class MessageProposalCardTest {
         rule.onNodeWithText("Send").assertDoesNotExist()
         assertEquals(false, requests.any { it.second.endsWith("/approve") })
     }
+    @Test
+    fun sendingAndConnectingApprovesFutureMessagesAsAnExplicitSeparateAction() {
+        show()
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Send and connect").performClick()
+        waitForRequest(HttpMethod.Post, "/message-proposals/$ProposalId/connect")
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Sent").fetchSemanticsNodes().isNotEmpty() }
+    }
+
 }

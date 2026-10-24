@@ -3,6 +3,12 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -82,14 +88,9 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
                 )
 
                 if (projectMenu) {
-                    MenuPopup(onDismiss = { projectMenu = false }) {
-                        MenuLabel("Work in")
-
-                        for (option in projects) {
-                            MenuItem(option.name, onClick = { place.projectId = option.id; projectMenu = false }, checked = option.id == project?.id, leading = state.nodes[option.nodeId]?.let(::nodeIcon), hint = state.nodes[option.nodeId]?.name)
-                        }
-
-                        MenuItem("A folder", onClick = { place.projectId = null; projectMenu = false }, checked = project == null, leading = MyIcon.Folder)
+                    ProjectMenu(projects, state.nodes, project?.id, "Work in", onDismiss = { projectMenu = false }) {
+                        place.projectId = it
+                        projectMenu = false
                     }
                 }
             }
@@ -136,5 +137,31 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
 
     if (project != null && withBranch) {
         TextInput(place.branch, { place.branch = it }, label = "New worktree branch (optional)", placeholder = "feature/restore-copy", mono = true)
+    }
+}
+
+@Composable
+fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, onSelect: (String?) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val matching = projects.filter { project ->
+        listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
+    }
+
+    MenuPopup(onDismiss = onDismiss) {
+        MenuLabel(label)
+        TextInput(query, { query = it }, label = "Search projects", placeholder = "Name, path or node", showLabel = false)
+        val scroll = rememberLazyListState()
+
+        LazyColumn(Modifier.heightIn(max = 320.dp).scrollbar(scroll), state = scroll) {
+            items(matching, key = { it.id }) { option ->
+                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, leading = nodes[option.nodeId]?.let(::nodeIcon), hint = nodes[option.nodeId]?.name)
+            }
+
+            if (matching.isEmpty()) {
+                item { MenuLabel("No matching projects") }
+            }
+        }
+
+        MenuItem("A folder", onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
     }
 }

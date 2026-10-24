@@ -180,20 +180,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 )
 
                                 if (projectMenu) {
-                                    MenuPopup(onDismiss = { projectMenu = false }) {
-                                        MenuLabel("Start in")
-
-                                        for (option in projects) {
-                                            MenuItem(
-                                                option.name,
-                                                onClick = { chosenProject = option.id; projectMenu = false },
-                                                checked = option.id == project?.id,
-                                                leading = state.nodes[option.nodeId]?.let(::nodeIcon),
-                                                hint = state.nodes[option.nodeId]?.name,
-                                            )
-                                        }
-
-                                        MenuItem("A folder", onClick = { chosenProject = null; projectMenu = false }, checked = project == null, leading = MyIcon.Folder)
+                                    ProjectMenu(projects, state.nodes, project?.id, "Start in", onDismiss = { projectMenu = false }) {
+                                        chosenProject = it
+                                        projectMenu = false
                                     }
                                 }
                             }

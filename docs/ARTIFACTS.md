@@ -260,3 +260,11 @@ Sidebar Artefacts and the list screen are the next slice. They read the same tab
 2. Should version 1 pages allow any external host (fonts, a chart library), or should everything stay inline?
 3. Can a public viewer ever write to an artefact's shared data, for example a poll? The proposal says no until phase 4.
 4. Should the artefact origin be a separate domain the operator runs, or can a subdomain with host-only cookies be accepted for single-user installs?
+
+## Project and conversation access (v0.7.0)
+
+The person retains access to every artefact they own. Agent access is separate: an artefact created in a project grants that project edit access; otherwise it grants the creating conversation edit access. Existing artefacts are backfilled from their original conversation without changing content or versions. Artefacts without a surviving conversation remain available to their owner, who can assign them through **Artefacts → Manage access**.
+
+An artefact can link to several projects or conversations, with view or edit access for each. The conversation artefact panel includes its direct links and its project's links. Removing a link revokes that route to agent access immediately; another valid project or conversation link can still grant access.
+
+`find_artifacts(query)` discovers only reachable artefacts. `request_artifact_access(artifact, permission, reason)` creates a durable approval request for a known id or slug. The person can approve or decline it in the conversation or Artefacts screen, and can grant the conversation's whole project access. View permits content and feedback reads; edit additionally permits versions and design changes. Request approval never reduces a pre-existing edit grant. The agent receives the decision as a message.

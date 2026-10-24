@@ -9,6 +9,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.graphics.asSkiaBitmap
+import java.io.File
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -72,7 +77,8 @@ class ArtifactsScreenTest {
     private val platform = ArtifactsPlatform()
     private val opened = mutableListOf<String>()
 
-    private fun showArtifacts(list: String = Artifacts) {
+    private fun showArtifacts(list: String = Artifacts, accessRequests: String = "[]", links: String = "[]") {
+        var linked = true
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -80,7 +86,10 @@ class ArtifactsScreenTest {
 
             when {
                 request.method == HttpMethod.Patch -> respond(artifact("a1", "design", "Landing sketch", "u1", isPublic = true), HttpStatusCode.OK, json)
-                request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
+                request.method == HttpMethod.Delete -> { linked = false; respond("", HttpStatusCode.NoContent) }
+                path.endsWith("/artifact-access-requests") -> respond(accessRequests, HttpStatusCode.OK, json)
+                path.endsWith("/approve") || path.endsWith("/decline") -> respond(accessRequests.trim('[', ']').replace("requested", if (path.endsWith("/approve")) "approved" else "declined"), HttpStatusCode.OK, json)
+                path.endsWith("/links") -> respond(if (linked) links else "[]", HttpStatusCode.OK, json)
                 path.endsWith("/thumbnail") -> respond(TinyPng, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "image/png"))
                 path.endsWith("/artifacts") -> respond(list, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
@@ -101,6 +110,25 @@ class ArtifactsScreenTest {
     private fun shown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
     private fun sent(method: String, suffix: String) = requests.toList().firstOrNull { it.first == method && it.second.endsWith(suffix) }
+
+    @Test
+    fun artefactAccessCanBeRemovedFromTheCardMenu() {
+        showArtifacts(links = """[{"id":"l1","artifact_id":"a2","conversation_id":"c1","permission":"view"}]""")
+        rule.onNodeWithContentDescription("More for Planning board").performClick()
+        rule.onNodeWithText("Manage access").performClick()
+        rule.waitUntil(5_000) { shown("Conversation c1") }
+        File("/tmp/artefact-access-actual.png").writeBytes(org.jetbrains.skia.Image.makeFromBitmap(rule.onAllNodes(isRoot()).get(1).captureToImage().asSkiaBitmap()).encodeToData()!!.bytes)
+        rule.onNodeWithContentDescription("Remove access for Conversation c1").performClick()
+        rule.waitUntil(5_000) { sent("DELETE", "/artifacts/a2/links/l1") != null && !shown("Conversation c1") }
+    }
+
+    @Test
+    fun approvingAnArtefactAccessRequestRemovesThePendingCard() {
+        showArtifacts(accessRequests = """[{"id":"r1","artifact_id":"a2","conversation_id":"c1","permission":"view","reason":"Continue the plan","state":"requested","created_at":"2026-10-24T10:00:00Z"}]""")
+        rule.waitUntil(5_000) { shown("Continue the plan") }
+        rule.onNodeWithText("Approve").performClick()
+        rule.waitUntil(5_000) { sent("POST", "/artifact-access-requests/r1/approve") != null && !shown("Continue the plan") }
+    }
 
     @Test
     fun theScreenListsEveryArtifactWithItsEditTime() {

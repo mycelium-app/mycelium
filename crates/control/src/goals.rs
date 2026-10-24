@@ -75,18 +75,34 @@ async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
         return Ok(None);
     };
 
-    let (tokens_used, turns) = sqlx::query_as::<_, (i64, i64)>(
-        "select coalesce(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens), 0)::bigint, (count(*) filter (where u.conversation_id = g.conversation_id))::bigint
-         from goals g
-         join usage_turns u on u.ended_at >= g.started_at
-          and (u.conversation_id = g.conversation_id or u.conversation_id in (select id from conversations where parent_id = g.conversation_id and side_kind = 'check'))
-         where g.conversation_id = $1",
+    let (tokens_used, turns, tokens_known) = sqlx::query_as::<_, (i64, i64, bool)>(
+        "with samples as (
+            select conversation_id, recorded_at,
+                   case when not cumulative then tokens
+                        when lag(tokens) over w is null then last_tokens
+                        when tokens < lag(tokens) over w then tokens
+                        else tokens - lag(tokens) over w end as tokens
+            from conversation_usage_samples
+            window w as (partition by conversation_id, source order by position)
+         ), scope as (
+            select c.id, g.started_at, g.conversation_id as parent
+            from conversations c join goals g on (c.id = g.conversation_id or (c.parent_id = g.conversation_id and c.side_kind = 'check'))
+            where g.conversation_id = $1
+         )
+         select coalesce(sum(greatest(
+                    (select coalesce(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens),0) from usage_turns u where u.conversation_id = s.id and u.ended_at >= s.started_at),
+                    (select coalesce(sum(u.tokens),0) from samples u where u.conversation_id = s.id and u.recorded_at >= s.started_at))),0)::bigint,
+                (select count(*)::bigint from usage_turns u join goals g on g.conversation_id = u.conversation_id where g.conversation_id = $1 and u.ended_at >= g.started_at),
+                coalesce(bool_or(exists(select 1 from usage_turns u where u.conversation_id = s.id and u.ended_at >= s.started_at and u.reported)
+                              or exists(select 1 from samples u where u.conversation_id = s.id and u.recorded_at >= s.started_at)), false)
+         from scope s",
     )
     .bind(conversation_id)
     .fetch_one(&state.pool)
     .await?;
+    let turn_active: bool = sqlx::query_scalar("select agent_active or exists(select 1 from events e where e.conversation_id = c.id and e.kind = 'user_message' and e.seq > coalesce((select max(seq) from events where conversation_id = c.id and kind = 'turn_end'),0)) from conversations c where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
 
-    let windows = account_usage::windows_of(state, node_id, parse_enum(&agent)?, account.as_deref()).await?;
+    let windows = if agent == crate::chats::CHAT_AGENT { Vec::new() } else { account_usage::windows_of(state, node_id, parse_enum(&agent)?, account.as_deref()).await? };
     let used = |name: &str| windows.iter().find(|window| window.name == name).map(|window| window.used_percent);
 
     Ok(Some(Goal {
@@ -97,7 +113,9 @@ async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
         five_hour_limit: five_hour_limit.and_then(|limit| u8::try_from(limit).ok()),
         weekly_limit: weekly_limit.and_then(|limit| u8::try_from(limit).ok()),
         tokens_used,
+        tokens_known,
         turns,
+        turn_active,
         started_at,
         five_hour_used: used(FIVE_HOUR_WINDOW),
         weekly_used: used(WEEKLY_WINDOW),
@@ -232,6 +250,17 @@ async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid,
             enqueue(state, owner, goal_conversation_id, &format!("Continue towards the goal: {}\n\n{}", goal.text, reason)).await
         }
     }
+}
+
+pub async fn refresh(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
+    let owner = sqlx::query_scalar("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let row = find_owned(&state.pool, conversation_id, owner).await?;
+    let target = if row.side_kind.as_deref() == Some("check") { row.parent_id.unwrap_or(conversation_id) } else { conversation_id };
+    if load(state, target).await?.is_some() {
+        announce(state, row.owner, target).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &str) -> ApiResult<()> {

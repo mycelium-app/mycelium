@@ -176,8 +176,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
     val agentWorking = conversation.agentActive || (conversation.status == ConversationStatus.Working && turnIsOpen(state.events[id].orEmpty()))
     val sending = state.sending[id].orEmpty()
-    val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
-    val delivering = sending.take(if (goesStraight) 1 else 0)
+    val deliveredPrompts = state.events[id].orEmpty().filter { it.kind == mycelium.api.EventKinds.UserMessage }.mapNotNull { event ->
+        val payload = event.payload as? kotlinx.serialization.json.JsonObject
+        val promptId = payload?.get("prompt_id") as? JsonPrimitive
+
+        promptId?.content
+    }.toSet()
+    val queue = state.queues[id].orEmpty().filterNot { it.id in deliveredPrompts }
+    val starting = thread.none { it is ThreadItem.UserMessage } && !state.hasOlderEvents(id)
+    val initialQueued = if (starting) queue.minByOrNull { it.position } else null
+    val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && queue.isEmpty()
+    val delivering = sending.take(if (goesStraight || (starting && initialQueued == null)) 1 else 0)
+    val initialMessage = initialQueued?.let { ThreadItem.UserMessage("queued:${it.id}", it.text, files = it.attachments) }
 
     val annotate = remember(id) {
         AnnotateActions(
@@ -195,7 +205,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val outerOpener = LocalArtifactOpener.current
     val artefactOpener = outerOpener?.let { outer ->
         ArtifactOpener(outer.artifacts) { artifactId ->
-            if (panels && !chat && outer.artifacts[artifactId]?.conversationId == id) {
+            if (panels && !chat && conversationArtefacts(state, id).any { it.id == artifactId }) {
                 viewedArtefact = artifactId
                 openPanel(SidePanel.Artefacts)
             } else {
@@ -292,7 +302,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
 
                 ThreadView(
-                    items = thread + delivering.map { ThreadItem.UserMessage("sending", it) },
+                    items = thread + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
                     hasOlder = state.hasOlderEvents(id),
                     loadingOlder = id in state.loadingOlderEvents,
                     onLoadOlder = { store.act { store.loadOlder(id) } },
@@ -329,7 +339,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Composer(
                         conversation = conversation,
                         working = agentWorking,
-                        queue = state.queues[id].orEmpty(),
+                        queue = queue.filter { it.id != initialQueued?.id },
                         sending = sending.drop(delivering.size),
                         onSend = ::send,
                         annotations = annotations,

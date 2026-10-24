@@ -65,6 +65,21 @@ pub struct PathsRequest {
 }
 
 #[derive(Deserialize)]
+pub struct HunkRequest {
+    path: String,
+    row: u32,
+    fingerprint: String,
+    action: String,
+}
+
+#[derive(Deserialize)]
+pub struct FileRequest {
+    path: String,
+    content: Option<String>,
+    expected: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct CommitRequest {
     message: String,
     #[serde(default)]
@@ -89,7 +104,7 @@ pub struct PushRequest {
 
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
-        GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
+        GitCommand::Remote { .. } | GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
         GitCommand::TownSync | GitCommand::TownPropose => TOWN_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
         _ => GIT_TIMEOUT,
@@ -215,6 +230,14 @@ pub async fn unstage(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     run(&state, &user, id, GitCommand::Unstage { paths: request.paths }).await
 }
 
+pub async fn hunk(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<HunkRequest>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::Hunk { path: request.path, row: request.row, fingerprint: request.fingerprint, action: request.action }).await
+}
+
+pub async fn file(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<FileRequest>) -> ApiResult<Json<Value>> {
+    run(&state, &user, id, GitCommand::File { path: request.path, content: request.content, expected: request.expected }).await
+}
+
 pub async fn stage_all(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     run(&state, &user, id, GitCommand::StageAll).await
 }
@@ -231,8 +254,36 @@ pub async fn commit(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     run(&state, &user, id, GitCommand::Commit { message, options }).await
 }
 
+async fn run_remote(state: &AppState, user: &AuthUser, id: Uuid, action: &str, force: bool) -> ApiResult<Json<Value>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let command = if let Some(project_id) = row.project_id {
+        let project = projects::find_owned(state, project_id, user.id).await?;
+
+        if let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.as_deref()) {
+            let forge = forges::find_owned(state, forge_id, user.id).await?;
+            let credentials = forge.git_credentials()?;
+            let url = format!("{}/{repository}.git", forge.base_url);
+
+            let mut allowed_urls = ForgeApi::from_row(&forge)?.clone_urls(&state.http, repository).await;
+            allowed_urls.push(url.clone());
+
+            GitCommand::Remote { action: action.into(), force, url, allowed_urls, credentials }
+        } else if action == "fetch" {
+            GitCommand::Fetch
+        } else {
+            GitCommand::Push { force }
+        }
+    } else if action == "fetch" {
+        GitCommand::Fetch
+    } else {
+        GitCommand::Push { force }
+    };
+
+    Ok(Json(relay(state, row.node_id, row.cwd, command).await?))
+}
+
 pub async fn fetch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
-    run(&state, &user, id, GitCommand::Fetch).await
+    run_remote(&state, &user, id, "fetch", false).await
 }
 
 pub async fn pull(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PullRequest>) -> ApiResult<Json<Value>> {
@@ -240,7 +291,7 @@ pub async fn pull(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 }
 
 pub async fn push(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PushRequest>) -> ApiResult<Json<Value>> {
-    run(&state, &user, id, GitCommand::Push { force: request.force }).await
+    run_remote(&state, &user, id, "push", request.force).await
 }
 
 pub async fn undo(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {

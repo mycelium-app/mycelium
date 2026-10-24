@@ -16,7 +16,7 @@ const AGENT_QUIET_LIMIT: std::time::Duration = std::time::Duration::from_secs(15
 
 pub struct TranscriptFollower {
     home: PathBuf,
-    roots: Vec<PathBuf>,
+    pub(crate) roots: Vec<PathBuf>,
     state_file: PathBuf,
     out: mpsc::UnboundedSender<NodeToControl>,
     acked: HashMap<String, i64>,
@@ -138,24 +138,36 @@ pub fn locate(home: &Path, roots: &[PathBuf], session_id: &str) -> Option<(Strin
     })
 }
 
-pub fn restore(home: &Path, path: &str, offset: i64, data: &str) -> Result<(), String> {
+pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &str) -> Result<(), String> {
     let relative = Path::new(path);
     let plain = relative.components().all(|component| matches!(component, std::path::Component::Normal(_)));
-    let in_a_transcript_folder = [".claude/projects/", ".codex/sessions/"].iter().any(|folder| path.starts_with(folder)) && path.ends_with(".jsonl");
+    let full = home.join(relative);
+    let root = roots.iter().find(|root| full.starts_with(root));
+    let in_a_transcript_folder = root.is_some() && path.ends_with(".jsonl");
 
     if !plain || !in_a_transcript_folder || offset < 0 {
         return Err(format!("{path} is not a place this node keeps transcripts."));
     }
 
     let bytes = STANDARD.decode(data).map_err(|_| "A transcript chunk was not valid base64.".to_string())?;
-    let full = home.join(relative);
     let write = || -> std::io::Result<()> {
         use std::io::Write;
 
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
+        let root = root.ok_or_else(|| std::io::Error::other("The transcript folder is not configured."))?;
+        std::fs::create_dir_all(root)?;
+        let root = root.canonicalize()?;
+        let parent = full.parent().ok_or_else(|| std::io::Error::other("The transcript has no parent folder."))?;
+        let mut existing = parent;
+
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| std::io::Error::other("The transcript folder is not available."))?;
         }
 
+        if !existing.canonicalize()?.starts_with(&root) || (full.exists() && !full.canonicalize()?.starts_with(&root)) {
+            return Err(std::io::Error::other("The transcript path is outside its configured folder."));
+        }
+
+        std::fs::create_dir_all(parent)?;
         let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&full)?;
         file.set_len(offset as u64)?;
         file.seek(SeekFrom::Start(offset as u64))?;
@@ -439,15 +451,37 @@ mod tests {
     }
 
     #[test]
+    fn a_managed_accounts_transcript_can_be_restored_only_within_its_configured_root() {
+        let home = tempfile::tempdir().unwrap();
+        let folder = ".local/state/mycelium/accounts/codex/account-test/sessions";
+        let root = home.path().join(folder);
+        let path = format!("{folder}/2026/10/24/session.jsonl");
+        restore(home.path(), &[root], &path, 0, &STANDARD.encode("reported usage\n")).unwrap();
+        assert_eq!(std::fs::read_to_string(home.path().join(path)).unwrap(), "reported usage\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restoring_a_transcript_does_not_follow_a_symlink_outside_the_configured_root() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = home.path().join(".claude/projects");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
+        assert!(restore(home.path(), &[root], ".claude/projects/escape/session.jsonl", 0, &STANDARD.encode("example\n")).is_err());
+        assert!(!outside.path().join("session.jsonl").exists());
+    }
+
+    #[test]
     fn restored_chunks_rebuild_the_transcript_and_a_restart_overwrites_it() {
         let dir = tempfile::tempdir().unwrap();
         let path = ".claude/projects/-w-app/abc.jsonl";
 
-        restore(dir.path(), path, 0, &STANDARD.encode("one\n")).unwrap();
-        restore(dir.path(), path, 4, &STANDARD.encode("two\n")).unwrap();
+        restore(dir.path(), &[dir.path().join(".claude/projects"), dir.path().join(".codex/sessions")], path, 0, &STANDARD.encode("one\n")).unwrap();
+        restore(dir.path(), &[dir.path().join(".claude/projects"), dir.path().join(".codex/sessions")], path, 4, &STANDARD.encode("two\n")).unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "one\ntwo\n");
 
-        restore(dir.path(), path, 0, &STANDARD.encode("new\n")).unwrap();
+        restore(dir.path(), &[dir.path().join(".claude/projects"), dir.path().join(".codex/sessions")], path, 0, &STANDARD.encode("new\n")).unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join(path)).unwrap(), "new\n");
     }
 
@@ -456,7 +490,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         for path in ["../escape.jsonl", ".claude/projects/../../escape.jsonl", "/etc/passwd.jsonl", ".ssh/authorized_keys", ".claude/projects/x/notes.txt"] {
-            assert!(restore(dir.path(), path, 0, &STANDARD.encode("x")).is_err(), "{path}");
+            assert!(restore(dir.path(), &[dir.path().join(".claude/projects"), dir.path().join(".codex/sessions")], path, 0, &STANDARD.encode("x")).is_err(), "{path}");
         }
 
         assert!(!dir.path().join("escape.jsonl").exists());

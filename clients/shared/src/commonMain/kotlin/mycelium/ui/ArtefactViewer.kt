@@ -116,7 +116,11 @@ fun ArtefactList(artifacts: List<Artifact>, onSelect: (Artifact) -> Unit, modifi
 }
 
 fun conversationArtefacts(state: AppState, conversationId: String): List<Artifact> =
-    state.artifacts.values.filter { it.conversationId == conversationId }.sortedByDescending { it.updatedAt }
+    state.artifacts.values.filter { artifact ->
+        val legacy = artifact.projectIds == null && artifact.conversationIds == null
+
+        (legacy && artifact.conversationId == conversationId) || conversationId in artifact.conversationIds.orEmpty() || state.conversations[conversationId]?.projectId?.let(artifact.projectIds.orEmpty()::contains) == true
+    }.sortedByDescending { it.updatedAt }
 
 @Composable
 fun ArtefactsPanel(

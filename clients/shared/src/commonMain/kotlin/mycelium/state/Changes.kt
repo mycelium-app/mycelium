@@ -19,6 +19,7 @@ data class DiffSection(
     val canStage: Boolean = false,
     val canUnstage: Boolean = false,
     val fingerprint: String = "",
+    val stagedRows: Int = 0,
 )
 
 class DiffLayout(val sections: List<DiffSection>, collapsed: Set<String>, expanded: Set<String>, limit: Int = LargeDiffRows) {
@@ -144,6 +145,7 @@ fun changeSections(layout: List<ChangedFile>): List<DiffSection> {
             canStage = file.unstaged || file.untracked,
             canUnstage = file.staged,
             fingerprint = changed.fingerprint,
+            stagedRows = changed.stagedRows,
         )
     }
 }

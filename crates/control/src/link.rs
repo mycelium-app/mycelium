@@ -612,6 +612,10 @@ fn without_text(update: &Value) -> Value {
 }
 
 async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, update: Value) -> ApiResult<()> {
+    if update["update"]["sessionUpdate"] == "usage_update" {
+        crate::goals::refresh(state, conversation_id).await?;
+    }
+
     let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
     let mut session_update = update["update"].clone();
     without_nul(&mut session_update);
@@ -713,7 +717,8 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
     let mut tx = state.pool.begin().await?;
     sqlx::query("delete from logins where node_id = $1").bind(node_id).execute(&mut *tx).await?;
 
-    for login in logins {
+    for mut login in logins {
+        crate::account_usage::cache(&mut tx, node_id, &mut login).await?;
         sqlx::query(
             "insert into logins (node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at) values ($1, $2, $3, $4, $5, $6, $7, $8)
              on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, usage_left = excluded.usage_left, usage_windows = excluded.usage_windows, usage_read_at = excluded.usage_read_at, updated_at = now()",
@@ -728,10 +733,14 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
         .bind(login.usage_read_at)
         .execute(&mut *tx)
         .await?;
-        crate::account_usage::record(&mut tx, node_id, &login).await?;
     }
 
     tx.commit().await?;
+    let goals: Vec<Uuid> = sqlx::query_scalar("select g.conversation_id from goals g join conversations c on c.id = g.conversation_id where c.node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
+
+    for conversation in goals {
+        crate::goals::refresh(state, conversation).await?;
+    }
 
     publish_node(state, node_id).await
 }
@@ -773,6 +782,11 @@ async fn store_transcript(state: &AppState, node_id: Uuid, path: String, offset:
     .await?;
 
     state.hub.send(node_id, ControlToNode::TranscriptAck { path: path.clone(), bytes: stored });
+
+    if let Err(error) = crate::live_usage::record(state, node_id, &path, offset, stored).await {
+        tracing::warn!("live transcript usage could not be read: {}", error.message());
+    }
+
 
     if size.is_none_or(|size| stored >= size) {
         imports::sync_subagent(state, node_id, &path).await;

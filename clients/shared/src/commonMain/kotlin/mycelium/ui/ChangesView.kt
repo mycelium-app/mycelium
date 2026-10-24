@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.runtime.Composable
@@ -33,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -43,6 +47,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -166,6 +172,10 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     var layout by remember(id) { mutableStateOf<ChangesLayout?>(null) }
     var loadFailed by remember(id) { mutableStateOf(false) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
+    var editing by remember(id) { mutableStateOf<String?>(null) }
+    var original by remember(id) { mutableStateOf("") }
+    var draft by remember(id) { mutableStateOf("") }
+    var saving by remember(id) { mutableStateOf(false) }
     val source = remember(id) { RowSource(scope) { ranges -> store.api.gitChangesRows(id, ranges).ranges } }
     val sections = remember(layout) { layout?.let { changeSections(it.files) }.orEmpty() }
 
@@ -217,6 +227,41 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     Column(modifier.fillMaxWidth()) {
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
+        editing?.let { path ->
+            Column(Modifier.fillMaxWidth().padding(Tokens.Space.S2)) {
+                Label(path, style = Tokens.Type.Code)
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
+                    cursorBrush = SolidColor(colors.text),
+                    modifier = Modifier.fillMaxWidth().height(240.dp).verticalScroll(rememberScrollState()).semantics { contentDescription = "Edit $path" },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    MyButton({
+                        if (!saving) {
+                            saving = true
+                            scope.launch {
+                                try {
+                                    store.api.gitFile(id, path, draft, original)
+                                    layout = store.api.gitChangesLayout(id)
+                                    editing = null
+                                    failure = null
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (problem: Exception) {
+                                    failure = problem.message ?: "Could not save this file. Try again."
+                                } finally {
+                                    saving = false
+                                }
+                            }
+                        }
+                    }, text = if (saving) "Saving" else "Save")
+                    MyButton({ editing = null }, text = "Cancel", variant = ButtonVariant.Outline)
+                }
+            }
+        }
+
         when {
             layout == null && loadFailed -> Label("Could not load the changes. Close the tab and open it again.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             layout == null -> Label("Loading the changes", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
@@ -228,6 +273,34 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 modifier = Modifier.weight(1f),
                 onStage = { stage(it, true) },
                 onUnstage = { stage(it, false) },
+                onEdit = { path ->
+                    scope.launch {
+                        try {
+                            val loaded = store.api.gitFile(id, path)
+                            original = loaded.content
+                            draft = loaded.content
+                            editing = path
+                            failure = null
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (problem: Exception) {
+                            failure = problem.message ?: "Could not open this file. Try again."
+                        }
+                    }
+                },
+                onHunk = { section, row, action ->
+                    scope.launch {
+                        try {
+                            store.api.gitHunk(id, section.path, row, section.fingerprint, action)
+                            layout = store.api.gitChangesLayout(id)
+                            failure = null
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (problem: Exception) {
+                            failure = problem.message ?: "Could not change this hunk. Refresh the view and try again."
+                        }
+                    }
+                },
                 reveal = tab.reveal,
                 onRevealed = { store.revealedInDiffTab(id, tab.key) },
                 onTopFile = { store.viewingChangesFile(id, it) },
@@ -280,6 +353,8 @@ fun DiffStack(
     modifier: Modifier = Modifier,
     onStage: (String) -> Unit = {},
     onUnstage: (String) -> Unit = {},
+    onEdit: ((String) -> Unit)? = null,
+    onHunk: ((DiffSection, Int, String) -> Unit)? = null,
     reveal: String? = null,
     onRevealed: () -> Unit = {},
     onTopFile: (String?) -> Unit = {},
@@ -397,7 +472,7 @@ fun DiffStack(
                 val hunks = hunkSets[sectionIndex]
 
                 stickyHeader(key = "h:${section.path}", contentType = "file") {
-                    FileHeader(section, section.path in collapsed, focused == "h:${section.path}", { toggle(section.path) }, { onStage(section.path) }, { onUnstage(section.path) }, onRowComposed)
+                    FileHeader(section, section.path in collapsed, focused == "h:${section.path}", { toggle(section.path) }, { onStage(section.path) }, { onUnstage(section.path) }, onEdit?.let { { it(section.path) } }, onRowComposed)
                 }
 
                 items(
@@ -406,7 +481,23 @@ fun DiffStack(
                     contentType = { if (it in hunks) "hunk" else "line" },
                 ) { row ->
                     remember { onRowComposed(); 0 }
-                    DiffBodyRow(rowAt(section.path, row), language, row in hunks, focused == "k:$row:${section.path}")
+                    val line = rowAt(section.path, row)
+
+                    if (row in hunks && onHunk != null && !section.truncated) {
+                        Row(Modifier.fillMaxWidth().height(rowHeight()).background(colors.bgPanel), verticalAlignment = Alignment.CenterVertically) {
+                            if (line != null) {
+                                Label(line.text, Modifier.weight(1f), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
+                                val staged = row < section.stagedRows
+                                MyButton({ onHunk(section, row, if (staged) "unstage" else "stage") }, text = if (staged) "Unstage hunk" else "Stage hunk", size = ButtonSize.Sm)
+
+                                if (!staged && section.tag != "Untracked") {
+                                    MyButton({ onHunk(section, row, "revert") }, text = "Revert hunk", size = ButtonSize.Sm)
+                                }
+                            }
+                        }
+                    } else {
+                        DiffBodyRow(line, language, row in hunks, focused == "k:$row:${section.path}")
+                    }
                 }
 
                 if (layout.hiddenRows[sectionIndex] > 0) {
@@ -439,7 +530,7 @@ private const val MinimumWindow = 40
 private fun diffRowHeight(): Dp = with(LocalDensity.current) { Tokens.Type.Code.lineHeight.toDp() }
 
 @Composable
-private fun FileHeader(section: DiffSection, collapsed: Boolean, focused: Boolean, onToggle: () -> Unit, onStage: () -> Unit, onUnstage: () -> Unit, onRowComposed: () -> Unit) {
+private fun FileHeader(section: DiffSection, collapsed: Boolean, focused: Boolean, onToggle: () -> Unit, onStage: () -> Unit, onUnstage: () -> Unit, onEdit: (() -> Unit)?, onRowComposed: () -> Unit) {
     val colors = MyTheme.colors
 
     remember { onRowComposed(); 0 }
@@ -462,6 +553,10 @@ private fun FileHeader(section: DiffSection, collapsed: Boolean, focused: Boolea
             Label("+${section.added}", style = Tokens.Type.Code, color = colors.diffAdd)
             Label("-${section.removed}", style = Tokens.Type.Code, color = colors.diffDel)
             section.tag?.let { Tag(it) }
+
+            if (onEdit != null) {
+                MyButton(onEdit, text = "Edit", description = "Edit file ${section.path}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            }
 
             if (section.canUnstage) {
                 MyButton(onUnstage, text = "Unstage", description = "Unstage file ${section.path}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)

@@ -2,6 +2,7 @@ package mycelium.state
 
 import kotlin.time.Instant
 import mycelium.api.Artifact
+import mycelium.api.ArtifactAccessRequest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
@@ -45,10 +46,13 @@ data class AppState(
     val groups: Map<String, Group> = emptyMap(),
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
+    val workflows: Map<String, JsonObject> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val artifacts: Map<String, Artifact> = emptyMap(),
+    val artifactAccessRequests: Map<String, ArtifactAccessRequest> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
     val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
+    val conversationConnections: Map<String, mycelium.api.ConversationConnection> = emptyMap(),
     val messageProposals: Map<String, MessageProposal> = emptyMap(),
     val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
     val sshAccessRequests: Map<String, SshAccessRequest> = emptyMap(),
@@ -128,6 +132,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.MoveChanged -> state.copy(moves = state.moves + (message.progress.conversationId to message.progress))
 
+    is StreamMessage.WorkflowChanged -> state.copy(workflows = state.workflows + (message.workflow.string("id").orEmpty() to message.workflow))
+
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
@@ -135,10 +141,13 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ArtifactChanged ->
         state.copy(artifacts = if (message.deleted) state.artifacts - message.artifact.id else state.artifacts + (message.artifact.id to message.artifact))
 
+    is StreamMessage.ArtifactAccessRequestChanged -> state.copy(artifactAccessRequests = state.artifactAccessRequests + (message.request.id to message.request))
+
     is StreamMessage.ArtifactCommentAdded -> state
 
     is StreamMessage.InstructionProposalChanged -> state.copy(instructionProposals = state.instructionProposals + (message.proposal.id to message.proposal))
 
+    is StreamMessage.ConversationConnectionChanged -> state.copy(conversationConnections = if (message.connection.revokedAt == null) state.conversationConnections + (message.connection.id to message.connection) else state.conversationConnections - message.connection.id)
     is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.ApiAccessRequestChanged -> state.copy(apiAccessRequests = state.apiAccessRequests + (message.request.id to message.request))

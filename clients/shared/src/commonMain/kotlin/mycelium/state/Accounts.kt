@@ -13,7 +13,7 @@ const val UnnamedAccount = "Account name not reported"
 
 data class AccountOnNode(val nodeName: String, val state: LoginState)
 
-data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList())
+data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null)
 
 fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     val grouped = linkedMapOf<Triple<String, String?, String?>, MutableList<Pair<NodeSummary, LoginInfo>>>()
@@ -29,7 +29,7 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     return grouped.map { (key, entries) ->
         val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
 
-        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty())
+        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt)
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 

@@ -302,6 +302,23 @@ data class InstructionProposal(
 data class DeclineInstructionProposalRequest(val note: String? = null, val redo: Boolean = false)
 
 @Serializable
+data class ConversationConnection(
+    val id: String,
+    @SerialName("source_id") val sourceId: String,
+    @SerialName("target_id") val targetId: String,
+    @SerialName("source_title") val sourceTitle: String,
+    @SerialName("target_title") val targetTitle: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("revoked_at") val revokedAt: String? = null,
+)
+
+@Serializable
+data class CreateConversationConnectionRequest(
+    @SerialName("source_id") val sourceId: String,
+    @SerialName("target_id") val targetId: String,
+)
+
+@Serializable
 data class MessageProposal(
     val id: String,
     @SerialName("conversation_id") val conversationId: String? = null,
@@ -381,6 +398,23 @@ data class ModelProvider(
     val models: List<String> = emptyList(),
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class ModelProviderUsage(
+    @SerialName("provider_id") val providerId: String,
+    val name: String,
+    @SerialName("read_at") val readAt: String? = null,
+    val spend: OpenRouterSpend? = null,
+)
+
+@Serializable
+data class OpenRouterSpend(
+    val total: Double,
+    val daily: Double? = null,
+    val weekly: Double? = null,
+    val monthly: Double? = null,
+    @SerialName("limit_remaining") val limitRemaining: Double? = null,
 )
 
 @Serializable
@@ -631,6 +665,8 @@ data class Artifact(
     val id: String,
     val owner: String,
     @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("project_ids") val projectIds: List<String>? = null,
+    @SerialName("conversation_ids") val conversationIds: List<String>? = null,
     val kind: String,
     val title: String,
     val slug: String = "",
@@ -642,6 +678,37 @@ data class Artifact(
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
 )
+
+@Serializable
+data class ArtifactLink(
+    val id: String,
+    @SerialName("artifact_id") val artifactId: String,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val permission: String,
+)
+
+@Serializable
+data class LinkArtifactRequest(
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val permission: String,
+)
+
+@Serializable
+data class ArtifactAccessRequest(
+    val id: String,
+    @SerialName("artifact_id") val artifactId: String,
+    @SerialName("conversation_id") val conversationId: String,
+    val permission: String,
+    val reason: String,
+    val state: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("decided_at") val decidedAt: String? = null,
+)
+
+@Serializable
+data class ApproveArtifactAccessRequest(val project: Boolean = false)
 
 @Serializable
 data class PatchArtifactRequest(
@@ -971,6 +1038,8 @@ data class Goal(
     @SerialName("started_at") val startedAt: String? = null,
     @SerialName("five_hour_used") val fiveHourUsed: Double? = null,
     @SerialName("weekly_used") val weeklyUsed: Double? = null,
+    @SerialName("tokens_known") val tokensKnown: Boolean = true,
+    @SerialName("turn_active") val turnActive: Boolean = false,
 )
 
 @Serializable
@@ -1054,6 +1123,8 @@ sealed interface StreamMessage {
 
     data class WalkthroughNotesChanged(val conversationId: String, val notes: List<WalkthroughNote>) : StreamMessage
 
+    data class WorkflowChanged(val workflow: JsonObject) : StreamMessage
+
     data class ScheduleChanged(val schedule: Schedule) : StreamMessage
 
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
@@ -1061,10 +1132,13 @@ sealed interface StreamMessage {
     data class ArtifactChanged(val artifact: Artifact, val deleted: Boolean = false) : StreamMessage
 
     data class ArtifactCommentAdded(val artifactId: String) : StreamMessage
+    data class ArtifactAccessRequestChanged(val request: ArtifactAccessRequest) : StreamMessage
 
     data class InstructionProposalChanged(val proposal: InstructionProposal) : StreamMessage
 
     data class MessageProposalChanged(val proposal: MessageProposal) : StreamMessage
+
+    data class ConversationConnectionChanged(val connection: ConversationConnection) : StreamMessage
 
     data class ApiAccessRequestChanged(val request: ApiAccessRequest) : StreamMessage
 
@@ -1115,14 +1189,17 @@ fun parseStreamMessage(text: String): StreamMessage? {
                 element.getValue("notes"),
             ),
         )
+        "workflow" -> StreamMessage.WorkflowChanged(element["workflow"]!!.jsonObject)
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "artifact" -> StreamMessage.ArtifactChanged(
             MyceliumJson.decodeFromJsonElement(Artifact.serializer(), element),
             deleted = (element["deleted"] as? JsonPrimitive)?.contentOrNull == "true",
         )
+        "artifact_access_request" -> StreamMessage.ArtifactAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ArtifactAccessRequest.serializer(), element))
         "artifact_comment" -> StreamMessage.ArtifactCommentAdded(element.requireString("artifact_id"))
         "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))
+        "conversation_connection" -> StreamMessage.ConversationConnectionChanged(MyceliumJson.decodeFromJsonElement(ConversationConnection.serializer(), element))
         "message_proposal" -> StreamMessage.MessageProposalChanged(MyceliumJson.decodeFromJsonElement(MessageProposal.serializer(), element))
         "api_access_request" -> StreamMessage.ApiAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ApiAccessRequest.serializer(), element))
         "ssh_access_request" -> StreamMessage.SshAccessRequestChanged(MyceliumJson.decodeFromJsonElement(SshAccessRequest.serializer(), element))
@@ -1189,6 +1266,7 @@ data class ChangedFile(
     val hunks: List<Int> = emptyList(),
     val truncated: Boolean = false,
     val fingerprint: String,
+    @SerialName("staged_rows") val stagedRows: Int = 0,
 )
 
 @Serializable
@@ -1208,6 +1286,15 @@ data class RowsChunk(val path: String, val from: Int, val fingerprint: String, v
 
 @Serializable
 data class ChangesRows(val ranges: List<RowsChunk>)
+
+@Serializable
+data class GitHunkRequest(val path: String, val row: Int, val fingerprint: String, val action: String)
+
+@Serializable
+data class GitFileRequest(val path: String, val content: String? = null, val expected: String? = null)
+
+@Serializable
+data class GitFileContent(val content: String)
 
 @Serializable
 data class GitPathsRequest(val paths: List<String>)

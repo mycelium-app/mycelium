@@ -20,8 +20,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -52,6 +50,9 @@ class DiffTabsTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private val requests = mutableListOf<String>()
 
     private fun show() {
@@ -72,7 +73,7 @@ class DiffTabsTest {
 
             respond(reply, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
         rule.setContent {
@@ -100,6 +101,11 @@ class DiffTabsTest {
         openFile("src/restore/Screen.tsx")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Close Changes").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) {
+            rule.onAllNodesWithText("const title = 2").fetchSemanticsNodes().isNotEmpty() &&
+                rule.onAllNodesWithText("const word = 3").fetchSemanticsNodes().isNotEmpty()
+        }
+
         rule.onNodeWithText("const title = 2").assertIsDisplayed()
         rule.onNodeWithText("const word = 3").assertIsDisplayed()
         rule.onNodeWithContentDescription("Show the changes to src/restore/strings.ts").assertIsDisplayed()

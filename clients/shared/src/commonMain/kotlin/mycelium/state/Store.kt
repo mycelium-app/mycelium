@@ -17,6 +17,7 @@ import mycelium.DefaultEventPageSize
 import mycelium.Platform
 import mycelium.api.ApiException
 import mycelium.api.Artifact
+import mycelium.api.ArtifactAccessRequest
 import mycelium.api.PatchArtifactRequest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -344,6 +345,24 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(instructionProposals = it.instructionProposals + (declined.id to declined)) }
     }
 
+    suspend fun refreshConversationConnections() {
+        val connections = api.conversationConnections()
+
+        mutableState.update { it.copy(conversationConnections = connections.associateBy { connection -> connection.id }) }
+    }
+
+    suspend fun revokeConversationConnection(id: String) {
+        api.revokeConversationConnection(id)
+        mutableState.update { it.copy(conversationConnections = it.conversationConnections - id) }
+    }
+
+    suspend fun approveAndConnectMessageProposal(proposal: MessageProposal) {
+        val sent = api.approveAndConnectMessageProposal(proposal.id)
+
+        mutableState.update { it.copy(messageProposals = it.messageProposals + (sent.id to sent)) }
+        refreshConversationConnections()
+    }
+
     suspend fun refreshMessageProposals() {
         val proposals = api.messageProposals()
 
@@ -360,6 +379,16 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val declined = api.declineMessageProposal(proposal.id)
 
         mutableState.update { it.copy(messageProposals = it.messageProposals + (declined.id to declined)) }
+    }
+
+    suspend fun refreshArtifactAccessRequests() {
+        val requests = api.artifactAccessRequests()
+        mutableState.update { it.copy(artifactAccessRequests = requests.associateBy { request -> request.id }) }
+    }
+
+    suspend fun decideArtifactAccessRequest(request: ArtifactAccessRequest, approve: Boolean, project: Boolean = false) {
+        val decided = if (approve) api.approveArtifactAccessRequest(request.id, project) else api.declineArtifactAccessRequest(request.id)
+        mutableState.update { it.copy(artifactAccessRequests = it.artifactAccessRequests + (decided.id to decided)) }
     }
 
     suspend fun refreshApiAccessRequests() {
@@ -426,6 +455,11 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         api.deleteArtifact(artifact.id)
 
         mutableState.update { it.copy(artifacts = it.artifacts - artifact.id) }
+    }
+
+    suspend fun refreshWorkflows() {
+        val workflows = api.workflows()
+        mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.string("id").orEmpty() }) }
     }
 
     suspend fun refreshSchedules() {

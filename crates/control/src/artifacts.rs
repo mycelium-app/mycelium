@@ -34,7 +34,7 @@ const MOST_READ_CHARACTERS: usize = 100_000;
 const ARTBOARD_GAP: i64 = 80;
 const ARTBOARD_WIDTH: i64 = 1440;
 const ARTBOARD_HEIGHT: i64 = 900;
-const COLUMNS: &str = "id, owner, conversation_id, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type";
+const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from artifact_links where artifact_id = artifacts.id and project_id is not null) as project_ids, array(select conversation_id from artifact_links where artifact_id = artifacts.id and conversation_id is not null) as conversation_ids, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type";
 const COMMENT_COLUMNS: &str = "id, artifact_id, author_name, body, anchor, resolved, created_at";
 
 #[derive(sqlx::FromRow)]
@@ -42,6 +42,8 @@ struct ArtifactRow {
     id: Uuid,
     owner: Uuid,
     conversation_id: Option<Uuid>,
+    project_ids: Vec<Uuid>,
+    conversation_ids: Vec<Uuid>,
     kind: String,
     title: String,
     slug: String,
@@ -155,6 +157,8 @@ impl ArtifactRow {
             id: self.id,
             owner: self.owner,
             conversation_id: self.conversation_id,
+            project_ids: self.project_ids,
+            conversation_ids: self.conversation_ids,
             kind: parse_kind(&self.kind).map_err(|_| ApiError::internal(format!("unknown artefact kind {}", self.kind)))?,
             url: domain.map(|domain| format!("https://{}.{domain}", self.slug)),
             title: self.title,
@@ -375,8 +379,13 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
         .await?;
 
     sqlx::query("insert into artifact_versions (artifact_id, version, author, media_type, sha256) values ($1, 1, $2, $3, $4)").bind(row.id).bind(author_text(new.author)).bind(&media_type).bind(&sha256).execute(&mut *tx).await?;
+    if let Some(conversation_id) = new.conversation_id {
+        sqlx::query("insert into artifact_links (artifact_id, project_id, conversation_id, permission) select $1, project_id, case when project_id is null then id end, 'edit' from conversations where id = $2").bind(row.id).bind(conversation_id).execute(&mut *tx).await?;
+    }
+
     tx.commit().await?;
 
+    let row = owned(state, row.id, new.owner).await?;
     let artifact = full(state, row).await?;
     announce(state, &artifact);
     snapshots::spawn(state, &artifact);
@@ -780,7 +789,18 @@ fn describe_item(item: &Value) -> String {
 }
 
 pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &str, arguments: &Value) -> ApiResult<String> {
+    if !matches!(name, "create_artifact" | "find_artifacts" | "request_artifact_access") {
+        let row = resolve(state, owner, arguments).await?;
+        let edit = matches!(name, "update_artifact" | "design_set_artboard" | "design_remove_item");
+        crate::artifact_access::require(state, owner, conversation_id, row.id, edit).await?;
+    }
+
     match name {
+        "find_artifacts" => crate::artifact_access::find(state, owner, conversation_id, argument(arguments, "query").unwrap_or_default()).await,
+        "request_artifact_access" => {
+            let row = resolve(state, owner, arguments).await?;
+            crate::artifact_access::request(state, owner, conversation_id, row.id, argument(arguments, "permission").unwrap_or("view"), argument(arguments, "reason").unwrap_or_default()).await
+        }
         "create_artifact" => {
             let kind = parse_kind(argument(arguments, "kind").unwrap_or_default())?;
             let content = content_from(state, owner, conversation_id, arguments).await?;

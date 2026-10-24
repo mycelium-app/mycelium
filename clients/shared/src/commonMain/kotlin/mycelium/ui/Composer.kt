@@ -433,13 +433,18 @@ fun Composer(
             ) {
                 attach()
                 goal?.let { GoalButton(it) }
-                Box(Modifier.weight(1f))
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (working) {
+                        Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
+                    }
 
-                if (working) {
-                    Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
+                    pickers()
                 }
 
-                pickers()
                 SendButtons(working, onStop, ::submit)
             }
         }

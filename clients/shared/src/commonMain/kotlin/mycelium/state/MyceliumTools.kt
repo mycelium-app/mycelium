@@ -12,8 +12,10 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     ProposeSchedule("propose_schedule", "Propose schedule", "Proposing a schedule"),
     Walkthrough("walkthrough", "Walkthrough", "Writing a walkthrough"),
     ProposeInstructionsEdit("propose_instructions_edit", "Propose instructions edit", "Proposing an instructions edit"),
+    SetProjectIcon("set_project_icon", "Set project icon", "Setting project icon"),
     FindConversations("find_conversations", "Find conversations", "Finding conversations"),
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
+    RequestArtifactAccess("request_artifact_access", "Request artefact access", "Requesting artefact access"),
     RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
     RequestSshAccess("request_ssh_access", "Request SSH access", "Requesting SSH access"),
     CreateArtifact("create_artifact", "Create artefact", "Creating an artefact"),
@@ -61,6 +63,10 @@ sealed interface MyceliumCall {
         override val tool = MyceliumTool.SendToConversation
     }
 
+    data class RequestArtifactAccess(val artifactId: String, val permission: String, val reason: String, val requestId: String?) : MyceliumCall {
+        override val tool = MyceliumTool.RequestArtifactAccess
+    }
+
     data class RequestApiAccess(val scopes: List<String>, val hours: Int?, val reason: String, val requestId: String? = null) : MyceliumCall {
         override val tool = MyceliumTool.RequestApiAccess
     }
@@ -79,6 +85,10 @@ sealed interface MyceliumCall {
 
     data class DesignSetArtboard(val artifactId: String, val artboard: String?, val name: String?, val version: Int?) : MyceliumCall {
         override val tool = MyceliumTool.DesignSetArtboard
+    }
+
+    data class SetProjectIcon(val path: String) : MyceliumCall {
+        override val tool = MyceliumTool.SetProjectIcon
     }
 
     data class ReadArtifact(val artifactId: String, val artboard: String?) : MyceliumCall {
@@ -176,6 +186,12 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             MyceliumCall.ProposeInstructionsEdit(proposedLayer.find(output)?.groupValues?.get(1) ?: fields.string("layer"), reason)
         }
 
+        MyceliumTool.SetProjectIcon -> {
+            val path = fields.requiredString("path", input) ?: return null
+
+            MyceliumCall.SetProjectIcon(path)
+        }
+
         MyceliumTool.FindConversations -> {
             val conversations = output.lines().mapNotNull { foundConversation.matchEntire(it)?.groupValues?.get(1) }
 
@@ -188,6 +204,14 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val target = waiting?.groupValues?.get(1) ?: fields.string("conversation")?.trim().orEmpty()
 
             MyceliumCall.SendToConversation(target, message, fields.string("reason")?.trim().orEmpty(), waiting?.groupValues?.get(2)?.ifEmpty { null })
+        }
+
+        MyceliumTool.RequestArtifactAccess -> {
+            val artifact = fields.requiredString("artifact", input) ?: return null
+            val reason = fields.requiredString("reason", input) ?: return null
+            val requestId = Regex("request ([0-9a-fA-F-]{36})").find(output)?.groupValues?.get(1)
+
+            MyceliumCall.RequestArtifactAccess(artifact, fields.string("permission") ?: "view", reason, requestId)
         }
 
         MyceliumTool.RequestApiAccess -> {

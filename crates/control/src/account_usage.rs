@@ -13,27 +13,43 @@ const FALL_THAT_MEANS_A_RESET: f64 = 0.5;
 
 type Point = (DateTime<Utc>, Vec<UsageWindow>);
 
-pub async fn record(tx: &mut Transaction<'_, Postgres>, node_id: Uuid, login: &LoginInfo) -> ApiResult<()> {
-    let Some(read_at) = login.usage_read_at.filter(|_| !login.windows.is_empty()) else {
-        return Ok(());
-    };
-    let account = login.account.clone().unwrap_or_default();
+pub async fn cache(tx: &mut Transaction<'_, Postgres>, node_id: Uuid, login: &mut LoginInfo) -> ApiResult<()> {
+    let account = login.account.as_deref().unwrap_or_default();
 
-    sqlx::query("insert into login_usage_history (node_id, agent, account, read_at, windows) values ($1, $2, $3, $4, $5) on conflict do nothing")
+    if let Some(read_at) = login.usage_read_at.filter(|_| !login.windows.is_empty()) {
+        sqlx::query("insert into login_usage_history (node_id, agent, account, read_at, windows) values ($1, $2, $3, $4, $5) on conflict do nothing")
+            .bind(node_id)
+            .bind(enum_text(&login.agent))
+            .bind(account)
+            .bind(read_at)
+            .bind(Json(&login.windows))
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    let latest = sqlx::query_as::<_, (DateTime<Utc>, Json<Vec<UsageWindow>>)>("select read_at, windows from login_usage_history where node_id = $1 and agent = $2 and account = $3 order by read_at desc limit 1")
         .bind(node_id)
         .bind(enum_text(&login.agent))
-        .bind(&account)
-        .bind(read_at)
-        .bind(Json(&login.windows))
-        .execute(&mut **tx)
+        .bind(account)
+        .fetch_optional(&mut **tx)
         .await?;
-    sqlx::query("delete from login_usage_history where node_id = $1 and agent = $2 and account = $3 and read_at < now() - make_interval(days => $4::int)")
-        .bind(node_id)
-        .bind(enum_text(&login.agent))
-        .bind(&account)
-        .bind(HISTORY_DAYS as i32)
-        .execute(&mut **tx)
-        .await?;
+
+    if let Some((read_at, windows)) = latest {
+        if login.windows.is_empty() || login.usage_read_at.is_none_or(|incoming| incoming < read_at) {
+            login.usage_left = windows.0.iter().map(|window| window.used_percent).reduce(f64::max).map(|used| (100.0 - used).round().clamp(0.0, 100.0) as u8);
+            login.windows = windows.0;
+            login.usage_read_at = Some(read_at);
+        }
+
+        sqlx::query("delete from login_usage_history where node_id = $1 and agent = $2 and account = $3 and read_at < now() - make_interval(days => $4::int) and read_at < $5")
+            .bind(node_id)
+            .bind(enum_text(&login.agent))
+            .bind(account)
+            .bind(HISTORY_DAYS as i32)
+            .bind(read_at)
+            .execute(&mut **tx)
+            .await?;
+    }
 
     Ok(())
 }
@@ -100,5 +116,7 @@ pub async fn windows_of(state: &AppState, node_id: Uuid, agent: AgentId, account
     .fetch_optional(&state.pool)
     .await?;
 
-    Ok(windows.map(|windows| windows.0).unwrap_or_default())
+    let now = Utc::now();
+
+    Ok(windows.map(|windows| windows.0.into_iter().filter(|window| window.resets_at.is_none_or(|reset| reset > now)).collect()).unwrap_or_default())
 }

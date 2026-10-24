@@ -98,7 +98,16 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
         .fetch_one(&state.pool)
         .await?;
 
-    Ok(Ok(publish(state, owner, find_owned(state, id, owner).await?)))
+    let proposal = publish(state, owner, find_owned(state, id, owner).await?);
+
+    if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? {
+        let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+        let Json(sent) = approve(State(state.clone()), user, Path(id)).await?;
+
+        return Ok(Ok(sent));
+    }
+
+    Ok(Ok(proposal))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<MessageProposal>>> {
@@ -155,4 +164,18 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
+}
+
+pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
+    user.require_full_access()?;
+    let found = find_owned(&state, id, user.id).await?;
+
+    if found.state != "proposed" {
+        return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
+    }
+
+    let source = found.conversation_id.ok_or_else(|| ApiError::conflict("source_removed", "The source conversation has been removed."))?;
+    crate::conversation_connections::connect(&state, &user, source, found.target_id).await?;
+
+    approve(State(state), user, Path(id)).await
 }

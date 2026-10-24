@@ -10,6 +10,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const PUBLISHING_ROUTES: &[&str] = &[
+    "POST /api/v1/workflows",
+    "POST /api/v1/workflows/{id}/control",
     "POST /api/v1/device",
     "POST /api/v1/device/token",
     "POST /api/v1/device/{user_code}/approve",
@@ -35,6 +37,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/schedules/{id}/decline",
     "POST /api/v1/instruction-proposals/{id}/approve",
     "POST /api/v1/instruction-proposals/{id}/decline",
+    "POST /api/v1/conversation-connections",
+    "DELETE /api/v1/conversation-connections/{id}",
+    "POST /api/v1/message-proposals/{id}/connect",
     "POST /api/v1/message-proposals/{id}/approve",
     "POST /api/v1/message-proposals/{id}/decline",
     "POST /api/v1/api-access-requests/{id}/approve",
@@ -67,6 +72,10 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/walkthroughs/{id}/notes",
     "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
     "POST /api/v1/walkthroughs/{id}/notes/sent",
+    "POST /api/v1/artifacts/{id}/links",
+    "DELETE /api/v1/artifacts/{id}/links/{link_id}",
+    "POST /api/v1/artifact-access-requests/{id}/approve",
+    "POST /api/v1/artifact-access-requests/{id}/decline",
     "POST /api/v1/artifacts",
     "POST /api/v1/artifacts/{id}/versions",
     "PATCH /api/v1/artifacts/{id}",
@@ -76,6 +85,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
+
     "POST /auth/logout",
     "DELETE /api/v1/sessions/{id}",
     "POST /api/v1/nodes/{id}/logins",
@@ -85,6 +95,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/cancel",
     "POST /api/v1/conversations/{id}/terminal",
     "POST /api/v1/conversations/{id}/attachments",
+    "POST /api/v1/conversations/{id}/git/hunk",
+    "POST /api/v1/conversations/{id}/git/file",
     "POST /api/v1/conversations/{id}/git/stage",
     "POST /api/v1/conversations/{id}/git/unstage",
     "POST /api/v1/conversations/{id}/git/stage-all",

@@ -217,3 +217,63 @@ async fn a_proposal_needs_a_message_and_a_reason() {
 
     assert_eq!(proposals(&server).await.len(), 0);
 }
+
+#[tokio::test]
+async fn connecting_conversations_allows_messages_in_both_directions_until_revoked() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Plan the release").await;
+    let target = working_conversation(&server, &mut link, "Fix billing export").await;
+    let (status, connection) = server.user.json(server.user.post("/api/v1/conversation-connections").json(&json!({"source_id": source, "target_id": target}))).await;
+    assert_eq!(status, 201, "{connection}");
+
+    let sent = propose(&server, &link, source, &target.to_string()).await;
+    assert!(text(&sent).starts_with("Sent to Fix billing export"), "{sent}");
+    assert_eq!(queue(&server, target).await[0]["text"], "From Plan the release:\n\nThe schema is ready");
+    let reply = propose(&server, &link, target, &source.to_string()).await;
+    assert!(text(&reply).starts_with("Sent to Plan the release"), "{reply}");
+    assert_eq!(queue(&server, source).await.len(), 1);
+
+    let id = connection["id"].as_str().unwrap();
+    let (status, revoked) = server.user.json(server.user.delete(&format!("/api/v1/conversation-connections/{id}"))).await;
+    assert_eq!(status, 200, "{revoked}");
+    let waiting = propose(&server, &link, source, &target.to_string()).await;
+    assert!(text(&waiting).starts_with("Waiting for the person"), "{waiting}");
+    assert_eq!(queue(&server, target).await.len(), 1);
+}
+
+#[tokio::test]
+async fn connections_are_owned_and_require_full_person_access() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Source").await;
+    let target = working_conversation(&server, &mut link, "Target").await;
+    let other = server.second_user("other@example.com").await;
+    let (status, _) = other.json(other.post("/api/v1/conversation-connections").json(&json!({"source_id": source, "target_id": target}))).await;
+    assert_eq!(status, 404);
+    let (status, _) = server.user.json(server.user.post("/api/v1/conversation-connections").json(&json!({"source_id": source, "target_id": source}))).await;
+    assert_eq!(status, 400);
+
+    let (_, connection) = server.user.json(server.user.post("/api/v1/conversation-connections").json(&json!({"source_id": source, "target_id": target}))).await;
+    let (_, list) = other.json(other.get("/api/v1/conversation-connections")).await;
+    assert_eq!(list, json!([]));
+    assert_eq!(other.json(other.delete(&format!("/api/v1/conversation-connections/{}", connection["id"].as_str().unwrap()))).await.0, 404);
+}
+
+#[tokio::test]
+async fn approving_a_message_and_connecting_only_sends_it_once() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = working_conversation(&server, &mut link, "Source").await;
+    let target = working_conversation(&server, &mut link, "Target").await;
+    propose(&server, &link, source, &target.to_string()).await;
+    let id = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    let route = format!("/api/v1/message-proposals/{id}/connect");
+    let (status, sent) = server.user.json(server.user.post(&route)).await;
+    assert_eq!((status, sent["state"].clone()), (200, json!("sent")), "{sent}");
+    assert_eq!(server.user.json(server.user.post(&route)).await.0, 409);
+    assert_eq!(queue(&server, target).await.len(), 1);
+    let (_, connections) = server.user.json(server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(connections.as_array().unwrap().len(), 1);
+    assert!(text(&propose(&server, &link, source, &target.to_string()).await).starts_with("Sent to"));
+}

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollToIndex
@@ -27,12 +28,13 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.decodeFromString
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
+import mycelium.api.GitFileRequest
+import mycelium.api.GitHunkRequest
 import mycelium.api.RowsRequest
 import mycelium.state.Store
 import mycelium.state.changesTab
@@ -64,7 +66,7 @@ private class FileSpec(val path: String, val rows: Int, val staged: Boolean = fa
     }
 }
 
-private class ChangesFake(private val files: List<FileSpec>) {
+private class ChangesFake(private val files: List<FileSpec>, private val rowsReady: CompletableDeferred<Unit>? = null) {
     val requests: MutableList<HttpRequestData> = CopyOnWriteArrayList()
     val rowRequests = AtomicInteger()
 
@@ -78,6 +80,7 @@ private class ChangesFake(private val files: List<FileSpec>) {
                 path.endsWith("/git/changes-layout") -> """{"files":[${files.joinToString(",") { it.layout() }}]}"""
                 path.endsWith("/git/changes-rows") -> {
                     rowRequests.incrementAndGet()
+                    rowsReady?.await()
                     val asked = MyceliumJson.decodeFromString<RowsRequest>(bodyOf(request))
 
                     """{"ranges":[${asked.ranges.joinToString(",") { range ->
@@ -87,6 +90,7 @@ private class ChangesFake(private val files: List<FileSpec>) {
                         """{"path":"${range.path}","from":${range.from},"fingerprint":"fp-${range.path}","rows":[${(range.from until to).joinToString(",") { spec.row(it) }}]}"""
                     }}]}"""
                 }
+                path.endsWith("/git/file") -> """{"content":"original text"}"""
                 path.endsWith("/git/show") -> ShowJson
                 else -> "{}"
             }
@@ -105,11 +109,14 @@ class ChangesViewTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private val composedRows = AtomicInteger()
 
     private fun open(fake: ChangesFake, reveal: String? = null, commit: Boolean = false) {
         val conversation = MyceliumJson.decodeFromString<Conversation>(ConversationJson)
-        val store = Store(fake.api, CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fake.api, scopes.create())
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -130,6 +137,31 @@ class ChangesViewTest {
 
     private fun awaitText(text: String) {
         rule.waitUntil(10_000) { rule.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aHunkActionIdentifiesTheDisplayedHunkAndItsOriginalDiskVersion() {
+        val fake = ChangesFake(listOf(FileSpec("a.kt", 4)))
+        open(fake)
+        awaitText("Stage hunk")
+        rule.onNodeWithText("Stage hunk").performClick()
+        rule.waitUntil(10_000) { fake.posts("/git/hunk").isNotEmpty() }
+        val request = MyceliumJson.decodeFromString<GitHunkRequest>(fake.bodyOf(fake.posts("/git/hunk").last()))
+        assertEquals(GitHunkRequest("a.kt", 0, "fp-a.kt", "stage"), request)
+    }
+
+    @Test
+    fun editingSavesTheNewTextWithTheOriginalContentToProtectExternalChanges() {
+        val fake = ChangesFake(listOf(FileSpec("a.kt", 4)))
+        open(fake)
+        await("Edit file a.kt")
+        rule.onNodeWithContentDescription("Edit file a.kt").performClick()
+        await("Edit a.kt")
+        rule.onNodeWithContentDescription("Edit a.kt").performTextReplacement("edited text")
+        rule.onNodeWithText("Save").performClick()
+        rule.waitUntil(10_000) { fake.posts("/git/file").size == 2 }
+        val request = MyceliumJson.decodeFromString<GitFileRequest>(fake.bodyOf(fake.posts("/git/file").last()))
+        assertEquals(GitFileRequest("a.kt", "edited text", "original text"), request)
     }
 
     @Test
@@ -161,15 +193,33 @@ class ChangesViewTest {
     }
 
     @Test
-    fun stagingAFileFromItsHeaderPostsThatPathToTheStageRoute() {
-        val fake = ChangesFake(listOf(FileSpec("a.kt", 4), FileSpec("b.kt", 4)))
+    fun loadingHunkControlsKeepsFollowingFileHeadersInPlace() {
+        val rowsReady = CompletableDeferred<Unit>()
+        val fake = ChangesFake(listOf(FileSpec("a.kt", 4), FileSpec("b.kt", 4)), rowsReady)
         open(fake)
         await("Stage file b.kt")
+        val before = rule.onNodeWithContentDescription("Stage file b.kt").getUnclippedBoundsInRoot().top
+
+        rowsReady.complete(Unit)
+        awaitText("val bLine2 = 2")
+        val after = rule.onNodeWithContentDescription("Stage file b.kt").getUnclippedBoundsInRoot().top
+
+        assertEquals(before, after)
+    }
+
+    @Test
+    fun stagingAFileFromItsHeaderPostsThatPathToTheStageRoute() {
+        val rowsReady = CompletableDeferred<Unit>()
+        val fake = ChangesFake(listOf(FileSpec("a.kt", 4), FileSpec("b.kt", 4)), rowsReady)
+        open(fake)
+        await("Stage file b.kt")
+        rule.onNodeWithContentDescription("Stage file b.kt").assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Stage file b.kt").performClick()
 
         rule.waitUntil(5_000) { fake.posts("/git/stage").isNotEmpty() }
         assertTrue(fake.bodyOf(fake.posts("/git/stage").single()).contains("\"b.kt\""))
+        rowsReady.complete(Unit)
     }
 
     @Test

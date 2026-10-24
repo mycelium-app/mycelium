@@ -152,6 +152,7 @@ async fn follow_transcripts(daemon: Arc<Daemon>) {
             return;
         };
 
+        transcripts.roots = crate::agents::transcript_roots(&daemon.options.home, &accounts_dir(&daemon.config.state_dir), &daemon.options.transcript_roots);
         transcripts.poll(connected, |acp_session_id| daemon.conversation_for_session(acp_session_id));
     }
 }
@@ -256,7 +257,9 @@ impl Daemon {
                 }
             }
             ControlToNode::RestoreTranscript { path, offset, data } => {
-                if let Err(error) = crate::transcripts::restore(&self.options.home, &path, offset, &data) {
+                let roots = crate::agents::transcript_roots(&self.options.home, &accounts_dir(&self.config.state_dir), &self.options.transcript_roots);
+
+                if let Err(error) = crate::transcripts::restore(&self.options.home, &roots, &path, offset, &data) {
                     tracing::warn!("could not restore a transcript: {error}");
                 }
             }
@@ -273,7 +276,7 @@ impl Daemon {
                 let out = self.out.clone();
                 let root = self.config.projects_root.clone();
                 let home = self.options.home.clone();
-                let transcript_roots = self.options.transcript_roots.clone();
+                let transcript_roots = crate::agents::transcript_roots(&self.options.home, &accounts_dir(&self.config.state_dir), &self.options.transcript_roots);
 
                 tokio::task::spawn_blocking(move || {
                     let session_id = match &command {

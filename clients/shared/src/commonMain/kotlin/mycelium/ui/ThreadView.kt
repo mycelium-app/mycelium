@@ -779,6 +779,37 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
         return
     }
 
+    if (call.kind == "think") {
+        val output = call.output?.trim().orEmpty()
+        val decision = output.removePrefix("Status: ").takeIf { it in setOf("Approved", "Rejected", "Denied") }
+        var expanded by remember(call.key) { mutableStateOf(false) }
+
+        Card(Modifier.semantics { contentDescription = call.title }) {
+            CardHead {
+                Icon(MyIcon.Review, colors.textMuted, Tokens.Size.IconSm)
+                Label(call.title, Modifier.weight(1f), Tokens.Type.UiStrong)
+
+                when {
+                    call.status == ToolStatus.Running -> StatusMark("Running", Tone.Working, MyIcon.Working)
+                    call.status == ToolStatus.Failed -> StatusMark("Failed", Tone.Failed, MyIcon.Failed)
+                    decision != null -> StatusMark(decision, Tone.Muted, if (decision == "Approved") MyIcon.Check else MyIcon.Close)
+                }
+
+                if (output.isNotBlank() && decision == null) {
+                    MyButton({ expanded = !expanded }, icon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight, description = if (expanded) "Hide ${call.title}" else "Show ${call.title}", size = ButtonSize.Sm, muted = true)
+                }
+            }
+
+            if (expanded && output.isNotBlank()) {
+                Box(Modifier.padding(Tokens.Space.S3)) {
+                    MarkdownBlocks(parsedMarkdown(output))
+                }
+            }
+        }
+
+        return
+    }
+
     val mycelium = myceliumCall(call)
 
     if (mycelium != null) {

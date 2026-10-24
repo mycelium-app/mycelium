@@ -8,6 +8,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import mycelium.api.ModelProviderUsage
 import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -120,6 +123,7 @@ sealed interface Route {
 
     data object Tasks : Route
 
+    data object Workflows : Route
     data object Schedules : Route
 
     data object Projects : Route
@@ -346,7 +350,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
@@ -356,6 +360,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
             is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
+            Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Schedules -> SchedulesScreen(store, state)
             Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
             Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
@@ -415,6 +420,23 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }
+    var providerUsage by remember(store) { mutableStateOf(emptyList<ModelProviderUsage>()) }
+
+    LaunchedEffect(store, usageOpen) {
+        if (usageOpen) {
+            while (true) {
+                try {
+                    providerUsage = store.api.modelProviderUsage()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                }
+
+                delay(60_000L)
+            }
+        }
+    }
+
     var mode by remember { mutableStateOf(if (route == Route.NewChat || (route as? Route.Chat)?.let { state.conversations[it.id]?.isChat } == true) ChatsMode else WorkspacesMode) }
     var lastOpened by remember { mutableStateOf(mapOf(WorkspacesMode to Route.New, ChatsMode to Route.NewChat)) }
     val openedMode = when (route) {
@@ -444,6 +466,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
                 SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+                SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }
         }
@@ -487,7 +510,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (usageOpen) {
             val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
 
-            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5))
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId)
         }
 
         Hairline()

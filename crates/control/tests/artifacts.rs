@@ -52,6 +52,12 @@ fn artifact_id(text: &str) -> String {
     text.split("(artifact ").nth(1).unwrap().split(',').next().unwrap().to_string()
 }
 
+async fn grant(client: &Client, artifact: &Value, conversation: Uuid) {
+    let id = artifact["id"].as_str().unwrap();
+    let (status, body) = client.json(client.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"conversation_id": conversation, "permission": "edit"}))).await;
+    assert_eq!(status, 200, "{body}");
+}
+
 async fn design_of(client: &Client, id: &str) -> Value {
     let (_, artifact) = client.json(client.get(&format!("/api/v1/artifacts/{id}"))).await;
     let (_, bytes) = content_of(client, id, artifact["latest_version"].as_i64().unwrap()).await;
@@ -387,6 +393,7 @@ async fn design_set_artboard_adds_an_artboard_then_replaces_it_and_leaves_everyt
     let (link, conversation) = started(&server).await;
     let drawn = r##"{"pages":[{"id":"p1","name":"Page 1","items":[{"id":"n1","type":"note","x":5,"y":6,"w":240,"h":120,"text":"Keep me"}]}]}"##;
     let design = created(&server.user, "design", "Landing", drawn).await;
+    grant(&server.user, &design, conversation).await;
     let id = design["id"].as_str().unwrap();
 
     let (_, first) = tool(&server, &link, conversation, "design_set_artboard", json!({"artifact": id, "name": "Home", "html": "<h1>Home</h1>"})).await;
@@ -415,8 +422,10 @@ async fn design_tools_refuse_other_kinds_and_remove_an_item_by_id() {
     let (link, conversation) = started(&server).await;
     let page = created(&server.user, "page", "Board", "x").await;
     let design = created(&server.user, "design", "Landing", r##"{"pages":[{"id":"p1","items":[{"id":"s1","type":"rect","x":0,"y":0,"w":10,"h":10,"fill":"#fff","stroke":null,"radius":0},{"id":"t1","type":"text","x":0,"y":0,"w":10,"text":"Hi","size":16,"color":"#000"}]}]}"##).await;
+    grant(&server.user, &design, conversation).await;
     let id = design["id"].as_str().unwrap();
 
+    grant(&server.user, &page, conversation).await;
     let (page_failed, page_text) = tool(&server, &link, conversation, "design_set_artboard", json!({"artifact": page["id"], "html": "<p></p>"})).await;
     let (no_html_failed, _) = tool(&server, &link, conversation, "design_set_artboard", json!({"artifact": id})).await;
     let (removed_failed, removed_text) = tool(&server, &link, conversation, "design_remove_item", json!({"artifact": id, "item": "s1"})).await;
@@ -438,6 +447,9 @@ async fn read_artifact_gives_text_a_file_summary_or_the_outline_of_a_design() {
     let page = created(&server.user, "page", "Board", "<h1>Board</h1>").await;
     let (_, file) = create(&server.user, json!({"kind": "file", "title": "Report", "content_base64": base64::engine::general_purpose::STANDARD.encode(PDF), "media_type": "application/pdf"})).await;
 
+    grant(&server.user, &design, conversation).await;
+    grant(&server.user, &page, conversation).await;
+    grant(&server.user, &file, conversation).await;
     let (_, outline) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": design["id"]})).await;
     let (_, html) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": design["id"], "artboard": "home"})).await;
     let (_, text) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": page["id"]})).await;
@@ -460,6 +472,7 @@ async fn read_artifact_feedback_gives_unresolved_comments_and_the_data_store() {
     let page = created(&server.user, "page", "Board", "x").await;
     let id = page["id"].as_str().unwrap();
 
+    grant(&server.user, &page, conversation).await;
     let (_, quiet) = tool(&server, &link, conversation, "read_artifact_feedback", json!({"artifact": id})).await;
     let (_, open) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/comments")).json(&json!({"body": "Row 3 is wrong", "anchor": {"row": 3}}))).await;
     let (_, done) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/comments")).json(&json!({"body": "Typo"}))).await;
@@ -487,4 +500,97 @@ async fn an_agent_cannot_reach_another_persons_artifact() {
     let (update_failed, _) = tool(&server, &link, conversation, "update_artifact", json!({"artifact": theirs["id"], "content": "mine now"})).await;
 
     assert_eq!((read_failed, by_slug_failed, update_failed), (true, true, true));
+}
+
+#[tokio::test]
+async fn artefact_access_is_scoped_approved_upgraded_and_revoked() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+    let artefact = created(&server.user, "markdown", "Private roadmap", "# Plan").await;
+    let id = artefact["id"].as_str().unwrap();
+    let (denied, _) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id})).await;
+    assert!(denied);
+    let (_, found) = tool(&server, &link, conversation, "find_artifacts", json!({"query": "roadmap"})).await;
+    assert_eq!(serde_json::from_str::<Value>(&found).unwrap()["artifacts"], json!([]));
+    let (failed, _) = tool(&server, &link, conversation, "request_artifact_access", json!({"artifact": id, "permission": "view", "reason": "Read the roadmap"})).await;
+    assert!(!failed);
+    let _ = tool(&server, &link, conversation, "request_artifact_access", json!({"artifact": id, "permission": "view", "reason": "Read the roadmap again"})).await;
+    let (_, requests) = server.user.json(server.user.get("/api/v1/artifact-access-requests")).await;
+    assert_eq!(requests.as_array().unwrap().len(), 1);
+    let request = requests[0]["id"].as_str().unwrap();
+    let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/artifact-access-requests/{request}/approve")).json(&json!({}))).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["state"], "approved");
+    let (denied, text) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id})).await;
+    assert!(!denied, "{text}");
+    assert_eq!(text, "# Plan");
+    let (denied, _) = tool(&server, &link, conversation, "update_artifact", json!({"artifact": id, "content": "Changed"})).await;
+    assert!(denied);
+    let (status, linked) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"conversation_id": conversation, "permission": "edit"}))).await;
+    assert_eq!(status, 200, "{linked}");
+    let (denied, text) = tool(&server, &link, conversation, "update_artifact", json!({"artifact": id, "content": "Changed"})).await;
+    assert!(!denied, "{text}");
+    let (_, found) = tool(&server, &link, conversation, "find_artifacts", json!({"query": "ROADMAP"})).await;
+    let found: Value = serde_json::from_str(&found).unwrap();
+    assert_eq!(found["artifacts"][0]["permission"], "edit");
+    let link_id = linked["id"].as_str().unwrap();
+    let response = server.user.delete(&format!("/api/v1/artifacts/{id}/links/{link_id}")).send().await.unwrap();
+    assert_eq!(response.status(), 204);
+    let (denied, _) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id})).await;
+    assert!(denied);
+    let (status, _) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{id}"))).await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn artefact_creator_chat_keeps_access_and_strangers_cannot_grant_it() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+    let (_, created) = tool(&server, &link, conversation, "create_artifact", json!({"kind": "markdown", "title": "Chat notes", "content": "Notes"})).await;
+    let id = artifact_id(&created);
+    let (_, found) = tool(&server, &link, conversation, "find_artifacts", json!({})).await;
+    assert!(found.contains(&id));
+    let other = server.second_user("stranger@example.test").await;
+    let (status, _) = other.json(other.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"conversation_id": conversation, "permission": "edit"}))).await;
+    assert_eq!(status, 404);
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"conversation_id": Uuid::new_v4(), "permission": "edit"}))).await;
+    assert_eq!(status, 404);
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"conversation_id": conversation, "permission": "owner"}))).await;
+    assert_eq!(status, 400);
+}
+
+#[tokio::test]
+async fn artefacts_belong_to_the_creator_project_and_can_be_shared_with_more_projects() {
+    let server = Server::start().await;
+    let (mut link, creator) = started(&server).await;
+    let second = server.create_conversation(link.id, Some("second")).await;
+    link.expect_start_session().await;
+    let third = server.create_conversation(link.id, Some("third")).await;
+    link.expect_start_session().await;
+    let first_project: Uuid = sqlx::query_scalar("insert into projects (owner, node_id, name, path) select owner, node_id, 'First', '/first' from conversations where id = $1 returning id").bind(creator).fetch_one(&server.pool).await.unwrap();
+    let second_project: Uuid = sqlx::query_scalar("insert into projects (owner, node_id, name, path) select owner, node_id, 'Second', '/second' from conversations where id = $1 returning id").bind(creator).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set project_id = $1 where id = any($2)").bind(first_project).bind(vec![creator, second.id]).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set project_id = $1 where id = $2").bind(second_project).bind(third.id).execute(&server.pool).await.unwrap();
+    let (_, text) = tool(&server, &link, creator, "create_artifact", json!({"kind": "markdown", "title": "Project plan", "content": "Shared"})).await;
+    let id = artifact_id(&text);
+    let (denied, text) = tool(&server, &link, second.id, "read_artifact", json!({"artifact": id})).await;
+    assert!(!denied, "{text}");
+    let (denied, _) = tool(&server, &link, third.id, "read_artifact", json!({"artifact": id})).await;
+    assert!(denied);
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/artifacts/{id}/links")).json(&json!({"project_id": second_project, "permission": "view"}))).await;
+    assert_eq!(status, 200, "{body}");
+    let (denied, text) = tool(&server, &link, third.id, "read_artifact", json!({"artifact": id})).await;
+    assert!(!denied, "{text}");
+    let (denied, _) = tool(&server, &link, third.id, "update_artifact", json!({"artifact": id, "content": "Changed"})).await;
+    assert!(denied);
+    let (_, _) = tool(&server, &link, third.id, "request_artifact_access", json!({"artifact": id, "permission": "edit", "reason": "Edit the project plan"})).await;
+    let (_, requests) = server.user.json(server.user.get("/api/v1/artifact-access-requests")).await;
+    let request = requests[0]["id"].as_str().unwrap();
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/artifact-access-requests/{request}/approve")).json(&json!({"project": true}))).await;
+    assert_eq!(status, 200, "{body}");
+    let (denied, text) = tool(&server, &link, third.id, "update_artifact", json!({"artifact": id, "content": "Changed"})).await;
+    assert!(!denied, "{text}");
+    let (_, artifact) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{id}"))).await;
+    assert_eq!(artifact["project_ids"].as_array().unwrap().len(), 2);
+    assert!(artifact["conversation_ids"].as_array().unwrap().is_empty());
 }

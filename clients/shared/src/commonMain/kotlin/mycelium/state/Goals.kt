@@ -11,7 +11,7 @@ const val GoalCheckKind = "check"
 data class GoalLimits(val tokenBudget: Long? = null, val timeLimitSeconds: Long? = null, val fiveHourPercent: Int? = null, val weeklyPercent: Int? = null)
 
 fun goalProgress(goal: Goal, now: Instant = Clock.System.now()): String {
-    val tokens = goal.tokenBudget?.let { "${formatTokens(goal.tokensUsed)} of ${formatTokens(it)} tokens" } ?: "${formatTokens(goal.tokensUsed)} tokens"
+    val tokens = if (!goal.tokensKnown) "Token usage pending" else goal.tokenBudget?.let { "${formatTokens(goal.tokensUsed)} of ${formatTokens(it)} tokens" } ?: "${formatTokens(goal.tokensUsed)} tokens"
     val time = goal.timeLimitSeconds?.let { limit ->
         val started = goal.startedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
         val left = started?.let { limit - (now - it).inWholeSeconds }
@@ -23,7 +23,7 @@ fun goalProgress(goal: Goal, now: Instant = Clock.System.now()): String {
         goal.weeklyLimit?.let { windowProgress("weekly", goal.weeklyUsed) },
     )
 
-    return (listOf("Turn ${goal.turns}", tokens) + listOfNotNull(time) + windows).joinToString("  ·  ")
+    return (listOf("Turn ${goal.turns + if (goal.turnActive) 1 else 0}", tokens) + listOfNotNull(time) + windows).joinToString("  ·  ")
 }
 
 private fun windowProgress(name: String, used: Double?): String = if (used == null) "$name usage unknown" else "$name ${used.roundToInt()}%"

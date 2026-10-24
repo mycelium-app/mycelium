@@ -43,14 +43,17 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::ChangesRows { ranges } => changes::rows(cwd, &ranges),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
         GitCommand::Unstage { paths } => changed(cwd, &["restore", "--staged", "--"], &paths),
+        GitCommand::Hunk { path, row, fingerprint, action } => changes::apply_hunk(cwd, &path, row, &fingerprint, &action),
+        GitCommand::File { path, content, expected } => edit_file(cwd, &path, content.as_deref(), expected.as_deref()),
+        GitCommand::Remote { action, force, url, allowed_urls, credentials } => remote(cwd, &action, force, &url, &allowed_urls, &credentials),
         GitCommand::StageAll => changed(cwd, &["add", "-A"], &[]),
         GitCommand::Commit { message, options } => commit(cwd, &message, &options),
         GitCommand::Fetch => changed(cwd, &["fetch"], &[]),
         GitCommand::Pull { rebase } => changed(cwd, if rebase { &["pull", "--rebase"] } else { &["pull"] }, &[]),
         GitCommand::Push { force } => push(cwd, force),
         GitCommand::UndoLastCommit => undo_last_commit(cwd),
-        GitCommand::TownSync => town(cwd, Path::new(GIT_TOWN), &["sync", "--stack"]),
-        GitCommand::TownPropose => town(cwd, Path::new(GIT_TOWN), &["propose"]),
+        GitCommand::TownSync => run_town(cwd, &["sync", "--stack"]),
+        GitCommand::TownPropose => run_town(cwd, &["propose"]),
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
         GitCommand::Apply { branch, head, patch, bundle, credentials } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref()),
@@ -218,6 +221,77 @@ fn undo_last_commit(cwd: &Path) -> Result<Value, String> {
     git(cwd, &["reset", "--soft", "HEAD~1"], &[])?;
 
     Ok(json!({"message": message}))
+}
+
+fn town_program(cwd: &Path, path: &std::ffi::OsStr) -> Option<(PathBuf, bool)> {
+    if executable_on(path, GIT_TOWN) {
+        return Some((PathBuf::from(GIT_TOWN), false));
+    }
+
+    let mise = std::env::split_paths(path).map(|directory| directory.join("mise")).find(|candidate| candidate.is_file())?;
+    let available = Command::new(&mise).args(["which", GIT_TOWN]).current_dir(cwd).stdin(Stdio::null()).output().ok()?.status.success();
+
+    available.then_some((mise, true))
+}
+
+fn run_town(cwd: &Path, args: &[&str]) -> Result<Value, String> {
+    let (program, mise) = town_program(cwd, &std::env::var_os("PATH").unwrap_or_default()).ok_or_else(|| "Git Town is not installed on this node or configured through mise in this folder.".to_string())?;
+    let mut all = if mise { vec!["exec", "--", GIT_TOWN] } else { Vec::new() };
+    all.extend_from_slice(args);
+
+    town(cwd, &program, &all)
+}
+
+fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_urls: &[String], credentials: &GitCredentials) -> Result<Value, String> {
+    if !matches!(action, "fetch" | "pull" | "push") {
+        return Err("Choose fetch, pull or push.".into());
+    }
+
+    let configured = git(cwd, &["remote", "get-url", "origin"], &[])?;
+    let configured = String::from_utf8_lossy(&configured);
+
+    let configured = configured.trim();
+    let push_url = git(cwd, &["remote", "get-url", "--push", "origin"], &[])?;
+    let push_url = String::from_utf8_lossy(&push_url);
+    let approved = |candidate: &str| candidate == url || allowed_urls.iter().any(|allowed| allowed == candidate);
+
+    if !approved(configured) || (action == "push" && !approved(push_url.trim())) {
+        return Err("The project's remote has changed. Register its current forge repository before using the forge token.".into());
+    }
+
+    let mut env = credential_env(url, credentials)?;
+    env[0].1 = "2".into();
+    env.push(("GIT_CONFIG_KEY_1".into(), format!("url.{url}.insteadOf")));
+    env.push(("GIT_CONFIG_VALUE_1".into(), configured.into()));
+
+    if action == "push" && push_url.trim() != configured {
+        env[0].1 = "3".into();
+        env.push(("GIT_CONFIG_KEY_2".into(), format!("url.{url}.insteadOf")));
+        env.push(("GIT_CONFIG_VALUE_2".into(), push_url.trim().into()));
+    }
+
+    let mut args = vec![action];
+
+    if action == "push" {
+        if force {
+            args.push("--force-with-lease");
+        }
+
+        args.extend(["--set-upstream", "origin", "HEAD"]);
+    } else {
+        args.push("origin");
+    }
+
+    let output = git_with_env(cwd, &args, &[], &env);
+
+    match output {
+        Ok(_) => Ok(json!({})),
+        Err(problem) => {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", credentials.username, credentials.password));
+
+            Err(problem.replace(&encoded, "[redacted]").replace(&credentials.password, "[redacted]"))
+        }
+    }
 }
 
 fn town(cwd: &Path, program: &Path, args: &[&str]) -> Result<Value, String> {
@@ -543,7 +617,7 @@ fn stack(cwd: &Path) -> Result<Value, String> {
         }));
     }
 
-    let git_town_available = executable_on(&std::env::var_os("PATH").unwrap_or_default(), GIT_TOWN);
+    let git_town_available = town_program(cwd, &std::env::var_os("PATH").unwrap_or_default()).is_some();
 
     Ok(json!({"current": current, "main": main, "inferred": !recorded, "git_town_available": git_town_available, "branches": rows}))
 }
@@ -666,6 +740,39 @@ fn read_file(cwd: &Path, path: &str) -> Result<Value, String> {
     let bytes = std::fs::read(&file).map_err(|cause| format!("{path} could not be read: {cause}."))?;
 
     Ok(json!({"data": base64::engine::general_purpose::STANDARD.encode(bytes), "size": size}))
+}
+
+fn edit_file(cwd: &Path, path: &str, content: Option<&str>, expected: Option<&str>) -> Result<Value, String> {
+    let root = cwd.canonicalize().map_err(|cause| cause.to_string())?;
+    let file = root.join(path).canonicalize().map_err(|_| format!("{path} was not found."))?;
+
+    if !file.starts_with(&root) || file.components().any(|part| part.as_os_str() == ".git") {
+        return Err("Choose a file inside the conversation's folder, outside .git.".into());
+    }
+
+    let bytes = std::fs::read(&file).map_err(|cause| cause.to_string())?;
+
+    if bytes.len() > MOST_DIFF_BYTES || bytes.contains(&0) {
+        return Err("Only text files up to 200 KB can be edited here.".into());
+    }
+
+    let current = String::from_utf8(bytes).map_err(|_| "This file is not UTF-8 text.".to_string())?;
+
+    if let Some(content) = content {
+        if expected != Some(current.as_str()) {
+            return Err("The file changed on disk. Reopen the editor before saving.".into());
+        }
+
+        if content.len() > MOST_DIFF_BYTES {
+            return Err("Only text files up to 200 KB can be edited here.".into());
+        }
+
+        std::fs::write(&file, content).map_err(|cause| cause.to_string())?;
+
+        return Ok(json!({"content": content}));
+    }
+
+    Ok(json!({"content": current}))
 }
 
 fn scope_diff(cwd: &Path, scope: &str) -> Result<Value, String> {
@@ -893,6 +1000,87 @@ mod tests {
 
     fn file<'a>(status: &'a Value, path: &str) -> &'a Value {
         status["files"].as_array().unwrap().iter().find(|file| file["path"] == path).unwrap_or_else(|| panic!("{path} missing from {status}"))
+    }
+
+    #[test]
+    fn editing_preserves_external_changes_and_refuses_paths_outside_the_repository() {
+        let dir = repository();
+        write(&dir, "a.txt", "original\n");
+        let read = edit_file(dir.path(), "a.txt", None, None).unwrap();
+        assert_eq!(read["content"], "original\n");
+        edit_file(dir.path(), "a.txt", Some("edited\n"), Some("original\n")).unwrap();
+        assert!(edit_file(dir.path(), "a.txt", Some("lost\n"), Some("original\n")).unwrap_err().contains("changed on disk"));
+        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "edited\n");
+        assert!(edit_file(dir.path(), ".git/config", Some("lost"), None).is_err());
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("private"), "private").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("private"), dir.path().join("link")).unwrap();
+        assert!(edit_file(dir.path(), "link", Some("lost"), Some("private")).is_err());
+        assert_eq!(std::fs::read_to_string(outside.path().join("private")).unwrap(), "private");
+    }
+
+    #[test]
+    fn one_hunk_can_be_staged_unstaged_or_reverted_without_changing_the_other() {
+        let dir = repository();
+        let original = (1..30).map(|line| format!("line {line}\n")).collect::<String>();
+        write(&dir, "a.txt", &original);
+        commit_all(&dir, "initial");
+        let edited = original.replace("line 2\n", "first edit\n").replace("line 25\n", "second edit\n");
+        write(&dir, "a.txt", &edited);
+        let layout = changes::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        let fingerprint = file["fingerprint"].as_str().unwrap();
+        assert_eq!(file["hunks"].as_array().unwrap().len(), 2);
+        changes::apply_hunk(dir.path(), "a.txt", 0, fingerprint, "stage").unwrap();
+        let staged = String::from_utf8(git(dir.path(), &["diff", "--cached"], &[]).unwrap()).unwrap();
+        assert!(staged.contains("first edit"));
+        assert!(!staged.contains("second edit"));
+        assert!(changes::apply_hunk(dir.path(), "a.txt", 0, fingerprint, "revert").is_err());
+        let layout = changes::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        changes::apply_hunk(dir.path(), "a.txt", 0, file["fingerprint"].as_str().unwrap(), "unstage").unwrap();
+        assert!(git(dir.path(), &["diff", "--cached"], &[]).unwrap().is_empty());
+        let layout = changes::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        let second_row = file["hunks"][1].as_u64().unwrap() as u32;
+        changes::apply_hunk(dir.path(), "a.txt", second_row, file["fingerprint"].as_str().unwrap(), "revert").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), original.replace("line 2\n", "first edit\n"));
+    }
+
+    #[test]
+    fn forge_credentials_are_refused_when_origin_is_a_different_repository() {
+        let dir = repository();
+        git(dir.path(), &["remote", "add", "origin", "https://other.example/repo.git"], &[]).unwrap();
+        let credentials = GitCredentials { username: "git".into(), password: "test-private-token".into() };
+        let error = remote(dir.path(), "push", false, "https://forge.example/repo.git", &[], &credentials).unwrap_err();
+        assert!(error.contains("remote has changed"));
+        assert!(!error.contains(&credentials.password));
+    }
+
+    #[test]
+    fn a_forges_approved_ssh_remote_uses_https_credentials_without_changing_its_configuration() {
+        use std::io::{Read, Write};
+
+        let dir = repository();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/repository.git", listener.local_addr().unwrap());
+        let credentials = GitCredentials { username: "git".into(), password: "test-private-token".into() };
+        let expected = base64::engine::general_purpose::STANDARD.encode("git:test-private-token");
+        let serving = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut bytes = [0; 8192];
+            let read = stream.read(&mut bytes).unwrap();
+            let received = String::from_utf8_lossy(&bytes[..read]).contains(&format!("Authorization: Basic {expected}"));
+            stream.write_all(b"HTTP/1.1 500 Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+
+            received
+        });
+        let ssh = "ssh://git@forge.example/repository.git";
+        git(dir.path(), &["remote", "add", "origin", ssh], &[]).unwrap();
+        assert!(remote(dir.path(), "fetch", false, &url, &[ssh.into()], &credentials).is_err());
+        assert!(serving.join().unwrap());
+        assert_eq!(String::from_utf8(git(dir.path(), &["remote", "get-url", "origin"], &[]).unwrap()).unwrap().trim(), ssh);
     }
 
     #[test]
@@ -1253,6 +1441,21 @@ mod tests {
 
         assert!(!executable_on(empty.path().as_os_str(), GIT_TOWN));
         assert!(executable_on(installed.path().as_os_str(), GIT_TOWN));
+    }
+
+    #[test]
+    fn git_town_configured_through_mise_is_discovered_and_run_through_mise() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = repository();
+        let tools = tempfile::tempdir().unwrap();
+        let mise = tools.path().join("mise");
+        std::fs::write(&mise, "#!/bin/sh\nif [ \"$1\" = which ]; then echo /managed/git-town; exit 0; fi\necho \"$@\"\n").unwrap();
+        std::fs::set_permissions(&mise, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let found = town_program(dir.path(), tools.path().as_os_str()).unwrap();
+        assert_eq!(found, (mise.clone(), true));
+        let answer = town(dir.path(), &found.0, &["exec", "--", GIT_TOWN, "sync", "--stack"]).unwrap();
+        assert_eq!(answer["output"], "exec -- git-town sync --stack");
     }
 
     #[test]

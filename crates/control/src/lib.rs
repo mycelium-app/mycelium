@@ -5,6 +5,7 @@ mod activity;
 mod activity_sweep;
 mod api_access;
 mod artifacts;
+mod artifact_access;
 mod attachments;
 mod auth;
 mod boot;
@@ -16,6 +17,7 @@ mod config;
 mod conversations;
 mod git;
 mod goals;
+mod live_usage;
 mod groups;
 mod device;
 mod error;
@@ -30,7 +32,9 @@ mod mcp;
 mod mcp_client;
 mod memories;
 mod message_proposals;
+mod conversation_connections;
 mod model_providers;
+mod provider_usage;
 mod moves;
 mod node_updates;
 mod nodes;
@@ -55,6 +59,7 @@ mod walkthrough_diff;
 mod walkthroughs;
 mod web;
 mod worktrees;
+mod workflows;
 
 pub use forge_cache::FORGE_CACHE_TTL;
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, VERSION_CHECK_INTERVAL};
@@ -88,6 +93,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(boot::migrate_until_ready(state.clone()));
     tokio::spawn(versions::refresh_regularly(state.clone()));
     tokio::spawn(schedules::run_regularly(state.clone()));
+    tokio::spawn(workflows::run_regularly(state.clone()));
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
@@ -106,6 +112,9 @@ fn router(state: AppState) -> Router {
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
+        .route("/api/v1/workflows", get(workflows::list).post(workflows::create))
+        .route("/api/v1/workflows/{id}", get(workflows::get))
+        .route("/api/v1/workflows/{id}/control", post(workflows::control))
         .route("/api/v1/activity", get(activity::get))
         .route("/api/v1/activity/conversations", get(activity::per_conversation))
         .route("/api/v1/sessions", get(sessions::list))
@@ -154,6 +163,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/git/diff", get(git::diff))
         .route("/api/v1/conversations/{id}/git/changes-layout", get(git::changes_layout))
         .route("/api/v1/conversations/{id}/git/changes-rows", post(git::changes_rows))
+        .route("/api/v1/conversations/{id}/git/hunk", post(git::hunk))
+        .route("/api/v1/conversations/{id}/git/file", post(git::file))
         .route("/api/v1/conversations/{id}/git/stage", post(git::stage))
         .route("/api/v1/conversations/{id}/git/unstage", post(git::unstage))
         .route("/api/v1/conversations/{id}/git/stage-all", post(git::stage_all))
@@ -172,6 +183,11 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/attachments/{sha256}", get(attachments::get))
         .route("/api/v1/artifacts", get(artifacts::list).post(artifacts::create).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
         .route("/api/v1/artifacts/{id}", get(artifacts::get).patch(artifacts::patch).delete(artifacts::delete))
+        .route("/api/v1/artifacts/{id}/links", get(artifact_access::links).post(artifact_access::link))
+        .route("/api/v1/artifacts/{id}/links/{link_id}", delete(artifact_access::unlink))
+        .route("/api/v1/artifact-access-requests", get(artifact_access::list_requests))
+        .route("/api/v1/artifact-access-requests/{id}/approve", post(artifact_access::approve))
+        .route("/api/v1/artifact-access-requests/{id}/decline", post(artifact_access::decline))
         .route("/api/v1/artifacts/{id}/versions", post(artifacts::create_version).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
         .route("/api/v1/artifacts/{id}/versions/{version}/content", get(artifacts::content))
         .route("/api/v1/artifacts/{id}/thumbnail", get(artifacts::thumbnail))
@@ -206,6 +222,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}", patch(projects::patch))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
+        .route("/api/v1/model-provider-usage", get(provider_usage::list))
         .route("/api/v1/model-providers/{id}", delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/chat-tool-servers", get(chat_tool_servers::list).post(chat_tool_servers::create))
@@ -223,6 +240,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-proposals", get(instruction_proposals::list))
         .route("/api/v1/instruction-proposals/{id}/approve", post(instruction_proposals::approve))
         .route("/api/v1/instruction-proposals/{id}/decline", post(instruction_proposals::decline))
+        .route("/api/v1/conversation-connections", get(conversation_connections::list).post(conversation_connections::create))
+        .route("/api/v1/conversation-connections/{id}", delete(conversation_connections::revoke))
+        .route("/api/v1/message-proposals/{id}/connect", post(message_proposals::approve_and_connect))
         .route("/api/v1/message-proposals", get(message_proposals::list))
         .route("/api/v1/message-proposals/{id}/approve", post(message_proposals::approve))
         .route("/api/v1/message-proposals/{id}/decline", post(message_proposals::decline))

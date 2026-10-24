@@ -44,6 +44,13 @@ private fun limited(timeLimitSeconds: Long? = null, fiveHourLimit: Int? = null, 
 
 class GoalsTest {
     @Test
+    fun aRunningFirstTurnIsNumberedOneAndMissingUsageIsShownAsPending() {
+        val active = Goal("c1", "Build it", state = GoalState.Active, turnActive = true, tokensKnown = false)
+        assertEquals("Turn 1  ·  Token usage pending", goalProgress(active))
+        assertEquals("Turn 1  ·  300 tokens", goalProgress(active.copy(tokensKnown = true, tokensUsed = 300)))
+    }
+
+    @Test
     fun theBudgetIsReadAsAPlainNumberOrWithAKMOrBSuffix() {
         assertEquals(5_000_000L, parseTokenBudget("5000000"))
         assertEquals(5_000_000L, parseTokenBudget("5M"))

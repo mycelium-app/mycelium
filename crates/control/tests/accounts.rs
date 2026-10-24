@@ -102,6 +102,59 @@ async fn each_usage_window_an_account_reports_is_shown_with_its_percent_reset_an
 }
 
 #[tokio::test]
+async fn an_unknown_usage_report_preserves_the_last_reading_without_preserving_sign_in_state() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
+    let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
+
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "refresh".into(), ..login("sam@example.com", LoginState::SignedOut) }] }).await;
+    let after = first_login(&server, |login| login["method"] == "refresh").await;
+
+    assert_eq!(after["state"], "signed_out");
+    assert_eq!(after["windows"], before["windows"]);
+    assert_eq!(after["usage_read_at"], before["usage_read_at"]);
+}
+
+#[tokio::test]
+async fn a_reconnected_account_recovers_usage_but_a_missing_account_stays_removed() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
+    let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
+    link.send(NodeToControl::Logins { logins: vec![] }).await;
+    common::eventually("the removed account", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes[0]["logins"].as_array().unwrap().is_empty().then_some(())
+    }).await;
+    let id = link.id;
+    let token = link.token.clone();
+    drop(link);
+    let mut reconnected = server.connect_node(id, &token).await;
+    reconnected.hello(vec![]).await;
+    reconnected.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    let after = first_login(&server, |login| login["account"] == "sam@example.com").await;
+
+    assert_eq!(after["windows"], before["windows"]);
+    assert_eq!(after["usage_read_at"], before["usage_read_at"]);
+}
+
+#[tokio::test]
+async fn an_older_usage_report_does_not_replace_a_newer_control_plane_reading() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    report_usage(&mut link, 0, vec![window("five_hour", 42.0, 2)]).await;
+    let before = first_login(&server, |login| login["usage_read_at"].is_string()).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { method: "older".into(), windows: vec![window("five_hour", 10.0, 2)], usage_read_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    let after = first_login(&server, |login| login["method"] == "older").await;
+
+    assert_eq!(after["windows"][0]["used_percent"], before["windows"][0]["used_percent"]);
+    assert_eq!(after["windows"][0]["resets_at"], before["windows"][0]["resets_at"]);
+    assert_eq!(after["usage_read_at"], before["usage_read_at"]);
+}
+
+#[tokio::test]
 async fn the_rate_of_use_and_when_the_window_runs_out_come_from_the_readings_since_it_last_reset() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -88,7 +88,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
     var query by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshArtifacts() }
+        store.act { store.refreshArtifacts(); store.refreshArtifactAccessRequests() }
     }
 
     val kind = ArtifactKindFilters.firstOrNull { it.second == kindName }?.first
@@ -112,6 +112,10 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
 
         Hairline()
 
+        for (request in state.artifactAccessRequests.values.filter { it.state == "requested" }) {
+            ArtifactAccessRequestCard(request, store, state)
+        }
+
         if (shown.isEmpty()) {
             val text = if (state.artifacts.isEmpty()) "No artefact yet. Ask an agent to create a design or a page and it appears here." else "No artefact matches."
 
@@ -125,7 +129,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
             ) {
                 items(shown, key = { it.id }) { artifact ->
-                    ArtifactCard(artifact, store, platform, mine = artifact.owner == me.id, onOpen = { onOpen(artifact.id) })
+                    ArtifactCard(artifact, store, state, platform, mine = artifact.owner == me.id, onOpen = { onOpen(artifact.id) })
                 }
             }
         }
@@ -187,8 +191,9 @@ private fun ArtifactPreviewArea(artifact: Artifact, store: Store) {
 }
 
 @Composable
-private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, mine: Boolean, onOpen: () -> Unit) {
+private fun ArtifactCard(artifact: Artifact, store: Store, state: AppState, platform: Platform, mine: Boolean, onOpen: () -> Unit) {
     val colors = MyTheme.colors
+    var access by remember(artifact.id) { mutableStateOf(false) }
     var renaming by remember(artifact.id) { mutableStateOf(false) }
     var deleting by remember(artifact.id) { mutableStateOf(false) }
 
@@ -227,11 +232,16 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
 
                 if (mine) {
                     MenuItem(if (artifact.isPublic) "Make private" else "Make public", onClick = { close(); store.act { store.setArtifactPublic(artifact, !artifact.isPublic) } }, leading = MyIcon.Key)
+                    MenuItem("Manage access", onClick = { close(); access = true }, leading = MyIcon.Key)
                     MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
                     MenuItem("Delete", onClick = { close(); deleting = true }, leading = MyIcon.Close)
                 }
             }
         }
+    }
+
+    if (access) {
+        ArtifactAccessDialog(artifact, store, state) { access = false }
     }
 
     if (renaming) {

@@ -365,3 +365,47 @@ async fn the_changes_layout_and_row_ranges_are_relayed_to_the_node_and_capped() 
     assert_eq!(commands, vec![GitCommand::ChangesLayout, GitCommand::ChangesRows { ranges: vec![RowRange { path: "a.rs".into(), from: 0, to: 50 }] }]);
     assert_eq!(asking.await.unwrap(), [200, 200, 400]);
 }
+
+#[tokio::test]
+async fn hunk_and_file_edits_retain_their_original_version_guards_on_the_node() {
+    let server = Server::start().await;
+    let (mut link, id) = conversation_on(&server).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let hunk = user.json(user.post(&format!("/api/v1/conversations/{id}/git/hunk")).json(&json!({"path": "a.rs", "row": 12, "fingerprint": "disk-version", "action": "revert"}))).await;
+        let file = user.json(user.post(&format!("/api/v1/conversations/{id}/git/file")).json(&json!({"path": "a.rs", "content": "edited", "expected": "original"}))).await;
+
+        [hunk.0, file.0]
+    });
+    let first = answer_next(&mut link, true, json!({}), None).await.1;
+    let second = answer_next(&mut link, false, Value::Null, Some("The file changed on disk.")).await.1;
+    assert_eq!(first, GitCommand::Hunk { path: "a.rs".into(), row: 12, fingerprint: "disk-version".into(), action: "revert".into() });
+    assert_eq!(second, GitCommand::File { path: "a.rs".into(), content: Some("edited".into()), expected: Some("original".into()) });
+    assert_eq!(asking.await.unwrap(), [200, 409]);
+}
+
+#[tokio::test]
+async fn a_forge_projects_fetch_and_push_use_its_token_without_returning_it_to_the_client() {
+    let server = Server::start().await;
+    let github = fake_github(json!([])).await;
+    let (mut link, id) = conversation_in_forge_project(&server, &github).await;
+    let user = server.user.clone();
+    let asking = tokio::spawn(async move {
+        let fetch = user.json(user.post(&format!("/api/v1/conversations/{id}/git/fetch"))).await;
+        let push = user.json(user.post(&format!("/api/v1/conversations/{id}/git/push")).json(&json!({"force": true}))).await;
+
+        [fetch, push]
+    });
+
+    for (expected, forced) in [("fetch", false), ("push", true)] {
+        let command = answer_next(&mut link, true, json!({}), None).await.1;
+        let GitCommand::Remote { action, force, url, allowed_urls, credentials } = command else {
+            panic!("expected an authenticated remote command");
+        };
+        assert_eq!((action.as_str(), force, url), (expected, forced, format!("{github}/acme-org/acme-backups.git")));
+        assert!(allowed_urls.contains(&format!("{github}/acme-org/acme-backups.git")));
+        assert!(credentials.password.starts_with("ghp_"));
+    }
+
+    assert_eq!(asking.await.unwrap(), [(200, json!({})), (200, json!({}))]);
+}

@@ -127,3 +127,42 @@ async fn another_person_cannot_change_the_icon_or_logo_of_someone_elses_project(
     assert_eq!((patched, uploaded), (404, 404));
     assert_eq!(listed(&server).await["icon"], Value::Null);
 }
+
+#[tokio::test]
+async fn an_agent_sets_its_projects_logo_from_a_file_in_its_conversation_folder() {
+    use base64::Engine;
+    use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let project = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(conversation.owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set project_id = $2 where id = $1").bind(conversation.id).bind(project).execute(&server.pool).await.unwrap();
+    let anonymous = server.anonymous();
+    let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).header("x-mycelium-conversation", conversation.id.to_string()).json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_project_icon","arguments":{"path":"logo.png"}}}));
+    let pending = tokio::spawn(async move { anonymous.json(request).await });
+    let (request_id, cwd, command) = loop {
+        if let ControlToNode::Git { request_id, cwd, command } = link.next().await {
+            break (request_id, cwd, command);
+        }
+    };
+    assert_eq!(cwd, conversation.cwd);
+    assert_eq!(command, GitCommand::ReadFile { path: "logo.png".to_string() });
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"data":base64::engine::general_purpose::STANDARD.encode(PNG)}), error: None }).await;
+    let (status, response) = pending.await.unwrap();
+    assert_eq!(status, 200);
+    assert_eq!(response["result"]["isError"], false, "{response}");
+    let (_, projects) = server.user.json(server.user.get("/api/v1/projects")).await;
+    assert!(projects[0]["avatar_sha256"].is_string());
+}
+
+#[tokio::test]
+async fn an_agent_without_a_project_cannot_set_a_project_icon() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    let anonymous = server.anonymous();
+    let (_, response) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).header("x-mycelium-conversation", conversation.id.to_string()).json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_project_icon","arguments":{"path":"logo.png"}}}))).await;
+    assert_eq!(response["result"]["isError"], true, "{response}");
+    assert!(response["result"]["content"][0]["text"].as_str().unwrap().contains("project"));
+}

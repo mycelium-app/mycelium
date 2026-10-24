@@ -24,6 +24,7 @@ struct FileRows {
     rows: Vec<Row>,
     hunks: Vec<u32>,
     truncated: bool,
+    staged_rows: u32,
 }
 
 struct Row {
@@ -48,6 +49,7 @@ pub fn layout(cwd: &Path) -> Result<Value, String> {
             "removed": rows.removed,
             "rows": rows.rows.len(),
             "hunks": rows.hunks,
+            "staged_rows": rows.staged_rows,
             "truncated": rows.truncated,
             "fingerprint": cached.fingerprint,
         })
@@ -70,6 +72,86 @@ pub fn rows(cwd: &Path, ranges: &[RowRange]) -> Result<Value, String> {
     }
 
     Ok(json!({"ranges": answered}))
+}
+
+pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &str) -> Result<Value, String> {
+    if !matches!(action, "stage" | "unstage" | "revert") {
+        return Err("Choose stage, unstage or revert.".into());
+    }
+
+    let files = refresh(cwd)?;
+    let (_, file) = files.iter().find(|(name, _)| name == path).ok_or_else(|| "This file has no changes. Refresh the view.".to_string())?;
+
+    if file.fingerprint != fingerprint {
+        return Err("The changes on disk have moved. Refresh the view before changing this hunk.".into());
+    }
+
+    if file.flags[2] {
+        if row != 0 || file.rows.hunks.is_empty() || action != "stage" {
+            return Err("Stage an untracked file as a whole, or edit it before staging.".into());
+        }
+
+        git(cwd, &["add", "--", path], &[])?;
+
+        return Ok(json!({}));
+    }
+
+    let mut offset = 0;
+
+    for (staged, wanted) in [(true, file.flags[0]), (false, file.flags[1])] {
+        if !wanted {
+            continue;
+        }
+
+        let mut args = vec!["diff", "--no-color", "--no-ext-diff", "--no-renames"];
+
+        if staged {
+            args.push("--cached");
+        }
+
+        args.extend(["--", path]);
+        let bytes = git(cwd, &args, &[])?;
+        let text = String::from_utf8(bytes).map_err(|_| "This diff is not UTF-8 text.".to_string())?;
+        let mut parsed = FileRows::default();
+        parse(&text, &mut parsed);
+        let local = row.checked_sub(offset);
+
+        if let Some(index) = local.and_then(|local| parsed.hunks.iter().position(|value| *value == local)) {
+            if (staged && action != "unstage") || (!staged && action == "unstage") {
+                return Err("This hunk's staged state has changed. Refresh the view.".into());
+            }
+
+            let lines: Vec<&str> = text.split_inclusive('\n').collect();
+            let starts: Vec<usize> = lines.iter().enumerate().filter_map(|(index, line)| line.starts_with("@@ ").then_some(index)).collect();
+            let mut patch = lines[..starts[0]].concat();
+            patch.push_str(&lines[starts[index]..starts.get(index + 1).copied().unwrap_or(lines.len())].concat());
+            let mut apply = std::process::Command::new("git");
+            apply.arg("-C").arg(cwd).args(["apply", "--recount"]);
+
+            if action != "revert" {
+                apply.arg("--cached");
+            }
+
+            if action != "stage" {
+                apply.arg("--reverse");
+            }
+
+            let mut child = apply.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|cause| cause.to_string())?;
+            use std::io::Write;
+            child.stdin.take().unwrap().write_all(patch.as_bytes()).map_err(|cause| cause.to_string())?;
+            let output = child.wait_with_output().map_err(|cause| cause.to_string())?;
+
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            }
+
+            return Ok(json!({}));
+        }
+
+        offset += parsed.rows.len() as u32;
+    }
+
+    Err("This hunk no longer exists. Refresh the view.".into())
 }
 
 fn refresh(cwd: &Path) -> Result<Vec<(String, Cached)>, String> {
@@ -171,6 +253,10 @@ fn file_rows(cwd: &Path, path: &str, flags: [bool; 3]) -> Result<FileRows, Strin
 
         built.truncated |= output.len() > MOST_DIFF_BYTES;
         parse(&String::from_utf8_lossy(&output[..output.len().min(MOST_DIFF_BYTES)]), &mut built);
+
+        if cached {
+            built.staged_rows = built.rows.len() as u32;
+        }
     }
 
     Ok(built)

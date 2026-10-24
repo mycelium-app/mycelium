@@ -94,7 +94,7 @@ fn root_of(agent: AgentId) -> &'static str {
     }
 }
 
-fn session_id_of_path(agent: AgentId, path: &str) -> String {
+pub(crate) fn session_id_of_path(agent: AgentId, path: &str) -> String {
     let stem = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".jsonl");
 
     match agent {

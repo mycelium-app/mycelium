@@ -47,7 +47,8 @@ impl UsageCache {
             }
 
             let fetched = Instant::now();
-            let reading = self.fetch(dir).await;
+            let fetched_reading = self.fetch(dir).await;
+            let reading = fetched_reading.or_else(|| self.reading(dir));
 
             if let Ok(mut entries) = self.entries.lock() {
                 entries.insert(dir.clone(), (fetched, reading));
@@ -182,6 +183,19 @@ mod tests {
         std::fs::write(dir.path().join(".credentials.json"), json!({"claudeAiOauth": {"accessToken": token}}).to_string()).unwrap();
 
         dir
+    }
+
+    #[tokio::test]
+    async fn a_failed_refresh_keeps_the_last_reported_usage_and_its_original_timestamp() {
+        let seen = Seen::default();
+        let endpoint = serve(200, json!({"five_hour": {"utilization": 42.0}}), seen.clone()).await;
+        let account = account_with_token("fake-access-token");
+        let mut cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, Duration::ZERO);
+        cache.refresh(&[account.path().to_path_buf()]).await;
+        let before = cache.reading(account.path()).unwrap();
+        cache.endpoint = serve(503, json!({}), seen).await;
+        cache.refresh(&[account.path().to_path_buf()]).await;
+        assert_eq!(cache.reading(account.path()), Some(before));
     }
 
     #[tokio::test]
