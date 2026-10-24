@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.6
+
+- The desktop app starts its built-in browser when it opens and waits until it is ready, so opening an artefact no longer shows an error dialog on JetBrains Runtime 25.
+
 ## v0.6.5
 
 - The desktop app's built-in browser starts on JetBrains Runtime 25, which the Nix package uses, so artefacts show inside the app there too.
