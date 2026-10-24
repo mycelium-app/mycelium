@@ -15,6 +15,7 @@ use uuid::Uuid;
 pub const TOOL_SEARCH: &str = "tool_search";
 pub const TOOLS_INSTRUCTIONS: &str = "You can use tools. Only tool_search and the tools it has returned are loaded: call tool_search with a few keywords for what you need, then call the tool it returns by its name. Each tool call waits for the person to approve it, so call a tool only when it helps.";
 const SEARCH_RESULTS: usize = 5;
+const LISTED_TOOLS_PER_SERVER: usize = 40;
 const MAX_TOOL_NAME: usize = 64;
 const MAX_RESULT_CHARS: usize = 50_000;
 const ALLOW_ONCE: &str = "allow_once";
@@ -121,6 +122,36 @@ impl Toolbox {
         let loaded = self.tools.iter().filter(|tool| self.loaded.contains(&tool.name)).map(|tool| ToolDefinition { name: tool.name.clone(), description: tool.description.clone(), schema: tool.schema.clone() });
 
         std::iter::once(search).chain(loaded).collect()
+    }
+
+    pub fn instructions(&self) -> String {
+        let mut servers: Vec<(&str, Vec<&str>)> = Vec::new();
+
+        for tool in self.tools.iter().filter(|tool| matches!(tool.source, Source::Remote { .. })) {
+            match servers.iter_mut().find(|(name, _)| *name == tool.server) {
+                Some((_, names)) => names.push(&tool.original),
+                None => servers.push((&tool.server, vec![&tool.original])),
+            }
+        }
+
+        if servers.is_empty() {
+            return TOOLS_INSTRUCTIONS.to_string();
+        }
+
+        let lines: Vec<String> = servers
+            .iter()
+            .map(|(server, names)| {
+                let listed = names.iter().take(LISTED_TOOLS_PER_SERVER).copied().collect::<Vec<_>>().join(", ");
+                let hidden = names.len().saturating_sub(LISTED_TOOLS_PER_SERVER);
+
+                match hidden {
+                    0 => format!("- {server}: {listed}"),
+                    _ => format!("- {server}: {listed}, and {hidden} more"),
+                }
+            })
+            .collect();
+
+        format!("{TOOLS_INSTRUCTIONS}\n\nConnected tool servers, loaded with tool_search when needed:\n{}", lines.join("\n"))
     }
 
     fn search(&mut self, query: &str) -> (String, Vec<String>) {

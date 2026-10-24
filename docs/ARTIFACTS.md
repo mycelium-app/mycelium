@@ -1,22 +1,22 @@
-# Artifacts
+# Artefacts
 
-Design proposal, 2026-10-23. Covers the PLAN.md items "Sovereign artifacts" and "Publish pages online". Nothing here is built yet.
+Design proposal, 2026-10-23. Covers the PLAN.md items "Sovereign artefacts" and "Publish pages online". Nothing here is built yet.
 
-An artifact is something an agent makes for a person to look at, keep and come back to: a page, a document, a deck, an image, a file. Mycelium stores it, versions it and serves it from its own origin. Nothing depends on a third-party host. The guidance agents read and the page runtime are written for Mycelium. Neither copies Anthropic's artifact skills or prompts.
+An artefact is something an agent makes for a person to look at, keep and come back to: a page, a document, a deck, an image, a file. Mycelium stores it, versions it and serves it from its own origin. Nothing depends on a third-party host. The guidance agents read and the page runtime are written for Mycelium. Neither copies Anthropic's artefact skills or prompts.
 
 ## Decisions (operator, 2026-10-23)
 
 These override anything below that disagrees.
 
-- **A separate artifact host.** The control plane stays off the internet. Artifacts are served by their own container, `mycelium artifacts`, on wildcard subdomains `*.mycelium.example.com`, the way GitLab Pages serves `*.pages`. It reads artifacts the control plane stores and holds no control-plane credentials.
-- **Private by default, behind OIDC.** The artifact host has its own OIDC login, optionally against a different provider from the control plane's (the reason it is a separate container). Any signed-in user may read any artifact. The owner can make one public, which serves it to anyone without a login, and can make it private again.
+- **A separate artefact host.** The control plane stays off the internet. Artefacts are served by their own container, `mycelium artifacts`, on wildcard subdomains `*.mycelium.example.com`, the way GitLab Pages serves `*.pages`. It reads artefacts the control plane stores and holds no control-plane credentials.
+- **Private by default, behind OIDC.** The artefact host has its own OIDC login, optionally against a different provider from the control plane's (the reason it is a separate container). Any signed-in user may read any artefact. The owner can make one public, which serves it to anyone without a login, and can make it private again.
 - **Types, in order:**
   - **Build now: Design.** A canvas of artboards like Claude Design, Figma or Penpot: pages, pan and zoom, artboards an agent fills, select and move, text, shapes, sticky notes, frames, a pen, comments, and present. An agent and the person both edit it, with the chat beside it.
-  - **Build now: generic HTML pages,** the base every other type sits on. Interactive pages keep state through the artifact's data store and can be read back by the agent: the Jackdaw v2 planning board, where the person sets "your call" per row and the agent reads the choices, is the reference.
-  - **Parked: Docs** (a collaborative live editor with @Claude to write or edit; needs a real WYSIWYG editor, and the ones in outline-for-android are not good enough), **Slides** (comment on an element and send it to Claude), **Dashboard** (live data, sources panel, chat popped out over the artifact).
+  - **Build now: generic HTML pages,** the base every other type sits on. Interactive pages keep state through the artefact's data store and can be read back by the agent: the Jackdaw v2 planning board, where the person sets "your call" per row and the agent reads the choices, is the reference.
+  - **Parked: Docs** (a collaborative live editor with @Claude to write or edit; needs a real WYSIWYG editor, and the ones in outline-for-android are not good enough), **Slides** (comment on an element and send it to Claude), **Dashboard** (live data, sources panel, chat popped out over the artefact).
   - **Unplaced: Motion.**
-  - **Later: whole apps as artifacts,** for example slop/monopoly-banker, started on demand in a micro VM with persistent storage. Ties into the micro VM item in PLAN.md. How storage and lifecycle work is open.
-- **Every artifact has a chat attached** that can be opened beside it or popped out over it, as in Claude's artifacts.
+  - **Later: whole apps as artefacts,** for example slop/monopoly-banker, started on demand in a micro VM with persistent storage. Ties into the micro VM item in PLAN.md. How storage and lifecycle work is open.
+- **Every artefact has a chat attached** that can be opened beside it or popped out over it, as in Claude's artifacts.
 
 ## What Anthropic ships today
 
@@ -24,14 +24,14 @@ Researched on 2026-10-23 from Anthropic's own pages. Where only third-party cove
 
 | Area | Current state | Source |
 |---|---|---|
-| Types | Since 16 September 2026, artifacts start from templates: Docs, Slides, Design, Dashboards (beta, paid plans) and Motion (beta, Team and Enterprise, exports MP4). Older chat artifacts are now "legacy artifacts": they can still be published, but new ones cannot be made. | [What are artifacts](https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them), [Claude Artifacts](https://claude.com/features/artifacts) |
-| Claude Design | Launched on 17 April 2026 by Anthropic Labs as a separate tool at claude.ai/design for prototypes, decks and one-pagers. It is now one of the artifact templates, with artboards on a canvas and the organisation's design system applied. The standalone site closes on 14 December 2026. It has no version history yet. | [Introducing Claude Design](https://anthropic.com/news/claude-design-anthropic-labs), [Get started with Claude Design](https://support.claude.com/en/articles/14604416-get-started-with-claude-design) |
+| Types | Since 16 September 2026, artefacts start from templates: Docs, Slides, Design, Dashboards (beta, paid plans) and Motion (beta, Team and Enterprise, exports MP4). Older chat artefacts are now "legacy artefacts": they can still be published, but new ones cannot be made. | [What are artifacts](https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them), [Claude Artifacts](https://claude.com/features/artifacts) |
+| Claude Design | Launched on 17 April 2026 by Anthropic Labs as a separate tool at claude.ai/design for prototypes, decks and one-pagers. It is now one of the artefact templates, with artboards on a canvas and the organisation's design system applied. The standalone site closes on 14 December 2026. It has no version history yet. | [Introducing Claude Design](https://anthropic.com/news/claude-design-anthropic-labs), [Get started with Claude Design](https://support.claude.com/en/articles/14604416-get-started-with-claude-design) |
 | Slides | Slides can be edited directly, presented inside Claude, and exported to PowerPoint, PDF or Google Slides. Claude Code has `/slides` and `/design` commands. | [Claude Code artifacts](https://code.claude.com/docs/en/artifacts), [Claude Artifacts](https://claude.com/features/artifacts) |
 | Claude Code artifacts | A single HTML or Markdown page is published to a private claude.ai URL and updated in place. Each publish is a version, and the Share control picks the version viewers see. The limit is 16 MiB. The page is served from a sandboxed `*.claudeusercontent.com` origin under a strict CSP: scripts only from five CDNs, fonts only from Google Fonts, `fetch` only to the page's own origin, and no downloads unless the page declares the capability. | [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
-| Sharing | Artifacts are private by default. On Team and Enterprise, sharing is within the organisation, and public links need an owner to switch on External sharing. Roles are viewer, commenter and editor. Unpublishing a legacy artifact cannot be undone and deletes its storage. | [Publish and share artifacts](https://support.claude.com/en/articles/9547008-publish-and-share-artifacts) |
+| Sharing | Artefacts are private by default. On Team and Enterprise, sharing is within the organisation, and public links need an owner to switch on External sharing. Roles are viewer, commenter and editor. Unpublishing a legacy artefact cannot be undone and deletes its storage. | [Publish and share artifacts](https://support.claude.com/en/articles/9547008-publish-and-share-artifacts) |
 | Comments | People in the organisation comment in threads on the page. "Send to Claude" or `@claude` activates a thread, and the publishing Claude Code session can then reply on its own, limited to 60 activations an hour. Viewers on a public link see no comments. | [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
-| Data | Persistent storage can be personal or shared, with 20 MB per artifact and text only. Artifacts can call the viewer's own connectors (MCP connectors on claude.ai) after the viewer approves, and can call Claude on the viewer's plan. | [What are artifacts](https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them), [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
-| API and MCP | Claude Code uses a built-in `Artifact` tool, not a public API. Claude Docs reaches Claude Code as a claude.ai connector. The Compliance API can list artifacts, fetch one version and delete. Publish, share and delete events go to the audit log as `claude_artifact_*`. No public API for creating artifacts was found. | [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
+| Data | Persistent storage can be personal or shared, with 20 MB per artefact and text only. Artefacts can call the viewer's own connectors (MCP connectors on claude.ai) after the viewer approves, and can call Claude on the viewer's plan. | [What are artifacts](https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them), [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
+| API and MCP | Claude Code uses a built-in `Artifact` tool, not a public API. Claude Docs reaches Claude Code as a claude.ai connector. The Compliance API can list artefacts, fetch one version and delete. Publish, share and delete events go to the audit log as `claude_artifact_*`. No public API for creating artefacts was found. | [Claude Code artifacts](https://code.claude.com/docs/en/artifacts) |
 
 Not confirmed:
 
@@ -43,27 +43,27 @@ Not confirmed:
 
 | Anthropic | Mycelium |
 |---|---|
-| Artifacts live on claude.ai and need a claude.ai login, the Anthropic API and a non-ZDR organisation. | Artifacts live on the operator's control plane, Postgres and disk. Any agent on any node can publish: Claude Code, Codex, or a chat model. |
-| Viewers need a Claude account unless the artifact is public. | Viewers are Mycelium users. Public links work without an account and keep a per-artifact access log. |
+| Artefacts live on claude.ai and need a claude.ai login, the Anthropic API and a non-ZDR organisation. | Artefacts live on the operator's control plane, Postgres and disk. Any agent on any node can publish: Claude Code, Codex, or a chat model. |
+| Viewers need a Claude account unless the artefact is public. | Viewers are Mycelium users. Public links work without an account and keep a per-artifact access log. |
 | Templates come with an editor on claude.ai. | Version 1 has no editor. Agents author the content, and people comment, compare versions and ask for changes. Slides and documents are formats the agent writes, not editors we host. |
-| Comment replies run from the publishing session through a watch. | A comment becomes an ordinary message in the artifact's conversation, or a queued prompt, under the existing approval rules. |
+| Comment replies run from the publishing session through a watch. | A comment becomes an ordinary message in the artefact's conversation, or a queued prompt, under the existing approval rules. |
 | Connectors run as the viewer. | No connector calls from pages in version 1. Pages get their own small data store and nothing else. |
-| Unpublishing cannot be undone and deletes storage. | Unpublishing revokes the public link only. The artifact, its versions and its data stay, and it can be published again at a new link. |
+| Unpublishing cannot be undone and deletes storage. | Unpublishing revokes the public link only. The artefact, its versions and its data stay, and it can be published again at a new link. |
 
-## What an artifact is
+## What an artefact is
 
-Each artifact has a **kind** that decides how it is rendered and what agents are told to send.
+Each artefact has a **kind** that decides how it is rendered and what agents are told to send.
 
 | Kind | Content | Rendered as | Phase |
 |---|---|---|---|
 | `image` | PNG, JPEG, WebP or GIF bytes | Inline in the thread, opened in `ImageViewer` | 1 |
 | `file` | Any bytes with a name and media type, such as a PDF, DOCX or CSV | A download card with version history | 1 |
-| `page` | One self-contained HTML file | Sandboxed iframe or browser tab on the artifact origin | 2 |
-| `document` | Markdown | Native Markdown in the clients (the existing `MarkdownBlock`), and HTML on the artifact origin | 2 |
+| `page` | One self-contained HTML file | Sandboxed iframe or browser tab on the artefact origin | 2 |
+| `document` | Markdown | Native Markdown in the clients (the existing `MarkdownBlock`), and HTML on the artefact origin | 2 |
 | `slides` | Markdown split on `---`, or HTML sections, played by our own slide runtime | Page runtime with keyboard paging and print-to-PDF | 4 |
 | `diagram` / `chart` | Mermaid or SVG, or the existing `mycelium-ui` chart nodes | SVG served sanitised, or native | Later |
 
-An SVG is never an `image`, because it can carry script. SVG is a `page` or a `diagram`, served on the artifact origin.
+An SVG is never an `image`, because it can carry script. SVG is a `page` or a `diagram`, served on the artefact origin.
 
 ## Data model
 
@@ -115,33 +115,33 @@ artifact_access_log
 
 ## MCP tools
 
-These are added to `tool_definitions()` in `crates/control/src/mcp.rs` next to `walkthrough`. The conversation is resolved through `claimed_conversation` as it is today, so a tool only touches artifacts in its own conversation's scope.
+These are added to `tool_definitions()` in `crates/control/src/mcp.rs` next to `walkthrough`. The conversation is resolved through `claimed_conversation` as it is today, so a tool only touches artefacts in its own conversation's scope.
 
 | Tool | Arguments | Effect |
 |---|---|---|
-| `show_image` | `path` or `base64`, `media_type`, `caption?`, `slug?` | The node reads the file, the control plane stores it as an `image` artifact (or a new version of one), and the thread shows it inline. This is the "agents show images by themselves" item. |
-| `publish_artifact` | `slug`, `kind`, `title`, `path` or `content`, `note` | Creates the artifact, or adds a version when the slug already exists in this conversation. Returns the artifact id, the version number and the in-app link. |
-| `list_artifacts` | `scope?` (`conversation`, `project`) | Returns id, slug, kind, title and the latest version, so a later session can update an artifact instead of making a new one. |
+| `show_image` | `path` or `base64`, `media_type`, `caption?`, `slug?` | The node reads the file, the control plane stores it as an `image` artefact (or a new version of one), and the thread shows it inline. This is the "agents show images by themselves" item. |
+| `publish_artifact` | `slug`, `kind`, `title`, `path` or `content`, `note` | Creates the artefact, or adds a version when the slug already exists in this conversation. Returns the artefact id, the version number and the in-app link. |
+| `list_artifacts` | `scope?` (`conversation`, `project`) | Returns id, slug, kind, title and the latest version, so a later session can update an artefact instead of making a new one. |
 | `read_artifact` | `id`, `version?` | Returns the content of a version. Used to merge or revise. |
 | `read_comments` | `id`, `unresolved_only?` | Returns comment threads with their version and anchor. |
 | `reply_comment` | `comment_id`, `body`, `resolve?` | Posts a reply attributed to the agent. |
 
 Files are read on the node, not sent inline, so a large PDF does not pass through the model. The node already uploads prompt attachments, and this runs in the opposite direction over the same channel. The size limit is `MAX_ATTACHMENT_BYTES` (20 MiB) at first.
 
-Guidance for agents goes in `tools_instructions()`, in our own words, and covers three things: when to choose an artifact over a reply, reusing the slug to add a version rather than making a new artifact (PLAN.md already asks for "update an existing artifact rather than making a new one"), and the page constraints listed below.
+Guidance for agents goes in `tools_instructions()`, in our own words, and covers three things: when to choose an artefact over a reply, reusing the slug to add a version rather than making a new artefact (PLAN.md already asks for "update an existing artefact rather than making a new one"), and the page constraints listed below.
 
 ## Serving and security
 
-The control plane's session cookie is `myc_session` on `MYCELIUM_PUBLIC_URL`. Artifact content never shares that origin.
+The control plane's session cookie is `myc_session` on `MYCELIUM_PUBLIC_URL`. Artefact content never shares that origin.
 
 - **A separate origin.** Add a new setting, `MYCELIUM_ARTIFACT_URL`, such as `https://usercontent.mycelium.example.com`. It must be a different registrable domain from the public URL, or at least a different host with the cookie scoped host-only and no `Domain` attribute. Config refuses to start if the two hosts are equal. In development it uses a second localhost port.
-- **Access by capability URL, not by cookie.** The app asks the API for a short-lived signed URL (`/v/<artifact>/<version>?sig=…&exp=…`, HMAC with a server key, valid for about 10 minutes). The artifact origin checks the signature and sets no cookies. Public links use the publication token instead.
+- **Access by capability URL, not by cookie.** The app asks the API for a short-lived signed URL (`/v/<artifact>/<version>?sig=…&exp=…`, HMAC with a server key, valid for about 10 minutes). The artefact origin checks the signature and sets no cookies. Public links use the publication token instead.
 - **Response headers for page and document:**
   - `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups-to-escape-sandbox; default-src 'none'; script-src 'unsafe-inline' <runtime>; style-src 'unsafe-inline'; img-src data: blob: 'self'; font-src data: 'self'; connect-src 'self'; frame-ancestors <public_url>`
-  - The `sandbox` directive without `allow-same-origin` gives the page an opaque origin, so even the artifact origin's own storage is out of reach. The page talks to its data store only through `postMessage` to the runtime.
+  - The `sandbox` directive without `allow-same-origin` gives the page an opaque origin, so even the artefact origin's own storage is out of reach. The page talks to its data store only through `postMessage` to the runtime.
   - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy` denying camera, microphone, geolocation and payment.
 - **No external hosts in version 1.** The page loads no CDN scripts and no web fonts. Agents inline everything, which keeps pages working offline and on a self-hosted network. A vetted allow list can come later if pages need it.
-- **The runtime.** A small script we write (`artifact-runtime.js`, served from the artifact origin) is injected into every page. It exposes `mycelium.data.get/set/list` (shared and per-viewer scope), `mycelium.download(name, blob)` and `mycelium.version`. It forwards these to the parent frame or to the artifact origin's `/data` endpoint, authorised by the same signature. Public viewers get read-only data unless the owner allows writes.
+- **The runtime.** A small script we write (`artifact-runtime.js`, served from the artefact origin) is injected into every page. It exposes `mycelium.data.get/set/list` (shared and per-viewer scope), `mycelium.download(name, blob)` and `mycelium.version`. It forwards these to the parent frame or to the artefact origin's `/data` endpoint, authorised by the same signature. Public viewers get read-only data unless the owner allows writes.
 - **Images and files** keep the current attachment rules: raster images inline, everything else `Content-Disposition: attachment` with `application/octet-stream`, and `CSP: sandbox`.
 - **Prompt injection back into agents.** `read_comments` and `read_artifact` return content marked as untrusted, the same way tool results are treated today. A public commenter cannot reach an agent: public viewers cannot comment in any phase.
 
@@ -159,42 +159,42 @@ Tasks
 Schedules
 ```
 
-The entry shows in Workspaces mode, where History lives. Whether Chats mode gets it too is a question for the operator, since chats can make artifacts as well.
+The entry shows in Workspaces mode, where History lives. Whether Chats mode gets it too is a question for the operator, since chats can make artefacts as well.
 
-### Artifacts screen
+### Artefacts screen
 
 | Part | Behaviour |
 |---|---|
-| List | One row per artifact: kind icon, title, latest version number, project or conversation, updated time, and a published marker. Newest first. |
+| List | One row per artefact: kind icon, title, latest version number, project or conversation, updated time, and a published marker. Newest first. |
 | Filters | Kind, project, node, "published", and a text search over titles. They reuse the filter chips from History. |
 | Open | Image opens `ImageViewer`. File downloads. Document renders natively. Page opens in a browser tab through the signed URL on desktop and Android, and in an iframe in the web client. |
 | Version history | A side list of versions with number, note, author and time. Picking one shows it, and "Restore as new version" copies it forward. |
 | Compare | Two versions side by side. Text kinds (document, page source) use the existing diff view. Images get a slider or side-by-side view. Files show size and hash only. |
-| Comments | A thread list per version. "Send to agent" posts the selected threads into the artifact's conversation as one message. |
+| Comments | A thread list per version. "Send to agent" posts the selected threads into the artefact's conversation as one message. |
 | Publish | A switch with a choice between "latest" and "this version", plus copy link, unpublish and access log (time, coarse location from the hashed IP, user agent, referrer). |
 
 ### In the thread
 
 - `show_image` renders with the existing `MessageAttachments` and `ThreadImage` path, so tapping it opens `ImageViewer` with the conversation's other images.
-- `publish_artifact` renders as an artifact card in `MyceliumCards.kt`, next to the walkthrough card: kind icon, title, "v3: note", an Open button and a Versions button. Later versions of the same artifact update the existing card's version label rather than stacking new cards. Each tool call still shows in its own place.
-- The conversation pane gets an Artifacts tab beside Walkthrough when the conversation has any artifacts, so a long thread does not have to be scrolled to find them.
+- `publish_artifact` renders as an artefact card in `MyceliumCards.kt`, next to the walkthrough card: kind icon, title, "v3: note", an Open button and a Versions button. Later versions of the same artefact update the existing card's version label rather than stacking new cards. Each tool call still shows in its own place.
+- The conversation pane gets an Artefacts tab beside Walkthrough when the conversation has any artefacts, so a long thread does not have to be scrolled to find them.
 
-## Running the artifact host
+## Running the artefact host
 
-`mycelium artifacts` serves every artifact at `https://{slug}.<domain>`.
+`mycelium artifacts` serves every artefact at `https://{slug}.<domain>`.
 
 | Variable | Meaning |
 |---|---|
 | `MYCELIUM_ARTIFACT_DOMAIN` | The domain the slugs live under, such as `mycelium.example.com`. Required. |
 | `MYCELIUM_CONTROL_URL` | The control plane's address over the mesh. Required. |
 | `MYCELIUM_ARTIFACT_HOST_TOKEN` | Bearer token for `/internal/artifacts`. Set the same value on the control plane. Required. |
-| `MYCELIUM_ARTIFACT_OIDC_ISSUER`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_ID`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_SECRET` | The host's own identity provider. Without them only public artifacts open. |
+| `MYCELIUM_ARTIFACT_OIDC_ISSUER`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_ID`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_SECRET` | The host's own identity provider. Without them only public artefacts open. |
 | `MYCELIUM_ARTIFACT_LISTEN` | Listen address. Defaults to `0.0.0.0:8081`. |
 | `MYCELIUM_EDITOR_DIR` | The built Design editor, used for the view-only mode. Defaults to `/usr/share/mycelium/editor`. |
 
 - **DNS.** A wildcard record, `*.<domain>`, and a record for `<domain>` itself, both pointing at the host.
 - **TLS.** One certificate covering `<domain>` and `*.<domain>`, terminated in front of the host, which speaks plain HTTP. A wildcard needs a DNS-01 challenge.
-- **OIDC redirect URI.** Register `https://<domain>/_auth/callback` with the provider. Sign-in always runs on the bare domain and the session cookie is scoped to `.<domain>`, so one sign-in covers every artifact.
+- **OIDC redirect URI.** Register `https://<domain>/_auth/callback` with the provider. Sign-in always runs on the bare domain and the session cookie is scoped to `.<domain>`, so one sign-in covers every artefact.
 
 ## Snapshots
 
@@ -237,7 +237,7 @@ networks:
 
 | Phase | Scope | Why this order |
 |---|---|---|
-| 1. Images and versioned files | The `artifacts` and `artifact_versions` tables, the `show_image`, `publish_artifact` (kinds `image` and `file`) and `list_artifacts` tools, the artifact card in the thread, the sidebar Artifacts entry and list screen, and version history. No new origin is needed, because both kinds are served by the attachment route as they are today. | It ships two PLAN.md asks (images in chat, versioned documents) using only existing storage and serving, and it builds the screen every later kind uses. |
+| 1. Images and versioned files | The `artifacts` and `artifact_versions` tables, the `show_image`, `publish_artifact` (kinds `image` and `file`) and `list_artifacts` tools, the artefact card in the thread, the sidebar Artefacts entry and list screen, and version history. No new origin is needed, because both kinds are served by the attachment route as they are today. | It ships two PLAN.md asks (images in chat, versioned documents) using only existing storage and serving, and it builds the screen every later kind uses. |
 | 2. Pages and documents on the sandboxed origin | `MYCELIUM_ARTIFACT_URL`, signed URLs, CSP headers, kinds `page` and `document`, opening in a browser or iframe, and text compare. | The security boundary is the risky part, so it gets its own release. |
 | 3. Comments and data | The `artifact_comments` table, `read_comments` and `reply_comment`, "Send to agent", the runtime script with `mycelium.data`, and `artifact_data`. | Comments need anchors into rendered pages, which need phase 2. |
 | 4. Publishing | Publications, the public route, the disclosure banner, the access log, and unpublish. Slides runtime. | Public exposure comes last, after the boundary has been in use privately. |
@@ -252,11 +252,11 @@ One slice within phase 1: **an agent calls `show_image` with a path on its node,
 - Thread: the tool result carries a `ThreadImage`, rendered by the existing `MessageAttachments` and opened in `ImageViewer`. No new composable is needed.
 - Tests: an HTTP-level test that a `show_image` call stores the image and that the thread returns it, a test that an SVG is refused, and a desktop UI test that finds the image by its caption.
 
-Sidebar Artifacts and the list screen are the next slice. They read the same tables.
+Sidebar Artefacts and the list screen are the next slice. They read the same tables.
 
 ## Open questions
 
-1. Should the Artifacts entry also appear in Chats mode?
+1. Should the Artefacts entry also appear in Chats mode?
 2. Should version 1 pages allow any external host (fonts, a chart library), or should everything stay inline?
-3. Can a public viewer ever write to an artifact's shared data, for example a poll? The proposal says no until phase 4.
-4. Should the artifact origin be a separate domain the operator runs, or can a subdomain with host-only cookies be accepted for single-user installs?
+3. Can a public viewer ever write to an artefact's shared data, for example a poll? The proposal says no until phase 4.
+4. Should the artefact origin be a separate domain the operator runs, or can a subdomain with host-only cookies be accepted for single-user installs?

@@ -423,7 +423,7 @@ async fn design_tools_refuse_other_kinds_and_remove_an_item_by_id() {
     let (unknown_failed, unknown_text) = tool(&server, &link, conversation, "design_remove_item", json!({"artifact": id, "item": "s1"})).await;
     let remaining = design_of(&server.user, id).await;
 
-    assert_eq!((page_failed, page_text.as_str()), (true, "That artifact is not a design."));
+    assert_eq!((page_failed, page_text.as_str()), (true, "That artefact is not a design."));
     assert!(no_html_failed);
     assert_eq!((removed_failed, removed_text.as_str()), (false, "Saved the removal of item s1 in \"Landing\" as version 2."));
     assert_eq!((unknown_failed, unknown_text.as_str()), (true, "The design has no item s1."));
@@ -450,7 +450,7 @@ async fn read_artifact_gives_text_a_file_summary_or_the_outline_of_a_design() {
     assert!(!outline.contains("<h1>"), "{outline}");
     assert_eq!((html.as_str(), text.as_str()), ("<h1>Home</h1>", "<h1>Board</h1>"));
     assert!(summary.starts_with("File \"Report\" (application/pdf, 8 bytes, version 1)."), "{summary}");
-    assert_eq!((stranger_failed, stranger_text.as_str()), (true, "That artifact was not found. Check the address and try again."));
+    assert_eq!((stranger_failed, stranger_text.as_str()), (true, "That artefact was not found. Check the address and try again."));
 }
 
 #[tokio::test]

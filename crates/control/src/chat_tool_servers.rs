@@ -109,6 +109,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(sqlx::types::Json(tools))
         .fetch_one(&state.pool)
         .await?;
+    state.hub.tools_changed(user.id);
 
     Ok((StatusCode::CREATED, Json(row.to_proto())))
 }
@@ -124,6 +125,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;
+    state.hub.tools_changed(user.id);
 
     Ok(Json(row.to_proto()))
 }
@@ -132,6 +134,7 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1 and owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That tool server"))?;
     let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref()).await?;
     let updated = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("update chat_tool_servers set tools = $2 where id = $1 returning {SERVER_COLUMNS}"))).bind(id).bind(sqlx::types::Json(tools)).fetch_one(&state.pool).await?;
+    state.hub.tools_changed(user.id);
 
     Ok(Json(updated.to_proto()))
 }
@@ -142,6 +145,8 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("That tool server"));
     }
+
+    state.hub.tools_changed(user.id);
 
     Ok(StatusCode::NO_CONTENT)
 }

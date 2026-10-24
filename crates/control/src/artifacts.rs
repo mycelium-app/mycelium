@@ -145,7 +145,7 @@ fn parse_author(text: &str) -> ApiResult<ArtifactAuthor> {
     match text {
         "agent" => Ok(ArtifactAuthor::Agent),
         "person" => Ok(ArtifactAuthor::Person),
-        other => Err(ApiError::internal(format!("unknown artifact author {other}"))),
+        other => Err(ApiError::internal(format!("unknown artefact author {other}"))),
     }
 }
 
@@ -155,7 +155,7 @@ impl ArtifactRow {
             id: self.id,
             owner: self.owner,
             conversation_id: self.conversation_id,
-            kind: parse_kind(&self.kind).map_err(|_| ApiError::internal(format!("unknown artifact kind {}", self.kind)))?,
+            kind: parse_kind(&self.kind).map_err(|_| ApiError::internal(format!("unknown artefact kind {}", self.kind)))?,
             url: domain.map(|domain| format!("https://{}.{domain}", self.slug)),
             title: self.title,
             slug: self.slug,
@@ -208,13 +208,13 @@ pub(crate) async fn republish(state: &AppState, id: Uuid) -> ApiResult<()> {
 async fn owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
-    row.ok_or_else(|| ApiError::not_found("That artifact"))
+    row.ok_or_else(|| ApiError::not_found("That artefact"))
 }
 
 async fn with_slug(state: &AppState, slug: &str) -> ApiResult<ArtifactRow> {
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where slug = $1"))).bind(slug).fetch_optional(&state.pool).await?;
 
-    row.ok_or_else(|| ApiError::not_found("That artifact"))
+    row.ok_or_else(|| ApiError::not_found("That artefact"))
 }
 
 async fn versions_of(state: &AppState, id: Uuid) -> ApiResult<Vec<ArtifactVersion>> {
@@ -269,11 +269,11 @@ fn parse_design(bytes: &[u8]) -> ApiResult<Value> {
 
 fn check_content(kind: ArtifactKind, bytes: &[u8]) -> ApiResult<()> {
     if bytes.is_empty() {
-        return Err(ApiError::bad_request("artifact_empty", "The artifact has no content. Add some, then try again."));
+        return Err(ApiError::bad_request("artifact_empty", "The artefact has no content. Add some, then try again."));
     }
 
     if bytes.len() > MAX_ATTACHMENT_BYTES {
-        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "artifact_too_large", "The artifact is larger than 20 MB. Use a smaller file."));
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "artifact_too_large", "The artefact is larger than 20 MB. Use a smaller file."));
     }
 
     match kind {
@@ -336,7 +336,7 @@ fn clean_title(title: &str) -> ApiResult<&str> {
     let title = title.trim();
 
     if title.is_empty() {
-        return Err(ApiError::bad_request("title_required", "Enter a title for the artifact."));
+        return Err(ApiError::bad_request("title_required", "Enter a title for the artefact."));
     }
 
     if title.chars().count() > MOST_TITLE_CHARACTERS {
@@ -351,7 +351,7 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
     let bytes = match (new.content, new.kind) {
         (Some(bytes), _) => bytes,
         (None, ArtifactKind::Design) => json!({"pages": [{"id": "p1", "name": "Page 1", "items": []}]}).to_string().into_bytes(),
-        (None, _) => return Err(ApiError::bad_request("content_required", "Give the content of the artifact.")),
+        (None, _) => return Err(ApiError::bad_request("content_required", "Give the content of the artefact.")),
     };
 
     check_content(new.kind, &bytes)?;
@@ -699,7 +699,7 @@ fn number_argument(arguments: &Value, name: &str) -> Option<i64> {
 
 async fn resolve(state: &AppState, owner: Uuid, arguments: &Value) -> ApiResult<ArtifactRow> {
     let Some(reference) = argument(arguments, "artifact") else {
-        return Err(ApiError::bad_request("artifact_required", "Give the artifact, its id or its slug."));
+        return Err(ApiError::bad_request("artifact_required", "Give the artefact, its id or its slug."));
     };
 
     match Uuid::parse_str(reference) {
@@ -708,7 +708,7 @@ async fn resolve(state: &AppState, owner: Uuid, arguments: &Value) -> ApiResult<
             let row = with_slug(state, reference).await?;
 
             if row.owner != owner {
-                return Err(ApiError::not_found("That artifact"));
+                return Err(ApiError::not_found("That artefact"));
             }
 
             Ok(row)
@@ -754,7 +754,7 @@ async fn edit_design(state: &AppState, owner: Uuid, arguments: &Value, edit: imp
     let row = resolve(state, owner, arguments).await?;
 
     if row.kind != "design" {
-        return Err(ApiError::bad_request("not_a_design", "That artifact is not a design."));
+        return Err(ApiError::bad_request("not_a_design", "That artefact is not a design."));
     }
 
     let (_, bytes) = latest_content(state, &row).await?;
@@ -924,7 +924,7 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
                     if text.chars().count() > MOST_READ_CHARACTERS {
                         let shown: String = text.chars().take(MOST_READ_CHARACTERS).collect();
 
-                        return Ok(format!("{shown}\n\n[Shortened: the artifact is {} bytes.]", bytes.len()));
+                        return Ok(format!("{shown}\n\n[Shortened: the artefact is {} bytes.]", bytes.len()));
                     }
 
                     Ok(text.into_owned())
@@ -958,6 +958,6 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
 
             Ok(lines.join("\n"))
         }
-        _ => Err(ApiError::bad_request("unknown_tool", "Unknown artifact tool.")),
+        _ => Err(ApiError::bad_request("unknown_tool", "Unknown artefact tool.")),
     }
 }

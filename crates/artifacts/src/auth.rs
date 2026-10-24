@@ -61,7 +61,7 @@ async fn start(state: &AppState, site: &Site, query: LoginQuery) -> Result<Respo
         return Err(not_found());
     }
 
-    let oidc = config.oidc.as_ref().ok_or_else(|| sign_in_failed(StatusCode::SERVICE_UNAVAILABLE, "Signing in is not set up on this artifact host. Ask the person who runs it to set the identity provider."))?;
+    let oidc = config.oidc.as_ref().ok_or_else(|| sign_in_failed(StatusCode::SERVICE_UNAVAILABLE, "Signing in is not set up on this artefact host. Ask the person who runs it to set the identity provider."))?;
     let discovery = discover(state, &oidc.issuer).await?;
     let endpoint = discovery["authorization_endpoint"].as_str().ok_or_else(|| sign_in_failed(StatusCode::BAD_GATEWAY, "The identity provider has no sign-in address."))?;
     let next = safe_next(&config.domain, query.next);
@@ -108,10 +108,10 @@ async fn finish(state: &AppState, site: &Site, headers: &HeaderMap, query: Callb
     }
 
     let oidc = config.oidc.as_ref().ok_or_else(not_found)?;
-    let expired = || sign_in_failed(StatusCode::BAD_REQUEST, "The sign-in took too long or was opened in another browser. Open the artifact link again to start again.");
+    let expired = || sign_in_failed(StatusCode::BAD_REQUEST, "The sign-in took too long or was opened in another browser. Open the artefact link again to start again.");
 
     if query.error.is_some() {
-        return Err(sign_in_failed(StatusCode::BAD_REQUEST, "The identity provider did not sign you in. Open the artifact link again, or ask the person who shared it for access."));
+        return Err(sign_in_failed(StatusCode::BAD_REQUEST, "The identity provider did not sign you in. Open the artefact link again, or ask the person who shared it for access."));
     }
 
     let (code, query_state) = query.code.zip(query.state).ok_or_else(expired)?;
@@ -136,7 +136,7 @@ async fn finish(state: &AppState, site: &Site, headers: &HeaderMap, query: Callb
         form.push(("client_secret", secret.as_str()));
     }
 
-    let rejected = || sign_in_failed(StatusCode::BAD_GATEWAY, "The identity provider's answer could not be read. Open the artifact link again.");
+    let rejected = || sign_in_failed(StatusCode::BAD_GATEWAY, "The identity provider's answer could not be read. Open the artefact link again.");
     let body = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(&form).finish();
     let reply = state.http().post(token_endpoint).header(CONTENT_TYPE, "application/x-www-form-urlencoded").body(body).send().await.map_err(|_| rejected())?;
     let tokens: Value = reply.json().await.map_err(|_| rejected())?;
@@ -154,7 +154,7 @@ async fn finish(state: &AppState, site: &Site, headers: &HeaderMap, query: Callb
     let unexpired = claims["exp"].as_i64().is_some_and(|exp| exp > chrono::Utc::now().timestamp());
 
     if !(issuer_matches && audience_matches && nonce_matches && unexpired) {
-        return Err(sign_in_failed(StatusCode::UNAUTHORIZED, "The identity provider's answer could not be checked. Open the artifact link again."));
+        return Err(sign_in_failed(StatusCode::UNAUTHORIZED, "The identity provider's answer could not be checked. Open the artefact link again."));
     }
 
     let next = safe_next(&config.domain, pending["next"].as_str().map(str::to_string));

@@ -198,7 +198,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/config", post(prompts::config))
         .route("/api/v1/memories", get(memories::list))
         .route("/api/v1/memories/{id}", patch(memories::update).delete(memories::delete))
-        .route("/api/v1/mcp", post(mcp::handle))
+        .route("/api/v1/mcp", get(mcp::stream).post(mcp::handle))
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
         .route("/api/v1/repositories", get(forges::repositories))

@@ -83,7 +83,7 @@ pub async fn serve() -> Result<()> {
     tracing::info!("artifact host listening on {} for *.{}", config.listen, config.domain);
 
     if config.oidc.is_none() {
-        tracing::warn!("MYCELIUM_ARTIFACT_OIDC_ISSUER is not set, so only public artifacts can be opened.");
+        tracing::warn!("MYCELIUM_ARTIFACT_OIDC_ISSUER is not set, so only public artefacts can be opened.");
     }
 
     run(config, listener).await
@@ -121,11 +121,11 @@ async fn healthz() -> &'static str {
 }
 
 fn not_found() -> Response {
-    notice(StatusCode::NOT_FOUND, "Artifact not found", "Nothing lives at this address. Check the link, or ask the person who shared it with you.")
+    notice(StatusCode::NOT_FOUND, "Artefact not found", "Nothing lives at this address. Check the link, or ask the person who shared it with you.")
 }
 
 fn bad_gateway() -> Response {
-    notice(StatusCode::BAD_GATEWAY, "This artifact could not be loaded", "The artifact host could not reach the control plane. Try again in a minute.")
+    notice(StatusCode::BAD_GATEWAY, "This artefact could not be loaded", "The artefact host could not reach the control plane. Try again in a minute.")
 }
 
 fn unauthorised() -> Response {
@@ -139,7 +139,7 @@ fn refuse_cross_site(headers: &HeaderMap, site: &Site) -> Option<Response> {
     if same_host {
         None
     } else {
-        Some((StatusCode::FORBIDDEN, Json(json!({"error": "cross_site", "message": "Save changes from the artifact's own page."}))).into_response())
+        Some((StatusCode::FORBIDDEN, Json(json!({"error": "cross_site", "message": "Save changes from the artefact's own page."}))).into_response())
     }
 }
 
@@ -171,7 +171,7 @@ async fn gate(state: &AppState, site: &Site, headers: &HeaderMap, uri: &Uri, nav
     }
 
     if config.oidc.is_none() {
-        return Gate::Closed(notice(StatusCode::SERVICE_UNAVAILABLE, "Sign in is not set up", "This artifact is private and the artifact host has no identity provider. Ask the person who runs it to set one, or ask the owner to make the artifact public."));
+        return Gate::Closed(notice(StatusCode::SERVICE_UNAVAILABLE, "Sign in is not set up", "This artefact is private and the artefact host has no identity provider. Ask the person who runs it to set one, or ask the owner to make the artifact public."));
     }
 
     let path_and_query = uri.path_and_query().map(|value| value.as_str()).unwrap_or("/");
@@ -226,7 +226,7 @@ async fn editor_asset(state: &AppState, uri: &Uri) -> Response {
     let wanted = if plain && !requested.as_os_str().is_empty() && asset.is_file() { asset } else { directory.join("index.html") };
 
     let Ok(bytes) = tokio::fs::read(&wanted).await else {
-        return notice(StatusCode::SERVICE_UNAVAILABLE, "The Design viewer is not installed", "This artifact host has no editor files. Ask the person who runs it to set MYCELIUM_EDITOR_DIR.");
+        return notice(StatusCode::SERVICE_UNAVAILABLE, "The Design viewer is not installed", "This artefact host has no editor files. Ask the person who runs it to set MYCELIUM_EDITOR_DIR.");
     };
 
     let mut response = bytes.into_response();

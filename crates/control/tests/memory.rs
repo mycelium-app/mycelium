@@ -35,7 +35,7 @@ async fn initialize_echoes_the_requested_protocol_version_and_offers_tools() {
 
     assert_eq!(status, 200);
     assert_eq!(body["result"]["protocolVersion"], "2025-03-26");
-    assert_eq!(body["result"]["capabilities"], json!({"tools": {}}));
+    assert_eq!(body["result"]["capabilities"], json!({"tools": {"listChanged": true}}));
     assert_eq!(body["result"]["serverInfo"]["name"], "mycelium");
 
     let (_, fallback) = mcp(&server, &token, None, json!({"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {}})).await;

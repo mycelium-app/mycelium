@@ -308,7 +308,7 @@ async fn an_unknown_slug_and_the_bare_domain_are_not_found_and_health_answers_on
     let health = harness.request(reqwest::Method::GET, "elsewhere.example", "/healthz", None).send().await.unwrap();
 
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    assert!(unknown.text().await.unwrap().contains("Artifact not found"));
+    assert!(unknown.text().await.unwrap().contains("Artefact not found"));
     assert_eq!(bare.status(), StatusCode::NOT_FOUND);
     assert_eq!(health.status(), StatusCode::OK);
 }

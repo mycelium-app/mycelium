@@ -309,6 +309,21 @@ async fn the_model_is_sent_tool_search_and_mycelium_tools_and_a_tool_it_finds_st
 }
 
 #[tokio::test]
+async fn the_system_prompt_lists_each_connected_server_and_its_tools_without_sending_their_definitions() {
+    let rig = rig(vec![Reply::Say("Hello.")]).await;
+    let id = rig.chat("What can you reach?").await;
+    rig.turns_ended(&id, 1).await;
+
+    let request = rig.model.request(0);
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    let sent = tool_names(&request);
+
+    assert!(system.contains("Connected tool servers, loaded with tool_search when needed:"));
+    assert!(system.contains("- Lab: get_weather, create_issue, list_files"));
+    assert!(!sent.contains(&WEATHER.to_string()) && !sent.contains(&"mcp__lab__create_issue".to_string()));
+}
+
+#[tokio::test]
 async fn tool_search_ranks_name_matches_above_description_matches_and_says_when_nothing_matches() {
     let rig = rig(vec![
         Reply::Call("tool_search", json!({"query": "files"})),

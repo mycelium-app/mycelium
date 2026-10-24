@@ -83,9 +83,24 @@ pub struct Hub {
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
     chat_approvals: Mutex<HashMap<(Uuid, String), oneshot::Sender<String>>>,
+    tool_streams: Mutex<HashMap<Uuid, broadcast::Sender<()>>>,
 }
 
 impl Hub {
+    pub fn subscribe_tools(&self, user: Uuid) -> broadcast::Receiver<()> {
+        let mut streams = self.tool_streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        streams.entry(user).or_insert_with(|| broadcast::channel(16).0).subscribe()
+    }
+
+    pub fn tools_changed(&self, user: Uuid) {
+        if let Ok(streams) = self.tool_streams.lock()
+            && let Some(sender) = streams.get(&user)
+        {
+            let _ = sender.send(());
+        }
+    }
+
     pub fn track_chat_turn(&self, conversation_id: Uuid, turn: tokio::task::AbortHandle) {
         if let Ok(mut turns) = self.chat_turns.lock() {
             turns.insert(conversation_id, turn);

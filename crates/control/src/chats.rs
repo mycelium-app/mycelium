@@ -1,7 +1,7 @@
 use crate::attachments;
 use crate::auth::AuthUser;
 use crate::activity::record_turn;
-use crate::chat_tools::{self, TOOLS_INSTRUCTIONS, Toolbox};
+use crate::chat_tools::{self, Toolbox};
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions::extensions_of;
@@ -383,7 +383,7 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
 
     loop {
         let definitions = if tools_on { toolbox.definitions() } else { Vec::new() };
-        let instructions = if tools_on { format!("{base_instructions}\n{TOOLS_INSTRUCTIONS}") } else { base_instructions.clone() };
+        let instructions = if tools_on { format!("{base_instructions}\n{}", toolbox.instructions()) } else { base_instructions.clone() };
         let started = provider.stream_reply(&state.http, model, &instructions, &messages, &definitions).await?;
         let mut stream = match started {
             Ok(stream) => stream,

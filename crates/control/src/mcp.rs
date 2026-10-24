@@ -1,9 +1,11 @@
 use crate::api_access;
 use crate::artifacts;
 use crate::auth::AuthNode;
+use crate::chat_tool_servers::{list_owned, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
+use crate::mcp_client::McpConnection;
 use crate::message_proposals;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::ssh_access;
@@ -13,10 +15,14 @@ use crate::walkthroughs;
 use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use futures_util::future::join_all;
 use mycelium_proto::api::{EachRun, TaskStatus};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
+use std::convert::Infallible;
+use tokio::sync::broadcast::error::RecvError;
 use uuid::Uuid;
 
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -26,6 +32,7 @@ const DEFAULT_FIND_LIMIT: i64 = 10;
 const MAX_FIND_LIMIT: i64 = 50;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
+const TOOLS_CHANGED: &str = r#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#;
 
 fn reply(id: &Value, result: Value) -> Response {
     Json(json!({"jsonrpc": "2.0", "id": id, "result": result})).into_response()
@@ -352,6 +359,10 @@ async fn scopes_named(state: &AppState, node_id: Uuid, names: &[String]) -> ApiR
     Ok(Ok(scopes))
 }
 
+async fn node_owner(state: &AppState, node_id: Uuid) -> ApiResult<Uuid> {
+    Ok(sqlx::query_scalar::<_, Uuid>("select created_by from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?)
+}
+
 pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
     let Some(id) = request.get("id").cloned() else {
         return Ok(StatusCode::ACCEPTED.into_response());
@@ -362,10 +373,32 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         "initialize" => {
             let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(DEFAULT_PROTOCOL_VERSION);
 
-            reply(&id, json!({"protocolVersion": version, "capabilities": {"tools": {}}, "serverInfo": {"name": "mycelium", "version": env!("CARGO_PKG_VERSION")}}))
+            let mut response = reply(&id, json!({"protocolVersion": version, "capabilities": {"tools": {"listChanged": true}}, "serverInfo": {"name": "mycelium", "version": env!("CARGO_PKG_VERSION")}}));
+            response.headers_mut().insert("mcp-session-id", Uuid::new_v4().to_string().parse().map_err(crate::error::ApiError::internal)?);
+
+            response
         }
         "ping" => reply(&id, json!({})),
-        "tools/list" => reply(&id, json!({"tools": tool_definitions()})),
+        "tools/list" => {
+            let owner = node_owner(&state, node.id).await?;
+            let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled).collect();
+            let http = &state.http;
+            let listed = join_all(servers.iter().map(|server| async move {
+                let mut connection = McpConnection::new(http, &server.url, server.bearer_token.as_deref());
+
+                connection.list_tools().await.map(|tools| (server, tools))
+            }))
+            .await;
+            let mut tools = tool_definitions().as_array().cloned().unwrap_or_default();
+
+            for (server, remote) in listed.into_iter().flatten() {
+                for tool in remote {
+                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+                }
+            }
+
+            reply(&id, json!({"tools": tools}))
+        }
         "tools/call" => {
             let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
 
@@ -664,6 +697,25 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(error) => reply(&id, tool_text(error.message(), true)),
                     }
                 }
+                Some(name) if name.contains("__") => {
+                    let owner = node_owner(&state, node.id).await?;
+                    let servers = list_owned(&state, owner).await?;
+                    let found = servers.iter().find_map(|server| name.strip_prefix(&format!("{}__", slug(&server.name))).map(|tool| (server, tool)));
+                    let Some((server, tool)) = found else {
+                        return Ok(failure(&id, INVALID_PARAMS, "Unknown tool. Use a tool from tools/list."));
+                    };
+
+                    if !server.enabled {
+                        return Ok(reply(&id, tool_text(&format!("{} is switched off in Mycelium. Switch it on in the tool server settings, then try again.", server.name), true)));
+                    }
+
+                    let mut connection = McpConnection::new(&state.http, &server.url, server.bearer_token.as_deref());
+
+                    match connection.call_tool(tool, &arguments).await {
+                        Ok(output) => reply(&id, tool_text(&output.text, output.is_error)),
+                        Err(error) => reply(&id, tool_text(&error.describe(&server.name), true)),
+                    }
+                }
                 _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
@@ -671,6 +723,19 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
     };
 
     Ok(response)
+}
+
+pub async fn stream(State(state): State<AppState>, node: AuthNode) -> ApiResult<Response> {
+    let owner = node_owner(&state, node.id).await?;
+    let receiver = state.hub.subscribe_tools(owner);
+    let notifications = futures_util::stream::unfold(receiver, |mut receiver| async move {
+        match receiver.recv().await {
+            Err(RecvError::Closed) => None,
+            _ => Some((Ok::<Event, Infallible>(Event::default().data(TOOLS_CHANGED)), receiver)),
+        }
+    });
+
+    Ok(Sse::new(notifications).keep_alive(KeepAlive::default()).into_response())
 }
 
 pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: Uuid, name: &str, arguments: &Value) -> ApiResult<(String, bool)> {
