@@ -404,10 +404,7 @@ async fn a_prompt_sent_while_a_turn_runs_is_queued_and_sent_when_the_turn_ends()
     assert_eq!(texts, vec!["second", "third"]);
 
     link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
-    assert_eq!(link.expect_prompt().await.1, "second");
-
-    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
-    assert_eq!(link.expect_prompt().await.1, "third");
+    assert_eq!(link.expect_prompt().await.1, "second\n\nthird");
 
     assert!(queue(&server, id).await.is_empty());
     stream.until(|message| matches!(message, StreamMessage::Queue { queue, .. } if queue.is_empty()).then_some(())).await;
@@ -475,6 +472,54 @@ async fn send_now_cancels_the_running_turn_then_sends_that_message_first() {
     let remaining = queue(&server, id).await;
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0]["text"], "later");
+}
+
+#[tokio::test]
+async fn queued_messages_arrive_as_one_prompt_when_the_turn_ends() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+
+    prompt(&server, id, "first").await;
+    prompt(&server, id, "second").await;
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+
+    assert_eq!(link.expect_prompt().await.1, "first\n\nsecond");
+    assert!(queue(&server, id).await.is_empty());
+}
+
+#[tokio::test]
+async fn send_all_now_cancels_the_running_turn_then_sends_the_combined_prompt() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+
+    prompt(&server, id, "first").await;
+    prompt(&server, id, "second").await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/send-all-now"))).await;
+    assert_eq!(status, 204);
+
+    assert_eq!(link.next().await, ControlToNode::Cancel { conversation_id: id });
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
+    assert_eq!(link.expect_prompt().await.1, "first\n\nsecond");
+    assert!(queue(&server, id).await.is_empty());
+}
+
+#[tokio::test]
+async fn send_all_now_on_an_empty_queue_is_not_found() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    link.expect_prompt().await;
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/send-all-now"))).await;
+
+    assert_eq!(status, 404);
 }
 
 #[tokio::test]

@@ -6,7 +6,7 @@ use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::node_offline;
 use crate::state::{AppState, UnacknowledgedPrompt};
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, append_event, enqueue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, append_event, enqueue, merge_queue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -258,6 +258,15 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn send_all_now(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    lock_owned(&mut tx, id, user.id).await?;
+    let first = merge_queue(&mut tx, id).await?.ok_or_else(|| ApiError::not_found("A queued message"))?;
+    tx.commit().await?;
+
+    send_now(State(state), user, Path((id, first))).await
 }
 
 pub async fn cancel(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

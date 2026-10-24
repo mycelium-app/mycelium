@@ -287,6 +287,27 @@ pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &
     Ok(())
 }
 
+pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> sqlx::Result<Option<Uuid>> {
+    let rows = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 order by position for update")
+        .bind(conversation_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+    let Some((first_id, _, _)) = rows.first() else {
+        return Ok(None);
+    };
+
+    if rows.len() > 1 {
+        let text = rows.iter().map(|(_, text, _)| text.as_str()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n");
+        let attachments: Vec<Attachment> = rows.iter().flat_map(|(_, _, attachments)| attachments.0.clone()).collect();
+
+        sqlx::query("update queued_prompts set text = $2, attachments = $3 where id = $1").bind(first_id).bind(text).bind(sqlx::types::Json(attachments)).execute(&mut *tx).await?;
+        sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
+    }
+
+    Ok(Some(*first_id))
+}
+
 #[derive(sqlx::FromRow)]
 struct NodeRow {
     id: Uuid,

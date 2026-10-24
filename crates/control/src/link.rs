@@ -7,7 +7,7 @@ use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
 use crate::state::{AppState, GitAnswer, ProcessAnswer};
-use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, publish_node, set_status, without_nul};
+use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
@@ -699,6 +699,11 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if stop_reason == "cancelled" && !send_now {
         return Ok(());
+    }
+
+    if !send_now {
+        let mut connection = state.pool.acquire().await?;
+        merge_queue(&mut connection, conversation_id).await?;
     }
 
     pump(state, conversation_id, false).await
