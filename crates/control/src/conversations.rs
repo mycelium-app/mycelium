@@ -509,7 +509,7 @@ pub async fn events(State(state): State<AppState>, user: AuthUser, Path(id): Pat
                 "with page_start as (select min(seq) as seq from (select seq from events where conversation_id = $1 and seq < $2 order by seq desc limit $3) newest)
                  select seq, kind, payload from events
                  where conversation_id = $1 and seq < $2
-                   and seq >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message' and seq <= (select seq from page_start)), 0)
+                   and seq >= greatest(coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message' and seq <= (select seq from page_start)), 0), (select seq from page_start) - $3)
                  order by seq",
             )
             .bind(id)

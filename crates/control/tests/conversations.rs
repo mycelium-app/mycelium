@@ -171,6 +171,19 @@ async fn the_newest_events_page_is_ascending_and_starts_at_a_user_message() {
 }
 
 #[tokio::test]
+async fn a_turn_far_longer_than_a_page_is_not_loaded_whole() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    seed_turns(&server, id, 1, 400).await;
+
+    let page = events_before(&server, id, i64::MAX, 20).await;
+
+    assert!(page.len() <= 40, "loaded {} events", page.len());
+    assert_eq!(page.last().unwrap().0, 501);
+}
+
+#[tokio::test]
 async fn paging_backwards_from_the_oldest_seq_has_no_gap_and_no_overlap() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
