@@ -4,6 +4,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import mycelium.state.PickedFile
 
+const val DefaultEventPageSize = 500
+
 data class Connection(val baseUrl: String, val token: String)
 
 data class DeviceInfo(val label: String, val hostname: String, val os: String, val arch: String)
@@ -16,6 +18,8 @@ interface Platform {
     val signInCallback: String? get() = null
 
     val reducedMotion: Boolean get() = false
+
+    val eventPageSize: Int get() = DefaultEventPageSize
 
     val resumes: Flow<Unit> get() = emptyFlow()
 

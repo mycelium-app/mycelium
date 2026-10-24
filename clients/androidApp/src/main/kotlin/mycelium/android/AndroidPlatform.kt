@@ -38,6 +38,7 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     override val signsInThroughTheBrowser = false
 
     override val originUrl: String? = null
+    override val eventPageSize = 100
 
     override val signInCallback = SignInCallback
 

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import mycelium.DefaultEventPageSize
 import mycelium.Platform
 import mycelium.api.ApiException
 import mycelium.api.Artifact
@@ -48,13 +49,13 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
 import kotlin.io.encoding.Base64
 
-private const val EventPageSize = 500
 private const val FirstRetryMillis = 1_000L
 private const val LongestRetryMillis = 15_000L
 private const val MaxCachedAttachments = 20
 private const val MaxCachedPreviews = 200
 
 class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform? = null) {
+    private val eventPageSize = platform?.eventPageSize ?: DefaultEventPageSize
     private val mutableState = MutableStateFlow(AppState())
     private val mutableProblem = MutableStateFlow<String?>(null)
     private var streaming: Job? = null
@@ -499,7 +500,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
 
         try {
-            val page = api.events(conversationId, before = oldest, limit = EventPageSize)
+            val page = api.events(conversationId, before = oldest, limit = eventPageSize)
 
             mutableState.update {
                 it.copy(
@@ -521,17 +522,17 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         if (reopened) {
             while (true) {
-                val page = api.events(conversationId, after, EventPageSize)
+                val page = api.events(conversationId, after, eventPageSize)
                 fetched += page
 
-                if (page.size < EventPageSize) {
+                if (page.size < eventPageSize) {
                     break
                 }
 
                 after = page.maxOf { it.seq }
             }
         } else {
-            fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = EventPageSize)
+            fetched += api.events(conversationId, before = Long.MAX_VALUE, limit = eventPageSize)
         }
 
         mutableState.update {
