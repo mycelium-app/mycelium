@@ -1,14 +1,24 @@
 :root {
-  --bg-content: #141716; --bg-panel: #181b1a; --bg-chrome: #1d201f; --bg-raised: #242827; --bg-hover: #232827; --bg-selected: #2c3231;
-  --border: #2a302e; --border-control: #646b69;
-  --text: #e3e6e4; --text-muted: #a3a8a6; --text-faint: #969c99;
-  --accent: #7ccba0; --on-accent: #0e1a14; --focus: #7ccba0;
+  --bg-content: #161616; --bg-panel: #1a1a1a; --bg-chrome: #1f1f1f; --bg-raised: #222222; --bg-hover: #2c2c2c; --bg-selected: #333333;
+  --border: #2c2c2c; --border-control: #6b6b6b;
+  --text: #e6e6e6; --text-muted: #a8a8a8; --text-faint: #9c9c9c;
+  --accent: #e6e6e6; --on-accent: #111111; --focus: #e6e6e6;
   --status-working: #7fb2ec; --status-attention: #e2b45f; --status-failed: #ec8576;
   --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --space-1: 4px; --space-1-5: 6px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
   --size-control-md: 28px; --size-control-lg: 32px;
   --radius-control: 4px; --radius-block: 6px; --radius-float: 8px; --radius-full: 9999px;
-  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-content: #ffffff; --bg-panel: #f4f4f4; --bg-chrome: #ededed; --bg-raised: #ffffff; --bg-hover: #e7e7e7; --bg-selected: #dddddd;
+  --border: #dfdfdf; --border-control: #7e7e7e;
+  --text: #171717; --text-muted: #5a5a5a; --text-faint: #5e5e5e;
+  --accent: #171717; --on-accent: #ffffff; --focus: #171717;
+  --status-working: #1f58a8; --status-attention: #875800; --status-failed: #b0372a;
+  --shadow-float: 0 8px 24px rgba(23, 23, 23, 0.16);
+  color-scheme: light;
 }
