@@ -23,6 +23,7 @@ fun AccountSignInDialog(store: Store, session: LoginSession, onClose: () -> Unit
             output = state.loginOutput[session.loginId].orEmpty(),
             finished = finished,
             onOpenUrl = { url -> platform?.openUrl(url) },
+            onCopy = { code -> platform?.copyToClipboard(code) },
             onInput = { text -> store.act { store.api.loginInput(session.loginId, text + "\n") } },
             onClose = {
                 if (finished == null) {

@@ -46,6 +46,11 @@ fun loginMethodFor(agent: String): String = when (agent) {
 
 fun firstUrl(text: String): String? = Regex("https?://[^\\s\"'<>]+").find(text)?.value
 
+fun withoutTerminalCodes(text: String): String =
+    Regex("\u001B(\\[[0-?]*[ -/]*[@-~]|\\][^\u0007\u001B]*(\u0007|\u001B\\\\)|[@-Z\\\\-_])").replace(text, "").replace("\r", "")
+
+fun oneTimeCode(text: String): String? = Regex("\\b[A-Z0-9]{4}-[A-Z0-9]{4,}\\b").find(text)?.value
+
 private val JoinMethods = listOf("Shell", "Nix", "NixOS or nix-darwin")
 
 fun joinCommands(method: String, controlPlane: String): List<Pair<String, String>> = when (method) {
@@ -296,7 +301,7 @@ private fun NodeGroup(
         }
 
         if (session != null) {
-            LoginPanel(session, output, finished, platform::openUrl, onLoginInput, onLoginClose)
+            LoginPanel(session, output, finished, platform::openUrl, platform::copyToClipboard, onLoginInput, onLoginClose)
             Hairline()
         }
     }
@@ -378,12 +383,15 @@ fun LoginPanel(
     output: String,
     finished: Boolean?,
     onOpenUrl: (String) -> Unit,
+    onCopy: (String) -> Unit,
     onInput: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     val colors = MyTheme.colors
     var reply by remember { mutableStateOf("") }
-    val link = firstUrl(output)
+    val text = withoutTerminalCodes(output)
+    val link = firstUrl(text)
+    val code = oneTimeCode(text)
 
     Column(
         Modifier.fillMaxWidth().background(colors.bgSelected).padding(Tokens.Space.S3).semantics { contentDescription = "${agentName(session.agent)} sign-in" },
@@ -400,12 +408,12 @@ fun LoginPanel(
                     .verticalScrollWithBar()
                     .padding(Tokens.Space.S2),
             ) {
-                Label(output.ifEmpty { "Waiting for the node to start the sign-in." }, style = Tokens.Type.Code)
+                Label(text.ifEmpty { "Waiting for the node to start the sign-in." }, style = Tokens.Type.Code)
             }
         }
 
         if (link != null && finished == null) {
-            MyButton({ onOpenUrl(link) }, text = "Open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
+            MyButton({ code?.let(onCopy); onOpenUrl(link) }, text = if (code == null) "Open the sign-in page" else "Copy the code and open the sign-in page", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
         }
 
         when (finished) {
