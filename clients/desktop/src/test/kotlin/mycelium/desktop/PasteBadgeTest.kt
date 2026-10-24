@@ -44,7 +44,7 @@ class PasteBadgeTest {
     }
 
     @Test
-    fun aLongPasteBecomesABadgeAndIsSentAsAPastedTextBlock() {
+    fun aLongPasteShowsInlineAndIsSentAsAPastedTextBlock() {
         val sent = mutableListOf<String>()
         show(sent)
         val field = rule.onNode(hasSetTextAction())
@@ -52,7 +52,7 @@ class PasteBadgeTest {
         field.performTextInput("see ")
         field.performTextInput(long)
 
-        rule.onNodeWithContentDescription("Pasted text · 20 lines").assertExists()
+        rule.onNodeWithText("see Pasted text · 20 lines").assertExists()
 
         field.performKeyInput { pressKey(Key.Enter) }
 
@@ -65,36 +65,22 @@ class PasteBadgeTest {
 
         rule.onNode(hasSetTextAction()).performTextInput("one\ntwo")
 
-        rule.onNodeWithContentDescription("Pasted text · 2 lines").assertDoesNotExist()
+        rule.onNodeWithText("Pasted text · 2 lines", substring = true).assertDoesNotExist()
     }
 
     @Test
-    fun theCloseButtonRemovesTheBadgeAndNothingIsSent() {
+    fun backspaceAfterAnInlinePasteDeletesTheWholePaste() {
         val sent = mutableListOf<String>()
         show(sent)
         val field = rule.onNode(hasSetTextAction())
 
+        field.performTextInput("see ")
         field.performTextInput(long)
-        rule.onNodeWithContentDescription("Remove pasted text, 20 lines").performClick()
+        field.performKeyInput { pressKey(Key.Backspace) }
 
-        rule.onNodeWithContentDescription("Pasted text · 20 lines").assertDoesNotExist()
-
-        field.performKeyInput { pressKey(Key.Enter) }
-
+        rule.onNodeWithText("Pasted text · 20 lines", substring = true).assertDoesNotExist()
+        field.assertTextEquals("see ")
         assertEquals(emptyList(), sent)
-    }
-
-    @Test
-    fun clickingTheBadgeExpandsItBackIntoPlainText() {
-        val sent = mutableListOf<String>()
-        show(sent)
-        val field = rule.onNode(hasSetTextAction())
-
-        field.performTextInput(long)
-        rule.onNodeWithContentDescription("Pasted text · 20 lines").performClick()
-
-        rule.onNodeWithContentDescription("Pasted text · 20 lines").assertDoesNotExist()
-        field.assertTextEquals(long)
     }
 
     @Test

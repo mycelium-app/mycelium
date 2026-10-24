@@ -61,6 +61,7 @@ fun InstructionProposals(store: Store) {
     val state by store.state.collectAsState()
     val waiting = waitingProposals(state.instructionProposals.values)
     val decided = decidedProposals(state.instructionProposals.values)
+    var showingDecided by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshInstructionProposals() }
@@ -78,10 +79,21 @@ fun InstructionProposals(store: Store) {
         }
 
         if (decided.isNotEmpty()) {
-            Label("Decided", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
+            Row {
+                MyButton(
+                    { showingDecided = !showingDecided },
+                    text = if (showingDecided) "Hide decided" else "Show decided (${decided.size})",
+                    size = ButtonSize.Sm,
+                    variant = ButtonVariant.Outline,
+                )
+            }
 
-            for (proposal in decided.take(DecidedShown)) {
-                DecidedRow(proposal)
+            if (showingDecided) {
+                Label("Decided", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
+
+                for (proposal in decided.take(DecidedShown)) {
+                    DecidedRow(proposal)
+                }
             }
         }
     }

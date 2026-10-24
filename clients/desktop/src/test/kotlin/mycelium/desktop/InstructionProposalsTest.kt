@@ -88,6 +88,20 @@ class InstructionProposalsTest {
 
         requestTo(HttpMethod.Post, "/instruction-proposals/p1/approve")
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithContentDescription("Proposed edit to the Global instructions").fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithText("Show decided (1)").performClick()
+        rule.onNodeWithText("Approved: Global instructions").assertExists()
+    }
+
+    @Test
+    fun decidedProposalsAreHiddenUntilShowDecidedIsPressed() {
+        show(proposal("p1", Edited, state = "approved") + "," + proposal("p2", Edited))
+
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Show decided (1)").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithText("Approved: Global instructions").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Proposed edit to the Global instructions").assertExists()
+
+        rule.onNodeWithText("Show decided (1)").performClick()
+
         rule.onNodeWithText("Approved: Global instructions").assertExists()
     }
 

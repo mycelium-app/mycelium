@@ -47,6 +47,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
@@ -68,7 +71,7 @@ import mycelium.state.expandedPastes
 import mycelium.state.freePasteMarker
 import mycelium.state.isPasteMarker
 import mycelium.state.pastedLabel
-import mycelium.state.pastedLineCount
+import mycelium.state.PasteDisplay
 import mycelium.state.pastedSummary
 import mycelium.state.pasteInsertion
 import mycelium.state.serialisedPastes
@@ -125,6 +128,7 @@ fun Composer(
     modelPicker: ModelPickerControls? = null,
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
+    onSendAllQueuedNow: () -> Unit = {},
 ) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
@@ -198,26 +202,10 @@ fun Composer(
 
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         Column(fieldModifier) {
-            PastedChips(
-                markers = text.text.filter(::isPasteMarker).filter { it in pastes }.toList(),
-                pastes = pastes,
-                onExpand = { marker ->
-                    val at = text.text.indexOf(marker)
-                    val full = pastes.getValue(marker)
-
-                    text = TextFieldValue(text.text.replaceRange(at, at + 1, full), TextRange(at + full.length))
-                },
-                onRemove = { marker ->
-                    val at = text.text.indexOf(marker)
-
-                    text = TextFieldValue(text.text.removeRange(at, at + 1), TextRange(at))
-                },
-            )
-
             Box {
                 MessageField(
                     text = text,
-                    visualTransformation = PasteMarkerTransformation,
+                    visualTransformation = remember(pastes, colors.bgRaised) { PasteMarkerTransformation(pastes, colors.bgRaised) },
                     onTextChange = { changed ->
                         val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
                         sent = null
@@ -306,7 +294,7 @@ fun Composer(
                 goal?.goal?.let { GoalBar(it, goal.onPause, goal.onResume, goal.onClear) }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
-                    QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
+                    QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
                 }
 
                 AnnotationChips(annotations, onRemoveAnnotation)
@@ -339,7 +327,7 @@ fun Composer(
 
         if (queue.isNotEmpty() || sending.isNotEmpty()) {
             Box(measured) {
-                QueuedMessages(queue, sending, onSendQueuedNow, onEditQueued, onRemoveQueued)
+                QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
             }
         }
 
@@ -427,59 +415,31 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
     )
 }
 
-private const val PasteInlineLabel = "Pasted text"
-
-private object PasteMarkerTransformation : VisualTransformation {
+private class PasteMarkerTransformation(private val pastes: Map<Char, String>, private val chip: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val original = text.text
-        val shown = original.map { if (isPasteMarker(it)) PasteInlineLabel else it.toString() }.joinToString("")
+        val display = PasteDisplay(text.text, pastes)
+
+        val shown = buildAnnotatedString {
+            for (char in text.text) {
+                val label = display.labelOf(char)
+
+                if (label == null) {
+                    append(char)
+                } else {
+                    withStyle(SpanStyle(background = chip)) {
+                        append(label)
+                    }
+                }
+            }
+        }
 
         val mapping = object : OffsetMapping {
-            override fun originalToTransformed(offset: Int): Int =
-                offset + original.take(offset).count(::isPasteMarker) * (PasteInlineLabel.length - 1)
+            override fun originalToTransformed(offset: Int): Int = display.toShown(offset)
 
-            override fun transformedToOriginal(offset: Int): Int {
-                var shownAt = 0
-
-                for ((index, char) in original.withIndex()) {
-                    if (offset <= shownAt) {
-                        return index
-                    }
-
-                    shownAt += if (isPasteMarker(char)) PasteInlineLabel.length else 1
-                }
-
-                return original.length
-            }
+            override fun transformedToOriginal(offset: Int): Int = display.toOriginal(offset)
         }
 
-        return TransformedText(AnnotatedString(shown), mapping)
-    }
-}
-
-@Composable
-private fun PastedChips(markers: List<Char>, pastes: Map<Char, String>, onExpand: (Char) -> Unit, onRemove: (Char) -> Unit) {
-    if (markers.isEmpty()) {
-        return
-    }
-
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.S1),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        for (marker in markers) {
-            val lines = pastedLineCount(pastes.getValue(marker))
-
-            Row(
-                Modifier.border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PastedBadge(lines, expanded = false, onClick = { onExpand(marker) })
-                MyButton({ onRemove(marker) }, icon = MyIcon.Close, description = "Remove pasted text, $lines ${if (lines == 1) "line" else "lines"}", size = ButtonSize.Sm, muted = true)
-            }
-        }
+        return TransformedText(shown, mapping)
     }
 }
 
@@ -621,6 +581,7 @@ private fun QueuedMessages(
     queue: List<QueuedPrompt>,
     sending: List<String>,
     onSendNow: (String) -> Unit,
+    onSendAllNow: () -> Unit,
     onEdit: (String, String) -> Unit,
     onRemove: (String) -> Unit,
 ) {
@@ -647,6 +608,7 @@ private fun QueuedMessages(
             Box(Modifier.weight(1f))
 
             if (queue.isNotEmpty()) {
+                MyButton(onSendAllNow, text = "Send all now", size = ButtonSize.Sm, muted = true)
                 MyButton({ queue.forEach { onRemove(it.id) } }, text = "Clear all", size = ButtonSize.Sm, muted = true)
             }
         }

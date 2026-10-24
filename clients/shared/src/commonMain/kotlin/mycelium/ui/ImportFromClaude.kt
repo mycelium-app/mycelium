@@ -3,7 +3,6 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,7 +56,7 @@ fun ImportFromClaude(store: Store) {
         }
     }
 
-    Column(Modifier.padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row {
             MyButton(
                 { platform.pickFiles { files -> if (files.isNotEmpty()) scope.launch { import(files) } } },

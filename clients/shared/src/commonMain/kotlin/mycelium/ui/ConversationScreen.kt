@@ -340,6 +340,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         modelPicker = if (chat) ModelPickerControls(providers, conversation.providerId, conversation.model) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
                         onStop = { store.act { api.cancel(id) } },
                         onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
+                        onSendAllQueuedNow = { store.act { api.sendAllQueuedNow(id) } },
                         onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
                         onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
                         options = remember(conversation, state.events[id], state.sessionUpdates[id]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },

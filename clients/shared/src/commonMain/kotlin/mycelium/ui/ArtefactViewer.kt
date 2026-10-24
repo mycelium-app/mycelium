@@ -41,7 +41,9 @@ fun ArtefactViewer(
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = MyTheme.colors
-    val url = artifactOpenUrl(store.api.baseUrl, artifact)
+    val appearance = LocalAppearance.current
+    val accent = if (appearance.accent == Accent.System) "neutral" else appearance.accent.name.lowercase()
+    val url = artifactOpenUrl(store.api.baseUrl, artifact, dark = appearance.dark, accent = accent)
     val token = platform.loadConnection()?.token
 
     Column(modifier) {

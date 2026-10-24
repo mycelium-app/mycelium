@@ -1,5 +1,6 @@
 package mycelium
 
+import mycelium.state.PasteDisplay
 import mycelium.state.PastedSegment
 import mycelium.state.expandedPastes
 import mycelium.state.isLargePaste
@@ -89,5 +90,27 @@ class PastedTest {
         val message = "look at " + pastedBlock("a\nb\nc") + " and fix it"
 
         assertEquals("look at [Pasted text · 3 lines] and fix it", pastedSummary(message))
+    }
+
+    @Test
+    fun aMarkerIsShownAsItsLabelAndTheCursorTreatsItAsOneUnit() {
+        val marker = '\uE000'
+        val display = PasteDisplay("a${marker}b", mapOf(marker to long))
+        val label = pastedLabel(20)
+
+        assertEquals(label, display.labelOf(marker))
+        assertEquals(1, display.toShown(1))
+        assertEquals(1 + label.length, display.toShown(2))
+        assertEquals(1, display.toOriginal(1))
+        assertEquals(2, display.toOriginal(1 + label.length / 2))
+        assertEquals(2, display.toOriginal(1 + label.length))
+    }
+
+    @Test
+    fun aMarkerWithoutAHeldPasteIsLeftAsItIs() {
+        val display = PasteDisplay("\uE000", emptyMap())
+
+        assertNull(display.labelOf('\uE000'))
+        assertEquals(1, display.toShown(1))
     }
 }

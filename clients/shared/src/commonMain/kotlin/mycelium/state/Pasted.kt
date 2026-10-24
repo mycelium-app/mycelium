@@ -80,3 +80,25 @@ fun expandedPastes(text: String, pastes: Map<Char, String>): String =
 
 fun serialisedPastes(text: String, pastes: Map<Char, String>): String =
     text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock).orEmpty() else char.toString() }.joinToString("")
+
+class PasteDisplay(private val original: String, pastes: Map<Char, String>) {
+    private val labels: Map<Char, String> = original.filter { it in pastes }.associateWith { pastedLabel(pastedLineCount(pastes.getValue(it))) }
+
+    fun labelOf(char: Char): String? = labels[char]
+
+    fun toShown(offset: Int): Int = original.take(offset).sumOf { labels[it]?.length ?: 1 }
+
+    fun toOriginal(offset: Int): Int {
+        var shownAt = 0
+
+        for ((index, char) in original.withIndex()) {
+            if (offset <= shownAt) {
+                return index
+            }
+
+            shownAt += labels[char]?.length ?: 1
+        }
+
+        return original.length
+    }
+}

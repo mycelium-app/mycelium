@@ -22,7 +22,6 @@ import mycelium.Platform
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
-import mycelium.ui.AgentsSettings
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
 import mycelium.ui.Shell
@@ -204,7 +203,8 @@ class PastConversationsTest {
     @Test
     fun anImportShowsHowFarItHasGotAndThenWhatItDid() {
         val store = store()
-        rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
+        rule.onNodeWithText("Import").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Import 3").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Import 3").performClick()

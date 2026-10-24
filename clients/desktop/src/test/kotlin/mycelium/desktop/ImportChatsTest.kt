@@ -54,7 +54,8 @@ class ImportChatsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, ExportPlatform(picked), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.NewChat) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, ExportPlatform(picked), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
+        rule.onNodeWithText("Import").performClick()
     }
 
     @Test

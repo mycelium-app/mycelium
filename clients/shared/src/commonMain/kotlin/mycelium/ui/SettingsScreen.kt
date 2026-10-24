@@ -44,6 +44,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Appearance("Appearance", MyIcon.Sun),
     Accounts("Accounts", MyIcon.Person, "Agent logins and usage"),
     Agents("Agents", MyIcon.ClaudeMark),
+    Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
     Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
@@ -159,6 +160,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.Appearance -> AppearanceSettings()
             SettingsSection.Accounts -> AccountsSettings(store)
             SettingsSection.Agents -> AgentsSettings(store)
+            SettingsSection.Import -> ImportSettings(store)
             SettingsSection.Instructions -> InstructionsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)

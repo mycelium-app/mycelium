@@ -647,6 +647,10 @@ class MyceliumApi(
         call("/conversations/$id/queue/$queueId/send-now") { client.post(it) { authorise() } }
     }
 
+    suspend fun sendAllQueuedNow(id: String) {
+        call("/conversations/$id/queue/send-all-now") { client.post(it) { authorise() } }
+    }
+
     suspend fun cancel(id: String) {
         call("/conversations/$id/cancel") { client.post(it) { authorise() } }
     }

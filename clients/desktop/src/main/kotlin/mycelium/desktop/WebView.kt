@@ -40,7 +40,9 @@ private object Jcef {
 }
 
 val jcefAvailable: Boolean by lazy {
-    runCatching { Jcef.app }.isSuccess
+    runCatching { Jcef.app }
+        .onFailure { cause -> System.err.println("The built-in browser could not start, so artefacts open in your browser instead: $cause") }
+        .isSuccess
 }
 
 @Composable
