@@ -1,15 +1,21 @@
 package mycelium
 
+import mycelium.state.BadgeGap
+import mycelium.state.MarkedText
 import mycelium.state.PasteDisplay
 import mycelium.state.PastedSegment
 import mycelium.state.expandedPastes
 import mycelium.state.isLargePaste
+import mycelium.state.imageLabel
+import mycelium.state.orphanedImageIds
 import mycelium.state.parsePasted
 import mycelium.state.pastedBlock
 import mycelium.state.pastedLabel
 import mycelium.state.pastedSummary
 import mycelium.state.pasteInsertion
 import mycelium.state.serialisedPastes
+import mycelium.state.withImageMarkers
+import mycelium.state.withoutImageMarkers
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -98,12 +104,15 @@ class PastedTest {
         val display = PasteDisplay("a${marker}b", mapOf(marker to long))
         val label = pastedLabel(20)
 
+        val width = label.length + 2 * BadgeGap.length
+
         assertEquals(label, display.labelOf(marker))
         assertEquals(1, display.toShown(1))
-        assertEquals(1 + label.length, display.toShown(2))
+        assertEquals(1 + width, display.toShown(2))
         assertEquals(1, display.toOriginal(1))
-        assertEquals(2, display.toOriginal(1 + label.length / 2))
-        assertEquals(2, display.toOriginal(1 + label.length))
+        assertEquals(2, display.toOriginal(1 + width / 2))
+        assertEquals(2, display.toOriginal(1 + width))
+        assertEquals(listOf((1 + BadgeGap.length) until (1 + BadgeGap.length + label.length)), display.badgeRanges())
     }
 
     @Test
@@ -112,5 +121,48 @@ class PastedTest {
 
         assertNull(display.labelOf('\uE000'))
         assertEquals(1, display.toShown(1))
+    }
+
+    @Test
+    fun anImageMarkerIsShownAsItsFileName() {
+        val marker = '\uE001'
+        val display = PasteDisplay("a${marker}", emptyMap(), mapOf(marker to "shot.png"))
+
+        assertEquals("Image · shot.png", display.labelOf(marker))
+        assertEquals(imageLabel("shot.png"), display.labelOf(marker))
+    }
+
+    @Test
+    fun imageMarkersAreInsertedAtTheCursorInAttachOrder() {
+        val marked = withImageMarkers(MarkedText("ab", 1, emptyMap()), listOf(7, 9), emptySet())
+
+        assertEquals(4, marked.text.length)
+        assertEquals(3, marked.cursor)
+        assertEquals(listOf(7, 9), marked.text.filter { it in marked.images }.map { marked.images.getValue(it) })
+        assertEquals("a", marked.text.take(1))
+        assertEquals("b", marked.text.last().toString())
+    }
+
+    @Test
+    fun imageMarkersNeverReuseAPasteMarker() {
+        val marked = withImageMarkers(MarkedText("", 0, emptyMap()), listOf(1), setOf('\uE000'))
+
+        assertEquals(mapOf('\uE001' to 1), marked.images)
+    }
+
+    @Test
+    fun removingAnImageTakesItsMarkerOutAndKeepsTheCursorAfterTheSameText() {
+        val marker = '\uE000'
+        val cleaned = withoutImageMarkers(MarkedText("a${marker}b", 3, mapOf(marker to 4)), setOf(4))
+
+        assertEquals(MarkedText("ab", 2, emptyMap()), cleaned)
+    }
+
+    @Test
+    fun anImageWhoseMarkerWasDeletedIsOrphaned() {
+        val kept = '\uE000'
+        val deleted = '\uE001'
+
+        assertEquals(listOf(2), orphanedImageIds("a${kept}", mapOf(kept to 1, deleted to 2)))
     }
 }

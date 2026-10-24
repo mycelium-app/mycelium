@@ -23,10 +23,24 @@ import kotlinx.coroutines.delay
 
 private const val SessionCookie = "mycelium_client"
 
+private fun cacheFolder(): String {
+    val base = System.getenv("XDG_CACHE_HOME")?.takeIf { it.isNotBlank() } ?: (System.getProperty("user.home") + "/.cache")
+    val folder = java.io.File(base, "mycelium/jcef")
+
+    folder.mkdirs()
+
+    return folder.absolutePath
+}
+
 private object Jcef {
     val app: CefApp by lazy {
         val config = JCefAppConfig.getInstance()
         val args = config.appArgs
+        val settings = config.cefSettings
+        val cache = cacheFolder()
+
+        settings.cache_path = cache
+        CefSettings::class.java.fields.firstOrNull { it.name == "root_cache_path" }?.set(settings, cache)
 
         CefApp.startup(args)
 
@@ -35,9 +49,9 @@ private object Jcef {
         val withCacheFolder = getInstance.firstOrNull { it.parameterTypes.toList() == listOf(Array<String>::class.java, CefSettings::class.java, java.io.File::class.java) }
 
         when {
-            withSettings != null -> withSettings.invoke(null, args, config.cefSettings) as CefApp
-            withCacheFolder != null -> withCacheFolder.invoke(null, args, config.cefSettings, null) as CefApp
-            else -> CefApp.getInstance(config.cefSettings)
+            withSettings != null -> withSettings.invoke(null, args, settings) as CefApp
+            withCacheFolder != null -> withCacheFolder.invoke(null, args, settings, null) as CefApp
+            else -> CefApp.getInstance(settings)
         }
     }
 

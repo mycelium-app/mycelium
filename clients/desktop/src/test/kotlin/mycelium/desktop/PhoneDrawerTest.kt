@@ -98,6 +98,16 @@ class PhoneDrawerTest {
     }
 
     @Test
+    fun aMostlyVerticalSwipeWithSidewaysDriftLeavesTheSidebarClosed() {
+        show()
+
+        rule.onRoot().performTouchInput { swipe(Offset(width * 0.5f, height * 0.8f), Offset(width * 0.6f, height * 0.2f)) }
+        rule.waitForIdle()
+
+        assertEquals(false, drawerIsOpen())
+    }
+
+    @Test
     fun swipingLeftOnTheConversationLeavesTheSidebarClosed() {
         show()
 

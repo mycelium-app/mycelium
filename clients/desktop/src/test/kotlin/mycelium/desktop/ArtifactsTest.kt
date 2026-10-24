@@ -174,7 +174,7 @@ class ArtifactsScreenTest {
         rule.onNodeWithText("Delete Planning board?").assertExists()
         assertNull(sent("DELETE", "/artifacts/a2"))
 
-        rule.onNodeWithText("Delete artifact").performClick()
+        rule.onNodeWithText("Delete artefact").performClick()
 
         rule.waitUntil(5_000) { sent("DELETE", "/artifacts/a2") != null }
         rule.waitUntil(5_000) { !shown("Planning board") }

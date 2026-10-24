@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,11 +25,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import mycelium.Platform
 import mycelium.api.Artifact
+import mycelium.api.ArtifactKinds
 import mycelium.state.AppState
+import mycelium.state.MarkdownBlock
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.artifactKindName
 import mycelium.state.artifactOpenUrl
+import mycelium.state.parsedMarkdown
 
 @Composable
 fun ArtefactViewer(
@@ -63,7 +68,22 @@ fun ArtefactViewer(
             }
         }
 
-        platform.WebContent(url, token, Modifier.weight(1f).fillMaxWidth())
+        if (artifact.kind == ArtifactKinds.Markdown) {
+            val blocks by produceState<List<MarkdownBlock>?>(null, artifact.id, artifact.latestVersion) {
+                value = store.artifactContent(artifact)?.let { parsedMarkdown(it.decodeToString()) }
+            }
+            val drawn = blocks
+
+            if (drawn != null) {
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S3)) {
+                    MarkdownBlocks(drawn)
+                }
+            } else {
+                Box(Modifier.weight(1f).fillMaxWidth())
+            }
+        } else {
+            platform.WebContent(url, token, Modifier.weight(1f).fillMaxWidth())
+        }
     }
 }
 

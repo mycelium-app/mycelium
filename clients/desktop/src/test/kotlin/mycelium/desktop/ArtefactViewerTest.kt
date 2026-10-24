@@ -53,8 +53,8 @@ private class ViewerPlatform : Platform {
 private fun conversation(id: String) = """{"id":"$id","owner":"u1","node_id":"n1","agent":"claude","cwd":"/work","title":"$id","status":"done",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
-private fun artefact(id: String, title: String, conversationId: String?, version: Int) =
-    """{"id":"$id","owner":"u1","conversation_id":${conversationId?.let { "\"$it\"" } ?: "null"},"kind":"page","title":"$title","slug":"$id-ab12","public":false,"latest_version":$version,
+private fun artefact(id: String, title: String, conversationId: String?, version: Int, kind: String = "page") =
+    """{"id":"$id","owner":"u1","conversation_id":${conversationId?.let { "\"$it\"" } ?: "null"},"kind":"$kind","title":"$title","slug":"$id-ab12","public":false,"latest_version":$version,
 "thumbnail_version":null,"url":null,"created_at":"2026-10-22T09:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
 class ArtefactViewerTest {
@@ -72,7 +72,8 @@ class ArtefactViewerTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
-                path.endsWith("/artifacts") -> "[" + artefact("p1", "Planning board", "c1", version) + "," + artefact("p2", "Elsewhere", "c2", 1) + "]"
+                path.endsWith("/content") -> "# Rendered heading\n\nBody text."
+                path.endsWith("/artifacts") -> "[" + artefact("p1", "Planning board", "c1", version) + "," + artefact("p2", "Elsewhere", "c2", 1) + "," + artefact("m1", "Release notes", "c2", 1, "markdown") + "]"
                 path.endsWith("/conversations") -> "[" + conversation("c1") + "]"
                 path.endsWith("/conversations/c1") -> conversation("c1")
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"
@@ -136,5 +137,16 @@ class ArtefactViewerTest {
         refresh()
 
         rule.waitUntil(5_000) { platform.loaded.contains("https://mycelium.test/api/v1/artifacts/p1/versions/2/content") }
+    }
+
+    @Test
+    fun aMarkdownArtefactIsDrawnNativelyWithoutTheWebView() {
+        show(Route.Artifacts)
+
+        rule.waitUntil(5_000) { shown("Release notes") }
+        rule.onNodeWithContentDescription("Open Release notes").performClick()
+
+        rule.waitUntil(5_000) { shown("Rendered heading") }
+        assertTrue(platform.loaded.isEmpty())
     }
 }

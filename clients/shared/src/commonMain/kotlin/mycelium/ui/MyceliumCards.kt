@@ -210,10 +210,10 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.RequestApiAccess -> "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
-    is MyceliumCall.CreateArtifact -> "Created ${parsed.kind.ifEmpty { "artifact" }} “${parsed.title}”"
-    is MyceliumCall.UpdateArtifact -> (parsed.title ?: artifacts[parsed.artifactId]?.title)?.let { "Updated “$it”" } ?: "Updated an artifact"
+    is MyceliumCall.CreateArtifact -> "Created ${parsed.kind.ifEmpty { "artefact" }} “${parsed.title}”"
+    is MyceliumCall.UpdateArtifact -> (parsed.title ?: artifacts[parsed.artifactId]?.title)?.let { "Updated “$it”" } ?: "Updated an artefact"
     is MyceliumCall.DesignSetArtboard -> (artifacts[parsed.artifactId]?.title)?.let { "Set an artboard in “$it”" } ?: "Set an artboard"
-    is MyceliumCall.ReadArtifact -> (artifacts[parsed.artifactId]?.title)?.let { "Read “$it”" } ?: "Read an artifact"
+    is MyceliumCall.ReadArtifact -> (artifacts[parsed.artifactId]?.title)?.let { "Read “$it”" } ?: "Read an artefact"
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -335,7 +335,7 @@ private fun ArtifactOpenButton(artifactId: String, kind: String?, title: String?
         return
     }
 
-    MyButton({ opener.open(artifactId) }, text = "Open", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Open ${known?.title ?: title ?: "the artifact"}")
+    MyButton({ opener.open(artifactId) }, text = "Open", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Open ${known?.title ?: title ?: "the artefact"}")
 }
 
 @Composable

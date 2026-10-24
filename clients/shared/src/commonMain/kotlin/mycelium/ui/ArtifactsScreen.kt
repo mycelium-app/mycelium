@@ -96,7 +96,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            BarTitle("Artifacts")
+            BarTitle("Artefacts")
         }
 
         FlowRow(
@@ -105,15 +105,15 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            Segmented(ArtifactTabs, tab, { tab = it }, groupLabel = "Whose artifacts")
+            Segmented(ArtifactTabs, tab, { tab = it }, groupLabel = "Whose artefacts")
             Segmented(listOf(AnyKind) + ArtifactKindFilters.map { it.second }, kindName, { kindName = it }, groupLabel = "Kind")
-            TextInput(query, { query = it }, label = "Search artifacts", placeholder = "Search artifacts", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search)
+            TextInput(query, { query = it }, label = "Search artefacts", placeholder = "Search artefacts", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search)
         }
 
         Hairline()
 
         if (shown.isEmpty()) {
-            val text = if (state.artifacts.isEmpty()) "No artifact yet. Ask an agent to create a design or a page and it appears here." else "No artifact matches."
+            val text = if (state.artifacts.isEmpty()) "No artefact yet. Ask an agent to create a design or a page and it appears here." else "No artefact matches."
 
             Label(text, Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
         } else {
@@ -242,8 +242,8 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
         }
 
         Dialog(onDismiss = { renaming = false }) {
-            Label("Rename artifact", Modifier.semantics { heading() }, Tokens.Type.Title)
-            TextInput(title, { title = it }, label = "Artifact name", onSubmit = save)
+            Label("Rename artefact", Modifier.semantics { heading() }, Tokens.Type.Title)
+            TextInput(title, { title = it }, label = "Artefact name", onSubmit = save)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
                 MyButton({ renaming = false }, text = "Cancel", muted = true)
@@ -259,7 +259,7 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
                 MyButton({ deleting = false }, text = "Cancel", muted = true)
-                MyButton({ deleting = false; store.act { store.deleteArtifact(artifact) } }, text = "Delete artifact", variant = ButtonVariant.Danger)
+                MyButton({ deleting = false; store.act { store.deleteArtifact(artifact) } }, text = "Delete artefact", variant = ButtonVariant.Danger)
             }
         }
     }

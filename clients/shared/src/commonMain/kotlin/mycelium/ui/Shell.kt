@@ -64,6 +64,12 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import kotlin.math.absoluteValue
 import mycelium.state.SidebarSection
 import mycelium.state.Store
 import androidx.compose.foundation.layout.size
@@ -225,11 +231,68 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     BoxWithConstraints(Modifier.fillMaxSize().background(MyTheme.colors.bgContent)) {
         val drawerWidth = minOf(Tokens.Size.Sidebar + Tokens.Space.S8 * 2, maxWidth * 0.86f)
         val drawerWidthPx = with(density) { drawerWidth.toPx() }
+        fun dragBy(delta: Float) {
+            scope.launch { progress.snapTo((progress.value + delta / drawerWidthPx).coerceIn(0f, 1f)) }
+        }
+
+        suspend fun release(velocity: Float) {
+            settle(velocity > Tokens.Size.DrawerFlingVelocity || (velocity > -Tokens.Size.DrawerFlingVelocity && progress.value > 0.5f))
+        }
+
         val drag = Modifier.draggable(
-            state = rememberDraggableState { delta -> scope.launch { progress.snapTo((progress.value + delta / drawerWidthPx).coerceIn(0f, 1f)) } },
+            state = rememberDraggableState { delta -> dragBy(delta) },
             orientation = Orientation.Horizontal,
-            onDragStopped = { velocity -> settle(velocity > Tokens.Size.DrawerFlingVelocity || (velocity > -Tokens.Size.DrawerFlingVelocity && progress.value > 0.5f)) },
+            onDragStopped = { velocity -> release(velocity) },
         )
+        val openDrag = Modifier.pointerInput(drawerWidthPx) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val tracker = VelocityTracker()
+                var travelled = Offset.Zero
+                var dragging = false
+
+                tracker.addPosition(down.uptimeMillis, down.position)
+
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+
+                    if (!change.pressed) {
+                        break
+                    }
+
+                    if (!dragging && change.isConsumed) {
+                        return@awaitEachGesture
+                    }
+
+                    if (!dragging) {
+                        travelled += change.positionChange()
+
+                        if (travelled.getDistance() < viewConfiguration.touchSlop) {
+                            continue
+                        }
+
+                        if (travelled.x <= 0f || travelled.x < travelled.y.absoluteValue * 2f) {
+                            return@awaitEachGesture
+                        }
+
+                        dragging = true
+                        dragBy(travelled.x)
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        change.consume()
+                        continue
+                    }
+
+                    tracker.addPosition(change.uptimeMillis, change.position)
+                    dragBy(change.positionChange().x)
+                    change.consume()
+                }
+
+                if (dragging) {
+                    scope.launch { release(tracker.calculateVelocity().x) }
+                }
+            }
+        }
 
         CompositionLocalProvider(LocalOpenList provides { drawerOpen = true }) {
             Column(Modifier.fillMaxSize()) {
@@ -239,7 +302,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
-                Box(Modifier.weight(1f).fillMaxWidth().then(drag)) {
+                Box(Modifier.weight(1f).fillMaxWidth().then(openDrag)) {
                     RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }
@@ -378,7 +441,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
-                SidebarLink("Artifacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
+                SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
                 SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }

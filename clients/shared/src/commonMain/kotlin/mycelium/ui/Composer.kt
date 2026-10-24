@@ -70,6 +70,16 @@ import mycelium.state.mentionAt
 import mycelium.state.expandedPastes
 import mycelium.state.freePasteMarker
 import mycelium.state.isPasteMarker
+import mycelium.state.BadgeGap
+import mycelium.state.MarkedText
+import mycelium.state.isImage
+import mycelium.state.orphanedImageIds
+import mycelium.state.withImageMarkers
+import mycelium.state.withoutImageMarkers
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextLayoutResult
 import mycelium.state.pastedLabel
 import mycelium.state.PasteDisplay
 import mycelium.state.pastedSummary
@@ -134,7 +144,35 @@ fun Composer(
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(initialText) }
     var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
+    var images by remember(conversation.id) { mutableStateOf(emptyMap<Char, Int>()) }
     val reportText by rememberUpdatedState(onTextChange)
+    val drafts = attachments?.drafts.orEmpty()
+    val removeDraft by rememberUpdatedState(attachments?.onRemove)
+    val currentDrafts by rememberUpdatedState(drafts)
+
+    LaunchedEffect(drafts) {
+        val live = drafts.map { it.id }.toSet()
+        val cleaned = withoutImageMarkers(MarkedText(text.text, text.selection.end, images), images.values.toSet() - live)
+        val fresh = drafts.filter { isImage(it.file.mediaType) && it.id !in cleaned.images.values }.map { it.id }
+        val marked = withImageMarkers(cleaned, fresh, pastes.keys)
+
+        if (marked.text != text.text) {
+            text = TextFieldValue(marked.text, TextRange(marked.cursor))
+        }
+
+        images = marked.images
+    }
+
+    LaunchedEffect(conversation.id) {
+        snapshotFlow { text.text to images }.collect { (value, held) ->
+            val orphaned = orphanedImageIds(value, held)
+
+            if (orphaned.isNotEmpty()) {
+                images = held.filterValues { it !in orphaned }
+                currentDrafts.filter { it.id in orphaned }.forEach { removeDraft?.invoke(it) }
+            }
+        }
+    }
 
     LaunchedEffect(conversation.id) {
         snapshotFlow { text to pastes }.collect { (value, held) ->
@@ -195,17 +233,24 @@ fun Composer(
             sent = text.text
             text = TextFieldValue("")
             pastes = emptyMap()
+            images = emptyMap()
         } else if (queue.isNotEmpty()) {
             onSendQueuedNow(queue.minBy { it.position }.id)
         }
     }
+
+    val display = remember(text.text, pastes, images, drafts) {
+        PasteDisplay(text.text, pastes, images.mapNotNull { (marker, id) -> drafts.firstOrNull { it.id == id }?.let { marker to it.file.name } }.toMap())
+    }
+    val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { it.id !in images.values }, held.problem, held.onAdd, held.onRemove) }
 
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         Column(fieldModifier) {
             Box {
                 MessageField(
                     text = text,
-                    visualTransformation = remember(pastes, colors.bgRaised) { PasteMarkerTransformation(pastes, colors.bgRaised) },
+                    visualTransformation = remember(display, colors.textMuted) { PasteMarkerTransformation(display, colors.textMuted) },
+                    badges = display.badgeRanges(),
                     onTextChange = { changed ->
                         val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
                         sent = null
@@ -298,7 +343,7 @@ fun Composer(
                 }
 
                 AnnotationChips(annotations, onRemoveAnnotation)
-                attachments?.let { AttachmentChips(it) }
+                unmarked?.let { AttachmentChips(it) }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
@@ -346,7 +391,7 @@ fun Composer(
             }
 
             Box(measured.padding(horizontal = Tokens.Space.S2)) {
-                attachments?.let { AttachmentChips(it) }
+                unmarked?.let { AttachmentChips(it) }
             }
 
             field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
@@ -372,8 +417,9 @@ fun Composer(
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList()) {
     val colors = MyTheme.colors
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     BasicTextField(
         value = text,
@@ -382,6 +428,7 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
         cursorBrush = SolidColor(colors.text),
         interactionSource = source,
         visualTransformation = visualTransformation,
+        onTextLayout = { layout = it },
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = Tokens.Size.ComposerInput)
@@ -409,16 +456,41 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                     Label(placeholder, style = Tokens.Type.Prose, color = colors.textFaint)
                 }
 
-                inner()
+                Box(
+                    Modifier.drawBehind {
+                        val measured = layout ?: return@drawBehind
+                        val radius = CornerRadius(Tokens.Radius.Control.toPx())
+                        val sideGap = Tokens.Space.S0_5.toPx()
+                        val line = Tokens.Size.Hairline.toPx()
+
+                        for (range in badges) {
+                            for (rect in badgeLineRects(measured, range)) {
+                                val box = Rect(rect.left - sideGap, rect.top + sideGap, rect.right + sideGap, rect.bottom - sideGap)
+
+                                drawRoundRect(colors.bgRaised, box.topLeft, box.size, radius)
+                                drawRoundRect(colors.border, box.topLeft, box.size, radius, Stroke(line))
+                            }
+                        }
+                    },
+                ) {
+                    inner()
+                }
             }
         },
     )
 }
 
-private class PasteMarkerTransformation(private val pastes: Map<Char, String>, private val chip: Color) : VisualTransformation {
-    override fun filter(text: AnnotatedString): TransformedText {
-        val display = PasteDisplay(text.text, pastes)
+private fun badgeLineRects(layout: TextLayoutResult, range: IntRange): List<Rect> {
+    val length = layout.layoutInput.text.length
+    val offsets = range.filter { it < length }
 
+    return offsets.groupBy { layout.getLineForOffset(it) }.values.map { line ->
+        line.map { layout.getBoundingBox(it) }.reduce { union, box -> Rect(minOf(union.left, box.left), minOf(union.top, box.top), maxOf(union.right, box.right), maxOf(union.bottom, box.bottom)) }
+    }
+}
+
+private class PasteMarkerTransformation(private val display: PasteDisplay, private val labelColour: Color) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
         val shown = buildAnnotatedString {
             for (char in text.text) {
                 val label = display.labelOf(char)
@@ -426,9 +498,13 @@ private class PasteMarkerTransformation(private val pastes: Map<Char, String>, p
                 if (label == null) {
                     append(char)
                 } else {
-                    withStyle(SpanStyle(background = chip)) {
+                    append(BadgeGap)
+
+                    withStyle(SpanStyle(fontSize = Tokens.Type.Meta.fontSize, color = labelColour)) {
                         append(label)
                     }
+
+                    append(BadgeGap)
                 }
             }
         }

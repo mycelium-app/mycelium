@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -111,15 +112,6 @@ class AttachmentsTest {
     }
 
     @Test
-    fun anImageChipShowsAThumbnailInsteadOfASize() {
-        open(FilePlatform(picked = listOf(PickedFile("shot.png", "image/png", png))))
-
-        rule.onNodeWithContentDescription("Attach files").performClick()
-
-        rule.onNodeWithContentDescription("Attached: shot.png, ${formatSize(png.size.toLong())}").assertIsDisplayed()
-    }
-
-    @Test
     fun aFileOverTwentyMegabytesIsRefusedWithWhatToDoAndNoChipAppears() {
         open(FilePlatform(picked = listOf(PickedFile("big.bin", "application/octet-stream", ByteArray(20 * 1024 * 1024 + 1)))))
 
@@ -129,18 +121,37 @@ class AttachmentsTest {
         assertEquals(0, rule.onAllNodesWithContentDescription("Remove attachment: big.bin").fetchSemanticsNodes().size)
     }
 
-    @Test
-    fun anImagePastedWithControlVBecomesAChip() {
-        open(FilePlatform(clipboard = listOf(PickedFile("pasted-image.png", "image/png", png))))
-
+    private fun pasteImage() {
         rule.onNodeWithContentDescription("Message").performClick()
         rule.onNodeWithContentDescription("Message").performKeyInput {
             keyDown(Key.CtrlLeft)
             pressKey(Key.V)
             keyUp(Key.CtrlLeft)
         }
+    }
 
-        rule.onNodeWithContentDescription("Attached: pasted-image.png, ${formatSize(png.size.toLong())}").assertIsDisplayed()
+    @Test
+    fun anImagePastedWithControlVShowsAsAnInlineBadgeNamedAfterTheFile() {
+        open(FilePlatform(clipboard = listOf(PickedFile("pasted-image.png", "image/png", png))))
+
+        pasteImage()
+
+        rule.onNodeWithText("Image · pasted-image.png", substring = true).assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Attached: pasted-image.png, ${formatSize(png.size.toLong())}").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun backspaceAfterAnInlineImageBadgeRemovesTheAttachment() {
+        open(FilePlatform(clipboard = listOf(PickedFile("pasted-image.png", "image/png", png))))
+
+        pasteImage()
+        rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Backspace) }
+
+        assertEquals(0, rule.onAllNodesWithText("Image · pasted-image.png", substring = true).fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        assertEquals(0, requests.count { it.first.url.encodedPath.endsWith("/attachments") })
     }
 
     @Test

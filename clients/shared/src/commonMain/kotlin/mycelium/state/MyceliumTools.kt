@@ -16,10 +16,10 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
     RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
     RequestSshAccess("request_ssh_access", "Request SSH access", "Requesting SSH access"),
-    CreateArtifact("create_artifact", "Create artifact", "Creating an artifact"),
-    UpdateArtifact("update_artifact", "Update artifact", "Updating an artifact"),
+    CreateArtifact("create_artifact", "Create artefact", "Creating an artefact"),
+    UpdateArtifact("update_artifact", "Update artefact", "Updating an artefact"),
     DesignSetArtboard("design_set_artboard", "Set artboard", "Setting an artboard"),
-    ReadArtifact("read_artifact", "Read artifact", "Reading an artifact"),
+    ReadArtifact("read_artifact", "Read artefact", "Reading an artefact"),
 }
 
 sealed interface MyceliumCall {

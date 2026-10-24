@@ -8,6 +8,8 @@ private const val FirstPasteMarker = ''
 
 private const val LastPasteMarker = ''
 
+const val BadgeGap = "\u2009"
+
 private val PastedBlock = Regex("""<pasted-text lines="(\d+)">\n([\s\S]*?)\n</pasted-text>""")
 
 sealed class PastedSegment {
@@ -81,12 +83,14 @@ fun expandedPastes(text: String, pastes: Map<Char, String>): String =
 fun serialisedPastes(text: String, pastes: Map<Char, String>): String =
     text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock).orEmpty() else char.toString() }.joinToString("")
 
-class PasteDisplay(private val original: String, pastes: Map<Char, String>) {
-    private val labels: Map<Char, String> = original.filter { it in pastes }.associateWith { pastedLabel(pastedLineCount(pastes.getValue(it))) }
+class PasteDisplay(private val original: String, pastes: Map<Char, String>, images: Map<Char, String> = emptyMap()) {
+    private val labels: Map<Char, String> = original
+        .filter { it in pastes || it in images }
+        .associateWith { marker -> images[marker]?.let(::imageLabel) ?: pastedLabel(pastedLineCount(pastes.getValue(marker))) }
 
     fun labelOf(char: Char): String? = labels[char]
 
-    fun toShown(offset: Int): Int = original.take(offset).sumOf { labels[it]?.length ?: 1 }
+    fun toShown(offset: Int): Int = original.take(offset).sumOf(::shownWidth)
 
     fun toOriginal(offset: Int): Int {
         var shownAt = 0
@@ -96,9 +100,57 @@ class PasteDisplay(private val original: String, pastes: Map<Char, String>) {
                 return index
             }
 
-            shownAt += labels[char]?.length ?: 1
+            shownAt += shownWidth(char)
         }
 
         return original.length
     }
+
+    fun badgeRanges(): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        var shownAt = 0
+
+        for (char in original) {
+            val label = labels[char]
+
+            if (label != null) {
+                ranges += (shownAt + BadgeGap.length) until (shownAt + BadgeGap.length + label.length)
+            }
+
+            shownAt += shownWidth(char)
+        }
+
+        return ranges
+    }
+
+    private fun shownWidth(char: Char): Int = labels[char]?.let { it.length + 2 * BadgeGap.length } ?: 1
 }
+
+data class MarkedText(val text: String, val cursor: Int, val images: Map<Char, Int>)
+
+fun imageLabel(name: String): String = "Image · $name"
+
+fun withImageMarkers(marked: MarkedText, ids: List<Int>, pasteMarkers: Set<Char>): MarkedText {
+    var text = marked.text
+    var cursor = marked.cursor.coerceIn(0, text.length)
+    var images = marked.images
+
+    for (id in ids) {
+        val marker = freePasteMarker(pasteMarkers + images.keys + text.filter(::isPasteMarker).toSet()) ?: break
+
+        text = text.substring(0, cursor) + marker + text.substring(cursor)
+        cursor += 1
+        images = images + (marker to id)
+    }
+
+    return MarkedText(text, cursor, images)
+}
+
+fun withoutImageMarkers(marked: MarkedText, ids: Set<Int>): MarkedText {
+    val dropped = marked.images.filterValues { it in ids }.keys
+    val cursorShift = marked.text.take(marked.cursor).count { it in dropped }
+
+    return MarkedText(marked.text.filterNot { it in dropped }, marked.cursor - cursorShift, marked.images - dropped)
+}
+
+fun orphanedImageIds(text: String, images: Map<Char, Int>): List<Int> = images.filterKeys { it !in text }.values.toList()
