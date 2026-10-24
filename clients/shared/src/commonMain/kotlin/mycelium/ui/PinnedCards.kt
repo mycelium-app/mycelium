@@ -27,6 +27,8 @@ internal val PinnedRailWidth: Dp = 320.dp
 
 internal val LocalPinnedKeys = compositionLocalOf<Set<String>> { emptySet() }
 
+val LocalAgentOpener = compositionLocalOf<(String) -> (() -> Unit)?> { { null } }
+
 internal data class PinControls(val label: String, val onUnpin: () -> Unit, val collapsed: Boolean = false, val onToggle: (() -> Unit)? = null)
 
 @Composable

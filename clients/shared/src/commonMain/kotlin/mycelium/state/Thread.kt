@@ -34,6 +34,8 @@ data class WorkflowAgent(
     val tokens: Long? = null,
     val turns: Int? = null,
     val elapsedMs: Long? = null,
+    val agentId: String? = null,
+    val failed: Boolean = false,
 )
 
 data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList()) {
@@ -539,10 +541,12 @@ fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject): List<Wo
                     label = line.string("label") ?: "Agent",
                     phase = line.string("phase") ?: "Run",
                     finished = false,
+                    agentId = line.string("agentId"),
                 ).withStats(line)
             }
         }
         "result" -> agents.map { if (it.key == agentKey) it.copy(finished = true).withStats(line) else it }
+        "failed" -> agents.map { if (it.key == agentKey) it.copy(finished = true, failed = true).withStats(line) else it }
         else -> agents.map { if (it.key == agentKey) it.withStats(line) else it }
     }
 }

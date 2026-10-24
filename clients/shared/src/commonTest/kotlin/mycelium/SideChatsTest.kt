@@ -14,6 +14,7 @@ import mycelium.api.MyceliumApi
 import mycelium.state.sideChatOf
 import mycelium.state.sidebarRows
 import mycelium.state.sidebarSections
+import mycelium.state.subagentSections
 import mycelium.state.subagentsOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,6 +58,15 @@ class SideChatsTest {
         val all = listOf(chat("parent"), subagent("helper", "parent"), chat("side", "parent"), chat("gone", archivedAt = "2026-10-22T11:00:00Z"), subagent("orphan", "gone"))
 
         assertEquals(listOf("parent", "side"), sidebarRows(sidebarSections(all).flatMap { it.rows }, all, emptySet()).map { it.conversation.id })
+    }
+
+    @Test
+    fun aSubagentsOwnSubagentsComeFirstThenEachAncestorsInTurn() {
+        fun subagent(id: String, parentId: String) = chat(id, parentId).copy(sideKind = "subagent")
+        val all = listOf(chat("parent"), subagent("child", "parent"), subagent("sibling", "parent"), subagent("grandchild", "child"))
+
+        assertEquals(listOf("child" to listOf("grandchild"), "parent" to listOf("child", "sibling")), subagentSections(all, "child").map { it.owner.id to it.subagents.map { sub -> sub.id } })
+        assertEquals(listOf("parent" to listOf("child", "sibling")), subagentSections(all, "sibling").map { it.owner.id to it.subagents.map { sub -> sub.id } })
     }
 
     @Test

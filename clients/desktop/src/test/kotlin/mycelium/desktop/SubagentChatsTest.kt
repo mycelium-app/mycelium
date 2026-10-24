@@ -113,4 +113,24 @@ class SubagentChatsTest {
         assertEquals(3, description.split(", ").size)
         assertTrue(description.split(", ").last().isNotBlank())
     }
+
+    @Test
+    fun insideASubagentThePanelStillListsItsParentsSubagentsAndLeadsBack() {
+        shell()
+        openSubagentsOfTheParent()
+
+        rule.onNodeWithContentDescription("Check the build, ", substring = true).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Open the conversation it belongs to").fetchSemanticsNodes().isNotEmpty() }
+
+        if (rule.onAllNodesWithContentDescription("Open subagents").fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNodeWithContentDescription("Open subagents").performClick()
+        }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Back to Review the change").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(1, rule.onAllNodesWithContentDescription("Check the build, ", substring = true).fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Back to Review the change").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+    }
 }

@@ -19,6 +19,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.WorkflowAgent
 import mycelium.state.WorkflowProgress
+import androidx.compose.runtime.CompositionLocalProvider
 import kotlin.test.assertEquals
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.ThreadView
@@ -107,5 +108,23 @@ class PinnedCardsTest {
 
         assertEquals(2, edges.size)
         assertEquals(1, edges.distinct().size)
+    }
+
+    @Test
+    fun aWorkflowAgentWithAConversationOpensItWhenClicked() {
+        val opened = mutableListOf<String>()
+        items = listOf(ThreadItem.Workflow("w", WorkflowProgress("run", listOf(WorkflowAgent("k1", "write:docs", "Write", finished = true, agentId = "a1"), WorkflowAgent("k2", "write:code", "Write", finished = false, agentId = "a2")))))
+        rule.setContent {
+            MyceliumTheme(true) {
+                CompositionLocalProvider(mycelium.ui.LocalAgentOpener provides { agentId -> if (agentId == "a1") { { opened += agentId } } else null }) {
+                    ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {})
+                }
+            }
+        }
+
+        rule.onNodeWithContentDescription("Open write:docs").performClick()
+
+        assertEquals(listOf("a1"), opened)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Open write:code").fetchSemanticsNodes().size)
     }
 }

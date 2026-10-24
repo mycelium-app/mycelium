@@ -1122,15 +1122,20 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                 }
 
                 for (agent in inPhase) {
+                    val open = agent.agentId?.let { LocalAgentOpener.current(it) }
+
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .then(if (open != null) Modifier.pressable(open, shape = BlockShape, description = "Open ${agent.label}") else Modifier)
                             .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S0_5)
-                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.finished) "Done" else "Running"}: ${agent.label}" },
+                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.failed) "Stopped" else if (agent.finished) "Done" else "Running"}: ${agent.label}" },
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (agent.finished) {
+                        if (agent.failed) {
+                            Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
+                        } else if (agent.finished) {
                             Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
                         } else {
                             Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)

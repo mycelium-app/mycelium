@@ -876,6 +876,7 @@ data class Conversation(
     @SerialName("title_user_set") val titleUserSet: Boolean = false,
     @SerialName("parent_id") val parentId: String? = null,
     @SerialName("side_kind") val sideKind: String? = null,
+    @SerialName("agent_id") val agentId: String? = null,
     @SerialName("provider_id") val providerId: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("group_id") val groupId: String? = null,

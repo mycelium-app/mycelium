@@ -290,4 +290,16 @@ class SuggestedRepliesTest {
         assertEquals(Triple(1200L, 3, 4000L), progress.agents.single().let { Triple(it.tokens, it.turns, it.elapsedMs) })
         assertFalse(progress.agents.single().finished)
     }
+
+    @Test
+    fun aFailedAgentEndsAndIsMarkedFailed() {
+        val events = listOf(
+            event(1, EventKinds.Workflow, """{"run_id":"r","line":{"type":"started","key":"k1","agentId":"a1","label":"write","phase":"Write"}}"""),
+            event(2, EventKinds.Workflow, """{"run_id":"r","line":{"type":"failed","key":"k1","agentId":"a1","reason":"Stopped responding"}}"""),
+        )
+
+        val agent = buildThread(events).filterIsInstance<ThreadItem.Workflow>().single().progress.agents.single()
+
+        assertTrue(agent.finished && agent.failed)
+    }
 }

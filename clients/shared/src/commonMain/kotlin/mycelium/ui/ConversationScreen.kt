@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
@@ -62,7 +63,8 @@ import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import mycelium.state.turnIsOpen
-import mycelium.state.subagentsOf
+import mycelium.state.SubagentSection
+import mycelium.state.subagentSections
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
 import mycelium.state.projectName
@@ -168,6 +170,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val node = if (chat) null else state.nodes[conversation.nodeId]
+    val subagentParent = conversation.parentId?.takeIf { conversation.isSubagent }?.let { state.conversations[it] }
     val sideKind = { kind: String -> if (chat) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
@@ -201,7 +204,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener) {
+    val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
+
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         Row(Modifier.fillMaxSize()) {
@@ -376,7 +381,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
-                            SidePanel.Subagents -> SubagentsPanel(subagentsOf(state.conversations.values, id), onOpenConversation)
+                            SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
@@ -394,7 +399,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
-                SidePanel.Subagents -> SubagentsList(subagentsOf(state.conversations.values, id), onOpenConversation)
+                SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
@@ -603,44 +608,57 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
 }
 
 @Composable
-private fun SubagentsPanel(subagents: List<Conversation>, onOpen: (String) -> Unit) {
+private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit) {
     Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents" }) {
         Bar {
             BarTitle("Subagents")
         }
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(vertical = Tokens.Space.S2)) {
-            SubagentsList(subagents, onOpen)
+            SubagentsList(sections, currentId, parent, onOpen)
         }
     }
 }
 
 @Composable
-private fun SubagentsList(subagents: List<Conversation>, onOpen: (String) -> Unit) {
+private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit) {
     val colors = MyTheme.colors
+    val stamp = timestamper()
 
-    if (subagents.isEmpty()) {
+    if (parent != null) {
+        MyButton({ onOpen(parent.id) }, text = "Back to ${parent.title}", icon = MyIcon.ChevronLeft, description = "Back to ${parent.title}", size = ButtonSize.Sm, muted = true, modifier = Modifier.padding(horizontal = Tokens.Space.S2))
+    }
+
+    if (sections.isEmpty()) {
         Label("This conversation has no subagents.", Modifier.padding(horizontal = Tokens.Space.S3), color = colors.textMuted)
     }
 
-    val stamp = timestamper()
+    sections.forEachIndexed { index, section ->
+        if (index > 0) {
+            Hairline(Modifier.padding(vertical = Tokens.Space.S1_5))
+        }
 
-    subagents.forEach { subagent ->
-        val status = statusSectionName(subagent.status)
-        val since = stamp(subagent.updatedAt, false)
+        if (sections.size > 1) {
+            Label(section.owner.title, Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted, maxLines = 1)
+        }
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .pressable({ onOpen(subagent.id) }, shape = BlockShape, description = "${subagent.title}, $status, $since")
-                .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(iconOf(subagent.status), colors.textMuted, Tokens.Size.IconSm)
-            Label(subagent.title, Modifier.weight(1f), maxLines = 1)
-            Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            Label(since, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+        section.subagents.forEach { subagent ->
+            val status = statusSectionName(subagent.status)
+            val since = stamp(subagent.updatedAt, false)
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable({ onOpen(subagent.id) }, selected = subagent.id == currentId, shape = BlockShape, description = "${subagent.title}, $status, $since")
+                    .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(iconOf(subagent.status), colors.textMuted, Tokens.Size.IconSm)
+                Label(subagent.title, Modifier.weight(1f), maxLines = 1)
+                Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(since, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+            }
         }
     }
 }

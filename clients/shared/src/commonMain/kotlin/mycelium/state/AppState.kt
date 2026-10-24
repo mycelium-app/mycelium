@@ -261,6 +261,17 @@ fun sidebarRows(parents: List<Conversation>, conversations: Collection<Conversat
         listOf(SidebarRow(parent, depth, sideChats.size)) + shown
     }
 
+data class SubagentSection(val owner: Conversation, val subagents: List<Conversation>)
+
+fun subagentSections(conversations: Collection<Conversation>, conversationId: String): List<SubagentSection> {
+    val byId = conversations.associateBy { it.id }
+
+    return generateSequence(byId[conversationId]) { current -> current.parentId?.let(byId::get) }
+        .map { owner -> SubagentSection(owner, subagentsOf(conversations, owner.id)) }
+        .filter { it.subagents.isNotEmpty() }
+        .toList()
+}
+
 fun subagentsOf(conversations: Collection<Conversation>, parentId: String): List<Conversation> =
     conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedBy { it.createdAt }
 
