@@ -1,103 +1,139 @@
 package mycelium.desktop
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.input.pointer.PointerIcon
 import org.cef.browser.CefBrowser
 import org.cef.callback.CefDragData
 import org.cef.handler.CefRenderHandler
 import org.cef.handler.CefScreenInfo
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.ImageInfo
+import java.awt.Canvas
+import java.awt.Component
 import java.awt.Cursor
-import java.awt.Graphics
 import java.awt.Point
 import java.awt.Rectangle
-import java.awt.event.ComponentAdapter
-import java.awt.event.ComponentEvent
 import java.awt.event.KeyEvent
-import java.awt.event.KeyListener
 import java.awt.event.MouseEvent
-import java.awt.event.MouseListener
-import java.awt.event.MouseMotionListener
 import java.awt.event.MouseWheelEvent
-import java.awt.image.BufferedImage
-import java.awt.image.DataBufferInt
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import javax.swing.JPanel
+import javax.swing.SwingUtilities
+import kotlin.math.roundToInt
 
-class OffscreenBrowserPanel : JPanel(), CefRenderHandler {
+private const val WheelNotchPixels = 40
+
+fun viewSize(widthPx: Int, heightPx: Int, scale: Double): Pair<Int, Int> =
+    (widthPx / scale).roundToInt().coerceAtLeast(1) to (heightPx / scale).roundToInt().coerceAtLeast(1)
+
+fun browserMouseEvent(source: Component, native: MouseEvent, position: Offset, scale: Double): MouseEvent {
+    val x = (position.x / scale).roundToInt()
+    val y = (position.y / scale).roundToInt()
+
+    if (native is MouseWheelEvent) {
+        val rotation = -native.preciseWheelRotation * WheelNotchPixels
+
+        return MouseWheelEvent(source, native.id, native.`when`, native.modifiersEx, x, y, x, y, native.clickCount, native.isPopupTrigger, native.scrollType, native.scrollAmount, rotation.roundToInt(), rotation)
+    }
+
+    return MouseEvent(source, native.id, native.`when`, native.modifiersEx, x, y, x, y, native.clickCount, native.isPopupTrigger, native.button)
+}
+
+class OffscreenBrowser : CefRenderHandler {
+    val source: Component = Canvas()
+
     var browser: CefBrowser? = null
         set(value) {
             field = value
-            value?.wasResized(width, height)
+            value?.wasResized(viewWidth, viewHeight)
         }
 
-    private var frame: BufferedImage? = null
+    var cursor by mutableStateOf(PointerIcon.Default)
+        private set
 
-    init {
-        isFocusable = true
-        isOpaque = true
+    var frames by mutableIntStateOf(0)
+        private set
 
-        addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(event: ComponentEvent) {
-                browser?.wasResized(width, height)
-            }
-        })
+    private var scale = 1.0
+    private var viewWidth = 1
+    private var viewHeight = 1
+    private var screenOrigin = Point(0, 0)
+    private val lock = Any()
+    private var pixels = ByteArray(0)
+    private var frameWidth = 0
+    private var frameHeight = 0
+    private val bitmap = Bitmap()
+    private var image: ImageBitmap? = null
 
-        val mouse = object : MouseListener, MouseMotionListener {
-            override fun mouseClicked(event: MouseEvent) = forward(event)
-            override fun mouseEntered(event: MouseEvent) = forward(event)
-            override fun mouseExited(event: MouseEvent) = forward(event)
-            override fun mouseDragged(event: MouseEvent) = forward(event)
-            override fun mouseMoved(event: MouseEvent) = forward(event)
-            override fun mouseReleased(event: MouseEvent) = forward(event)
+    fun resize(widthPx: Int, heightPx: Int, deviceScale: Double) {
+        val (width, height) = viewSize(widthPx, heightPx, deviceScale)
+        val rescaled = deviceScale != scale
 
-            override fun mousePressed(event: MouseEvent) {
-                requestFocusInWindow()
-                browser?.setFocus(true)
-                forward(event)
-            }
+        scale = deviceScale
+        viewWidth = width
+        viewHeight = height
+
+        if (rescaled) {
+            browser?.notifyScreenInfoChanged()
         }
 
-        addMouseListener(mouse)
-        addMouseMotionListener(mouse)
-        addMouseWheelListener { event: MouseWheelEvent -> browser?.sendMouseWheelEvent(event) }
-        addKeyListener(object : KeyListener {
-            override fun keyTyped(event: KeyEvent) = forward(event)
-            override fun keyPressed(event: KeyEvent) = forward(event)
-            override fun keyReleased(event: KeyEvent) = forward(event)
-        })
+        browser?.wasResized(width, height)
     }
 
-    private fun forward(event: MouseEvent) {
-        browser?.sendMouseEvent(event)
+    fun place(origin: Point) {
+        screenOrigin = origin
     }
 
-    private fun forward(event: KeyEvent) {
-        browser?.sendKeyEvent(event)
+    fun mouse(native: MouseEvent, position: Offset) {
+        val forwarded = browserMouseEvent(source, native, position, scale)
+
+        if (forwarded is MouseWheelEvent) {
+            browser?.sendMouseWheelEvent(forwarded)
+        } else {
+            browser?.sendMouseEvent(forwarded)
+        }
     }
 
-    override fun paintComponent(graphics: Graphics) {
-        super.paintComponent(graphics)
-        val shown = synchronized(this) { frame } ?: return
-
-        graphics.drawImage(shown, 0, 0, width, height, null)
+    fun key(native: KeyEvent) {
+        browser?.sendKeyEvent(native)
     }
 
-    override fun getViewRect(browser: CefBrowser): Rectangle = Rectangle(0, 0, width.coerceAtLeast(1), height.coerceAtLeast(1))
+    fun frame(): ImageBitmap? = synchronized(lock) {
+        if (frameWidth <= 0 || frameHeight <= 0) {
+            return null
+        }
+
+        if (bitmap.width != frameWidth || bitmap.height != frameHeight) {
+            bitmap.allocPixels(ImageInfo(frameWidth, frameHeight, ColorType.BGRA_8888, ColorAlphaType.PREMUL))
+            image = bitmap.asComposeImageBitmap()
+        }
+
+        bitmap.installPixels(pixels)
+        bitmap.notifyPixelsChanged()
+
+        image
+    }
+
+    override fun getViewRect(browser: CefBrowser): Rectangle = Rectangle(0, 0, viewWidth, viewHeight)
 
     override fun getScreenInfo(browser: CefBrowser, screenInfo: CefScreenInfo): Boolean {
-        screenInfo.device_scale_factor = scale()
+        screenInfo.device_scale_factor = scale
         screenInfo.depth = 32
         screenInfo.depth_per_component = 8
 
         return true
     }
 
-    override fun getScreenPoint(browser: CefBrowser, viewPoint: Point): Point {
-        val origin = if (isShowing) locationOnScreen else Point(0, 0)
+    override fun getScreenPoint(browser: CefBrowser, viewPoint: Point): Point = Point(screenOrigin.x + viewPoint.x, screenOrigin.y + viewPoint.y)
 
-        return Point(origin.x + viewPoint.x, origin.y + viewPoint.y)
-    }
-
-    override fun getDeviceScaleFactor(browser: CefBrowser): Double = scale()
+    override fun getDeviceScaleFactor(browser: CefBrowser): Double = scale
 
     override fun onPopupShow(browser: CefBrowser, show: Boolean) = Unit
 
@@ -108,18 +144,25 @@ class OffscreenBrowserPanel : JPanel(), CefRenderHandler {
             return
         }
 
-        synchronized(this) {
-            val image = frame?.takeIf { it.width == width && it.height == height } ?: BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE)
-            val pixels = (image.raster.dataBuffer as DataBufferInt).data
-            buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels, 0, minOf(pixels.size, width * height))
-            frame = image
+        synchronized(lock) {
+            val length = width * height * 4
+
+            if (pixels.size != length) {
+                pixels = ByteArray(length)
+            }
+
+            buffer.duplicate().apply { rewind() }.get(pixels, 0, minOf(length, buffer.capacity()))
+            frameWidth = width
+            frameHeight = height
         }
 
-        repaint()
+        SwingUtilities.invokeLater { frames++ }
     }
 
     override fun onCursorChange(browser: CefBrowser, cursorType: Int): Boolean {
-        cursor = Cursor.getPredefinedCursor(cursorType.coerceIn(Cursor.DEFAULT_CURSOR, Cursor.MOVE_CURSOR))
+        val shown = PointerIcon(Cursor.getPredefinedCursor(cursorType.coerceIn(Cursor.DEFAULT_CURSOR, Cursor.MOVE_CURSOR)))
+
+        SwingUtilities.invokeLater { cursor = shown }
 
         return true
     }
@@ -127,6 +170,4 @@ class OffscreenBrowserPanel : JPanel(), CefRenderHandler {
     override fun startDragging(browser: CefBrowser, dragData: CefDragData, mask: Int, x: Int, y: Int): Boolean = false
 
     override fun updateDragCursor(browser: CefBrowser, operation: Int) = Unit
-
-    private fun scale(): Double = graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
 }

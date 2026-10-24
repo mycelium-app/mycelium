@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -8,8 +10,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.awt.SwingPanel
+import androidx.compose.ui.awt.awtEventOrNull
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import com.jetbrains.cef.JCefAppConfig
 import org.cef.CefApp
 import org.cef.CefSettings
@@ -74,6 +86,7 @@ val jcefAvailable: Boolean by lazy {
         .isSuccess
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     var ready by remember { mutableStateOf(CefApp.getState() == CefApp.CefAppState.INITIALIZED) }
@@ -91,13 +104,16 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     }
 
     val client = remember { Jcef.createClient() }
-    val panel = remember { OffscreenBrowserPanel() }
+    val host = remember { OffscreenBrowser() }
     val browser: CefBrowser = remember {
-        client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(panel, panel), false).also { created ->
-            panel.browser = created
+        client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(host, host.source), false).also { created ->
+            host.browser = created
             created.createImmediately()
+            created.setWindowlessFrameRate(60)
         }
     }
+    val density = LocalDensity.current.density.toDouble()
+    val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -114,5 +130,47 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         browser.loadURL(url)
     }
 
-    SwingPanel(factory = { panel }, modifier = modifier)
+    Canvas(
+        modifier
+            .onGloballyPositioned { coordinates ->
+                val inWindow = coordinates.positionInWindow()
+                val window = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
+                val windowOrigin = if (window?.isShowing == true) window.locationOnScreen else java.awt.Point(0, 0)
+                val screenScale = window?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
+
+                host.resize(coordinates.size.width, coordinates.size.height, density)
+                host.place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()))
+            }
+            .pointerHoverIcon(host.cursor)
+            .onKeyEvent { event ->
+                val native = event.awtEventOrNull ?: return@onKeyEvent false
+
+                host.key(native)
+                true
+            }
+            .focusRequester(focus)
+            .focusable()
+            .pointerInput(host) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val native = event.nativeEvent as? java.awt.event.MouseEvent ?: continue
+                        val change = event.changes.firstOrNull() ?: continue
+
+                        if (event.type == PointerEventType.Press) {
+                            focus.requestFocus()
+                            browser.setFocus(true)
+                        }
+
+                        host.mouse(native, change.position)
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            },
+    ) {
+        host.frames
+        val frame = host.frame() ?: return@Canvas
+
+        drawImage(frame)
+    }
 }
