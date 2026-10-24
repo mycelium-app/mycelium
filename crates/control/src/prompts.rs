@@ -126,10 +126,27 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 }
 
 pub async fn retry(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    find_owned(&state.pool, id, user.id).await?;
+    let row = find_owned(&state.pool, id, user.id).await?;
     retry_failed(&state, user.id, id).await?;
 
+    if row.acp_session_id.is_some() {
+        continue_unless_queued(&state, user.id, id, "Continue from where you stopped.").await?;
+    }
+
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn continue_unless_queued(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
+    let waiting = sqlx::query_scalar::<_, bool>("select exists (select 1 from queued_prompts where conversation_id = $1)").bind(id).fetch_one(&state.pool).await?;
+
+    if waiting {
+        return Ok(());
+    }
+
+    let mut connection = state.pool.acquire().await?;
+    enqueue(&mut connection, id, text, &[]).await?;
+    pump(state, id, false).await?;
+    publish_queue(state, owner, id).await
 }
 
 pub async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {

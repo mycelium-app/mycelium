@@ -7,7 +7,7 @@ use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const CONTINUE: &str = "Continue from where you stopped.";
+const CONTINUE: &str = "The usage limit has reset. Continue from where you stopped.";
 
 async fn ticking_server() -> Server {
     Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await

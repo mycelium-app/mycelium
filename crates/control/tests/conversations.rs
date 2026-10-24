@@ -554,6 +554,18 @@ async fn retrying_a_failed_conversation_starts_its_session_again_and_delivers_wh
 }
 
 #[tokio::test]
+async fn retrying_a_failed_conversation_with_nothing_queued_tells_the_agent_to_continue() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = failed_conversation(&server, &mut link).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
+
+    link.expect_start_session().await;
+    assert_eq!(link.expect_prompt().await.1, "Continue from where you stopped.");
+}
+
+#[tokio::test]
 async fn retrying_a_failed_conversation_that_never_started_asks_for_a_new_session_in_the_same_folder() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

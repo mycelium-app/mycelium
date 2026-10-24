@@ -3,9 +3,9 @@ use crate::auth::AuthUser;
 use crate::boot::is_ready;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
-use crate::prompts::{pump, retry_failed};
+use crate::prompts::{continue_unless_queued, retry_failed};
 use crate::state::AppState;
-use crate::store::{CONVERSATION_COLUMNS, ConversationRow, enqueue, find_owned, parse_enum, publish_queue};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, find_owned, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 const RESUME_DELAY_SECONDS: i64 = 60;
 const AUTOMATIC_RESUME_CAP: i32 = 3;
 const DUE_BATCH: i64 = 20;
-const CONTINUE_TEXT: &str = "Continue from where you stopped.";
+const CONTINUE_TEXT: &str = "The usage limit has reset. Continue from where you stopped.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageLimit {
@@ -280,16 +280,8 @@ async fn resume_one(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     }
 
     retry_failed(state, owner, id).await?;
-    let waiting = sqlx::query_scalar::<_, bool>("select exists (select 1 from queued_prompts where conversation_id = $1)").bind(id).fetch_one(&state.pool).await?;
 
-    if !waiting {
-        let mut connection = state.pool.acquire().await?;
-        enqueue(&mut connection, id, CONTINUE_TEXT, &[]).await?;
-        pump(state, id, false).await?;
-        publish_queue(state, owner, id).await?;
-    }
-
-    Ok(())
+    continue_unless_queued(state, owner, id, CONTINUE_TEXT).await
 }
 
 #[cfg(test)]
