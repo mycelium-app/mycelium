@@ -80,6 +80,7 @@ import mycelium.state.freePasteMarker
 import mycelium.state.isPasteMarker
 import mycelium.state.BadgeGap
 import mycelium.state.MarkedText
+import mycelium.state.EditHistory
 import mycelium.state.isImage
 import mycelium.state.orphanedImageIds
 import mycelium.state.withImageMarkers
@@ -153,6 +154,7 @@ fun Composer(
     var text by remember(conversation.id) { mutableStateOf(initialText) }
     var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
     var images by remember(conversation.id) { mutableStateOf(emptyMap<Char, Int>()) }
+    var history by remember(conversation.id) { mutableStateOf(EditHistory<ComposerEdit>()) }
     val reportText by rememberUpdatedState(onTextChange)
     val drafts = attachments?.drafts.orEmpty()
     val removeDraft by rememberUpdatedState(attachments?.onRemove)
@@ -242,9 +244,19 @@ fun Composer(
             text = TextFieldValue("")
             pastes = emptyMap()
             images = emptyMap()
+            history = EditHistory()
         } else if (queue.isNotEmpty()) {
             onSendQueuedNow(queue.minBy { it.position }.id)
         }
+    }
+
+    fun restore(edit: ComposerEdit) {
+        val live = currentDrafts.map { it.id }.toSet()
+        val cleaned = withoutImageMarkers(MarkedText(edit.text.text, edit.text.selection.end, edit.images), edit.images.values.toSet() - live)
+
+        text = TextFieldValue(cleaned.text, TextRange(cleaned.cursor))
+        pastes = edit.pastes
+        images = cleaned.images
     }
 
     val display = remember(text.text, pastes, images, drafts) {
@@ -261,6 +273,7 @@ fun Composer(
                     badges = display.badgeRanges().values.toList(),
                     previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
                     onTextChange = { changed ->
+                        val before = ComposerEdit(text, pastes, images)
                         val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
                         sent = null
 
@@ -274,7 +287,15 @@ fun Composer(
                             pastes = pastes + (marker to next.text.substring(range.first, range.last + 1).filterNot(::isPasteMarker))
                             text = TextFieldValue(next.text.replaceRange(range, marker.toString()), TextRange(range.first + 1))
                         }
+
+                        if (text.text != before.text.text) {
+                            val typedOne = text.text.length == before.text.text.length + 1 && pastes == before.pastes
+                            val typedSpace = typedOne && text.text.getOrNull(text.selection.end - 1)?.isWhitespace() == true
+                            history = history.recorded(before, typedOne, typedSpace)
+                        }
                     },
+                    onUndo = { history.undone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
+                    onRedo = { history.redone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     source = source,
                     onSubmit = ::submit,
                     onPaste = {
@@ -426,7 +447,7 @@ fun Composer(
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
     val colors = MyTheme.colors
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -448,6 +469,22 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                 }
 
                 if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && onPaste()) {
+                    return@onPreviewKeyEvent true
+                }
+
+                val shortcut = event.isCtrlPressed || event.isMetaPressed
+                val redo = shortcut && ((event.key == Key.Z && event.isShiftPressed) || event.key == Key.Y)
+                val undo = shortcut && event.key == Key.Z && !event.isShiftPressed
+
+                if (onUndo != null && onRedo != null && (undo || redo)) {
+                    if (event.type == KeyEventType.KeyDown && undo) {
+                        onUndo()
+                    }
+
+                    if (event.type == KeyEventType.KeyDown && redo) {
+                        onRedo()
+                    }
+
                     return@onPreviewKeyEvent true
                 }
 
@@ -526,6 +563,8 @@ private fun badgeLineRects(layout: TextLayoutResult, range: IntRange): List<Rect
         line.map { layout.getBoundingBox(it) }.reduce { union, box -> Rect(minOf(union.left, box.left), minOf(union.top, box.top), maxOf(union.right, box.right), maxOf(union.bottom, box.bottom)) }
     }
 }
+
+private data class ComposerEdit(val text: TextFieldValue, val pastes: Map<Char, String>, val images: Map<Char, Int>)
 
 private class PasteMarkerTransformation(private val display: PasteDisplay, private val labelColour: Color) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {

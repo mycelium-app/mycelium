@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.test.assertTextEquals
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -81,6 +82,40 @@ class PasteBadgeTest {
         rule.onNodeWithText("Pasted text · 20 lines", substring = true).assertDoesNotExist()
         field.assertTextEquals("see ")
         assertEquals(emptyList(), sent)
+    }
+
+    @Test
+    fun undoRemovesAnInlinePasteWholeAndRedoBringsItBack() {
+        val sent = mutableListOf<String>()
+        show(sent)
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("see ")
+        field.performTextInput(long)
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Z) } }
+
+        rule.onNodeWithText("Pasted text · 20 lines", substring = true).assertDoesNotExist()
+        field.assertTextEquals("see ")
+
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { withKeyDown(Key.ShiftLeft) { pressKey(Key.Z) } } }
+        field.performKeyInput { pressKey(Key.Enter) }
+
+        assertEquals(listOf("see ${pastedBlock(long)}"), sent)
+    }
+
+    @Test
+    fun undoBringsBackAPasteDeletedWithBackspace() {
+        val sent = mutableListOf<String>()
+        show(sent)
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("see ")
+        field.performTextInput(long)
+        field.performKeyInput { pressKey(Key.Backspace) }
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Z) } }
+        field.performKeyInput { pressKey(Key.Enter) }
+
+        assertEquals(listOf("see ${pastedBlock(long)}"), sent)
     }
 
     @Test
