@@ -84,8 +84,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
-    var panel by remember(workspace) {
-        val saved = if (compact || workspace == null) null else platform?.loadPreference("$SidePanelPreference:$workspace")
+    var panel by remember(id) {
+        val saved = if (compact) null else platform?.loadPreference(SidePanelPreference)
 
         mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved })
     }
@@ -98,8 +98,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
 
-        if (!compact && workspace != null) {
-            platform?.savePreference("$SidePanelPreference:$workspace", chosen?.name.orEmpty())
+        if (!compact) {
+            platform?.savePreference(SidePanelPreference, chosen?.name.orEmpty())
         }
     }
 
