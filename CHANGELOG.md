@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.6.2
+
+- Queued messages go to the agent together when its turn ends, so several points arrive in one turn without interrupting it. Send all now interrupts with all of them.
+- Send now no longer stops the message it just sent.
+- Pasted text sits inline in the composer as a chip, and Backspace removes it whole.
+- Settings has an Import page for transcripts and Claude chats.
+- Instructions shows only proposals still waiting, with decided ones behind Show decided.
+- The right-hand panel stays open as you switch conversations.
+- The Design viewer in the app follows your light or dark mode and accent.
+- The desktop app says in its terminal output why its built-in browser could not start.
+
 ## v0.6.1
 
 - Artefacts open inside the app. A conversation's Artefacts panel shows one beside the chat, and the full view keeps its chat beside it. Both reload when an agent saves a new version. The desktop app now runs on JetBrains Runtime for its built-in browser.
