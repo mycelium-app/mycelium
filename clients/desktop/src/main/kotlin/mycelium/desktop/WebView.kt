@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import com.jetbrains.cef.JCefAppConfig
 import org.cef.CefApp
+import org.cef.CefSettings
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.network.CefCookie
@@ -24,7 +25,15 @@ private object Jcef {
 
         CefApp.startup(args)
 
-        CefApp.getInstance(args, config.cefSettings)
+        val getInstance = CefApp::class.java.methods.filter { it.name == "getInstance" }
+        val withSettings = getInstance.firstOrNull { it.parameterTypes.toList() == listOf(Array<String>::class.java, CefSettings::class.java) }
+        val withCacheFolder = getInstance.firstOrNull { it.parameterTypes.toList() == listOf(Array<String>::class.java, CefSettings::class.java, java.io.File::class.java) }
+
+        when {
+            withSettings != null -> withSettings.invoke(null, args, config.cefSettings) as CefApp
+            withCacheFolder != null -> withCacheFolder.invoke(null, args, config.cefSettings, null) as CefApp
+            else -> CefApp.getInstance(config.cefSettings)
+        }
     }
 
     fun createClient(): CefClient = app.createClient()
