@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.8
+
+- The desktop app draws artefacts inside its own window, so they no longer open a separate blank window or show black.
+- Hover over, or tap, an image in the composer to see a preview of it.
+- The import page counts conversations, not every subagent inside them.
+
 ## v0.6.7
 
 - Everything you see says artefact rather than artifact.
