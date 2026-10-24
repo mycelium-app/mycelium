@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -115,6 +116,13 @@ fun ProjectIcon(project: Project?, size: Dp = Tokens.Size.IconSm, modifier: Modi
         Image(drawn, contentDescription = null, modifier.size(size).clip(ControlShape), contentScale = ContentScale.Crop)
     } else if (sha256 == null && named != null) {
         StrokedPaths(named.paths.asList(), MyTheme.colors.textMuted, size, modifier)
+    } else if (project != null) {
+        val initial = project.name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?"
+        val fontSize = with(LocalDensity.current) { (size * 0.62f).toSp() }
+
+        Box(modifier.size(size).border(Tokens.Size.Hairline, MyTheme.colors.textMuted, ControlShape), contentAlignment = Alignment.Center) {
+            Label(initial, style = Tokens.Type.UiStrong.copy(fontSize = fontSize, lineHeight = fontSize), color = MyTheme.colors.textMuted)
+        }
     } else {
         Box(modifier.size(size))
     }
