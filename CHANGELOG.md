@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.7
+
+- Everything you see says artefact rather than artifact.
+- Markdown artefacts are drawn by the app itself, so they read like chat messages and work everywhere.
+- Pasted text and images sit in the composer as rounded inline badges, removed whole with Backspace.
+- On a phone the sidebar only opens on a clearly sideways swipe, so scrolling an artefact no longer pulls it open.
+- Claude Code and Codex sessions get the tools of your connected tool servers, and Mycelium tells running sessions when those change.
+- Chats name each connected tool server and its tools, so they look them up instead of saying they have none.
+
 ## v0.6.6
 
 - The desktop app starts its built-in browser when it opens and waits until it is ready, so opening an artefact no longer shows an error dialog on JetBrains Runtime 25.
