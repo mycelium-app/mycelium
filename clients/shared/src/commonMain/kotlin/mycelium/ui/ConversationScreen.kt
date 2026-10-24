@@ -290,6 +290,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     ) else null,
                     agent = conversation.agent,
                     dismissedPins = dismissedPins,
+                    working = conversation.status == ConversationStatus.Working,
                     onUnpin = { key ->
                         store.pinDismissals.dismiss(id, key)
                         dismissedPins = store.pinDismissals[id]

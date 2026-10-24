@@ -6,7 +6,7 @@ data class PinnedCard(val key: String, val label: String, val ui: UiNode? = null
 
 fun workflowPinKey(runId: String): String = "workflow:$runId"
 
-fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>): List<PinnedCard> {
+fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>, working: Boolean = true): List<PinnedCard> {
     val pinned = LinkedHashMap<String, PinnedCard>()
 
     for (item in items) {
@@ -23,7 +23,15 @@ fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>): List<PinnedCar
                 }
             }
 
-            is ThreadItem.Workflow -> pinned[workflowPinKey(item.progress.runId)] = PinnedCard(workflowPinKey(item.progress.runId), "Workflow", workflow = item.progress)
+            is ThreadItem.Workflow -> {
+                val key = workflowPinKey(item.progress.runId)
+
+                if (working && !item.progress.complete) {
+                    pinned[key] = PinnedCard(key, "Workflow", workflow = item.progress)
+                } else {
+                    pinned.remove(key)
+                }
+            }
 
             else -> Unit
         }

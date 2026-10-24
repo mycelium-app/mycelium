@@ -109,6 +109,7 @@ fun ThreadView(
     limitActions: LimitActions? = null,
     agent: String = "",
     dismissedPins: Set<String> = emptySet(),
+    working: Boolean = true,
     onUnpin: (String) -> Unit = {},
     hasOlder: Boolean = false,
     loadingOlder: Boolean = false,
@@ -116,7 +117,7 @@ fun ThreadView(
 ) {
     val state = rememberLazyListState()
     val loadOlder by rememberUpdatedState(onLoadOlder)
-    val pinned = remember(items, dismissedPins) { pinnedCards(items, dismissedPins) }
+    val pinned = remember(items, dismissedPins, working) { pinnedCards(items, dismissedPins, working) }
     val pinnedKeys = remember(pinned) { pinned.map { it.key }.toSet() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current

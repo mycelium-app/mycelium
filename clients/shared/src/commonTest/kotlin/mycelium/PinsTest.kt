@@ -56,12 +56,14 @@ class PinsTest {
     }
 
     @Test
-    fun aWorkflowIsPinnedWhileRunningAndAfterItFinishes() {
+    fun aWorkflowIsPinnedOnlyWhileItRunsInAWorkingConversation() {
         val running = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = false)))
         val finished = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = true)))
 
-        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet()).map { it.key })
-        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", finished)), emptySet()).map { it.key })
+        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet(), working = true).map { it.key })
+        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", finished)), emptySet(), working = true))
+        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet(), working = false))
+        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", running), ThreadItem.Workflow("w2", finished)), emptySet(), working = true))
     }
 
     @Test
