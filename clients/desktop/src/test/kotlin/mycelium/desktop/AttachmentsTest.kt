@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import io.ktor.client.engine.mock.MockEngine
@@ -138,6 +140,19 @@ class AttachmentsTest {
 
         rule.onNodeWithText("Image · pasted-image.png", substring = true).assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Attached: pasted-image.png, ${formatSize(png.size.toLong())}").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun hoveringAnInlineImageBadgeShowsAPreviewOfTheImage() {
+        open(FilePlatform(clipboard = listOf(PickedFile("pasted-image.png", "image/png", png))))
+
+        pasteImage()
+        rule.onNodeWithContentDescription("Message").performMouseInput { moveTo(Offset(20f, centerY)) }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Image preview").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Message").performMouseInput { exit() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Image preview").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test

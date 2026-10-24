@@ -15,6 +15,7 @@ import org.cef.CefApp
 import org.cef.CefSettings
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
+import org.cef.browser.CefRendering
 import org.cef.network.CefCookie
 import org.cef.network.CefCookieManager
 import java.net.URI
@@ -90,7 +91,13 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     }
 
     val client = remember { Jcef.createClient() }
-    val browser: CefBrowser = remember { client.createBrowser("about:blank", false, false) }
+    val panel = remember { OffscreenBrowserPanel() }
+    val browser: CefBrowser = remember {
+        client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(panel, panel), false).also { created ->
+            panel.browser = created
+            created.createImmediately()
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -107,5 +114,5 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         browser.loadURL(url)
     }
 
-    SwingPanel(factory = { browser.uiComponent }, modifier = modifier)
+    SwingPanel(factory = { panel }, modifier = modifier)
 }

@@ -106,15 +106,15 @@ class PasteDisplay(private val original: String, pastes: Map<Char, String>, imag
         return original.length
     }
 
-    fun badgeRanges(): List<IntRange> {
-        val ranges = mutableListOf<IntRange>()
+    fun badgeRanges(): Map<Char, IntRange> {
+        val ranges = LinkedHashMap<Char, IntRange>()
         var shownAt = 0
 
         for (char in original) {
             val label = labels[char]
 
             if (label != null) {
-                ranges += (shownAt + BadgeGap.length) until (shownAt + BadgeGap.length + label.length)
+                ranges[char] = (shownAt + BadgeGap.length) until (shownAt + BadgeGap.length + label.length)
             }
 
             shownAt += shownWidth(char)

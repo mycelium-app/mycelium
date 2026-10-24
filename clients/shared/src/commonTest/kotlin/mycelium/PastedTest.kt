@@ -112,7 +112,7 @@ class PastedTest {
         assertEquals(1, display.toOriginal(1))
         assertEquals(2, display.toOriginal(1 + width / 2))
         assertEquals(2, display.toOriginal(1 + width))
-        assertEquals(listOf((1 + BadgeGap.length) until (1 + BadgeGap.length + label.length)), display.badgeRanges())
+        assertEquals(listOf((1 + BadgeGap.length) until (1 + BadgeGap.length + label.length)), display.badgeRanges().values.toList())
     }
 
     @Test

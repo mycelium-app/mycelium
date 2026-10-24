@@ -167,6 +167,7 @@ object Tokens {
         val DiffNumber: Dp = 36.dp
         val DiffSign: Dp = 16.dp
         val ComposerInput: Dp = 44.dp
+        val ImagePreview: Dp = 160.dp
         val ProgressBar: Dp = 4.dp
         val FormColumn: Dp = 320.dp
         val ApproveColumn: Dp = 420.dp

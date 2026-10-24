@@ -16,6 +16,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.foundation.Image
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import org.jetbrains.compose.resources.decodeToImageBitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -250,7 +258,8 @@ fun Composer(
                 MessageField(
                     text = text,
                     visualTransformation = remember(display, colors.textMuted) { PasteMarkerTransformation(display, colors.textMuted) },
-                    badges = display.badgeRanges(),
+                    badges = display.badgeRanges().values.toList(),
+                    previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
                     onTextChange = { changed ->
                         val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
                         sent = null
@@ -417,7 +426,7 @@ fun Composer(
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList()) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
     val colors = MyTheme.colors
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -456,8 +465,24 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                     Label(placeholder, style = Tokens.Type.Prose, color = colors.textFaint)
                 }
 
+                var previewed by remember { mutableStateOf<IntRange?>(null) }
+                val previewAt = { position: Offset -> layout?.let { measured -> previews.keys.firstOrNull { range -> badgeLineRects(measured, range).any { it.contains(position) } } } }
+
                 Box(
-                    Modifier.drawBehind {
+                    Modifier.pointerInput(previews) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val position = event.changes.firstOrNull()?.position ?: continue
+
+                                previewed = when (event.type) {
+                                    PointerEventType.Exit -> null
+                                    PointerEventType.Press, PointerEventType.Move, PointerEventType.Enter -> previewAt(position)
+                                    else -> previewed
+                                }
+                            }
+                        }
+                    }.drawBehind {
                         val measured = layout ?: return@drawBehind
                         val radius = CornerRadius(Tokens.Radius.Control.toPx())
                         val sideGap = Tokens.Space.S0_5.toPx()
@@ -474,6 +499,19 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                     },
                 ) {
                     inner()
+
+                    val shownRange = previewed
+                    val bytes = shownRange?.let(previews::get)
+                    val image = remember(bytes) { bytes?.let { runCatching { it.decodeToImageBitmap() }.getOrNull() } }
+                    val anchor = shownRange?.let { range -> layout?.let { badgeLineRects(it, range).firstOrNull() } }
+
+                    if (image != null && anchor != null) {
+                        val lift = with(LocalDensity.current) { (Tokens.Size.ImagePreview + Tokens.Space.S2).toPx() }
+
+                        Popup(offset = IntOffset(anchor.left.toInt(), (anchor.top - lift).toInt()), properties = PopupProperties(focusable = false)) {
+                            Image(image, contentDescription = "Image preview", modifier = Modifier.size(Tokens.Size.ImagePreview).clip(ControlShape).border(Tokens.Size.Hairline, colors.border, ControlShape), contentScale = ContentScale.Crop)
+                        }
+                    }
                 }
             }
         },
