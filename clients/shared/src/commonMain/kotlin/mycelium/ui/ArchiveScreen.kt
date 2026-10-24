@@ -53,6 +53,9 @@ fun usageCells(usage: ActivityRow?): List<String> {
     )
 }
 
+fun hasTurns(conversation: Conversation, usage: Map<String, ActivityRow>?): Boolean =
+    usage == null || conversation.status == ConversationStatus.Working || (usage[conversation.id]?.turns ?: 0) > 0
+
 @Serializable
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
@@ -77,7 +80,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     var archived by remember { mutableStateOf<List<Conversation>>(emptyList()) }
     var filter by remember { mutableStateOf(PastFilter.All) }
     var query by remember { mutableStateOf("") }
-    var usage by remember { mutableStateOf<Map<String, ActivityRow>>(emptyMap()) }
+    var usage by remember { mutableStateOf<Map<String, ActivityRow>?>(null) }
     var deleting by remember { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
     var layout by remember { mutableStateOf(HistoryLayout(columns = decodeHistoryColumns(platform?.loadPreference(HistoryColumnsPreference)))) }
@@ -126,7 +129,8 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
     val filters = layout.filters
     val entries = pastConversations(state.conversations.values, archived, filters.state, query)
-        .map { HistoryEntry(it, projectName(it.cwd), state.nodes[it.nodeId]?.name.orEmpty(), usage[it.id]) }
+        .filter { hasTurns(it, usage) }
+        .map { HistoryEntry(it, projectName(it.cwd), state.nodes[it.nodeId]?.name.orEmpty(), usage?.get(it.id)) }
     val groups = groupHistory(sortHistory(filterHistory(entries, filters), layout.sort), layout.grouping)
 
     val touch = LocalTouch.current

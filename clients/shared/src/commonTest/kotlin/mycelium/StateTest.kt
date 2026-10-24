@@ -282,6 +282,17 @@ class HistoryTest {
     }
 
     @Test
+    fun aConversationWithNoTurnsIsHiddenOnceUsageHasLoadedUnlessItsFirstTurnIsRunning() {
+        val empty = conversation("empty", ConversationStatus.Done)
+        val running = conversation("running", ConversationStatus.Working)
+        val used = conversation("used", ConversationStatus.Done)
+        val usage = mapOf("used" to mycelium.api.ActivityRow(key = "used", name = "", turns = 2))
+
+        assertEquals(listOf("running", "used"), listOf(empty, running, used).filter { mycelium.ui.hasTurns(it, usage) }.map { it.id })
+        assertEquals(listOf("empty", "running", "used"), listOf(empty, running, used).filter { mycelium.ui.hasTurns(it, null) }.map { it.id })
+    }
+
+    @Test
     fun subagentsAreLeftOutOfHistoryWhetherCurrentOrArchived() {
         val subagent = conversation("helper", ConversationStatus.Done).copy(parentId = "done", sideKind = "subagent")
         val current = listOf(conversation("done", ConversationStatus.Done), subagent)

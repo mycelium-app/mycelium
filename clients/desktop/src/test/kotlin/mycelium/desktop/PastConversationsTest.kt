@@ -133,8 +133,8 @@ class PastConversationsTest {
     }
 
     @Test
-    fun historySaysNotReportedForAConversationWithNoUsage() {
-        val store = store(usage = "[]")
+    fun historySaysNotReportedForAConversationWhoseTurnsReportedNoUsage() {
+        val store = store(usage = """[{"key":"c1","name":"","turns":2,"reported_turns":0}]""")
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Not reported").fetchSemanticsNodes().size == 2 }
@@ -190,7 +190,7 @@ class PastConversationsTest {
 
     @Test
     fun historyRowsWithAndWithoutAProjectPutTheNodeInTheSameColumn() {
-        val store = store(archived = TwoArchivedJson)
+        val store = store(archived = TwoArchivedJson, usage = """[{"key":"c1","name":"","turns":1},{"key":"c2","name":"","turns":1}]""")
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Scratch notes").fetchSemanticsNodes().isNotEmpty() }

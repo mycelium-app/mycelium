@@ -75,6 +75,7 @@ class HistoryTableTest {
             val path = request.url.encodedPath
             val body = when {
                 path.endsWith("/nodes") -> TwoNodesJson
+                path.endsWith("/activity/conversations") -> (1..4).joinToString(",", "[", "]") { """{"key":"c$it","name":"","turns":1}""" }
                 path.endsWith("/conversations") && request.url.parameters["archived"] == "true" -> ThreeArchivedJson
                 path.endsWith("/conversations") -> "[]"
                 else -> "[]"
