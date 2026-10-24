@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.12
+
+- The desktop's built-in browser is drawn by the app itself: the panel beside it resizes again, typing and clicks reach it directly, it follows the app's UI scale, and the scroll wheel and Ctrl+scroll zoom go the right way.
+
 ## v0.6.11
 
 - Ctrl+Z and Ctrl+Shift+Z in the composer undo and redo pasted text and image badges whole, a word at a time for typing.
