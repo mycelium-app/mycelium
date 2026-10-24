@@ -69,12 +69,13 @@ import mycelium.state.projectName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
+    var viewedArtefact by remember(id) { mutableStateOf<String?>(null) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
     var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
@@ -188,7 +189,19 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         canOpenFiles = !chat,
     )
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes) {
+    val outerOpener = LocalArtifactOpener.current
+    val artefactOpener = outerOpener?.let { outer ->
+        ArtifactOpener(outer.artifacts) { artifactId ->
+            if (panels && !chat && outer.artifacts[artifactId]?.conversationId == id) {
+                viewedArtefact = artifactId
+                openPanel(SidePanel.Artefacts)
+            } else {
+                outer.open(artifactId)
+            }
+        }
+    }
+
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         Row(Modifier.fillMaxSize()) {
@@ -356,7 +369,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
             }
 
-            if (!compact && !chat) {
+            if (!compact && !chat && panels) {
                 if (panel != null) {
                     ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
 
@@ -366,6 +379,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             SidePanel.Subagents -> SubagentsPanel(subagentsOf(state.conversations.values, id), onOpenConversation)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
+                            SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                             null -> Unit
                         }
                     }
@@ -376,13 +390,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    if (compact && !chat && panel != null) {
+    if (compact && !chat && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentsOf(state.conversations.values, id), onOpenConversation)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
+                SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 null -> Unit
             }
         }
@@ -550,7 +565,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git }
+private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts }
 
 @Composable
 private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
@@ -567,6 +582,7 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
             MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
+            MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
         }
     }
 }

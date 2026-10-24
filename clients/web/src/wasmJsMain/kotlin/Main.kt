@@ -1,4 +1,6 @@
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
 import mycelium.App
@@ -177,6 +179,9 @@ private object WebPlatform : Platform {
     override fun closeWindow() = closeThisWindow()
 
     override fun copyToClipboard(text: String) = writeClipboard(text)
+
+    @Composable
+    override fun WebContent(url: String, token: String?, modifier: Modifier) = IframeWebContent(url, modifier)
 
     override fun timeZone(): String? = browserTimeZone().ifBlank { null }
 

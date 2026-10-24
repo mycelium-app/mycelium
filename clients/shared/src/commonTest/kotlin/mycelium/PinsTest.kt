@@ -11,6 +11,7 @@ import mycelium.state.applyWorkflowJournal
 import mycelium.state.pinnedCards
 import mycelium.state.workflowPinKey
 import mycelium.state.workflowStats
+import mycelium.state.workflowTokens
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -94,7 +95,8 @@ class PinsTest {
             put("elapsed_ms", 125_000)
         })
 
-        assertEquals("12.3k tokens · 4 turns · 2m 05s", workflowStats(agents.single()))
-        assertEquals("12.3k tokens · 4 turns · 2m 05s", workflowStats(WorkflowProgress("run", agents).totals))
+        assertEquals("12.3k toks · 4 turns · 2m 05s", workflowStats(agents.single()))
+        assertEquals("12.3k toks · 4 turns · 2m 05s", workflowStats(WorkflowProgress("run", agents).totals))
+        assertEquals("12.3k toks", workflowTokens(WorkflowProgress("run", agents)))
     }
 }

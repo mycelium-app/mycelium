@@ -21,7 +21,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import mycelium.Platform
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
@@ -34,7 +33,6 @@ import mycelium.state.MyceliumCall
 import mycelium.state.Store
 import mycelium.state.apiAccessDuration
 import mycelium.state.apiScopeLabel
-import mycelium.state.artifactOpenUrl
 import mycelium.state.sshAccessDuration
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
@@ -82,12 +80,12 @@ fun sshAccessRequests(store: Store, state: AppState) =
         { request -> store.revokeSshAccessRequest(request) },
     )
 
-class ArtifactOpener(val artifacts: Map<String, Artifact>, val open: (id: String, kind: String, version: Int) -> Unit)
+class ArtifactOpener(val artifacts: Map<String, Artifact>, val open: (id: String) -> Unit)
 
 val LocalArtifactOpener = compositionLocalOf<ArtifactOpener?> { null }
 
-fun artifactOpener(store: Store, state: AppState, platform: Platform) =
-    ArtifactOpener(state.artifacts) { id, kind, version -> platform.navigate(artifactOpenUrl(store.api.baseUrl, id, kind, version)) }
+fun artifactOpener(state: AppState, onOpenArtefact: (String) -> Unit) =
+    ArtifactOpener(state.artifacts) { id -> onOpenArtefact(id) }
 
 @Composable
 private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
@@ -309,19 +307,19 @@ private fun MyceliumBody(parsed: MyceliumCall) {
 
         is MyceliumCall.CreateArtifact -> {
             parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-            parsed.artifactId?.let { ArtifactOpenButton(it, parsed.kind.ifEmpty { null }, parsed.version, parsed.title) }
+            parsed.artifactId?.let { ArtifactOpenButton(it, parsed.kind.ifEmpty { null }, parsed.title) }
         }
 
         is MyceliumCall.UpdateArtifact -> {
             parsed.note?.let { Label(it, style = Tokens.Type.Ui, maxLines = ExcerptLines) }
             parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-            ArtifactOpenButton(parsed.artifactId, null, parsed.version)
+            ArtifactOpenButton(parsed.artifactId, null)
         }
 
         is MyceliumCall.DesignSetArtboard -> {
             (parsed.name ?: parsed.artboard)?.let { Label(it, style = Tokens.Type.Ui, maxLines = 1) }
             parsed.version?.let { Label("Version $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-            ArtifactOpenButton(parsed.artifactId, ArtifactKinds.Design, parsed.version)
+            ArtifactOpenButton(parsed.artifactId, ArtifactKinds.Design)
         }
 
         is MyceliumCall.ReadArtifact -> parsed.artboard?.let { Label("Artboard $it", style = Tokens.Type.Meta, color = colors.textMuted) }
@@ -329,13 +327,15 @@ private fun MyceliumBody(parsed: MyceliumCall) {
 }
 
 @Composable
-private fun ArtifactOpenButton(artifactId: String, kind: String?, version: Int?, title: String? = null) {
+private fun ArtifactOpenButton(artifactId: String, kind: String?, title: String? = null) {
     val opener = LocalArtifactOpener.current ?: return
     val known = opener.artifacts[artifactId]
-    val openKind = kind ?: known?.kind ?: return
-    val openVersion = known?.latestVersion ?: version ?: 1
 
-    MyButton({ opener.open(artifactId, openKind, openVersion) }, text = "Open", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Open ${known?.title ?: title ?: "the artifact"}")
+    if (kind == null && known == null) {
+        return
+    }
+
+    MyButton({ opener.open(artifactId) }, text = "Open", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Open ${known?.title ?: title ?: "the artifact"}")
 }
 
 @Composable

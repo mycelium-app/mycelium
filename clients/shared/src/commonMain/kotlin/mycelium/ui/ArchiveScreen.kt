@@ -48,7 +48,11 @@ fun usageCells(usage: ActivityRow?): List<String> {
 
     return listOf(
         (usage?.turns ?: 0).toString(),
-        if (reported) formatTokens(usage!!.tokens) else "Not reported",
+        when {
+            !reported -> "Not reported"
+            usage!!.subagentTokens > 0 -> "${formatTokens(usage.tokens)} (${formatTokens(usage.subagentTokens)} in subagents)"
+            else -> formatTokens(usage.tokens)
+        },
         if (usage?.costUsd == null) "Not reported" else formatCost(usage.costUsd) + if (usage.costEstimated) " (estimated)" else "",
     )
 }

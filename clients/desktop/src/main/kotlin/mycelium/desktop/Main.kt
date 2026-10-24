@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -182,6 +183,15 @@ private object DesktopPlatform : Platform {
 
         if (clicked.getOrNull() == true) {
             notificationOpener?.invoke(conversationId)
+        }
+    }
+
+    @Composable
+    override fun WebContent(url: String, token: String?, modifier: Modifier) {
+        if (jcefAvailable) {
+            JcefWebContent(url, token, modifier)
+        } else {
+            super.WebContent(url, token, modifier)
         }
     }
 

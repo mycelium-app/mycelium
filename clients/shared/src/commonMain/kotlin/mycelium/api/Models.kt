@@ -154,6 +154,7 @@ data class NodeSummary(
     val version: String,
     val address: String = "",
     @SerialName("update_available") val updateAvailable: String? = null,
+    @SerialName("update_message") val updateMessage: String? = null,
     val online: Boolean,
     val draining: Boolean,
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
@@ -245,6 +246,7 @@ data class ActivityRow(
     @SerialName("output_tokens") val outputTokens: Long = 0,
     @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
     @SerialName("cache_write_tokens") val cacheWriteTokens: Long = 0,
+    @SerialName("subagent_tokens") val subagentTokens: Long = 0,
     @SerialName("cost_usd") val costUsd: Double? = null,
     @SerialName("cost_estimated") val costEstimated: Boolean = false,
 ) {

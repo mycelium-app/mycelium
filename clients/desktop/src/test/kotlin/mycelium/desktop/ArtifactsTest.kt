@@ -70,6 +70,7 @@ class ArtifactsScreenTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
     private val platform = ArtifactsPlatform()
+    private val opened = mutableListOf<String>()
 
     private fun showArtifacts(list: String = Artifacts) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -91,7 +92,7 @@ class ArtifactsScreenTest {
             MyceliumTheme(true) {
                 val state by store.state.collectAsState()
 
-                ArtifactsScreen(store, state, Me("u1", "person@example.test", "Person"), platform)
+                ArtifactsScreen(store, state, Me("u1", "person@example.test", "Person"), platform, onOpen = { opened += it })
             }
         }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Edited", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -192,13 +193,27 @@ class ArtifactsScreenTest {
     }
 
     @Test
-    fun openingADesignGoesToTheEditorAndOtherKindsToTheirContent() {
+    fun clickingACardOpensItsFullView() {
         showArtifacts()
 
         rule.onNodeWithContentDescription("Open Landing sketch").performClick()
         rule.onNodeWithContentDescription("Open Planning board").performClick()
 
-        assertEquals(listOf("https://mycelium.test/design/a1", "https://mycelium.test/api/v1/artifacts/a2/versions/2/content"), platform.navigated)
+        assertEquals(listOf("a1", "a2"), opened)
+        assertTrue(platform.navigated.isEmpty())
+    }
+
+    @Test
+    fun theOpenMenuItemOpensTheFullViewAndOpenInBrowserNavigates() {
+        showArtifacts()
+
+        rule.onNodeWithContentDescription("More for Planning board").performClick()
+        rule.onNodeWithText("Open").performClick()
+        rule.onNodeWithContentDescription("More for Planning board").performClick()
+        rule.onNodeWithText("Open in browser").performClick()
+
+        assertEquals(listOf("a2"), opened)
+        assertEquals(listOf("https://mycelium.test/api/v1/artifacts/a2/versions/2/content"), platform.navigated)
     }
 
     @Test
@@ -238,7 +253,7 @@ class ArtifactsScreenTest {
         rule.onNodeWithContentDescription("Open Planning board").performClick()
 
         assertEquals(1, requests.toList().count { it.second.endsWith("/artifacts/a2/thumbnail") })
-        assertEquals(listOf("https://mycelium.test/api/v1/artifacts/a2/versions/2/content"), platform.navigated)
+        assertEquals(listOf("a2"), opened)
     }
 
     @Test

@@ -12,6 +12,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import mycelium.Connection
@@ -205,6 +207,9 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
         waitingForPick?.invoke(files)
         waitingForPick = null
     }
+
+    @Composable
+    override fun WebContent(url: String, token: String?, modifier: Modifier) = AndroidWebContent(url, token, modifier)
 
     override fun copyToClipboard(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

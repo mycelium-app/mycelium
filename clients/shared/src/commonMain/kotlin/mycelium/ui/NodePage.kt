@@ -37,6 +37,7 @@ import mycelium.state.Store
 import mycelium.state.agentName
 import mycelium.state.agentVersion
 import mycelium.state.conversationTitle
+import mycelium.state.compareVersions
 import mycelium.state.cpuSummary
 import mycelium.state.formatBytes
 import mycelium.state.isLocalToNode
@@ -44,6 +45,7 @@ import mycelium.state.memoryUsedBytes
 import mycelium.state.percentOf
 import mycelium.state.portLink
 import mycelium.state.statusSectionName
+import mycelium.state.versionParts
 import mycelium.state.versionWithUpdate
 import kotlin.math.roundToInt
 
@@ -55,6 +57,11 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
     val colors = MyTheme.colors
     val node = state.nodes[nodeId]
     var tab by remember { mutableStateOf(Tabs.first()) }
+    var controlVersion by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        controlVersion = runCatching { store.api.version() }.getOrNull()
+    }
 
     LaunchedEffect(nodeId, node?.online) {
         while (node?.online == true) {
@@ -90,6 +97,18 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
             return@Column
         }
 
+        val updateTo = controlVersion?.takeIf { node.online && isOlderThan(node.version, it) }?.let { "v${it.removePrefix("v")}" }
+
+        if (updateTo != null || node.updateMessage != null) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                if (updateTo != null) {
+                    MyButton({ store.act { store.api.updateNodeSoftware(node.id) } }, text = "Update to $updateTo", variant = ButtonVariant.Outline)
+                }
+
+                node.updateMessage?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+            }
+        }
+
         TabRow(Tabs, tab, { tab = it }, groupLabel = "Node sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
 
         Hairline()
@@ -102,6 +121,13 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
             }
         }
     }
+}
+
+private fun isOlderThan(version: String, other: String): Boolean {
+    val own = versionParts(version) ?: return false
+    val wanted = versionParts(other) ?: return false
+
+    return compareVersions(own, wanted) < 0
 }
 
 @Composable

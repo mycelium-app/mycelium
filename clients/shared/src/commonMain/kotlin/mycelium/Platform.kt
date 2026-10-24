@@ -1,8 +1,18 @@
 package mycelium
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import mycelium.state.PickedFile
+import mycelium.ui.ButtonVariant
+import mycelium.ui.Label
+import mycelium.ui.MyButton
+import mycelium.ui.Tokens
 
 const val DefaultEventPageSize = 500
 
@@ -44,6 +54,14 @@ interface Platform {
     fun openSignIn(url: String, onCancelled: () -> Unit) = openUrl(url)
 
     fun copyToClipboard(text: String)
+
+    @Composable
+    fun WebContent(url: String, token: String?, modifier: Modifier) {
+        Column(modifier.fillMaxSize(), Arrangement.spacedBy(Tokens.Space.S3, Alignment.CenterVertically), Alignment.CenterHorizontally) {
+            Label("This artefact can't be shown here.")
+            MyButton(onClick = { openUrl(url) }, text = "Open in browser", variant = ButtonVariant.Outline)
+        }
+    }
 
     fun timeZone(): String? = null
 

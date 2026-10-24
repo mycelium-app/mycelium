@@ -20,19 +20,30 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
+val jcefOpens = listOf(
+    "--add-opens=java.desktop/sun.awt=ALL-UNNAMED",
+    "--add-opens=java.desktop/java.awt.peer=ALL-UNNAMED",
+    "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED",
+    "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED",
+)
+
 tasks.test {
     useJUnit()
+    jvmArgs(jcefOpens)
     maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
 }
 
 compose.desktop {
     application {
         mainClass = "mycelium.desktop.MainKt"
+        jvmArgs(*jcefOpens.toTypedArray())
 
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Dmg, TargetFormat.Msi)
             packageName = "mycelium"
             packageVersion = System.getenv("MYCELIUM_VERSION")?.removePrefix("v") ?: "1.0.0"
+            System.getenv("MYCELIUM_JBR_HOME")?.let { javaHome = it }
+            modules("jcef", "jdk.unsupported", "java.desktop")
         }
     }
 }

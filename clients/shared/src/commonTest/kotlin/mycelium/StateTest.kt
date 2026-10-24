@@ -294,6 +294,14 @@ class HistoryTest {
     }
 
     @Test
+    fun theTokensCellSaysHowMuchOfTheTotalRanInSubagents() {
+        val row = mycelium.api.ActivityRow(key = "c", name = "", turns = 1, reportedTurns = 1, inputTokens = 10_000, subagentTokens = 4_000)
+
+        assertEquals("10k (4k in subagents)", mycelium.ui.usageCells(row)[1])
+        assertEquals("10k", mycelium.ui.usageCells(row.copy(subagentTokens = 0))[1])
+    }
+
+    @Test
     fun subagentsAreLeftOutOfHistoryWhetherCurrentOrArchived() {
         val subagent = conversation("helper", ConversationStatus.Done).copy(parentId = "done", sideKind = "subagent")
         val current = listOf(conversation("done", ConversationStatus.Done), subagent)

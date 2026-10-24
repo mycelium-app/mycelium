@@ -28,13 +28,15 @@ fun artifactPreview(artifact: Artifact): ArtifactPreview = when {
 
 fun artifactKindName(kind: String): String = ArtifactKindFilters.firstOrNull { it.first == kind }?.second ?: kind.replaceFirstChar { it.uppercase() }
 
-fun artifactOpenUrl(baseUrl: String, id: String, kind: String, version: Int): String {
+fun artifactOpenUrl(baseUrl: String, id: String, kind: String, version: Int, dark: Boolean = true, accent: String = "neutral"): String {
     val root = baseUrl.trimEnd('/')
+    val theme = if (dark) "dark" else "light"
 
-    return if (kind == ArtifactKinds.Design) "$root/design/$id" else "$root/api/v1/artifacts/$id/versions/$version/content"
+    return if (kind == ArtifactKinds.Design) "$root/design/$id?theme=$theme&accent=$accent" else "$root/api/v1/artifacts/$id/versions/$version/content"
 }
 
-fun artifactOpenUrl(baseUrl: String, artifact: Artifact): String = artifactOpenUrl(baseUrl, artifact.id, artifact.kind, artifact.latestVersion)
+fun artifactOpenUrl(baseUrl: String, artifact: Artifact, dark: Boolean = true, accent: String = "neutral"): String =
+    artifactOpenUrl(baseUrl, artifact.id, artifact.kind, artifact.latestVersion, dark, accent)
 
 fun visibleArtifacts(artifacts: Collection<Artifact>, tab: String, ownerId: String, kind: String?, query: String): List<Artifact> {
     val needle = query.trim()

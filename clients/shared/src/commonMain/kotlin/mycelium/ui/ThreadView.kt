@@ -90,6 +90,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.UiNode
 import mycelium.state.workflowStats
+import mycelium.state.workflowTokens
 import mycelium.state.suggestedReplies
 import mycelium.state.WorkflowProgress
 import mycelium.api.Attachment
@@ -1064,7 +1065,7 @@ internal fun GeneratedUiPanel(node: UiNode) {
 @Composable
 internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: PinControls? = null) {
     val colors = MyTheme.colors
-    val totals = workflowStats(progress.totals).takeIf { progress.agents.size > 1 }
+    val totals = workflowTokens(progress).takeIf { progress.agents.size > 1 }
 
     Card {
         CardHead {
@@ -1075,7 +1076,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             }
 
             Label("Workflow", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("${progress.finishedCount} of ${progress.agents.size} agents", Modifier.weight(1f, fill = totals == null), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            Label("${progress.finishedCount} of ${progress.agents.size}", if (totals == null) Modifier.weight(1f) else Modifier, Tokens.Type.Meta, colors.textMuted, maxLines = 1)
 
             if (totals != null) {
                 Label(totals, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
@@ -1117,7 +1118,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             Column(Modifier.padding(top = Tokens.Space.S1_5, bottom = Tokens.Space.S0_5)) {
                 Row(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     Label(phase, Modifier.semantics { heading() }, Tokens.Type.MetaStrong)
-                    Label("${inPhase.count { it.finished }} of ${inPhase.size}", style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label(if (inPhase.isEmpty()) "Waiting" else "${inPhase.count { it.finished }} of ${inPhase.size}", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
                 for (agent in inPhase) {

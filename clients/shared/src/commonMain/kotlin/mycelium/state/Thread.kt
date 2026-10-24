@@ -36,10 +36,10 @@ data class WorkflowAgent(
     val elapsedMs: Long? = null,
 )
 
-data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>) {
+data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList()) {
     val finishedCount: Int get() = agents.count { it.finished }
     val complete: Boolean get() = agents.isNotEmpty() && finishedCount == agents.size
-    val phases: List<String> get() = agents.map { it.phase }.distinct()
+    val phases: List<String> get() = (plannedPhases + agents.map { it.phase }).distinct()
     val totals: WorkflowAgent get() = WorkflowAgent(
         key = runId,
         label = "Workflow",
@@ -52,10 +52,12 @@ data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>) 
 }
 
 fun workflowStats(agent: WorkflowAgent): String? = listOfNotNull(
-    agent.tokens?.let { "${tokenCount(it)} tokens" },
+    agent.tokens?.let { "${tokenCount(it)} toks" },
     agent.turns?.let { if (it == 1) "1 turn" else "$it turns" },
     agent.elapsedMs?.let { durationText(it) },
 ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
+fun workflowTokens(progress: WorkflowProgress): String? = progress.totals.tokens?.let { "${tokenCount(it)} toks" }
 
 private fun tokenCount(tokens: Long): String = when {
     tokens >= 1_000_000 -> "${tokens / 100_000 / 10.0}M"
@@ -513,7 +515,8 @@ private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, paylo
     val line = payload["line"] as? JsonObject ?: return
     val index = items.indexOfFirst { it is ThreadItem.Workflow && it.progress.runId == runId }
     val current = (items.getOrNull(index) as? ThreadItem.Workflow)?.progress ?: WorkflowProgress(runId, emptyList())
-    val updated = current.copy(agents = applyWorkflowJournal(current.agents, line))
+    val planned = (line["phases"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.takeIf { line.string("type") == "plan" }
+    val updated = if (planned != null) current.copy(plannedPhases = planned) else current.copy(agents = applyWorkflowJournal(current.agents, line))
 
     if (index < 0) {
         items += ThreadItem.Workflow(key, updated)

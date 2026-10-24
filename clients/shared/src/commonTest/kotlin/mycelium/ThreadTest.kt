@@ -275,4 +275,19 @@ class SuggestedRepliesTest {
         assertFalse(turnIsOpen(answered))
         assertFalse(turnIsOpen(backgroundChatter))
     }
+
+    @Test
+    fun aWorkflowsPlanListsItsPhasesBeforeTheyStartAndProgressUpdatesARunningAgent() {
+        val events = listOf(
+            event(1, EventKinds.Workflow, """{"run_id":"r","line":{"type":"plan","phases":["Write","Verify"]}}"""),
+            event(2, EventKinds.Workflow, """{"run_id":"r","line":{"type":"started","key":"k1","agentId":"a1","label":"write:one","phase":"Write"}}"""),
+            event(3, EventKinds.Workflow, """{"run_id":"r","line":{"type":"progress","key":"k1","agentId":"a1","tokens":1200,"turns":3,"elapsed_ms":4000}}"""),
+        )
+
+        val progress = buildThread(events).filterIsInstance<ThreadItem.Workflow>().single().progress
+
+        assertEquals(listOf("Write", "Verify"), progress.phases)
+        assertEquals(Triple(1200L, 3, 4000L), progress.agents.single().let { Triple(it.tokens, it.turns, it.elapsedMs) })
+        assertFalse(progress.agents.single().finished)
+    }
 }

@@ -19,6 +19,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.WorkflowAgent
 import mycelium.state.WorkflowProgress
+import kotlin.test.assertEquals
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.ThreadView
 import org.junit.Rule
@@ -92,7 +93,19 @@ class PinnedCardsTest {
 
         rule.onNodeWithContentDescription("Unpin Workflow").assertIsDisplayed()
         rule.onNodeWithText("Survey").assertIsDisplayed()
-        rule.onNodeWithText("2.5k tokens · 3 turns · 42s").assertIsDisplayed()
+        rule.onNodeWithText("2.5k toks · 3 turns · 42s").assertIsDisplayed()
         rule.waitUntil { rule.onAllNodesWithText("workflow").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun theWorkflowCardsCloseButtonSitsAtTheSameEdgeWhateverItsHeaderSays() {
+        fun run(id: String, agents: Int, tokens: Long) = ThreadItem.Workflow(id, WorkflowProgress(id, List(agents) { WorkflowAgent("$id$it", "Agent $it", "Build", finished = false, tokens = tokens) }))
+        items = listOf(run("short", 1, 10), run("long", 9, 123_456_789))
+        show(width = 900)
+
+        val edges = rule.onAllNodesWithContentDescription("Unpin Workflow").fetchSemanticsNodes().map { it.boundsInRoot.right }
+
+        assertEquals(2, edges.size)
+        assertEquals(1, edges.distinct().size)
     }
 }

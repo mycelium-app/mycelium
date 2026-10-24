@@ -101,7 +101,8 @@ class ArtifactsTest {
 
     @Test
     fun aDesignOpensInTheEditorAndOtherKindsOpenTheirLatestContent() {
-        assertEquals("https://mycelium.test/design/a1", artifactOpenUrl("https://mycelium.test/", "a1", "design", 3))
+        assertEquals("https://mycelium.test/design/a1?theme=dark&accent=neutral", artifactOpenUrl("https://mycelium.test/", "a1", "design", 3))
+        assertEquals("https://mycelium.test/design/a1?theme=light&accent=blue", artifactOpenUrl("https://mycelium.test", "a1", "design", 3, dark = false, accent = "blue"))
         assertEquals("https://mycelium.test/api/v1/artifacts/a2/versions/3/content", artifactOpenUrl("https://mycelium.test", "a2", "page", 3))
     }
 

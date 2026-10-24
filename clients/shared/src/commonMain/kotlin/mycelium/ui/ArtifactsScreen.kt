@@ -81,7 +81,7 @@ internal fun artifactIcon(kind: String): MyIcon = when (kind) {
 }
 
 @Composable
-fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform) {
+fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, onOpen: (String) -> Unit = {}) {
     val colors = MyTheme.colors
     var tab by remember { mutableStateOf(AllArtifacts) }
     var kindName by remember { mutableStateOf(AnyKind) }
@@ -125,7 +125,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform) {
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
             ) {
                 items(shown, key = { it.id }) { artifact ->
-                    ArtifactCard(artifact, store, platform, mine = artifact.owner == me.id)
+                    ArtifactCard(artifact, store, platform, mine = artifact.owner == me.id, onOpen = { onOpen(artifact.id) })
                 }
             }
         }
@@ -187,7 +187,7 @@ private fun ArtifactPreviewArea(artifact: Artifact, store: Store) {
 }
 
 @Composable
-private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, mine: Boolean) {
+private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, mine: Boolean, onOpen: () -> Unit) {
     val colors = MyTheme.colors
     var renaming by remember(artifact.id) { mutableStateOf(false) }
     var deleting by remember(artifact.id) { mutableStateOf(false) }
@@ -199,7 +199,7 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
             Column(
                 Modifier
                     .weight(1f)
-                    .pressable({ platform.navigate(artifactOpenUrl(store.api.baseUrl, artifact)) }, shape = BlockShape, description = "Open ${artifact.title}")
+                    .pressable(onOpen, shape = BlockShape, description = "Open ${artifact.title}")
                     .padding(Tokens.Space.S1),
                 verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5),
             ) {
@@ -217,7 +217,8 @@ private fun ArtifactCard(artifact: Artifact, store: Store, platform: Platform, m
             }
 
             RowMenu(artifact.title) { close ->
-                MenuItem("Open", onClick = { close(); platform.navigate(artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Globe)
+                MenuItem("Open", onClick = { close(); onOpen() }, leading = MyIcon.Layers)
+                MenuItem("Open in browser", onClick = { close(); platform.navigate(artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Globe)
                 MenuItem("Copy link", onClick = { close(); platform.copyToClipboard(artifact.url ?: artifactOpenUrl(store.api.baseUrl, artifact)) }, leading = MyIcon.Copy)
 
                 if (artifact.isPublic) {
