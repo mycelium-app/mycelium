@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -68,10 +69,35 @@ class ConversationRowStatusTest {
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, RowsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Build the thing").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("[Pipeline] Build the thing").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Build the thing, Working, Claude Code on Workbench").assertExists()
-        rule.onNodeWithContentDescription("Pick a colour, Needs input, Claude Code on Workbench").assertExists()
-        rule.onNodeWithContentDescription("Break the build, Failed, Claude Code on Workbench").assertExists()
+        rule.onNodeWithContentDescription("[Pipeline] Build the thing, Working, Claude Code on Workbench").assertExists()
+        rule.onNodeWithContentDescription("[Pipeline] Pick a colour, Needs input, Claude Code on Workbench").assertExists()
+        rule.onNodeWithContentDescription("[Pipeline] Break the build, Failed, Claude Code on Workbench").assertExists()
+    }
+
+    @Test
+    fun aConversationInAProjectShowsTheProjectBeforeItsTitleAndOneWithoutShowsTheTitleAlone() {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val rows = listOf(conversation("w1", "Fix close session", "done"), conversation("w2", "Loose end", "done").replace("\"project_id\":\"p1\",", ""))
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val body = when {
+                path.endsWith("/conversations") -> "[${rows.joinToString(",")}]"
+                path.endsWith("/projects") -> ProjectsJson
+                path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"
+                else -> "{}"
+            }
+
+            respond(body, HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        runBlocking { store.refresh() }
+        rule.setContent { MyceliumTheme(true) { Shell(store, RowsPlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Loose end").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("[Pipeline] Fix close session").assertExists()
+        rule.onNodeWithText("Loose end").assertExists()
     }
 }

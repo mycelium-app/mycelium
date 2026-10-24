@@ -411,6 +411,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
     LaunchedEffect(Unit) {
         store.act { store.refreshGroups() }
+        store.act { store.refreshProjects() }
     }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }
@@ -622,6 +623,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val statusName = if (row.resumeAt != null) WaitingForReset else statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
+    val shownTitle = project?.takeIf { !row.isChat }?.let { "[${it.name}] ${row.title}" } ?: row.title
 
     Box(
         Modifier
@@ -678,7 +680,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected,
                     shape = BlockShape,
-                    description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
+                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -709,7 +711,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
 
             Column(Modifier.weight(1f)) {
-                Label(row.title, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
+                Label(shownTitle, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
 
                 if (row.resumeAt != null) {
                     Label(WaitingForReset, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
