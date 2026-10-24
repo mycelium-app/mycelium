@@ -12,6 +12,7 @@ const CHUNK_BYTES: u64 = 256 * 1024;
 const CHUNKS_PER_FILE_PER_POLL: usize = 4;
 const CHUNKS_PER_POLL: usize = 16;
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+const AGENT_QUIET_LIMIT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 pub struct TranscriptFollower {
     home: PathBuf,
@@ -24,6 +25,7 @@ pub struct TranscriptFollower {
     workflows_scanned: bool,
     running_agents: HashMap<String, HashMap<String, RunningAgent>>,
     planned: HashSet<String>,
+    agent_quiet_limit: std::time::Duration,
     dirty: bool,
     chunks_left: usize,
 }
@@ -31,6 +33,7 @@ pub struct TranscriptFollower {
 struct RunningAgent {
     key: String,
     sent_at: Option<std::time::Instant>,
+    changed_at: std::time::Instant,
     stats: serde_json::Map<String, Value>,
 }
 
@@ -176,7 +179,7 @@ impl TranscriptFollower {
     pub fn new(home: PathBuf, roots: Vec<PathBuf>, state_file: PathBuf, out: mpsc::UnboundedSender<NodeToControl>) -> TranscriptFollower {
         let acked = std::fs::read_to_string(&state_file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
 
-        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, running_agents: HashMap::new(), planned: HashSet::new(), dirty: false, chunks_left: CHUNKS_PER_POLL }
+        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, running_agents: HashMap::new(), planned: HashSet::new(), agent_quiet_limit: AGENT_QUIET_LIMIT, dirty: false, chunks_left: CHUNKS_PER_POLL }
     }
 
     pub fn on_connect(&mut self) {
@@ -295,7 +298,7 @@ impl TranscriptFollower {
 
             match (line["type"].as_str(), agent_id, line["key"].as_str()) {
                 (Some("started"), Some(agent_id), Some(agent_key)) => {
-                    running.insert(agent_id, RunningAgent { key: agent_key.to_string(), sent_at: None, stats: serde_json::Map::new() });
+                    running.insert(agent_id, RunningAgent { key: agent_key.to_string(), sent_at: None, changed_at: std::time::Instant::now(), stats: serde_json::Map::new() });
                 }
                 (Some("result"), Some(agent_id), _) => {
                     running.remove(&agent_id);
@@ -315,6 +318,8 @@ impl TranscriptFollower {
             let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line });
         }
 
+        let mut stopped = Vec::new();
+
         for (agent_id, agent) in running.iter_mut() {
             if agent.sent_at.is_some_and(|sent_at| sent_at.elapsed() < PROGRESS_EVERY) {
                 continue;
@@ -324,8 +329,16 @@ impl TranscriptFollower {
             let stats = agent_stats(path, agent_id);
 
             if stats.is_empty() || stats == agent.stats {
+                if agent.changed_at.elapsed() >= self.agent_quiet_limit {
+                    stopped.push(agent_id.clone());
+                    let line = serde_json::json!({"type": "failed", "key": agent.key, "agentId": agent_id, "reason": "Stopped responding"});
+                    let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line });
+                }
+
                 continue;
             }
+
+            agent.changed_at = std::time::Instant::now();
 
             let mut line = serde_json::json!({"type": "progress", "key": agent.key, "agentId": agent_id});
 
@@ -335,6 +348,10 @@ impl TranscriptFollower {
 
             agent.stats = stats;
             let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: journal.run_id.clone(), line });
+        }
+
+        for agent_id in stopped {
+            running.remove(&agent_id);
         }
     }
 
@@ -635,6 +652,31 @@ mod tests {
         assert_eq!(lines[0], serde_json::json!({"type": "plan", "phases": ["Write", "Verify"]}));
         assert_eq!(lines[1]["type"], "started");
         assert_eq!((lines[2]["type"].clone(), lines[2]["key"].clone(), lines[2]["tokens"].clone(), lines[2]["turns"].clone()), (serde_json::json!("progress"), serde_json::json!("k1"), serde_json::json!(2 + 40 + 100 + 3 + 10), serde_json::json!(2)));
+    }
+
+    #[test]
+    fn a_running_agent_whose_transcript_stops_changing_is_reported_as_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+        let run = root.join("proj").join("session-9").join("subagents").join("workflows").join("run-1");
+        let conversation = Uuid::from_u128(5);
+        let (mut follower, mut messages) = follower(dir.path(), &root, &dir.path().join("state.json"));
+        follower.agent_quiet_limit = std::time::Duration::ZERO;
+        append(&run.join("journal.jsonl"), "{\"old\":true}\n");
+        follower.poll(true, |_| Some(conversation));
+        append(&run.join("agent-a1.jsonl"), &agent_transcript());
+        append(&run.join("journal.jsonl"), "{\"type\":\"started\",\"key\":\"k1\",\"agentId\":\"a1\"}\n");
+        follower.poll(true, |_| Some(conversation));
+        drain(&mut messages);
+
+        for running in follower.running_agents.values_mut().flat_map(|agents| agents.values_mut()) {
+            running.sent_at = None;
+        }
+
+        follower.poll(true, |_| Some(conversation));
+
+        let lines: Vec<Value> = drain(&mut messages).into_iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line) } else { None }).collect();
+        assert_eq!(lines, [serde_json::json!({"type": "failed", "key": "k1", "agentId": "a1", "reason": "Stopped responding"})]);
     }
 
     #[test]

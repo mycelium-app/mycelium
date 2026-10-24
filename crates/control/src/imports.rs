@@ -872,6 +872,7 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
     .await
     .map_err(|_| "The file could not be read.".to_string())?;
     let (parsed, description) = read.map_err(|_| "The file could not be read.".to_string())?;
+    let label = workflow_label(state, parent_id, path).await;
     let Some(parsed) = parsed else {
         return Err("There is no conversation in this file.".to_string());
     };
@@ -895,9 +896,12 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
         insert_events(&mut tx, id, &events, if appended { stored as usize } else { 0 }).await.map_err(|cause| store_failure(path, cause))?;
         sqlx::query("delete from usage_turns where conversation_id = $1").bind(id).execute(&mut *tx).await.map_err(|cause| store_failure(path, cause))?;
         record_imported_turns(&mut tx, id, &turns_of(&parsed.items)).await.map_err(|cause| store_failure(path, cause.message()))?;
-        let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set updated_at = $2 where id = $1 returning {CONVERSATION_COLUMNS}")))
+        let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+            "update conversations set updated_at = $2, title = case when $3::text is not null and not title_user_set then $3 else title end where id = $1 returning {CONVERSATION_COLUMNS}"
+        )))
             .bind(id)
             .bind(parsed.last_at.unwrap_or_else(Utc::now))
+            .bind(&label)
             .fetch_one(&mut *tx)
             .await
             .map_err(|cause| store_failure(path, cause))?;
@@ -907,7 +911,8 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
         return Ok(Outcome::Skipped);
     }
 
-    let title = description
+    let title = label
+        .or(description)
         .filter(|description| !description.is_empty())
         .or_else(|| {
             parsed.items.iter().find_map(|item| match item {
@@ -952,6 +957,20 @@ async fn store_subagent(state: &AppState, node_id: Uuid, path: &str) -> Result<O
     tx.commit().await.map_err(|cause| store_failure(path, cause))?;
 
     Ok(Outcome::Imported(row.to_proto().map_err(|cause| store_failure(path, cause.message()))?))
+}
+
+async fn workflow_label(state: &AppState, parent_id: Uuid, path: &str) -> Option<String> {
+    let agent = path.rsplit('/').next()?.strip_prefix("agent-")?.strip_suffix(".jsonl")?;
+
+    sqlx::query_scalar::<_, String>(
+        "select payload->'line'->>'label' from events where conversation_id = $1 and kind = 'workflow' and payload->'line'->>'agentId' = $2 and payload->'line'->>'label' is not null order by seq limit 1",
+    )
+    .bind(parent_id)
+    .bind(agent)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten()
 }
 
 pub async fn sync_subagent(state: &AppState, node_id: Uuid, path: &str) {

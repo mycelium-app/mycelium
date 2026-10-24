@@ -121,6 +121,8 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side_kind: Option<SideKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<Uuid>,

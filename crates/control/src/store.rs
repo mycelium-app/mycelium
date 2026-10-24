@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -77,6 +77,7 @@ pub struct ConversationRow {
     pub options: Option<Value>,
     pub parent_id: Option<Uuid>,
     pub side_kind: Option<String>,
+    pub imported_from: Option<String>,
     pub provider_id: Option<Uuid>,
     pub project_id: Option<Uuid>,
     pub group_id: Option<Uuid>,
@@ -106,6 +107,7 @@ impl ConversationRow {
             options: self.options.clone(),
             parent_id: self.parent_id,
             side_kind: self.side_kind.as_deref().map(parse_enum).transpose()?,
+            agent_id: self.imported_from.as_deref().and_then(|path| path.rsplit('/').next()?.strip_prefix("agent-")?.strip_suffix(".jsonl")).filter(|_| self.side_kind.as_deref() == Some("subagent")).map(str::to_string),
             provider_id: self.provider_id,
             project_id: self.project_id,
             group_id: self.group_id,

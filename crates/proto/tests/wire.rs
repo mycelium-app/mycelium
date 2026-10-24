@@ -58,6 +58,7 @@ fn conversation() -> Conversation {
         options: None,
         parent_id: None,
         side_kind: None,
+        agent_id: None,
         provider_id: None,
         project_id: None,
         group_id: None,

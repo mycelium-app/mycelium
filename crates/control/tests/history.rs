@@ -390,6 +390,27 @@ async fn a_subagent_transcript_streamed_live_becomes_a_side_chat_that_grows_with
 }
 
 #[tokio::test]
+async fn a_workflow_agents_side_chat_is_titled_by_its_workflow_label_and_carries_its_agent_id() {
+    use base64::Engine;
+
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let parent = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(parent.id, PARENT_SESSION).await;
+    eventually("session id stored", || async { (server.conversation(parent.id).await["acp_session_id"] == PARENT_SESSION).then_some(()) }).await;
+    link.send(NodeToControl::Workflow { conversation_id: parent.id, run_id: "run-1".into(), line: json!({"type": "started", "key": "k1", "agentId": "aaa", "label": "write:docs", "phase": "Write"}) }).await;
+    eventually("the workflow line", || async { server.events(parent.id).await.iter().any(|event| event["kind"] == "workflow").then_some(()) }).await;
+    let transcript = subagent_transcript("aaa", "[Workflow harness] long preamble", "Done.", "2026-10-01T10:00:20Z", "2026-10-01T10:00:30Z") + "\n";
+    let data = base64::engine::general_purpose::STANDARD.encode(&transcript);
+
+    link.send(NodeToControl::Transcript { path: subagent_path("aaa"), offset: 0, data, size: Some(transcript.len() as i64) }).await;
+    let side_chat = eventually("the side chat", || async { side_chats_of(&server, &parent.id.to_string()).await.into_iter().next() }).await;
+
+    assert_eq!((side_chat["title"].clone(), side_chat["agent_id"].clone()), (json!("write:docs"), json!("aaa")));
+}
+
+#[tokio::test]
 async fn a_live_subagents_token_usage_is_counted_in_its_parent_conversations_total() {
     use base64::Engine;
 
