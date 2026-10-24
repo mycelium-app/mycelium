@@ -288,7 +288,7 @@ async fn importing_a_transcript_with_two_subagents_creates_two_read_only_side_ch
     mirror(&server, link.id, &subagent_path("zzz"), &subagent_transcript("zzz", "Run the build and report", "Build passes.", "2026-10-01T10:00:05Z", "2026-10-01T10:00:15Z")).await;
 
     let (_, before) = server.user.json(server.user.get("/api/v1/imports")).await;
-    assert_eq!(status_of(&before, link.id, "claude"), (3, 0));
+    assert_eq!(status_of(&before, link.id, "claude"), (1, 0));
 
     let job = import(&server, link.id, "claude").await;
     assert_eq!(job["imported"], 3);
@@ -309,7 +309,7 @@ async fn importing_a_transcript_with_two_subagents_creates_two_read_only_side_ch
     assert_eq!(events[1]["payload"]["update"]["content"]["text"], "Build passes.");
 
     let (_, after) = server.user.json(server.user.get("/api/v1/imports")).await;
-    assert_eq!(status_of(&after, link.id, "claude"), (3, 3));
+    assert_eq!(status_of(&after, link.id, "claude"), (1, 1));
     assert_eq!(import(&server, link.id, "claude").await["imported"], 0);
 }
 

@@ -455,7 +455,7 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
     let (subagents, sessions): (Vec<String>, Vec<String>) = paths.into_iter().filter(|path| !path.contains("/subagents/") || subagent_session(path).is_some()).partition(|path| subagent_session(path).is_some());
     let parent_sessions: HashSet<String> = sessions.iter().map(|path| session_id_of_path(agent, path)).chain(session_ids.iter().map(|session| session.to_string())).collect();
     let subagents: Vec<String> = subagents.into_iter().filter(|path| subagent_session(path).is_some_and(|session| parent_sessions.contains(session))).collect();
-    let found = (sessions.len() + subagents.len()) as i64;
+    let found = sessions.len() as i64;
     let mut pending: Vec<String> = sessions
         .into_iter()
         .filter(|path| !imported_paths.contains(path.as_str()) && !session_ids.contains(session_id_of_path(agent, path).as_str()))
@@ -535,7 +535,7 @@ pub async fn list(State(state): State<AppState>, _user: AuthUser) -> ApiResult<J
     for node_id in nodes {
         for agent in AGENTS {
             let (found, pending) = importable_paths(&state, node_id, agent).await?;
-            statuses.push(ImportStatus { node_id, agent, found, imported: found - pending.len() as i64 });
+            statuses.push(ImportStatus { node_id, agent, found, imported: found - pending.iter().filter(|path| subagent_session(path).is_none()).count() as i64 });
         }
     }
 
