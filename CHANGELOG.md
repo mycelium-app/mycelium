@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.4
+
+- Agents can ask for SSH access to one of your nodes. You approve it in the chat for a set time, and can shorten it or revoke it. The connection goes through the control plane, so the node opens no port.
+- A long paste becomes a Pasted text badge in the composer and in the sent message, and expands in place.
+- History leaves subagents out, counts their tokens and cost in their conversation's total, and keeps every row in line with the headers.
+- Chat rows drop the agent icon and the indent, and show a dot on the right: white for a reply you have not read, blue while the agent answers.
+- Much less writing to the database while agents stream, and faster lookups of a conversation's messages and turns.
+
 ## v0.5.2
 
 - Subagents leave the sidebar. A conversation's subagents are listed in a Subagents panel on its right, with their status.
