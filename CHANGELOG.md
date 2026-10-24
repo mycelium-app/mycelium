@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.9
+
+- Close session ends the agent of any conversation that still has one running, including ones waiting for review.
+- Codex accounts show how much of their 5-hour and weekly usage is left.
+- A sign-in that fails or is cancelled no longer leaves a signed-out account behind.
+- Each Sign in button names the node it signs in on.
+- The sign-in window shows Codex's output without colour codes, opens the right link, and copies the one-time code for you.
+- Workspaces in the sidebar read "[project] title".
+
 ## v0.6.8
 
 - The desktop app draws artefacts inside its own window, so they no longer open a separate blank window or show black.
