@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.5
+
+- The desktop app's built-in browser starts on JetBrains Runtime 25, which the Nix package uses, so artefacts show inside the app there too.
+- Each conversation remembers its own right-hand panel.
+
 ## v0.6.2
 
 - Queued messages go to the agent together when its turn ends, so several points arrive in one turn without interrupting it. Send all now interrupts with all of them.
