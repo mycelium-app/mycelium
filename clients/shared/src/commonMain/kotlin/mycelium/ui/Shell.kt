@@ -1,14 +1,11 @@
 package mycelium.ui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -212,8 +209,6 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     val reducedMotion = LocalReducedMotion.current
     val drawerShown by remember { derivedStateOf { progress.value > 0f } }
     val density = LocalDensity.current
-    val layoutDirection = LocalLayoutDirection.current
-    val gestureInset = with(density) { WindowInsets.systemGestures.getLeft(density, layoutDirection).toDp() }
 
     suspend fun settle(open: Boolean) {
         drawerOpen = open
@@ -242,14 +237,10 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxWidth().then(drag)) {
                     RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }
-        }
-
-        if (!drawerShown) {
-            Box(Modifier.padding(start = gestureInset).width(Tokens.Size.DrawerEdge).fillMaxHeight().then(drag))
         }
 
         if (drawerShown) {

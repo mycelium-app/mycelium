@@ -88,10 +88,20 @@ class PhoneDrawerTest {
     }
 
     @Test
-    fun swipingRightFromTheMiddleOfTheScreenLeavesTheSidebarClosed() {
+    fun swipingRightFromTheMiddleOfTheScreenOpensTheSidebar() {
         show()
 
-        rule.onRoot().performTouchInput { swipe(Offset(width / 2f, height / 2f), Offset(width * 0.9f, height / 2f)) }
+        rule.onRoot().performTouchInput { swipe(Offset(width / 2f, height / 2f), Offset(width * 0.95f, height / 2f)) }
+        rule.waitForIdle()
+
+        assertEquals(true, drawerIsOpen())
+    }
+
+    @Test
+    fun swipingLeftOnTheConversationLeavesTheSidebarClosed() {
+        show()
+
+        rule.onRoot().performTouchInput { swipe(Offset(width * 0.8f, height / 2f), Offset(width * 0.2f, height / 2f)) }
         rule.waitForIdle()
 
         assertEquals(false, drawerIsOpen())
@@ -105,9 +115,9 @@ class PhoneDrawerTest {
         assertEquals(true, drawerIsOpen())
 
         rule.onRoot().performTouchInput { swipe(Offset(width * 0.7f, height / 2f), Offset(width * 0.1f, height / 2f)) }
-        rule.waitForIdle()
 
-        assertEquals(false, drawerIsOpen())
+        rule.waitUntil(5_000) { !drawerIsOpen() }
+        rule.waitForIdle()
     }
 
     @Test
