@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.7.0
+
+- Artefacts belong to projects and chats, with view/edit links, access requests and agent discovery.
+- Edit files in Changes, stage, unstage and revert individual hunks, and open commits from History. Git commands find git-town through mise and use approved forge credentials for fetch and push.
+- Run native workflows and subagents across nodes, agents and chat models, with dependencies, approval gates, nested workflows and saved progress.
+- Approve a connection between chats to allow future messages in both directions, and revoke it in Settings.
+- Goals show the running turn and reported token usage before it finishes. Agents can read their goal and account usage.
+- Usage shows OpenRouter API-key spend in USD. Last successful usage readings and their fetch times survive restarts on the control plane.
+- Project selection is searchable, the desktop composer keeps Stop and Send visible, and the first message appears immediately in a new conversation.
+- Codex Guardian Review instructions render as cards, design saves finish correctly, and agents can set their project's icon from an image file.
+- Startup recovery finishes before new chat replies are accepted, preventing an interrupted startup from leaving a new reply unfinished.
+
 ## v0.6.12
 
 - The desktop's built-in browser is drawn by the app itself: the panel beside it resizes again, typing and clicks reach it directly, it follows the app's UI scale, and the scroll wheel and Ctrl+scroll zoom go the right way.
