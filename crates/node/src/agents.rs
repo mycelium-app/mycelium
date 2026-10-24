@@ -191,7 +191,7 @@ pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::usage::{USAGE_ENDPOINT, USAGE_MIN_AGE};
+    use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE};
 
     fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
@@ -266,7 +266,7 @@ mod tests {
     }
 
     fn no_usage() -> UsageCache {
-        UsageCache::new(USAGE_ENDPOINT, USAGE_MIN_AGE)
+        UsageCache::new(USAGE_ENDPOINT, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE)
     }
 
     fn write(path: &Path, text: &str) {

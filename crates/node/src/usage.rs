@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub const USAGE_ENDPOINT: &str = "https://api.anthropic.com/api/oauth/usage";
+pub const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const USAGE_MIN_AGE: Duration = Duration::from_secs(300);
 const USAGE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEADING_WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
@@ -18,14 +19,15 @@ pub struct Reading {
 
 pub struct UsageCache {
     endpoint: String,
+    codex_endpoint: String,
     min_age: Duration,
     http: reqwest::Client,
     entries: Mutex<HashMap<PathBuf, (Instant, Option<Reading>)>>,
 }
 
 impl UsageCache {
-    pub fn new(endpoint: &str, min_age: Duration) -> UsageCache {
-        UsageCache { endpoint: endpoint.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
+    pub fn new(endpoint: &str, codex_endpoint: &str, min_age: Duration) -> UsageCache {
+        UsageCache { endpoint: endpoint.to_string(), codex_endpoint: codex_endpoint.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
     }
 
     pub fn reading(&self, config_dir: &Path) -> Option<Reading> {
@@ -54,15 +56,10 @@ impl UsageCache {
     }
 
     async fn fetch(&self, config_dir: &Path) -> Option<Reading> {
-        let credentials: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?).ok()?;
-        let token = credentials["claudeAiOauth"]["accessToken"].as_str().filter(|token| !token.is_empty())?;
-        let response = self.http.get(&self.endpoint).timeout(USAGE_TIMEOUT).bearer_auth(token).header("anthropic-beta", "oauth-2025-04-20").send().await.ok()?;
-
-        if !response.status().is_success() {
-            return None;
-        }
-
-        let windows = usage_windows(&response.json().await.ok()?);
+        let windows = match read_json(&config_dir.join(".credentials.json")) {
+            Some(credentials) => self.fetch_claude(&credentials).await?,
+            None => self.fetch_codex(&read_json(&config_dir.join("auth.json"))?).await?,
+        };
 
         if windows.is_empty() {
             return None;
@@ -70,6 +67,38 @@ impl UsageCache {
 
         Some(Reading { windows, read_at: Utc::now() })
     }
+
+    async fn fetch_claude(&self, credentials: &serde_json::Value) -> Option<Vec<UsageWindow>> {
+        let token = credentials["claudeAiOauth"]["accessToken"].as_str().filter(|token| !token.is_empty())?;
+        let response = self.http.get(&self.endpoint).timeout(USAGE_TIMEOUT).bearer_auth(token).header("anthropic-beta", "oauth-2025-04-20").send().await.ok()?;
+
+        if !response.status().is_success() {
+            return None;
+        }
+
+        Some(usage_windows(&response.json().await.ok()?))
+    }
+
+    async fn fetch_codex(&self, auth: &serde_json::Value) -> Option<Vec<UsageWindow>> {
+        let token = auth["tokens"]["access_token"].as_str().filter(|token| !token.is_empty())?;
+        let mut request = self.http.get(&self.codex_endpoint).timeout(USAGE_TIMEOUT).bearer_auth(token).header("user-agent", "codex_cli_rs");
+
+        if let Some(account_id) = auth["tokens"]["account_id"].as_str() {
+            request = request.header("chatgpt-account-id", account_id);
+        }
+
+        let response = request.send().await.ok()?;
+
+        if !response.status().is_success() {
+            return None;
+        }
+
+        Some(codex_usage_windows(&response.json().await.ok()?))
+    }
+}
+
+fn read_json(path: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 fn usage_windows(body: &serde_json::Value) -> Vec<UsageWindow> {
@@ -88,6 +117,24 @@ fn usage_windows(body: &serde_json::Value) -> Vec<UsageWindow> {
     windows.sort_by_key(|window| (LEADING_WINDOWS.iter().position(|leading| *leading == window.name).unwrap_or(LEADING_WINDOWS.len()), window.name.clone()));
 
     windows
+}
+
+fn codex_usage_windows(body: &serde_json::Value) -> Vec<UsageWindow> {
+    ["primary_window", "secondary_window"]
+        .iter()
+        .filter_map(|key| {
+            let window = &body["rate_limit"][key];
+            let used_percent = window["used_percent"].as_f64()?;
+            let resets_at = window["reset_at"].as_i64().and_then(|seconds| DateTime::from_timestamp(seconds, 0));
+            let name = match window["limit_window_seconds"].as_i64() {
+                Some(18_000) => "five_hour",
+                Some(604_800) => "seven_day",
+                _ => key.trim_end_matches("_window"),
+            };
+
+            Some(UsageWindow { name: name.to_string(), used_percent, resets_at, rate_per_hour: None, runs_out_at: None })
+        })
+        .collect()
 }
 
 pub fn usage_left(windows: &[UsageWindow]) -> Option<u8> {
@@ -142,7 +189,7 @@ mod tests {
         let seen = Seen::default();
         let endpoint = serve(200, json!({"five_hour": {"utilization": 82.0}, "seven_day": {"utilization": 31}}), seen.clone()).await;
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new(&endpoint, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
 
@@ -151,13 +198,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_codex_account_reports_its_five_hour_and_weekly_windows_read_with_its_chatgpt_token() {
+        let seen = Seen::default();
+        let five_hour = json!({"used_percent": 40, "limit_window_seconds": 18000, "reset_at": 1_792_900_000});
+        let weekly = json!({"used_percent": 75, "limit_window_seconds": 604800, "reset_at": 1_793_400_000});
+        let endpoint = serve(200, json!({"rate_limit": {"primary_window": five_hour, "secondary_window": weekly}}), seen.clone()).await;
+        let account = tempfile::tempdir().unwrap();
+        std::fs::write(account.path().join("auth.json"), json!({"tokens": {"access_token": "chatgpt-token", "account_id": "acct"}}).to_string()).unwrap();
+        let cache = UsageCache::new(USAGE_ENDPOINT, &endpoint, USAGE_MIN_AGE);
+
+        cache.refresh(&[account.path().to_path_buf()]).await;
+
+        let windows = cache.reading(account.path()).unwrap().windows;
+        assert_eq!(windows.iter().map(|window| (window.name.as_str(), window.used_percent)).collect::<Vec<_>>(), vec![("five_hour", 40.0), ("seven_day", 75.0)]);
+        assert_eq!(windows[0].resets_at, DateTime::from_timestamp(1_792_900_000, 0));
+        assert_eq!(cache.left(account.path()), Some(25));
+        assert_eq!(seen.lock().unwrap()[0].0, "Bearer chatgpt-token");
+    }
+
+    #[tokio::test]
     async fn a_fresh_reading_is_not_fetched_again_until_it_is_old_enough() {
         let seen = Seen::default();
         let endpoint = serve(200, json!({"five_hour": {"utilization": 10}}), seen.clone()).await;
         let account = account_with_token("fake-access-token");
         let dirs = [account.path().to_path_buf()];
-        let cache = UsageCache::new(&endpoint, USAGE_MIN_AGE);
-        let eager = UsageCache::new(&endpoint, Duration::ZERO);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let eager = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, Duration::ZERO);
 
         cache.refresh(&dirs).await;
         cache.refresh(&dirs).await;
@@ -175,13 +241,13 @@ mod tests {
         let bare = tempfile::tempdir().unwrap();
 
         for endpoint in [&refused, &empty] {
-            let cache = UsageCache::new(endpoint, USAGE_MIN_AGE);
+            let cache = UsageCache::new(endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
             cache.refresh(&[account.path().to_path_buf()]).await;
 
             assert_eq!(cache.left(account.path()), None);
         }
 
-        let cache = UsageCache::new(&empty, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&empty, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
         cache.refresh(&[bare.path().to_path_buf()]).await;
 
         assert_eq!(cache.left(bare.path()), None);
@@ -190,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn usage_is_unknown_when_the_endpoint_cannot_be_reached() {
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new("http://127.0.0.1:9/api/oauth/usage", USAGE_MIN_AGE);
+        let cache = UsageCache::new("http://127.0.0.1:9/api/oauth/usage", CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
 
@@ -205,7 +271,7 @@ mod tests {
         let work = accounts.join("claude").join("work");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join(".credentials.json"), json!({"claudeAiOauth": {"accessToken": "fake-access-token"}}).to_string()).unwrap();
-        let cache = UsageCache::new(&endpoint, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
         let available = [AgentInfo { agent: AgentId::Claude, version: None, available: true, update_available: None }];
 
         cache.refresh(std::slice::from_ref(&work)).await;
@@ -230,7 +296,7 @@ mod tests {
         });
         let endpoint = serve(200, body, Seen::default()).await;
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new(&endpoint, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
         let reading = cache.reading(account.path()).unwrap();
@@ -255,7 +321,7 @@ mod tests {
         let work = accounts.join("claude").join("work");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join(".credentials.json"), json!({"claudeAiOauth": {"accessToken": "fake-access-token"}}).to_string()).unwrap();
-        let cache = UsageCache::new(&endpoint, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
         let available = [AgentInfo { agent: AgentId::Claude, version: None, available: true, update_available: None }];
 
         cache.refresh(std::slice::from_ref(&work)).await;
