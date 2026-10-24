@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -25,6 +26,7 @@ import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Review the change","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 private const val Subagent = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Check the build","status":"done","created_at":"2026-10-22T10:01:00Z","updated_at":"2026-10-22T10:02:00Z","parent_id":"c1","side_kind":"subagent"}"""
@@ -98,5 +100,17 @@ class SubagentChatsTest {
         rule.onNodeWithText("Open the conversation it belongs to").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aSubagentRowShowsHowLongAgoItWasLastActive() {
+        shell()
+
+        openSubagentsOfTheParent()
+
+        val description = rule.onNodeWithContentDescription("Check the build, ", substring = true).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
+
+        assertEquals(3, description.split(", ").size)
+        assertTrue(description.split(", ").last().isNotBlank())
     }
 }

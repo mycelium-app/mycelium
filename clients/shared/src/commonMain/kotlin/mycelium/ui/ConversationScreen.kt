@@ -170,6 +170,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val sideKind = { kind: String -> if (chat) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
     val thread = remember(state.events[id]) { threadBuilder.build(state.events[id].orEmpty()) }
+    val agentWorking = conversation.agentActive || (conversation.status == ConversationStatus.Working && turnIsOpen(state.events[id].orEmpty()))
     val sending = state.sending[id].orEmpty()
     val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && state.queues[id].isNullOrEmpty()
     val delivering = sending.take(if (goesStraight) 1 else 0)
@@ -290,7 +291,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     ) else null,
                     agent = conversation.agent,
                     dismissedPins = dismissedPins,
-                    working = conversation.status == ConversationStatus.Working,
+                    working = agentWorking,
                     onUnpin = { key ->
                         store.pinDismissals.dismiss(id, key)
                         dismissedPins = store.pinDismissals[id]
@@ -309,7 +310,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 } else {
                     Composer(
                         conversation = conversation,
-                        working = conversation.status == ConversationStatus.Working && turnIsOpen(state.events[id].orEmpty()),
+                        working = agentWorking,
                         queue = state.queues[id].orEmpty(),
                         sending = sending.drop(delivering.size),
                         onSend = ::send,
@@ -606,13 +607,16 @@ private fun SubagentsList(subagents: List<Conversation>, onOpen: (String) -> Uni
         Label("This conversation has no subagents.", Modifier.padding(horizontal = Tokens.Space.S3), color = colors.textMuted)
     }
 
+    val stamp = timestamper()
+
     subagents.forEach { subagent ->
         val status = statusSectionName(subagent.status)
+        val since = stamp(subagent.updatedAt, false)
 
         Row(
             Modifier
                 .fillMaxWidth()
-                .pressable({ onOpen(subagent.id) }, shape = BlockShape, description = "${subagent.title}, $status")
+                .pressable({ onOpen(subagent.id) }, shape = BlockShape, description = "${subagent.title}, $status, $since")
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
@@ -620,6 +624,7 @@ private fun SubagentsList(subagents: List<Conversation>, onOpen: (String) -> Uni
             Icon(iconOf(subagent.status), colors.textMuted, Tokens.Size.IconSm)
             Label(subagent.title, Modifier.weight(1f), maxLines = 1)
             Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            Label(since, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
         }
     }
 }

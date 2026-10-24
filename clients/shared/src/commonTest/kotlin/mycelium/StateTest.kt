@@ -1,5 +1,6 @@
 package mycelium
 
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -342,5 +343,15 @@ class ProjectJoinTest {
         val removed = reduce(edited, parseStreamMessage("""{"type":"memory_removed","memory_id":"m1"}""")!!)
 
         assertEquals(Triple(emptySet<String>(), setOf("m1"), 3), Triple(removed.memories.keys, removed.removedMemories, removed.memoryRevision))
+    }
+}
+
+class AgentActiveTest {
+    private val base = """"id":"c1","owner":"u","node_id":"n","agent":"claude","cwd":"/work","title":"t","status":"working","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z""""
+
+    @Test
+    fun aConversationIsAgentActiveOnlyWhenTheServerSaysSo() {
+        assertEquals(true, MyceliumJson.decodeFromString<Conversation>("""{$base,"agent_active":true}""").agentActive)
+        assertEquals(false, MyceliumJson.decodeFromString<Conversation>("""{$base}""").agentActive)
     }
 }

@@ -877,6 +877,7 @@ data class Conversation(
     @SerialName("provider_id") val providerId: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("group_id") val groupId: String? = null,
+    @SerialName("agent_active") val agentActive: Boolean = false,
 )
 
 @Serializable
