@@ -56,6 +56,13 @@ fun parsePasted(message: String): List<PastedSegment> {
     return segments
 }
 
+fun pastedSummary(message: String): String = parsePasted(message).joinToString("") { segment ->
+    when (segment) {
+        is PastedSegment.Plain -> segment.text
+        is PastedSegment.Pasted -> "[${pastedLabel(segment.lines)}]"
+    }
+}
+
 fun pasteInsertion(before: String, after: String): IntRange? {
     val prefix = before.commonPrefixWith(after).length
     val suffix = before.commonSuffixWith(after).length.coerceAtMost(minOf(before.length, after.length) - prefix)

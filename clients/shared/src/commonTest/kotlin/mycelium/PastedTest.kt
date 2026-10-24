@@ -6,6 +6,7 @@ import mycelium.state.isLargePaste
 import mycelium.state.parsePasted
 import mycelium.state.pastedBlock
 import mycelium.state.pastedLabel
+import mycelium.state.pastedSummary
 import mycelium.state.pasteInsertion
 import mycelium.state.serialisedPastes
 import kotlin.test.Test
@@ -81,5 +82,12 @@ class PastedTest {
     fun theLabelCountsLines() {
         assertEquals("Pasted text · 20 lines", pastedLabel(20))
         assertEquals("Pasted text · 1 line", pastedLabel(1))
+    }
+
+    @Test
+    fun aSummaryShowsEachPastedBlockAsItsLabel() {
+        val message = "look at " + pastedBlock("a\nb\nc") + " and fix it"
+
+        assertEquals("look at [Pasted text · 3 lines] and fix it", pastedSummary(message))
     }
 }

@@ -69,6 +69,7 @@ import mycelium.state.freePasteMarker
 import mycelium.state.isPasteMarker
 import mycelium.state.pastedLabel
 import mycelium.state.pastedLineCount
+import mycelium.state.pastedSummary
 import mycelium.state.pasteInsertion
 import mycelium.state.serialisedPastes
 import kotlinx.coroutines.delay
@@ -681,7 +682,7 @@ private fun QueuedMessages(
                         Dot(if (index == 0) colors.statusAttention else colors.textFaint, hollow = index != 0)
                     }
 
-                    Label(item.text, Modifier.weight(1f), maxLines = 1)
+                    Label(pastedSummary(item.text).replace('\n', ' ').trim(), Modifier.weight(1f), maxLines = 1)
 
                     Row(Modifier.alpha(if (showActions) 1f else 0f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                         MyButton({ onRemove(item.id) }, icon = MyIcon.Close, description = "Remove queued message", size = ButtonSize.Sm, muted = true)
