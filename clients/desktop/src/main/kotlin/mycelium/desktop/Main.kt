@@ -100,7 +100,7 @@ private object DesktopPlatform : Platform {
     override fun navigate(url: String) = openUrl(url)
 
     override fun openUrl(url: String) {
-        val opened = runCatching { ProcessBuilder("xdg-open", url).start() }.isSuccess
+        val opened = runCatching { ProcessBuilder("xdg-open", url).apply { environment().remove("LD_LIBRARY_PATH") }.start() }.isSuccess
 
         if (opened) {
             return
