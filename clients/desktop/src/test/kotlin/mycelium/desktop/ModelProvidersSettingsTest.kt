@@ -18,8 +18,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ModelProvidersSettings
@@ -36,11 +34,14 @@ class ModelProvidersSettingsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<HttpRequestData>()
-    private val bodies = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<HttpRequestData>())
+    private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to AnthropicJson
 
-    private fun store(): Store {
+    private fun show() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             requests += request
@@ -53,13 +54,14 @@ class ModelProvidersSettingsTest {
             }
         }
 
-        return Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
     fun theListShowsEachProviderWithItsModels() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithText("Ollama").assertExists()
         rule.onNodeWithText("llama3.2, qwen3").assertExists()
@@ -69,8 +71,7 @@ class ModelProvidersSettingsTest {
     @Test
     fun addingAnOpenAiCompatibleEndpointSendsItsBaseUrlAndNoKey() {
         postAnswer = HttpStatusCode.Created to OllamaJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("Ollama")
@@ -84,8 +85,7 @@ class ModelProvidersSettingsTest {
 
     @Test
     fun addingAnAnthropicProviderSendsTheMaskedKeyAndShowsOnlyItsHint() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithText("Anthropic").performClick()
@@ -101,8 +101,7 @@ class ModelProvidersSettingsTest {
 
     @Test
     fun addingOpenRouterSendsItsAddressWithTheKeyAndAsksForAKeyFirst() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithText("OpenRouter").performClick()
@@ -119,8 +118,7 @@ class ModelProvidersSettingsTest {
     @Test
     fun aServerErrorShowsItsMessageAndKeepsTheForm() {
         postAnswer = HttpStatusCode.BadRequest to """{"error":"provider_unreachable","message":"Mycelium could not reach http://box:11434/v1. Check the address and try again."}"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithText("Add provider").performClick()
@@ -132,8 +130,7 @@ class ModelProvidersSettingsTest {
     @Test
     fun refreshingFetchesTheModelsAgain() {
         postAnswer = HttpStatusCode.OK to OllamaJson.replace("llama3.2", "gemma3")
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithContentDescription("Refresh the models of Ollama").performClick()
 
@@ -143,8 +140,7 @@ class ModelProvidersSettingsTest {
 
     @Test
     fun removingDeletesTheProviderAndItsRow() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        show()
 
         rule.onNodeWithContentDescription("Remove Ollama").performClick()
 

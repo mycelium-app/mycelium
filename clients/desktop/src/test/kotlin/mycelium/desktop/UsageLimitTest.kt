@@ -12,8 +12,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -37,6 +35,9 @@ private fun limitEvent(resetsAt: String?) = """[{"conversation_id":"c1","seq":1,
 class UsageLimitTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
 
     private val calls = mutableListOf<String>()
     private val bodies = mutableListOf<String>()
@@ -64,7 +65,7 @@ class UsageLimitTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
         return store
@@ -142,6 +143,7 @@ class UsageLimitTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("When a usage limit is reached").assertExists()
         rule.onNodeWithText("Wait and resume automatically").performClick()
 

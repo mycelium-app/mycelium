@@ -18,8 +18,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ChatToolsSettings
@@ -35,6 +33,9 @@ private const val GitHubJson = """{"id":"s2","name":"GitHub","url":"https://gh.t
 class ChatToolsSettingsTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
 
     private val requests = mutableListOf<HttpRequestData>()
     private val bodies = mutableListOf<String>()
@@ -54,7 +55,7 @@ class ChatToolsSettingsTest {
             }
         }
 
-        return Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
     }
 
     @Test
@@ -94,6 +95,7 @@ class ChatToolsSettingsTest {
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
         rule.onNodeWithText("Add a server").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add server").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Add server").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not accept this token. Check that it has not expired and is for this server, then try again.").fetchSemanticsNodes().isNotEmpty() }
