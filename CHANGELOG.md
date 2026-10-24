@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.11
+
+- Ctrl+Z and Ctrl+Shift+Z in the composer undo and redo pasted text and image badges whole, a word at a time for typing.
+
 ## v0.6.10
 
 - A project without a chosen icon shows its first letter, so workspace rows show the project by its icon and no longer put its name before the title.
