@@ -129,7 +129,7 @@ class AccountUsageTest {
     fun aCompactWindowGivesItsForecastAndTimeLeft() {
         val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T19:00:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T17:00:00Z")
 
-        assertEquals(CompactWindowUsage(64, "runs out ~17:00", "64% used, 5h left", true), compactWindowUsage(window, ::utc, Now))
+        assertEquals(CompactWindowUsage(64, "runs out in 3h", "64% used, 5h left", true), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test

@@ -64,7 +64,11 @@ fun Kpi(title: String, value: String, modifier: Modifier = Modifier, caption: St
 @Composable
 fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, attention: Boolean = false) {
     val colors = MyTheme.colors
-    val fill = if (attention || percent >= AttentionPercent) colors.statusAttention else colors.accent
+    val fill = when {
+        percent >= AttentionPercent -> colors.statusFailed
+        attention -> colors.statusAttention
+        else -> colors.accent
+    }
 
     Canvas(
         modifier

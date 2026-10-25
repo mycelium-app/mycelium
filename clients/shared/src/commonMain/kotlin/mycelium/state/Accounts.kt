@@ -142,8 +142,7 @@ fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, no
 
     val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
     val attention = percent < 100 && runsOutBeforeReset(window)
-    val approximately = if (localDateTime(now.toEpochMilliseconds()) == null) "" else "~"
-    val forecast = window.runsOutAt?.takeIf { attention }?.let { "runs out $approximately${usageClockTime(it, localDateTime, now)}" }
+    val forecast = window.runsOutAt?.takeIf { attention }?.let { "runs out ${until(it, now)}" }
     val left = resetsAt?.let { ", ${until(it, now).removePrefix("in ")} left" }.orEmpty()
 
     return CompactWindowUsage(percent, forecast, "$percent% used$left", attention)

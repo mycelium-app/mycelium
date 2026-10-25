@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -84,17 +85,13 @@ fun UsageCard(
 private fun UsageHeader(title: String, thisChat: Boolean, readAt: String?, leading: @Composable RowScope.() -> Unit = {}) {
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
         leading()
-        Label(title, Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+        Label(title, style = Tokens.Type.UiStrong, maxLines = 1)
 
         if (thisChat) {
             Tag("This chat")
         }
 
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-            if (readAt != null) {
-                Label("last updated ${ago(readAt)}", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
-            }
-        }
+        Label(readAt?.let { "last updated ${ago(it)}" }.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), MyTheme.colors.textMuted, maxLines = 1)
     }
 }
 
@@ -105,13 +102,8 @@ private fun UsageLine(name: String, note: String?, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
         Label(name, style = Tokens.Type.Meta, maxLines = 1)
 
-        if (note != null) {
-            Label(note, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-        }
-
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-            Label(value, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-        }
+        Label(note.orEmpty(), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+        Label(value, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
     }
 }
 

@@ -1,5 +1,18 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import mycelium.ui.Meter
+import mycelium.ui.MyTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
@@ -121,6 +134,44 @@ class UsageCardTest {
     }
 
     @Test
+    fun lastUpdatedLinesUpWithTheWindowValuesAtTheRightAndALongForecastLeavesTheValueWhole() {
+        val window = UsageWindow("seven_day", 17.0, resetsAt = "2099-01-07T10:00:00Z", ratePerHour = 1.0, runsOutAt = "2099-01-03T01:37:00Z")
+        val account = AgentAccount("codex", "work@example.com", "oauth_token", emptyList(), windows = listOf(window), usageReadAt = "2026-10-25T10:00:00Z")
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                Box(Modifier.width(320.dp).height(600.dp)) {
+                    UsageCard(listOf(account to false))
+                }
+            }
+        }
+
+        val updated = rule.onNodeWithText("last updated", substring = true).getUnclippedBoundsInRoot()
+        val value = rule.onNodeWithText("17% used", substring = true).fetchSemanticsNode()
+
+        assertEquals(updated.right, value.boundsInRoot.right.toDp(rule), 1.dp)
+        assertTrue(value.config[SemanticsProperties.Text].single().text.endsWith("left"))
+    }
+
+    @Test
+    fun aBarAtNinetyPercentOrMoreIsRed() {
+        var failed = Color.Unspecified
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                failed = MyTheme.colors.statusFailed
+                Box(Modifier.width(200.dp)) {
+                    Meter(98, "Weekly window 98% used")
+                }
+            }
+        }
+
+        val image = rule.onNodeWithContentDescription("Weekly window 98% used").captureToImage().toPixelMap()
+
+        assertEquals(failed, image[image.width / 2, image.height / 2])
+    }
+
+    @Test
     fun theProviderTheChatUsesComesBeforeTheAccounts() {
         val account = AgentAccount("claude", "work@example.com", "oauth_token", emptyList(), windows = listOf(UsageWindow("five_hour", 40.0)))
 
@@ -192,4 +243,10 @@ class UsageCardTest {
 
         rule.onNodeWithText("This chat").assertDoesNotExist()
     }
+}
+
+private fun Float.toDp(rule: ComposeContentTestRule): Dp = with(rule.density) { this@toDp.toDp() }
+
+private fun assertEquals(expected: Dp, actual: Dp, tolerance: Dp) {
+    assertTrue((expected - actual).value.let { kotlin.math.abs(it) } <= tolerance.value, "expected $expected, was $actual")
 }
