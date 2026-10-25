@@ -201,7 +201,7 @@ fn claude_credential(home: &Path) -> (&'static str, bool) {
 
 pub fn login_command(agent: AgentId, method: &str) -> Option<Vec<String>> {
     let words: &[&str] = match (agent, method) {
-        (AgentId::Claude, "oauth_token") => &["claude", "setup-token"],
+        (AgentId::Claude, "oauth_token") => &["claude", "auth", "login"],
         (AgentId::Codex, "device_auth") => &["codex", "login", "--device-auth"],
         _ => return None,
     };
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn each_agent_signs_in_with_the_method_it_reports() {
-        assert_eq!(login_command(AgentId::Claude, "oauth_token"), Some(vec!["claude".to_string(), "setup-token".to_string()]));
+        assert_eq!(login_command(AgentId::Claude, "oauth_token"), Some(vec!["claude".to_string(), "auth".to_string(), "login".to_string()]));
         assert_eq!(login_command(AgentId::Codex, "device_auth"), Some(vec!["codex".to_string(), "login".to_string(), "--device-auth".to_string()]));
     }
 

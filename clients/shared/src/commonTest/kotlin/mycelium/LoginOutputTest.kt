@@ -13,6 +13,12 @@ private const val CodexDeviceSignIn = "\r\nWelcome to Codex [v\u001B[90m0.164.0\
     "2. Enter this one-time code \u001B[90m(expires in 15 minutes)\u001B[0m\r\n" +
     "   \u001B[94mAB12-CD34E\u001B[0m\r\n"
 
+private const val ClaudeAuthorizeUrl = "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a&response_type=code" +
+    "&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Aprofile+user%3Ainference&code_challenge=Oy3dM3&state=a5uC-hQf"
+
+private const val ClaudeAuthLogin = "Opening browser to sign in\u2026\r\nIf the browser didn't open, visit: " +
+    "\u001B]8;;$ClaudeAuthorizeUrl\u0007$ClaudeAuthorizeUrl\u001B]8;;\u0007\r\nPaste code here if prompted > "
+
 class LoginOutputTest {
     @Test
     fun codexSignInOutputShowsWithoutColourCodesAndGivesTheCleanLinkAndCode() {
@@ -29,5 +35,10 @@ class LoginOutputTest {
 
         assertEquals("https://claude.ai/oauth/authorize?code=true&client_id=abc", firstUrl(text))
         assertNull(oneTimeCode(text))
+    }
+
+    @Test
+    fun claudeAuthLoginOutputGivesTheWholeLinkInsideItsTerminalHyperlink() {
+        assertEquals(ClaudeAuthorizeUrl, firstUrl(withoutTerminalCodes(ClaudeAuthLogin)))
     }
 }

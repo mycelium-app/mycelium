@@ -568,7 +568,7 @@ reports "Join tokens arrive in a later release" until then.
 
 | agent | ACP command (default, overridable) | Login command |
 |---|---|---|
-| `claude` | `claude-agent-acp` (`MYCELIUM_CLAUDE_ACP`) | method `oauth_token`: `claude setup-token`, verify against `claude --help` |
+| `claude` | `claude-agent-acp` (`MYCELIUM_CLAUDE_ACP`) | method `oauth_token`: `claude auth login`, verify against `claude --help` |
 | `codex` | `codex-acp` (`MYCELIUM_CODEX_ACP`) | method `device_auth`: `codex login --device-auth` |
 
 An agent is available when its ACP command resolves on `PATH`. The daemon reports versions from

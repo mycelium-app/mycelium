@@ -109,7 +109,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
                             sessions[node.id] = LoginSession(started.loginId, agent)
                         }
                     },
-                    onLoginInput = { text -> sessions[node.id]?.let { s -> store.act { api.loginInput(s.loginId, text + "\n") } } },
+                    onLoginInput = { text -> sessions[node.id]?.let { s -> store.act { api.loginInput(s.loginId, text) } } },
                     onLoginClose = {
                         sessions[node.id]?.let { s ->
                             store.act { api.stopLogin(s.loginId) }
@@ -392,6 +392,10 @@ fun LoginPanel(
     val text = withoutTerminalCodes(output)
     val link = firstUrl(text)
     val code = oneTimeCode(text)
+    val send = {
+        onInput(reply + "\r")
+        reply = ""
+    }
 
     Column(
         Modifier.fillMaxWidth().background(colors.bgSelected).padding(Tokens.Space.S3).semantics { contentDescription = "${agentName(session.agent)} sign-in" },
@@ -428,9 +432,9 @@ fun LoginPanel(
                         placeholder = "Paste the code, then send",
                         modifier = Modifier.weight(1f),
                         mono = true,
-                        onSubmit = { onInput(reply); reply = "" },
+                        onSubmit = send,
                     )
-                    MyButton({ onInput(reply); reply = "" }, text = "Send", variant = ButtonVariant.Outline)
+                    MyButton(send, text = "Send", variant = ButtonVariant.Outline)
                 }
 
                 StatusMark("Waiting for you to sign in", Tone.Working, MyIcon.Working)
