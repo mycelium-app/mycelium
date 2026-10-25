@@ -3,340 +3,553 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mycelium</title>
-<meta name="description" content="Coding agents on every machine you own, steered from one place.">
+<meta name="description" content="Claude Code, Codex and chat models in one self-hosted workspace.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<title>Mycelium: your agents, every machine, one place</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="tokens.css">
-<link rel="stylesheet" href="mycelium.css">
-<link rel="stylesheet" href="site.css">
+<style>
+:root {
+  --page: #0f1110;
+  --bg-content: #161616; --bg-panel: #1a1a1a; --bg-chrome: #1f1f1f; --bg-raised: #222222; --bg-hover: #2c2c2c; --bg-selected: #333333;
+  --border: #2c2c2c; --border-control: #6b6b6b;
+  --text: #e6e6e6; --text-muted: #a8a8a8; --text-faint: #9c9c9c;
+  --accent: #7ccba0; --on-accent: #111111;
+  --working: #7fb2ec; --attention: #e2b45f; --failed: #ec8576; --done: #7ccba0;
+  --diff-add-bg: #17291f; --diff-del-bg: #2f1c19;
+  --node-blue: #8ab8f0; --node-violet: #b9a3f2; --node-amber: #e6bc6c; --node-rose: #ee93ae;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --panel-edge: inset 0 1px 0 0 rgba(255,255,255,.05), 0 0 0 1px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.2), 0 4px 8px -2px rgba(0,0,0,.18), 0 12px 24px -8px rgba(0,0,0,.22), 0 40px 90px -30px rgba(0,0,0,.7);
+  --glass: inset 0 1px 0 0 rgba(255,255,255,.06), inset 0 0 0 1px rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.36), 0 1px 1px -.5px rgba(0,0,0,.22), 0 3px 3px -1.5px rgba(0,0,0,.2), 0 6px 6px -3px rgba(0,0,0,.16);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.sm { width: 14px; height: 14px; }
+
+
+.disclosure { background: color-mix(in srgb, var(--accent) 10%, var(--bg-content)); border-bottom: 1px solid var(--border); }
+.disclosure p { width: min(calc(100% - 3rem), 72rem); margin: 0 auto; padding: 12px 0; font-size: 17px; line-height: 26px; color: var(--text); }
+
+.hero { position: relative; isolation: isolate; overflow: hidden; }
+.art { position: absolute; z-index: -1; inset: 0 0 430px; }
+.art::before { content: ""; position: absolute; inset: 0; background: url("https://images.unsplash.com/photo-1613502719426-cba8fcd9e51c?auto=format&fit=crop&w=2400&h=1500&q=75") 50% 38% / cover no-repeat; -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent); mask-image: linear-gradient(to bottom, #000 72%, transparent); }
+.art::after { content: ""; position: absolute; inset: 0; background:
+  linear-gradient(90deg, rgba(12,14,13,.86) 0%, rgba(12,14,13,.72) 38%, rgba(12,14,13,.38) 68%, rgba(12,14,13,.2) 100%),
+  linear-gradient(to bottom, rgba(12,14,13,.55) 0%, rgba(12,14,13,0) 30%, rgba(15,17,16,0) 70%, var(--page) 100%); }
+
+.topbar { width: min(calc(100% - 3rem), 72rem); height: 64px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+.cluster { display: flex; align-items: center; gap: 2px; height: 46px; padding: 0 5px; border-radius: 999px; background: rgba(24,27,26,.55); -webkit-backdrop-filter: blur(26px) saturate(1.16); backdrop-filter: blur(26px) saturate(1.16); box-shadow: var(--glass); }
+.brand { display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px 6px 10px; text-decoration: none; font-family: var(--mono); font-size: 14px; font-weight: 500; letter-spacing: .02em; color: #f1f4f2; }
+.brand svg { width: 24px; height: 24px; }
+.navlink { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 999px; font-size: 14px; color: #d4dad7; text-decoration: none; }
+.navlink:hover { background: rgba(255,255,255,.06); color: #fff; }
+.side { display: flex; align-items: center; gap: 8px; }
+
+.col { width: min(calc(100% - 3rem), 72rem); margin: 0 auto; padding-top: 80px; }
+h1 { max-width: 17ch; margin: 0; font-size: 60px; line-height: 1.04; font-weight: 600; letter-spacing: -.035em; color: #f3f5f4; text-shadow: 0 2px 28px rgba(12,14,13,.55); text-wrap: balance; }
+.sub { max-width: 34rem; margin: 20px 0 0; font-size: 18px; line-height: 1.6; color: #d3d9d6; text-shadow: 0 0 3px rgba(12,14,13,.55), 0 1px 18px rgba(12,14,13,.9); text-wrap: pretty; }
+.cta { display: flex; gap: 10px; margin-top: 32px; }
+.btn { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 16px; border-radius: 9px; font-size: 15px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.btn svg { width: 16px; height: 16px; }
+.btn-primary { background: var(--accent); color: #0e1a14; box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 1px rgba(0,0,0,.28), 0 2px 3px -2px rgba(0,0,0,.2); }
+.btn-glass { color: #eef1ef; font-weight: 500; background: rgba(24,27,26,.55); -webkit-backdrop-filter: blur(26px) saturate(1.16); backdrop-filter: blur(26px) saturate(1.16); box-shadow: var(--glass); }
+.btn-sm { min-height: 34px; padding: 0 14px; font-size: 14px; border-radius: 999px; }
+
+.stage { position: relative; width: min(calc(100% - 3rem), 72rem); margin: 104px auto 0; }
+.credit { position: absolute; right: 0; bottom: calc(100% + 12px); margin: 0; font-size: 12px; color: rgba(255,255,255,.78); text-shadow: 0 1px 8px rgba(0,0,0,.8); }
+.credit a { text-underline-offset: .2em; }
+
+
+.window { height: 760px; display: flex; overflow: hidden; border-radius: 12px; background: var(--bg-content); box-shadow: var(--panel-edge); font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.sidebar { width: 248px; flex: none; display: flex; flex-direction: column; background: var(--bg-panel); border-right: 1px solid var(--border); }
+.seg { display: flex; gap: 2px; margin: 6px; padding: 2px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; }
+.seg span { flex: 1; height: 22px; display: grid; place-items: center; border-radius: 3px; font-size: 12px; color: var(--text-muted); }
+.seg span.on { background: var(--bg-selected); color: var(--text); }
+.hair { height: 1px; background: var(--border); flex: none; }
+.links { padding: 6px; }
+.link { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; }
+.link svg { color: var(--text-muted); }
+.list { flex: 1; min-height: 0; overflow: hidden; padding: 8px 6px; }
+.list-label { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.opt { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px; border-radius: 4px; color: var(--text-muted); font-size: 12px; }
+.head { display: flex; align-items: center; gap: 8px; height: 32px; margin-top: 8px; padding: 0 8px; font-weight: 500; color: var(--text-muted); }
+.row { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; }
+.row.sel { background: var(--bg-selected); }
+.row .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.row .t b { font-weight: 600; }
+.row .when { font-size: 12px; line-height: 16px; color: var(--text-faint); }
+.row > svg { color: var(--text-muted); }
+.pi { position: relative; width: 14px; height: 14px; flex: none; display: grid; place-items: center; border: 1px solid var(--text-muted); border-radius: 4px; font-size: 9px; line-height: 9px; font-weight: 500; color: var(--text-muted); }
+.pi i { position: absolute; right: -3px; bottom: -3px; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg-panel); }
+.row.sel .pi i { box-shadow: 0 0 0 2px var(--bg-selected); }
+.n-blue { color: var(--node-blue) !important; } .n-violet { color: var(--node-violet) !important; } .n-amber { color: var(--node-amber) !important; } .n-rose { color: var(--node-rose) !important; }
+.c-work { color: var(--working); } .c-att { color: var(--attention); } .c-done { color: var(--done); }
+.usage { margin: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); }
+.usage-h { padding: 6px; font-weight: 500; }
+.usage-b { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-top: 1px solid var(--border); font-size: 12px; line-height: 16px; }
+.acct { display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; }
+.acct strong { font-weight: 500; flex: 1; }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; color: var(--text-muted); }
+.win { display: flex; justify-content: space-between; color: var(--text); }
+.win span + span { color: var(--text-muted); }
+.meter { height: 4px; border-radius: 9999px; background: var(--border); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.foot { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px; flex: none; }
+.fbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 4px; color: var(--text-muted); }
+.fbtn.icon { width: 28px; padding: 0; justify-content: center; }
+.fbtn.on { background: var(--bg-selected); color: var(--text); }
+.grow { flex: 1; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bar { height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
+.bar-title { font-size: 14px; line-height: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-title span { font-weight: 400; }
+.meta { font-size: 12px; line-height: 16px; color: var(--text-muted); white-space: nowrap; }
+.thread { flex: 1; min-height: 0; overflow: hidden; padding: 24px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
+.you { padding: 8px 12px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; font-size: 14px; line-height: 22px; }
+.agent { display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 22px; }
+.agent p { margin: 0; }
+.tool { display: flex; align-items: center; gap: 8px; min-height: 22px; font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--text-muted); }
+.tool b { font-weight: 400; color: var(--text); }
+.tool .arg { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tool .end { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-family: var(--sans); white-space: nowrap; }
+.code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.dock { flex: none; padding: 8px 12px 12px; }
+.queued { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 0 4px 6px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+.queued .q { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mini { display: inline-flex; align-items: center; height: 22px; padding: 0 6px; border-radius: 4px; font-size: 12px; color: var(--text-muted); }
+.composer { padding: 8px 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 16px; }
+.ph { min-height: 40px; padding-top: 4px; font-size: 14px; line-height: 22px; color: var(--text-faint); }
+.cbar { display: flex; align-items: center; gap: 4px; }
+.pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 4px; color: var(--text-muted); }
+.stop { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border-control); border-radius: 4px; }
+
+.panel { width: 452px; flex: none; display: flex; flex-direction: column; background: var(--bg-panel); border-left: 1px solid var(--border); }
+.canvas { position: relative; flex: 1; overflow: hidden; background-color: var(--bg-content); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 24px 24px; }
+.toolbar, .zoombar { position: absolute; top: 12px; display: flex; align-items: center; gap: 4px; padding: 4px; background: var(--bg-chrome); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.toolbar { left: 12px; }
+.zoombar { right: 12px; font-size: 12px; color: var(--text-muted); }
+.tl { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; color: var(--text); }
+.tl.on { background: var(--accent); color: var(--on-accent); }
+.tsep { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+.ab-name { position: absolute; font-size: 11px; color: var(--text-muted); }
+.ab { position: absolute; background: #fbfaf7; color: #1d211f; box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden; font-family: var(--sans); }
+.sel-box { position: absolute; border: 1.5px solid var(--accent); pointer-events: none; }
+.sel-box b { position: absolute; width: 8px; height: 8px; margin: -4px; background: var(--bg-content); border: 1.5px solid var(--accent); }
+.sel-size { position: absolute; padding: 1px 5px; border-radius: 3px; background: var(--accent); color: var(--on-accent); font-size: 10px; line-height: 14px; font-family: var(--mono); }
+.pin { position: absolute; width: 24px; height: 24px; border-radius: 12px 12px 12px 2px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-size: 11px; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.45); }
+.cursor { position: absolute; display: flex; align-items: flex-start; gap: 2px; }
+.cursor span { margin-top: 14px; padding: 1px 6px; border-radius: 4px; background: var(--node-violet); color: #17112a; font-size: 11px; line-height: 16px; font-weight: 500; }
+.rail { width: 44px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding-top: 4px; background: var(--bg-chrome); border-left: 1px solid var(--border); }
+.rail span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; color: var(--text-muted); }
+.rail span.on { background: var(--bg-selected); color: var(--text); }
+.after { height: 96px; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.disclosure { background: #203128; }
+.disclosure p { font-size: 18px; line-height: 28px; padding: 14px 0; }
+.col { padding-top: 62px; }
+h1 { font-size: 72px; max-width: 12ch; line-height: 1.02; }
+.sub { max-width: 31rem; font-size: 18px; line-height: 1.55; }
+.art { inset: 0 0 300px; }
+.art::before { background-position: 52% 36%; }
+.art::after { background: linear-gradient(90deg,rgba(12,14,13,.91),rgba(12,14,13,.8) 48%,rgba(12,14,13,.2) 78%),linear-gradient(180deg,rgba(12,14,13,.4),transparent 40%,#0f1110 100%); }
+.stage { width: min(calc(100% - 96px),1280px); margin-top: 76px; }
+.window { height: 820px; }
+.sidebar { width: 280px; }
+.tool-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.tool-head { display: flex; gap: 8px; align-items: center; padding: 9px 10px; min-height: 38px; font-size: 12px; line-height: 18px; }
+.tool-head > svg { color: var(--text-muted); }
+.tool-head strong { font-weight: 600; flex: 1; }
+.tool-head .end { display: flex; gap: 4px; align-items: center; }
+.tool-body { border-top: 1px solid var(--border); padding: 7px 10px; color: var(--text-muted); font-size: 12px; }
+.toolbar { max-width: calc(100% - 24px); flex-wrap: wrap; }
+.page-picker { height:28px;display:flex;align-items:center;gap:5px;padding:0 7px;background:var(--bg-raised);border:1px solid var(--border-control);border-radius:4px;font-size:12px; }
+.zoombar { top: 62px; }
+.present { display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:4px;background:var(--accent);color:var(--on-accent);font-weight:500; }
+.credit { color:#f0f0f0;background:rgba(15,17,16,.85);padding:5px 8px;border-radius:4px; }
+.after { height: 68px; }
+.prototype-nav { position:fixed;inset:auto 16px 16px;z-index:20;padding:16px 20px;border:1px solid var(--border-control);border-radius:8px;background:var(--bg-panel);box-shadow:var(--panel-edge);max-width:500px;margin:auto; }
+.prototype-nav h2 { margin:0 0 8px;font-size:18px; }
+.prototype-nav p { margin:0;line-height:1.5; }
+.prototype-nav button { margin-top:12px;border:1px solid var(--border-control);border-radius:4px;padding:7px 12px;color:var(--text);background:var(--bg-raised);font:inherit; }
+@media (max-width: 700px) {
+  .disclosure p,.topbar,.col { width:calc(100% - 40px); }
+  .disclosure p { padding:12px 0;font-size:16px;line-height:24px; }
+  .topbar { height:76px; }
+  .cluster { height:42px; }
+  .brand { padding:6px 10px; }
+  .navlink { display:none; }
+  .col { padding-top:32px; }
+  h1 { font-size:48px;line-height:1.04;letter-spacing:-.04em; }
+  .sub { font-size:16px;line-height:1.6;max-width:340px; }
+  .cta { margin-top:26px;gap:10px;flex-wrap:wrap; }
+  .btn { min-height:44px;font-size:14px;padding:0 14px; }
+  .btn-sm { min-height:36px;padding:0 14px; }
+  .art { inset:0 0 160px; }
+  .art::before { background-position:59% 10%; }
+  .art::after { background:linear-gradient(90deg,rgba(12,14,13,.9),rgba(12,14,13,.78)),linear-gradient(180deg,transparent 60%,#0f1110); }
+  .stage { width:calc(100% - 24px);margin-top:72px;height:calc((100vw - 24px) * 820 / 1280); }
+  .window { width:1280px;transform:scale(calc((100vw - 24px) / 1280px));transform-origin:top left;border-radius:12px; }
+  .credit { max-width:100%;font-size:11px;line-height:16px;bottom:calc(100% + 12px); }
+  .after { height:40px; }
+}
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; } }
+
+.page-content { width:min(calc(100% - 96px),1152px);margin:auto; }
+.landing-section { display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:90px;padding:100px 0;border-top:1px solid #29312d; }
+.section-copy { max-width:500px; }
+.eyebrow { font:500 13px/1.5 var(--mono);letter-spacing:.04em;color:var(--accent);margin:0 0 18px; }
+.page-content h2 { margin:0;font-size:44px;line-height:1.1;letter-spacing:-.03em;font-weight:600;text-wrap:balance; }
+.section-copy>p:not(.eyebrow),.install-heading>p:not(.eyebrow) { font-size:17px;line-height:1.65;color:#b8c1bc;margin:22px 0 0; }
+.reverse .section-copy { grid-column:2;grid-row:1; }.reverse>.product-demo { grid-column:1;grid-row:1; }
+.product-demo { min-width:0;border:1px solid #354039;background:var(--bg-content);border-radius:10px;box-shadow:0 24px 60px -28px #000;overflow:hidden;font-size:13px;line-height:1.5; }
+.sample-bar { display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border);font-weight:600; }
+.sample-meta { color:var(--text-muted);font-size:12px;font-weight:400; }
+.sample-section { color:var(--text-muted);font-size:12px;padding:13px 14px 6px; }
+.sample-row { display:flex;align-items:center;gap:8px;padding:8px 14px;min-width:0; }.sample-row strong { font-weight:500; }.sample-row .sample-meta { margin-left:auto; }
+.chat-sample { margin:20px 14px 14px;border:1px solid var(--border);border-radius:6px;overflow:hidden; }.sample-message { margin:14px;padding:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px; }.chat-sample>p { margin:14px;line-height:1.65; }.sample-composer { margin:20px 14px 14px;padding:14px;border:1px solid #555;border-radius:12px;display:flex;justify-content:space-between;color:var(--text-muted); }
+.artefact-demo { height:480px; }.artefact-demo .panel { height:480px;width:100%;border:0; }.artefact-demo .canvas { min-height:400px; }
+.wide-section { padding:100px 0;border-top:1px solid #29312d; }.wide-copy { max-width:680px; }.task-workflow { display:grid;grid-template-columns:1.5fr 1fr;gap:24px;margin-top:40px;align-items:start; }.board-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0 8px 16px;gap:8px; }.board-grid .sample-section { padding-left:5px; }.task-card { display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-raised);padding:12px;min-height:200px; }.task-card strong { font-weight:500; }.sample-button { display:inline-flex;align-items:center;align-self:flex-start;justify-content:center;min-height:28px;padding:3px 10px;background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);border-radius:4px;font-size:12px; }.sample-button.plain { color:var(--text);border-color:#6b6b6b;background:transparent; }.sample-state { display:flex;gap:6px;align-items:center;font-size:12px;font-weight:400; }.workflow-line { display:flex;align-items:center;gap:12px;padding:16px;border-bottom:1px solid var(--border); }.workflow-line strong { flex:1;font-weight:500; }.workflow-note { color:var(--text-muted);font-size:12px;line-height:1.6;padding:14px; }
+.repo-line { padding:18px 14px;display:flex;align-items:center;gap:8px; }.repo-line strong { flex:1;font-weight:500; }.diff-title { padding:10px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font:12px var(--mono); }.diff-delete,.diff-add { padding:10px 14px;font:12px/1.6 var(--mono);overflow-wrap:anywhere; }.diff-delete { background:var(--diff-del-bg);color:var(--failed); }.diff-add { background:var(--diff-add-bg);color:var(--done); }.diff-delete span,.diff-add span { margin-right:10px; }.tool-permission { margin:20px 14px 14px;border:1px solid #555;border-radius:6px; }.tool-permission>p { margin:14px;color:var(--text-muted); }.permission-buttons { display:flex;gap:8px;padding:0 14px 14px; }
+.usage-demo { max-width:460px;width:100%;justify-self:center; }.usage-example { padding:16px;border-bottom:1px solid var(--border); }.usage-example:last-child { border:0; }.usage-account { display:flex;align-items:center;gap:12px;justify-content:space-between; }.usage-example .sample-row { padding:16px 0 6px; }.usage-example p { margin:8px 0 0;line-height:1.5; }.usage-example .meter { height:5px; }
+.compare-section { border-top:1px solid #29312d;padding:100px 0; }.comparison-points { display:grid;grid-template-columns:repeat(3,1fr);gap:36px;margin:42px 0 30px; }.comparison-points>div>.i { width:24px;height:24px;color:var(--accent); }.comparison-points h3 { font-size:17px;font-weight:500;margin:14px 0 8px; }.comparison-points p { color:#b8c1bc;font-size:15px;line-height:1.6;margin:0; }.text-link { display:inline-flex;align-items:center;gap:8px;min-height:32px;color:var(--accent);font-size:15px;text-underline-offset:.3em; }
+.install-section { display:grid;grid-template-columns:.8fr 1.2fr;gap:90px;padding:100px 0;border-top:1px solid #29312d; }.install-heading { align-self:start; }.platforms { display:flex;flex-wrap:wrap;gap:8px;margin-top:30px; }.platforms span { color:#cdd7d1;border:1px solid #536358;border-radius:999px;padding:5px 12px;font-size:13px; }.install-body h3 { font-size:19px;font-weight:500;margin:0 0 10px; }.install-body p { color:#b8c1bc;font-size:15px;line-height:1.65;margin:10px 0; }.prerequisites { padding-bottom:26px;border-bottom:1px solid #354039; }.install-list { padding-left:24px;margin:32px 0 0; }.install-list>li { padding:0 0 38px 12px; }.install-list>li::marker { color:var(--accent);font:500 17px var(--mono); }.page-content pre { white-space:pre-wrap;overflow-wrap:anywhere;margin:16px 0;padding:16px;border:1px solid #354039;border-radius:6px;background:#191f1b;font:12px/1.8 var(--mono);color:#d4e2d9; }.page-content p code { font:12px var(--mono);color:#d4e2d9;overflow-wrap:anywhere; }.page-content details { margin:16px 0; }.page-content summary { min-height:40px;cursor:pointer;line-height:1.6;color:var(--accent);text-decoration:underline;text-underline-offset:.3em;font-size:15px; }.remote-config { border-left:2px solid #55695c;padding:6px 0 6px 16px;margin:24px 0; }.remote-config>strong { font-size:14px;font-weight:500; }.remote-config p { font-size:14px;margin:8px 0 0; }.install-links { display:flex;align-items:center;flex-wrap:wrap;gap:20px;margin-top:22px; }
+.landing-footer { border-top:1px solid #29312d;padding:36px 0 48px;background:#16231c; }.footer-inner { width:min(calc(100% - 96px),1152px);margin:auto;display:flex;gap:32px;align-items:center;justify-content:space-between; }.footer-brand { display:flex;align-items:center;gap:10px;font:500 14px var(--mono); }.footer-brand svg { width:24px;height:24px; }.landing-footer .disclosure { background:transparent;border:0; }.landing-footer .disclosure p { width:auto;margin:0;padding:0;font-size:18px;line-height:1.6; }
+@media(max-width:1000px) { .landing-section,.install-section { gap:40px; }.page-content h2 { font-size:36px; }.task-workflow { grid-template-columns:1fr; }.artefact-demo .toolbar { gap:2px; }.artefact-demo .tl { width:24px; }.comparison-points { gap:20px; } }
+@media(max-width:700px) {
+.page-content { width:calc(100% - 40px); }.landing-section { grid-template-columns:1fr;gap:30px;padding:56px 0; }.reverse .section-copy,.reverse>.product-demo { grid-column:auto;grid-row:auto; }.page-content h2 { font-size:34px;line-height:1.12; }.section-copy>p:not(.eyebrow),.install-heading>p:not(.eyebrow) { font-size:16px;line-height:1.65;margin-top:20px; }.eyebrow { font-size:12px;margin-bottom:14px; }.sample-row { flex-wrap:wrap; }.sample-row strong { font-size:12px; }.sample-row .sample-meta { font-size:11px; }.product-demo { font-size:12px; }.artefact-demo { height:400px; }.artefact-demo .panel { width:452px;height:480px;transform:scale(calc((100vw - 42px)/452px));transform-origin:top left; }.wide-section,.compare-section { padding:56px 0; }.task-workflow { margin-top:30px;gap:18px; }.board-grid { grid-template-columns:1fr; }.task-card { min-height:0;gap:8px;padding:12px; }.board-grid .sample-section { padding-top:15px; }.sample-button { min-height:28px; }.comparison-points { grid-template-columns:1fr;gap:28px;margin:32px 0; }.comparison-points h3 { margin-top:10px; }.comparison-points p { font-size:15px; }.install-section { grid-template-columns:1fr;padding:56px 0 10px;gap:30px; }.install-body h3 { font-size:18px; }.install-body p { font-size:15px; }.install-list { padding-left:20px; }.install-list>li { padding-left:4px; }.page-content pre { font-size:11px;padding:12px; }.platforms { margin-top:24px; }.footer-inner { width:calc(100% - 40px);flex-direction:column;align-items:flex-start;gap:20px; }.landing-footer .disclosure p { font-size:16px; }.landing-footer { padding:28px 0 36px; }.text-link { flex-wrap:wrap;line-height:1.6; }.sample-bar { gap:8px; }.sample-state { font-size:11px; }.workflow-line { gap:8px;padding:14px 12px; }
+}
+</style>
 </head>
 <body>
 <section class="disclosure" aria-label="AI disclosure">
-<div class="wrap">
-<p>Claude Code designed and wrote Mycelium, and wrote this page.</p>
-</div>
+<p>An AI agent wrote this software and this page.</p>
 </section>
 
 
-<div class="page">
-<div class="hero-art" aria-hidden="true"></div>
-<header class="topbar-wrap">
-<div class="topbar-blur" aria-hidden="true"><div></div><div></div><div></div><div></div></div>
-<div class="topbar-inner">
-<div class="nav-cluster"><a class="brand" href="./"><img class="brand-logo" src="logo.svg" alt="" width="24" height="24"><span>Mycelium</span></a></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="logo" viewBox="0 0 32 32"><g fill="none" stroke="#7ccba0" stroke-width="2.4" stroke-linecap="round"><path d="M15 18c0-4.5-3-8-8-10"/><path d="M15 18c2-4.5 5.5-7 11-7.5"/><path d="M15 18c.5 4 -1.5 7.5-5 9.5"/><path d="M18.6 13.4c1.4-2.4 1.6-5 .9-7.6"/></g><g fill="#7ccba0"><circle cx="15" cy="18" r="3.6"/><circle cx="7" cy="8" r="2.4"/><circle cx="26" cy="10.5" r="2.4"/><circle cx="10" cy="27.5" r="2.4"/><circle cx="19.5" cy="5.6" r="1.8"/></g></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+<symbol id="listi" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+<symbol id="calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 4 4H6l4-4-1-5zM12 13v7"/></symbol>
+<symbol id="input" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+<symbol id="review" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="working" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="claude" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></symbol>
+<symbol id="codex" viewBox="0 0 24 24"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="m9 10 2 2-2 2M13 14h2"/></symbol>
+<symbol id="server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></symbol>
+<symbol id="laptop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M3 19h18"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="issue" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1.5"/></symbol>
+<symbol id="gauge" viewBox="0 0 24 24"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4-5"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+<symbol id="activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+<symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chevl" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+<symbol id="move" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
+<symbol id="clip" viewBox="0 0 24 24"><path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/></symbol>
+<symbol id="stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+<symbol id="close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+<symbol id="agent" viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 4v4M9 13h.01M15 13h.01"/></symbol>
+<symbol id="terminal" viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M12 16h7"/></symbol>
+<symbol id="branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-11 7"/></symbol>
+<symbol id="select" viewBox="0 0 24 24"><path d="m5 3 14 8-6 2-2 6z"/></symbol>
+<symbol id="hand" viewBox="0 0 24 24"><path d="M8 12V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-.5a6 6 0 0 1-5-2.7L3.6 14a1.5 1.5 0 0 1 2.5-1.7L8 15"/></symbol>
+<symbol id="text" viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></symbol>
+<symbol id="frame" viewBox="0 0 24 24"><path d="M7 3v18M17 3v18M3 7h18M3 17h18"/></symbol>
+<symbol id="note" viewBox="0 0 24 24"><path d="M5 4h14v10l-6 6H5z"/><path d="M13 20v-6h6"/></symbol>
+<symbol id="pen" viewBox="0 0 24 24"><path d="m12 19 7-7 3 3-7 7zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18zM2 2l7.6 7.6"/><circle cx="11" cy="11" r="2"/></symbol>
+<symbol id="rect" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5"/></symbol>
+<symbol id="comment" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+<symbol id="cursor" viewBox="0 0 24 24"><path d="M4 3l7 17 2.5-7L21 10.5z" fill="#b9a3f2" stroke="#17112a" stroke-width="1.2"/></symbol>
+<symbol id="download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+<symbol id="minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol><symbol id="undo" viewBox="0 0 24 24"><path d="M4 10h10a6 6 0 0 1 0 12M4 10l5-5M4 10l5 5"/></symbol><symbol id="redo" viewBox="0 0 24 24"><path d="M20 10H10a6 6 0 0 0 0 12M20 10l-5-5M20 10l-5 5"/></symbol></defs>
+</svg>
+
+<main>
+<div class="hero" id="top">
+<div class="art" aria-hidden="true"></div>
+
+<header class="topbar">
+<div class="cluster">
+<a class="brand" href="#top"><svg aria-hidden="true"><use href="#logo"/></svg><span>Mycelium</span></a>
+<a class="navlink" href="#in-use">In use</a>
+<a class="navlink" href="#install">Install</a>
+<a class="navlink" href="#compare">How it compares</a>
+</div>
+<div class="side">
+<a class="btn btn-primary btn-sm" href="#install">Install</a>
 </div>
 </header>
-<main class="my">
-<section class="wrap hero">
-<h1>Your coding agents, on every machine, in one place.</h1>
-<p class="lead">Mycelium is a self-hosted control plane that runs Claude Code and Codex on each machine you own, and lets you steer every conversation from the browser, the desktop or your phone.</p>
-<div class="actions">
-<a class="my-btn my-btn--primary my-btn--lg" href="#install">Install</a>
-<a class="my-btn my-btn--outline my-btn--lg" href="#compare">How it compares</a>
+
+<section class="col">
+<h1>Your agents.<br>Every machine.<br>One place.</h1>
+<p class="sub">Claude Code, Codex and chat models in one self-hosted workspace. Pick up any conversation from any device.</p>
+<div class="cta">
+<a class="btn btn-primary" href="#install"><svg class="i" aria-hidden="true"><use href="#download"/></svg>Install</a>
+<a class="btn btn-glass" href="#compare">How it compares</a>
 </div>
 </section>
 
-<div class="wrap">
-<div class="show show-1 show-hero" aria-hidden="true">
-<div class="frame window">
-<nav class="my-sidebar" style="height: 100%; resize: none">
-<div class="my-bar my-bar--chrome" style="padding-left: 8px"><span class="my-btn my-btn--sm" style="font-weight: 500">All groups</span><span class="my-bar__spacer"></span></div>
-<div class="my-scroll" style="padding: 4px 0">
-<div class="my-section__head">Needs input</div>
-<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span><span class="my-row__title">Release v2.4 of the mobile app</span><span class="my-row__meta">home</span></div>
-<div class="my-section__head">Ready to review</div>
-<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></span><span class="my-row__title">Copy for the restore flow</span><span class="my-row__meta">work</span></div>
-<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></span><span class="my-row__title">Audit the cache headers</span><span class="my-row__meta">home</span></div>
-<div class="my-section__head">Working</div>
-<div class="my-row" aria-current="page"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Bump @acme/ui in web</span><span class="my-row__meta">home</span></div>
-<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Uploads survive a 503 and a timeout</span><span class="my-row__meta">work</span></div>
-<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Types for the sync client</span><span class="my-row__meta">work</span></div>
+<div class="stage" id="in-use">
+<p class="credit">Photo by <a href="https://unsplash.com/@landonparenteau?utm_source=mycelium&amp;utm_medium=referral">Landon Parenteau</a> on <a href="https://unsplash.com/photos/brown-mushrooms-on-ground-during-daytime-EEuDMqRYbx0?utm_source=mycelium&amp;utm_medium=referral">Unsplash</a></p>
+
+<div class="window" role="img" aria-label="Mycelium on the desktop: the sidebar lists pinned conversations and others that need input, are working or are ready to review; a conversation in the middle where Claude Code is updating a pricing page design; the design open beside it with a heading selected for editing.">
+
+<nav class="sidebar" aria-hidden="true">
+<div class="seg"><span class="on">Workspaces</span><span>Chats</span></div>
+<div class="hair"></div>
+<div class="links">
+<div class="link"><svg class="i"><use href="#plus"/></svg>New conversation</div>
+<div class="link"><svg class="i"><use href="#clock"/></svg>History</div>
+<div class="link"><svg class="i"><use href="#layers"/></svg>Artefacts</div>
+<div class="link"><svg class="i"><use href="#listi"/></svg>Tasks</div>
+<div class="link"><svg class="i"><use href="#layers"/></svg>Workflows</div>
+<div class="link"><svg class="i"><use href="#calendar"/></svg>Schedules</div>
+</div>
+<div class="hair"></div>
+<div class="list">
+<div class="list-label"><span>Conversations</span><span class="opt">All groups<svg class="i sm"><use href="#chev"/></svg></span></div>
+
+<div class="head"><svg class="i"><use href="#pin"/></svg>Pinned</div>
+<div class="row sel"><span class="pi">W<i style="background:var(--working)"></i></span><span class="t"><b>web</b> Calmer pricing hero</span><span class="when">now</span><svg class="i sm"><use href="#claude"/></svg><svg class="i sm n-blue"><use href="#laptop"/></svg></div>
+<div class="row"><span class="pi">S</span><span class="t"><b>sync</b> Resumable uploads</span><span class="when">2h</span><svg class="i sm"><use href="#codex"/></svg><svg class="i sm n-violet"><use href="#server"/></svg></div>
+
+<div class="head c-att"><svg class="i"><use href="#input"/></svg><span style="color:var(--text-muted)">Needs input</span></div>
+<div class="row"><span class="pi">M<i style="background:var(--attention)"></i></span><span class="t"><b>mobile</b> Release v2.4</span><span class="when">6m</span><svg class="i sm"><use href="#claude"/></svg><svg class="i sm n-amber"><use href="#server"/></svg></div>
+
+<div class="head c-work"><svg class="i"><use href="#working"/></svg><span style="color:var(--text-muted)">Working</span></div>
+<div class="row"><span class="pi">A<i style="background:var(--working)"></i></span><span class="t"><b>api</b> Retry uploads on a 503</span><span class="when">1m</span><svg class="i sm"><use href="#codex"/></svg><svg class="i sm n-violet"><use href="#server"/></svg></div>
+<div class="row"><span class="pi">I<i style="background:var(--working)"></i></span><span class="t"><b>infra</b> Nightly image builds</span><span class="when">3m</span><svg class="i sm"><use href="#claude"/></svg><svg class="i sm n-rose"><use href="#server"/></svg></div>
+
+<div class="head c-att"><svg class="i"><use href="#review"/></svg><span style="color:var(--text-muted)">Ready to review</span></div>
+<div class="row"><span class="pi">D<i style="background:var(--attention)"></i></span><span class="t"><b>docs</b> Copy for the restore flow</span><span class="when">18m</span><svg class="i sm"><use href="#claude"/></svg><svg class="i sm n-blue"><use href="#laptop"/></svg></div>
+
+<div class="head c-done"><svg class="i"><use href="#check"/></svg><span style="color:var(--text-muted)">Done</span></div>
+<div class="row"><span class="pi">W</span><span class="t"><b>web</b> Cache headers audit</span><span class="when">1d</span><svg class="i sm"><use href="#claude"/></svg><svg class="i sm n-blue"><use href="#laptop"/></svg></div>
+</div>
+
+<div class="usage">
+<div class="usage-h">Usage</div>
+<div class="usage-b">
+<div class="acct"><strong>Claude, work</strong><span class="tag">This chat</span></div>
+<div class="win"><span>5-hour window</span><span>46% used</span></div>
+<div class="meter"><i style="width:46%"></i></div>
+<div class="win"><span>Weekly window</span><span>31% used</span></div>
+<div class="meter"><i style="width:31%"></i></div>
+</div>
+</div>
+<div class="hair"></div>
+<div class="foot">
+<span class="fbtn icon"><svg class="i"><use href="#server"/></svg></span>
+<span class="fbtn icon"><svg class="i"><use href="#folder"/></svg></span>
+<span class="fbtn icon"><svg class="i"><use href="#issue"/></svg></span>
+<span class="grow"></span>
+<span class="fbtn icon on"><svg class="i"><use href="#gauge"/></svg></span>
+<span class="fbtn icon"><svg class="i"><use href="#sun"/></svg></span>
+<span class="fbtn icon"><svg class="i"><use href="#activity"/></svg></span>
+<span class="fbtn icon"><svg class="i"><use href="#settings"/></svg></span>
 </div>
 </nav>
-<div class="my-main">
-<div class="my-bar"><span class="my-bar__title">Bump @acme/ui in web</span><span class="my-row__meta">web · ui-bump · laptop</span></div>
-<div class="my-scroll">
-<div class="my-thread" style="padding-top: 24px">
-<div class="my-msg-user">Bump @acme/ui to the latest release and make sure nothing else in the tree drifts from it.</div>
-<div class="my-msg-agent">
-<div class="my-tool"><span class="my-tool__name">recall</span><span class="my-tool__arg">"@acme/ui version", groups: ["work"]</span><span class="my-tool__end"><span class="my-muted">1 memory</span></span></div>
-<p>A <strong>work</strong> memory says to keep <span class="my-code">@acme/ui</span> in step with the <span class="my-code">@acme/billing-*</span> packages. They pin 2.4.1, so I'll match that.</p>
-<div class="my-card"><div class="my-card__head"><span>package.json</span><span class="my-diffstat"><span class="my-diffstat__add">+1</span> <span class="my-diffstat__del">-1</span></span></div>
-<div class="my-diff">
-<div class="my-diff__line my-diff__line--del"><span class="my-diff__num">18</span><span class="my-diff__num"></span><span class="my-diff__sign">-</span><span>    "@acme/ui": "^2.1.0",</span></div>
-<div class="my-diff__line my-diff__line--add"><span class="my-diff__num"></span><span class="my-diff__num">18</span><span class="my-diff__sign">+</span><span>    "@acme/ui": "2.4.1",</span></div>
-</div></div>
-<div class="my-tool"><span class="my-tool__name">bash</span><span class="my-tool__arg">pnpm -r test</span><span class="my-tool__end"><span class="my-status my-status--working"><span class="my-status__mark"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span>Running</span></span></div>
+
+<div class="main" aria-hidden="true">
+<div class="bar"><span class="bar-title">web <span>Calmer pricing hero</span></span><span class="grow"></span><span class="meta">laptop · Claude Code</span></div>
+<div class="thread">
+<div class="you">The pricing hero shouts. Keep one primary button, and pull the plan cards up under the headline.</div>
+<div class="agent">
+<div class="tool-card"><div class="tool-head"><svg class="i"><use href="#layers"/></svg><strong>Read “Pricing page”</strong></div></div>
+<p>Three buttons compete for the same click. I'll keep <strong>Start free</strong> as the only filled one, turn the other two into links and lift the cards 48&nbsp;px.</p>
+<div class="tool-card"><div class="tool-head"><svg class="i"><use href="#layers"/></svg><strong>Set an artboard in “Pricing page”</strong></div><div class="tool-body">Desktop<br>Version 7<br><span style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;color:var(--accent)"><svg class="i"><use href="#layers"/></svg>Open design</span></div></div>
+<div class="tool-card"><div class="tool-head"><svg class="i"><use href="#layers"/></svg><strong>Setting an artboard…</strong><span class="end c-work"><svg class="i sm"><use href="#working"/></svg>Running</span></div></div>
+</div>
+<div class="you">The headline is still too long. I'm rewording it on the canvas now.</div>
+<div class="agent">
+<p>Understood. I'll leave the <span class="code">h1</span> to you and match the phone artboard to whatever you settle on.</p>
+</div>
+</div>
+<div class="dock">
+<div class="queued"><span class="q">Then check both artboards at 320&nbsp;px wide</span><span class="mini">Send now</span><span class="mini"><svg class="i sm"><use href="#pencil"/></svg></span><span class="mini"><svg class="i sm"><use href="#close"/></svg></span></div>
+<div class="composer">
+<div class="ph">Ask, plan or build</div>
+<div class="cbar"><span class="pick"><svg class="i"><use href="#clip"/></svg></span><span class="pick">Opus 5.5<svg class="i sm"><use href="#chev"/></svg></span><span class="grow"></span><span class="stop"><svg class="i"><use href="#stop"/></svg></span></div>
 </div>
 </div>
 </div>
+
+<div class="panel" aria-hidden="true">
+<div class="bar"><span class="fbtn icon"><svg class="i"><use href="#chevl"/></svg></span><span style="font-weight:500;flex:1">Pricing page</span><span class="meta">Design</span><span class="fbtn icon"><svg class="i"><use href="#globe"/></svg></span><span class="fbtn icon"><svg class="i"><use href="#move"/></svg></span></div>
+<div class="canvas">
+<div class="toolbar"><span class="page-picker">Page 1<svg class="i sm"><use href="#chev"/></svg></span><span class="tl"><svg class="i"><use href="#plus"/></svg></span><span class="tsep"></span>
+<span class="tl on"><svg class="i"><use href="#select"/></svg></span>
+<span class="tl"><svg class="i"><use href="#hand"/></svg></span>
+<span class="tl"><svg class="i"><use href="#text"/></svg></span>
+<span class="tl"><svg class="i"><use href="#frame"/></svg></span>
+<span class="tl"><svg class="i"><use href="#note"/></svg></span>
+<span class="tl"><svg class="i"><use href="#pen"/></svg></span>
+<span class="tl"><svg class="i"><use href="#rect"/></svg></span>
+<span class="tsep"></span>
+<span class="tl"><svg class="i"><use href="#comment"/></svg></span>
+</div>
+<div class="zoombar"><span style="padding:0 6px">Saved</span><span class="tl"><svg class="i"><use href="#undo"/></svg></span><span class="tl"><svg class="i"><use href="#redo"/></svg></span><span class="tsep"></span><span class="tl"><svg class="i"><use href="#minus"/></svg></span><span style="padding:0 2px">42%</span><span class="tl"><svg class="i"><use href="#plus"/></svg></span><span class="tl"><svg class="i"><use href="#frame"/></svg></span><span class="tsep"></span><span class="tl"><svg class="i"><use href="#clock"/></svg></span><span class="present">Present</span></div>
+
+<span class="ab-name" style="left:28px;top:114px">Desktop</span>
+<div class="ab" style="left:28px;top:130px;width:300px;height:330px">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-size:8px;color:#4c524f"><b style="color:#1d211f;font-size:9px">Ledgerly</b><span>Product · Pricing · Sign in</span></div>
+<div style="padding:22px 18px 0;text-align:center">
+<div style="font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:#2d6a4a">Pricing</div>
+<div style="margin:6px auto 0;max-width:220px;font-size:17px;line-height:1.12;font-weight:600;letter-spacing:-.02em">Plans that grow with your books</div>
+<div style="margin:7px auto 0;max-width:200px;font-size:7.5px;line-height:1.5;color:#59605c">Start free, add people when you need them, cancel whenever.</div>
+<div style="display:flex;justify-content:center;gap:8px;margin-top:10px;font-size:7.5px"><span style="padding:4px 9px;border-radius:4px;background:#1f5c3f;color:#fff;font-weight:500">Start free</span><span style="padding:4px 2px;color:#1f5c3f;text-decoration:underline">Compare plans</span></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:16px 14px 0">
+<div style="border:1px solid #e3e1da;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#59605c">Solo</div><div style="font-size:14px;font-weight:600;margin-top:2px">£0</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:70%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:80%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
+<div style="border:1.5px solid #1f5c3f;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#1f5c3f">Team</div><div style="font-size:14px;font-weight:600;margin-top:2px">£9</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:70%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:85%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
+<div style="border:1px solid #e3e1da;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#59605c">Firm</div><div style="font-size:14px;font-weight:600;margin-top:2px">£24</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:60%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:75%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
 </div>
 </div>
-</div>
-</div>
-<p class="wrap credit">Photo: Sofie D. on <a href="https://unsplash.com/photos/close-up-of-orange-coral-like-growth-on-dark-surface-XEaqcPO9c0g">Unsplash</a></p>
+<div class="sel-box" style="left:66px;top:196px;width:224px;height:44px"><b style="left:0;top:0"></b><b style="left:100%;top:0"></b><b style="left:0;top:100%"></b><b style="left:100%;top:100%"></b><b style="left:50%;top:0"></b><b style="left:50%;top:100%"></b><b style="left:0;top:50%"></b><b style="left:100%;top:50%"></b></div>
+<span class="sel-size" style="left:150px;top:246px">224 × 44</span>
 
 
-<section class="wrap shots" aria-labelledby="shots-h">
-<h2 id="shots-h">In use</h2>
-<div class="shot-grid">
-<figure class="shot shot-3"><div class="shot-frame"><img style="--shift:-38%" src="shots/tasks-board.webp" width="1440" height="866" alt="The Tasks board with Questions, Proposed, Open and Claimed columns, each card showing its project, agent and model, with Answer, Approve, Start and Stop buttons." loading="lazy"></div><figcaption><strong>Tasks board.</strong> Agents propose work and ask questions here. You approve, answer or start it in any idle conversation.</figcaption></figure>
-<figure class="shot shot-3 shot-wide"><div class="shot-frame"><img style="--shift:-72%" src="shots/chat-generated-ui.webp" width="1440" height="866" alt="A chat with a plain model answering with a bar chart of restore times and two follow-up buttons, with the model picker in the composer." loading="lazy"></div><figcaption><strong>Chats.</strong> Plain models alongside the agents, with generated interfaces in the reply and the model switchable mid-chat.</figcaption></figure>
+<span class="ab-name" style="left:346px;top:114px">Phone</span>
+<div class="ab" style="left:346px;top:130px;width:96px;height:200px;opacity:.92">
+<div style="padding:16px 8px 0;text-align:center"><div style="font-size:7px;line-height:1.15;font-weight:600">Plans that grow with your books</div><div style="margin:6px auto 0;width:40px;height:9px;border-radius:2px;background:#1f5c3f"></div></div>
+<div style="margin:12px 8px 0;height:44px;border:1px solid #e3e1da;border-radius:4px"></div>
+<div style="margin:5px 8px 0;height:44px;border:1.5px solid #1f5c3f;border-radius:4px"></div>
+</div>
+<div style="position:absolute;left:346px;top:130px;width:96px;height:200px;border:1.5px dashed var(--working);border-radius:2px"></div>
+
+<span class="pin" style="left:302px;top:374px">2</span>
+</div>
+</div>
+
+<div class="rail" aria-hidden="true">
+<span><svg class="i"><use href="#info"/></svg></span>
+<span><svg class="i"><use href="#agent"/></svg></span>
+<span><svg class="i"><use href="#terminal"/></svg></span>
+<span><svg class="i"><use href="#branch"/></svg></span>
+<span class="on"><svg class="i"><use href="#layers"/></svg></span>
+</div>
+</div>
+</div>
+<div class="after"></div>
+</div>
+<div class="page-content">
+<section class="landing-section" aria-labelledby="machines-heading">
+<div class="section-copy"><p class="eyebrow">Workspaces and chats</p><h2 id="machines-heading">The work stays put.<br>You can move.</h2><p>Steer Claude Code and Codex on your laptop or a server, then carry on the same conversation from another device.</p><p>Plain chats with Anthropic, Ollama and OpenRouter models sit beside your coding workspaces.</p></div>
+<div class="machine-demo product-demo" role="img" aria-label="Synthetic Mycelium workspace: conversations on laptop and server, followed by a plain chat about release notes.">
+<div class="sample-bar"><span>Conversations</span><span class="sample-meta">All groups</span></div>
+<div class="sample-section">Pinned</div><div class="sample-row"><svg class="i"><use href="#claude"/></svg><strong>Calmer pricing hero</strong><span class="sample-meta">laptop</span></div>
+<div class="sample-section">Working</div><div class="sample-row"><svg class="i c-work"><use href="#working"/></svg><strong>Retry failed uploads</strong><span class="sample-meta">server</span></div>
+<div class="sample-row"><svg class="i c-work"><use href="#working"/></svg><strong>Build the Android release</strong><span class="sample-meta">build-vm</span></div>
+<div class="chat-sample"><div class="sample-bar"><span>Chats</span><span class="sample-meta">Ollama</span></div><div class="sample-message">Help me explain the new restore flow in the release notes.</div><p>Start with what changed for the person restoring a backup. Put the command-line details after the example.</p><div class="sample-composer">Ask, plan or build<svg class="i"><use href="#plus"/></svg></div></div>
 </div>
 </section>
+<section class="landing-section reverse" aria-labelledby="artefacts-heading"><div class="section-copy"><p class="eyebrow">Shared artefacts</p><h2 id="artefacts-heading">Make something<br>you can come back to.</h2><p>Designs, pages and documents open beside the conversation. Go back a version, comment, or edit the canvas yourself.</p><p>Share one with another conversation and choose who can view or edit it.</p></div><div class="product-demo artefact-demo" role="img" aria-label="Synthetic Mycelium artefact editor showing desktop and phone pricing designs with a selected headline."><div class="panel" aria-hidden="true">
+<div class="bar"><span class="fbtn icon"><svg class="i"><use href="#chevl"/></svg></span><span style="font-weight:500;flex:1">Pricing page</span><span class="meta">Design</span><span class="fbtn icon"><svg class="i"><use href="#globe"/></svg></span><span class="fbtn icon"><svg class="i"><use href="#move"/></svg></span></div>
+<div class="canvas">
+<div class="toolbar"><span class="page-picker">Page 1<svg class="i sm"><use href="#chev"/></svg></span><span class="tl"><svg class="i"><use href="#plus"/></svg></span><span class="tsep"></span>
+<span class="tl on"><svg class="i"><use href="#select"/></svg></span>
+<span class="tl"><svg class="i"><use href="#hand"/></svg></span>
+<span class="tl"><svg class="i"><use href="#text"/></svg></span>
+<span class="tl"><svg class="i"><use href="#frame"/></svg></span>
+<span class="tl"><svg class="i"><use href="#note"/></svg></span>
+<span class="tl"><svg class="i"><use href="#pen"/></svg></span>
+<span class="tl"><svg class="i"><use href="#rect"/></svg></span>
+<span class="tsep"></span>
+<span class="tl"><svg class="i"><use href="#comment"/></svg></span>
+</div>
+<div class="zoombar"><span style="padding:0 6px">Saved</span><span class="tl"><svg class="i"><use href="#undo"/></svg></span><span class="tl"><svg class="i"><use href="#redo"/></svg></span><span class="tsep"></span><span class="tl"><svg class="i"><use href="#minus"/></svg></span><span style="padding:0 2px">42%</span><span class="tl"><svg class="i"><use href="#plus"/></svg></span><span class="tl"><svg class="i"><use href="#frame"/></svg></span><span class="tsep"></span><span class="tl"><svg class="i"><use href="#clock"/></svg></span><span class="present">Present</span></div>
 
-<section class="wrap focus" aria-labelledby="f-list">
-<div class="copy"><span class="stage stage-1">Sessions</span><h2 id="f-list">Every machine, one list.</h2><p>Claude Code and Codex on all your nodes, sorted by what needs you.</p></div>
-<div class="show show-1" aria-hidden="true">
-<div class="frame" style="width: 300px">
-<div class="my-sidebar" style="width: 100%; resize: none; border-right: 0">
-<div class="my-section__head">Needs input</div>
-<div class="my-row"><span class="my-row__lead st-att"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span><span class="my-row__title">Release v2.4 of the mobile app</span><span class="my-row__meta">Claude</span></div>
-<div class="my-section__head">Failed</div>
-<div class="my-row"><span class="my-row__lead st-fail"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg></span><span class="my-row__title">Renovate sweep</span><span class="my-row__meta">Claude</span></div>
-<div class="my-section__head">Working</div>
-<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Bump @acme/ui in web</span><span class="my-row__meta">Claude</span></div>
-<div class="my-row"><span class="my-row__lead st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Retry uploads on a 503</span><span class="my-row__meta">Codex</span></div>
-<div class="my-section__head">Done</div>
-<div class="my-row"><span class="my-row__lead st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">Nightly image builds</span><span class="my-row__meta">Claude</span></div>
+<span class="ab-name" style="left:28px;top:114px">Desktop</span>
+<div class="ab" style="left:28px;top:130px;width:300px;height:330px">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-size:8px;color:#4c524f"><b style="color:#1d211f;font-size:9px">Ledgerly</b><span>Product · Pricing · Sign in</span></div>
+<div style="padding:22px 18px 0;text-align:center">
+<div style="font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:#2d6a4a">Pricing</div>
+<div style="margin:6px auto 0;max-width:220px;font-size:17px;line-height:1.12;font-weight:600;letter-spacing:-.02em">Plans that grow with your books</div>
+<div style="margin:7px auto 0;max-width:200px;font-size:7.5px;line-height:1.5;color:#59605c">Start free, add people when you need them, cancel whenever.</div>
+<div style="display:flex;justify-content:center;gap:8px;margin-top:10px;font-size:7.5px"><span style="padding:4px 9px;border-radius:4px;background:#1f5c3f;color:#fff;font-weight:500">Start free</span><span style="padding:4px 2px;color:#1f5c3f;text-decoration:underline">Compare plans</span></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:16px 14px 0">
+<div style="border:1px solid #e3e1da;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#59605c">Solo</div><div style="font-size:14px;font-weight:600;margin-top:2px">£0</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:70%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:80%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
+<div style="border:1.5px solid #1f5c3f;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#1f5c3f">Team</div><div style="font-size:14px;font-weight:600;margin-top:2px">£9</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:70%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:85%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
+<div style="border:1px solid #e3e1da;border-radius:6px;padding:8px;background:#fff"><div style="font-size:7px;color:#59605c">Firm</div><div style="font-size:14px;font-weight:600;margin-top:2px">£24</div><div style="height:3px;background:#eceae4;border-radius:2px;margin-top:8px"></div><div style="height:3px;width:60%;background:#eceae4;border-radius:2px;margin-top:4px"></div><div style="height:3px;width:75%;background:#eceae4;border-radius:2px;margin-top:4px"></div></div>
 </div>
 </div>
+<div class="sel-box" style="left:66px;top:196px;width:224px;height:44px"><b style="left:0;top:0"></b><b style="left:100%;top:0"></b><b style="left:0;top:100%"></b><b style="left:100%;top:100%"></b><b style="left:50%;top:0"></b><b style="left:50%;top:100%"></b><b style="left:0;top:50%"></b><b style="left:100%;top:50%"></b></div>
+<span class="sel-size" style="left:150px;top:246px">224 × 44</span>
+
+
+<span class="ab-name" style="left:346px;top:114px">Phone</span>
+<div class="ab" style="left:346px;top:130px;width:96px;height:200px;opacity:.92">
+<div style="padding:16px 8px 0;text-align:center"><div style="font-size:7px;line-height:1.15;font-weight:600">Plans that grow with your books</div><div style="margin:6px auto 0;width:40px;height:9px;border-radius:2px;background:#1f5c3f"></div></div>
+<div style="margin:12px 8px 0;height:44px;border:1px solid #e3e1da;border-radius:4px"></div>
+<div style="margin:5px 8px 0;height:44px;border:1.5px solid #1f5c3f;border-radius:4px"></div>
 </div>
+<div style="position:absolute;left:346px;top:130px;width:96px;height:200px;border:1.5px dashed var(--working);border-radius:2px"></div>
+
+<span class="pin" style="left:302px;top:374px">2</span>
+</div>
+</div>
+
+</div></section>
+<section class="wide-section" aria-labelledby="tasks-heading"><div class="section-copy wide-copy"><p class="eyebrow">Tasks and workflows</p><h2 id="tasks-heading">Plan the work.<br>Follow every step.</h2><p>Answer questions, approve tasks and start the next job from one board. Run agents in parallel and follow each step in its own conversation.</p></div>
+<div class="task-workflow"><div class="product-demo task-demo" role="img" aria-label="Synthetic Tasks board: a question about the release, a proposed upload fix, and a claimed restore task."><div class="sample-bar"><span>Tasks</span><span class="sample-meta">All groups</span></div><div class="board-grid"><div><div class="sample-section">Questions</div><div class="task-card"><span class="sample-meta">web</span><strong>Which release should we target?</strong><span class="sample-meta">Claude Code</span><span class="sample-button">Answer</span></div></div><div><div class="sample-section">Proposed</div><div class="task-card"><span class="sample-meta">sync</span><strong>Retry uploads after a timeout</strong><span class="sample-meta">Codex</span><span class="sample-button">Approve</span></div></div><div><div class="sample-section">Claimed</div><div class="task-card"><span class="sample-meta">mobile</span><strong>Check the restore flow</strong><span class="sample-state c-work"><svg class="i"><use href="#working"/></svg>Working</span><span class="sample-button">Stop</span></div></div></div></div>
+<div class="product-demo workflow-demo" role="img" aria-label="Synthetic workflow: design and build completed, verification running."><div class="sample-bar"><span>Refresh the restore flow</span><span class="sample-state c-work"><svg class="i"><use href="#working"/></svg>Running</span></div><div class="workflow-line"><svg class="i c-done"><use href="#check"/></svg><strong>Design the screens</strong><span class="sample-meta">Done</span></div><div class="workflow-line"><svg class="i c-done"><use href="#check"/></svg><strong>Build the changes</strong><span class="sample-meta">Done</span></div><div class="workflow-line"><svg class="i c-work"><use href="#working"/></svg><strong>Verify the flow</strong><span class="sample-meta">Running</span></div><div class="workflow-note">Each step keeps its conversation, output and decisions.</div></div></div>
 </section>
+<section class="landing-section" aria-labelledby="integrations-heading"><div class="section-copy"><p class="eyebrow">Tools and context</p><h2 id="integrations-heading">Bring the tools<br>you already use.</h2><p>Clone or create projects from GitHub and GitLab. Give plain chats MCP tools and approve each call before it runs.</p><p>A terminal and Git panel sit beside the conversation. Review a diff as a walkthrough, with notes on the lines in question.</p></div><div class="product-demo integrations-demo" role="img" aria-label="Synthetic Mycelium interface showing a Git diff and an MCP tool call awaiting approval."><div class="sample-bar"><span>sync</span><span class="sample-meta">Git</span></div><div class="repo-line"><svg class="i"><use href="#branch"/></svg><strong>fix/retry-uploads</strong><span class="sample-meta">2 files</span></div><div class="diff-title">src/upload.ts</div><div class="diff-delete"><span>−</span> return fail(chunk);</div><div class="diff-add"><span>+</span> return scheduleRetry(chunk);</div><div class="tool-permission"><div class="sample-bar"><span>MCP tool request</span><span class="sample-meta">Waiting</span></div><p>Read the issue before drafting the release note.</p><div class="permission-buttons"><span class="sample-button">Approve</span><span class="sample-button plain">Decline</span></div></div></div></section>
+<section class="landing-section reverse" aria-labelledby="usage-heading"><div class="section-copy"><p class="eyebrow">Accounts and usage</p><h2 id="usage-heading">See the limits<br>before you reach them.</h2><p>Every account’s usage windows, reset times and projections in view. Switch accounts when one runs low.</p><p>Give a long-running goal a token, time or usage limit, and pause it from the conversation.</p></div><div class="product-demo usage-demo" role="img" aria-label="Synthetic Usage card with two Claude accounts, five-hour and weekly usage windows and reset times."><div class="sample-bar"><span>Usage</span><svg class="i"><use href="#gauge"/></svg></div><div class="usage-example"><div class="usage-account"><strong>Claude, work</strong><span class="tag">This chat</span></div><div class="sample-row"><span>5-hour window</span><span class="sample-meta">82% used</span></div><div class="meter"><i style="width:82%;background:var(--attention)"></i></div><p class="sample-meta">At this rate, runs out about 16:40. Resets 17:00.</p><div class="sample-row"><span>Weekly window</span><span class="sample-meta">41% used</span></div><div class="meter"><i style="width:41%"></i></div><p class="sample-meta">At this rate, lasts until it resets. Resets Mon 09:00.</p></div><div class="usage-example"><div class="usage-account"><strong>Claude, personal</strong></div><div class="sample-row"><span>5-hour window</span><span class="sample-meta">18% used</span></div><div class="meter"><i style="width:18%"></i></div><p class="sample-meta">At this rate, lasts until it resets. Resets 19:30.</p></div></div></section>
+<section class="compare-section" id="compare" aria-labelledby="compare-heading"><div class="section-copy wide-copy"><p class="eyebrow">How it compares</p><h2 id="compare-heading">One workspace around<br>your existing agents.</h2><p>Coding agents, plain chats and shared work in one self-hosted service. The agents still run on your machines.</p></div><div class="comparison-points"><div><svg class="i"><use href="#server"/></svg><h3>Your own control plane</h3><p>One place for conversations across several nodes.</p></div><div><svg class="i"><use href="#layers"/></svg><h3>Work beyond a transcript</h3><p>Artefacts, tasks and workflow steps you can return to.</p></div><div><svg class="i"><use href="#agent"/></svg><h3>More than one kind of model</h3><p>Claude Code and Codex alongside plain model chats.</p></div></div><a class="text-link" href="#compare">Compare Mycelium, Paseo and OpenChamber<svg class="i"><use href="#move"/></svg></a></section>
+<section class="install-section" id="install" aria-labelledby="install-heading"><div class="install-heading"><p class="eyebrow">Get started</p><h2 id="install-heading">Run it on<br>your own machines.</h2><p>One control plane, plus a node on each machine that runs agents.</p><div class="platforms"><span>Web</span><span>Linux desktop</span><span>Android</span></div></div><div class="install-body"><div class="prerequisites"><h3>Before you start</h3><p>You need Docker Compose, a Linux x86_64 machine, and Node.js with npm for the agent adapters. Compose brings Postgres and storage.</p><p>The development login below works on localhost only. Other machines need HTTPS and an OIDC provider.</p></div><ol class="install-list"><li><h3>Start the control plane</h3><p>Save the configuration below as <code>compose.yaml</code>. Replace both <code>change-me</code> placeholders with the same strong database password.</p><details><summary>Docker Compose configuration</summary><pre><code>services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mycelium
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: mycelium
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;pg_isready&quot;, &quot;-U&quot;, &quot;mycelium&quot;]
+      interval: 2s
+      retries: 30
+    restart: unless-stopped
 
-<section class="wrap focus" aria-labelledby="f-usage">
-<div class="copy"><span class="stage stage-3">Usage</span><h2 id="f-usage">Every account&rsquo;s usage, at a glance.</h2><p>Pin the Usage card to the sidebar and see each login&rsquo;s 5-hour and weekly windows, when they reset, and whether you will run out first.</p></div>
-<div class="show show-3" aria-hidden="true">
-<div class="frame usage" style="width: 340px">
-<div class="usage__head">Usage</div>
-<div class="usage__block">
-<div class="usage__acct"><strong>example.com</strong><span class="usage__tag">This chat</span></div>
-<div class="usage__win"><span>5-hour window</span><span class="my-muted">82% used</span></div>
-<div class="meter"><i class="meter--att" style="width: 82%"></i></div>
-<div class="my-muted">At this rate, runs out about 16:40, resets 17:00</div>
-<div class="usage__win"><span>Weekly window</span><span class="my-muted">41% used</span></div>
-<div class="meter"><i style="width: 41%"></i></div>
-<div class="my-muted">At this rate, lasts until it resets, resets Mon 09:00</div>
-</div>
-<div class="usage__block">
-<div class="usage__acct"><strong>example.org</strong></div>
-<div class="usage__win"><span>5-hour window</span><span class="my-muted">18% used</span></div>
-<div class="meter"><i style="width: 18%"></i></div>
-<div class="my-muted">At this rate, lasts until it resets, resets 19:30</div>
-</div>
-</div>
-</div>
-</section>
+  mycelium:
+    image: ghcr.io/mycelium-app/mycelium:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - &quot;127.0.0.1:8080:8080&quot;
+    environment:
+      MYCELIUM_DATABASE_URL: postgres://mycelium:change-me@db:5432/mycelium
+      MYCELIUM_PUBLIC_URL: http://localhost:8080
+      MYCELIUM_DEV_LOGIN: you@example.com
+    volumes:
+      - data:/var/lib/mycelium
+    restart: unless-stopped
 
-<section class="wrap focus" aria-labelledby="f-move">
-<div class="copy"><span class="stage stage-2">Machines</span><h2 id="f-move">Move it to a bigger machine.</h2><p>Pick another node. The conversation and its uncommitted work go with it.</p></div>
-<div class="show show-2" aria-hidden="true">
-<div class="my-menu" style="width: 300px">
-<div class="my-menu__label">Run on</div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>laptop<span class="my-menu__hint">Here</span></div>
-<div class="my-menu__item" style="background: var(--bg-hover)"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>server<span class="my-menu__hint">3 running</span></div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></span>work-laptop<span class="my-menu__hint">Draining</span></div>
-<div class="my-menu__item"><span class="my-row__lead"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg></span>build-vm<span class="my-menu__hint">Offline, waits</span></div>
-</div>
-</div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-wf">
-<div class="copy"><span class="stage stage-1">Workflows</span><h2 id="f-wf">Watch a workflow run.</h2><p>Every agent in every phase, live, with one button to stop the lot.</p></div>
-<div class="show show-1" aria-hidden="true">
-<div class="frame my-card" style="width: 560px; border-radius: var(--radius-float)">
-<div class="my-card__head" style="font-family: var(--font-sans); height: var(--size-bar); padding: 0 6px 0 10px"><span class="st-work" style="display: inline-flex"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><strong style="font-weight: 600; font-size: 13px">Build flow screens, then verify each</strong><span class="my-muted" style="font-size: 12px">6 of 10 agents · 4m 05s</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Stop</span></div>
-<div class="segments"><i class="s-done"></i><i class="s-done"></i><i class="s-done"></i><i class="s-run"></i><i class="s-run"></i><i class="s-done"></i><i class="s-run"></i><i class="s-run"></i><i></i><i></i></div>
-<div class="my-section__head" style="color: var(--text); height: 28px; padding: 0 10px">Build <span class="my-muted" style="font-weight: 400">3 of 5</span></div>
-<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">New user</span><span class="my-row__meta">Sonnet 5.5 · 3m 12s</span></div>
-<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">Machines and logins</span><span class="my-row__meta">Sonnet 5.5 · 3m 48s</span></div>
-<div class="my-row wf"><span class="st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Schedules, memory, config</span><span class="my-row__meta">Sonnet 5.5 · 3m 40s</span></div>
-<div class="my-section__head" style="color: var(--text); height: 28px; padding: 0 10px">Verify <span class="my-muted" style="font-weight: 400">1 of 5</span></div>
-<div class="my-row wf"><span class="st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><span class="my-row__title">New user</span><span class="my-row__meta">Sonnet 5.5 · 1m 02s</span></div>
-<div class="my-row wf"><span class="st-work"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg></span><span class="my-row__title">Machines and logins</span><span class="my-row__meta">Sonnet 5.5 · 0m 41s</span></div>
-</div>
-</div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-walk">
-<div class="copy"><span class="stage stage-2">Walkthroughs</span><h2 id="f-walk">Have the change explained to you.</h2><p>The agent walks you through every changed hunk, step by step, and the notes you leave on its lines reach it with your next message.</p></div>
-<div class="show show-2"><img class="focus-shot" src="shots/walkthrough.webp" width="560" height="600" alt="A walkthrough step titled Restore reads its copy from strings, with a diff of src/restore/Screen.tsx and two notes left for the agent." loading="lazy"></div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-mem">
-<div class="copy"><span class="stage stage-1">Memory</span><h2 id="f-mem">What one session learns, the next one knows.</h2><p>Agents remember what they worked out and recall it in any later session, on any machine, kept apart by group.</p></div>
-<div class="show show-1"><img class="focus-shot" src="shots/conversation.webp" width="1114" height="750" alt="A conversation in which the agent recalls a memory, changes package.json in a diff, runs commands, asks permission to commit and shows a workflow's progress." loading="lazy"></div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-phone">
-<div class="copy"><span class="stage stage-3">Phone</span><h2 id="f-phone">Pick it up anywhere.</h2><p>The same list and the same conversation on your phone. Swipe from the left edge for the list, and it reconnects the moment you return to the app.</p></div>
-<div class="show show-3"><img class="phone-shot" src="shots/phone-conversation.webp" width="390" height="810" alt="The conversation on a phone, with a diff, a running test and a permission prompt." loading="lazy"></div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-queue">
-<div class="copy"><span class="stage stage-1">Queue</span><h2 id="f-queue">Keep typing while it works.</h2><p>Messages wait their turn. Send one now, edit it, or drop it.</p></div>
-<div class="show show-1" aria-hidden="true">
-<div class="frame" style="width: 560px">
-<div class="my-composer" style="border-top: 0">
-<div class="my-composer__queue">
-<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Also bump @acme/ui in the docs site if it drifts</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
-<div class="my-composer__queued"><span class="my-status__mark st-done"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="my-composer__queued-text">Then open a merge request and ask me before pushing</span><span class="my-btn my-btn--sm my-btn--muted">Send now</span></div>
-</div>
-<div class="my-composer__input fake-input">Ask, plan or build</div>
-<div class="my-composer__bar"><span class="my-btn my-btn--icon my-btn--muted"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-attention); font-weight: 500">Auto</span><span class="my-btn my-btn--muted">Opus 5.5</span><span class="my-btn my-btn--outline my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg></span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
-</div>
-</div>
-</div>
-</section>
-
-<section class="wrap focus" aria-labelledby="f-goal">
-<div class="copy"><span class="stage stage-4">Goals</span><h2 id="f-goal">Give it a goal and walk away.</h2><p>It keeps going, turn after turn, until a second model says the goal is met, or a token, time or usage limit stops it.</p></div>
-<div class="show show-4" aria-hidden="true">
-<div class="frame" style="width: 560px">
-<div class="my-composer" style="border-top: 0">
-<div class="my-composer__goal"><svg class="my-icon my-icon--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg><span style="color: var(--text)">Uploads survive a 503 and a timeout</span><span class="st-work">Turn 9</span><span>184k of 500k tokens</span><span class="my-bar__spacer"></span><span class="my-btn my-btn--sm my-btn--muted">Pause</span></div>
-<div class="my-composer__input fake-input">Add to the goal or ask</div>
-<div class="my-composer__bar"><span class="my-bar__spacer"></span><span class="my-btn" style="color: var(--status-working); font-weight: 500">Plan</span><span class="my-btn my-btn--muted">GPT-6.1</span><span class="my-btn my-btn--primary my-btn--icon"><svg class="my-icon" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
-</div>
-</div>
-</div>
-</section>
-
-
-<section id="more" class="wrap more" aria-labelledby="more-h">
-<h2 id="more-h">And the rest</h2>
-<ul class="more-grid">
-<li><h3>Git panel</h3><p>Stage, commit, amend, sign off, skip hooks, then publish, push or pull. A branch picker and a graph of every branch.</p></li>
-<li><h3>Walkthroughs</h3><p>Steps grouped into sections, a scope picker, and the ones you have read remembered.</p></li>
-<li><h3>Chats</h3><p>Anthropic, Ollama and OpenRouter. Switch model mid-chat, or import a claude.ai export.</p></li>
-<li><h3>Projects and groups</h3><p>Clone or create from GitHub and GitLab, sort by last update, assign to groups and pin conversations.</p></li>
-<li><h3>Accounts and usage</h3><p>Several logins per agent, with each usage window kept, its reset time and a projection.</p></li>
-<li><h3>Nodes</h3><p>Give each machine a colour. At the session limit it closes the least recently used idle session.</p></li>
-<li><h3>Schedules</h3><p>Cron in your time zone, or proposed by an agent from a conversation and confirmed by you.</p></li>
-<li><h3>Terminals</h3><p>A terminal panel on tmux, so the full terminal app survives the client closing.</p></li>
-<li><h3>History</h3><p>Turns, tokens and an estimated cost for every conversation, and search across every transcript.</p></li>
-</ul>
-</section>
-
-<section id="stages" class="stages" aria-labelledby="stages-h">
-<div class="wrap">
-<h2 id="stages-h">What is new</h2>
-<div class="stage-grid">
-<article class="show show-2"><span class="stage stage-1">Released in 0.3.12</span><h3>Beside the chat, and on your phone</h3><ul><li>Workflow cards and interface blocks pinned beside the chat</li><li>A notification and a chime on desktop and phone when an agent finishes</li><li>Walkthrough notes that appear live on every device</li><li>A terminal in the web client</li></ul></article>
-<article class="show show-1"><span class="stage stage-1">Released in 0.3.11</span><h3>Usage, icons and drafts</h3><ul><li>A Usage card in the sidebar with every account&rsquo;s windows</li><li>Project icons, from a set or your own logo</li><li>Working, attention and failed badges on sidebar rows</li><li>Rename and archive from a row&rsquo;s menu</li><li>An image viewer with zoom and panning</li><li>Each conversation keeps its own draft</li><li>Schedules can be edited</li></ul></article>
-<article class="show show-1"><span class="stage stage-1">Released in 0.3.9 and 0.3.10</span><h3>Reviewable by you</h3><ul><li>Memory, tasks and schedules shown as cards in the thread</li><li>An agent proposes an edit to your instructions, and you review the diff</li><li>Questions answered where they are asked</li><li>Walkthroughs that cover every changed hunk, with line notes</li><li>Select text to add it to a message or ask in a side chat</li><li>Text size, density and chat width</li><li>Chats call MCP tools, and ask before each call</li></ul></article>
-<article class="show show-3"><span class="stage stage-3">Still to come</span><h3>Artefacts, and more clients</h3><ul><li>Artefacts: images, documents and pages an agent publishes, with every version kept</li><li>Subagents as side chats under their conversation</li><li>Memory banks only the models you choose can read</li><li>iPhone and iPad</li><li>Zed as a client</li></ul></article>
-</div>
-</div>
-</section>
-
-<section id="compare" class="wrap compare">
-<h2>How it compares</h2>
-<p class="compare-lead">Checked against each project's own documentation on 23 October 2026. "Not documented" means we found nothing either way. The Mycelium column describes the latest release.</p>
-<svg class="sr-only" aria-hidden="true" focusable="false">
-<symbol id="st-yes" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.3l1.9 1.9 3.7-4.1"/></symbol>
-<symbol id="st-partly" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 1.5a6.5 6.5 0 0 0 0 13z" fill="currentColor"/></symbol>
-<symbol id="st-no" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2"/></symbol>
-<symbol id="st-unknown" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" stroke-dasharray="2 2.4"/></symbol>
-<symbol id="st-next" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.6V8l2.4 1.5"/></symbol>
-</svg>
-<div class="table-scroll" tabindex="0" role="region" aria-label="Comparison with similar tools">
-<table class="matrix">
-<caption class="sr-only">Mycelium compared with Paseo and OpenChamber</caption>
-<thead><tr><th scope="col"><span class="sr-only">Feature</span></th><th scope="col"><a href="https://github.com/mycelium-app/mycelium"><img src="logo.svg" alt="Mycelium" width="24" height="24"></a></th><th scope="col"><a href="https://paseo.sh"><img src="logos/paseo.svg" alt="Paseo" height="24"></a></th><th scope="col"><a href="https://github.com/openchamber/openchamber"><img src="logos/openchamber.svg" alt="OpenChamber" height="24"></a></th></tr></thead>
-<tbody>
-<tr><th scope="rowgroup" colspan="4"><span>Hosting and clients</span></th></tr>
-<tr><th scope="row">Self-hosted</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">One container and Postgres</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Licence</th><td>WTFPL</td><td>Apache-2.0</td><td>MIT</td></tr>
-<tr><th scope="row">Price</th><td>Free</td><td>Free</td><td>Free</td></tr>
-<tr><th scope="row">Many machines</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">A node on each</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Hub, relay or SSH</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">SSH or paired servers</span></td></tr>
-<tr><th scope="row">Survives the client closing</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">And node restarts</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Web</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Desktop</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Linux</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">macOS, Windows, Linux</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">macOS, Windows, Linux</span></td></tr>
-<tr><th scope="row">Android</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Sideloaded</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Google Play</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Beta, sideloaded</span></td></tr>
-<tr><th scope="row">iOS</th><td><span class="st st-no"><svg aria-hidden="true"><use href="#st-no"/></svg>No</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">App Store</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">TestFlight beta</span></td></tr>
-<tr><th scope="row">Sign-in</th><td>Your OIDC provider</td><td>Pairing or password</td><td>Password, passkey or pairing</td></tr>
-</tbody>
-<tbody>
-<tr><th scope="rowgroup" colspan="4"><span>Agents and sessions</span></th></tr>
-<tr><th scope="row">Agents</th><td>Claude Code, Codex</td><td>Claude Code, Codex and 30 more</td><td>OpenCode</td></tr>
-<tr><th scope="row">Protocol</th><td>ACP</td><td>Own adapters and ACP</td><td>OpenCode server</td></tr>
-<tr><th scope="row">Permission prompts from anywhere</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Documented for Muse Code</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span></td></tr>
-<tr><th scope="row">Queued messages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Edit, send now</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Side chats and forks</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Forks only</span></td></tr>
-<tr><th scope="row">Move a conversation to another machine</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With unsaved work</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Several accounts per agent</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Switcher, usage left</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-no"><svg aria-hidden="true"><use href="#st-no"/></svg>No</span></td></tr>
-<tr><th scope="row">Images and files in messages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Through plugins</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Chats with plain models</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Ollama, Anthropic, OpenRouter</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Generated UI in replies</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Status badges in the conversation list</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">On the project icon</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Grouped by state</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Working, waiting, finished, failed</span></td></tr>
-<tr><th scope="row">Rename and archive from the list</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">From a row&rsquo;s menu</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">A draft kept per conversation</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Text, files and chips</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Image viewer with zoom</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Wheel, pinch, arrow keys</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Project icons</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">A set of 49 or your logo</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Notifications when an agent finishes</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Desktop and phone, with a chime</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Desktop, web and mobile</span></td></tr>
-<tr><th scope="row">Pinned workflow cards and interface blocks</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Beside the chat</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-</tbody>
-<tbody>
-<tr><th scope="rowgroup" colspan="4"><span>Workspace tools</span></th></tr>
-<tr><th scope="row">Terminal panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">On tmux</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Terminal in the browser</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Reattach from the web</span></td></tr>
-<tr><th scope="row">Git panel</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, push, graph</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Diffs and PRs</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Stage, commit, history</span></td></tr>
-<tr><th scope="row">Projects from GitHub and GitLab</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Clone or create</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">GitHub, no clone</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Worktrees</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Start from a forge issue</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Issues through Hub</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">GitHub, GitLab</span></td></tr>
-<tr><th scope="row">Diff walkthroughs</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td></tr>
-<tr><th scope="row">Walkthrough notes live on every device</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Machine pages</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Resources, ports, Docker</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-</tbody>
-<tbody>
-<tr><th scope="rowgroup" colspan="4"><span>Planning and automation</span></th></tr>
-<tr><th scope="row">Tasks board</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Agents propose tasks</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Third-party plugin<sup><a href="#fn-plugin">1</a></sup></span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Todos, no board</span></td></tr>
-<tr><th scope="row">Schedules</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron, agent-proposed</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cron</span></td></tr>
-<tr><th scope="row">Edit a schedule</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Prompt, cadence, time zone</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Goals</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Token, time and usage limits</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With a token budget</span></td></tr>
-<tr><th scope="row">Activity</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Tokens, cost, usage windows</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Cost, quotas</span></td></tr>
-<tr><th scope="row">Usage of every account at a glance</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Usage card in the sidebar</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Quotas only</span></td><td><span class="st st-partly"><svg aria-hidden="true"><use href="#st-partly"/></svg>Partly</span><span class="q">Provider limits, one account</span></td></tr>
-</tbody>
-<tbody>
-<tr><th scope="rowgroup" colspan="4"><span>Knowledge</span></th></tr>
-<tr><th scope="row">Shared memory across agents</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Through MCP, by group</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">One instructions file on every machine</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">With group layers</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Import past conversations</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span><span class="q">Claude Code, Codex, claude.ai</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-<tr><th scope="row">Search every transcript</th><td><span class="st st-yes"><svg aria-hidden="true"><use href="#st-yes"/></svg>Yes</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td><td><span class="st st-unknown"><svg aria-hidden="true"><use href="#st-unknown"/></svg>Not documented</span></td></tr>
-</tbody>
-</table>
-</div>
-<p id="fn-plugin" class="footnote"><sup>1</sup> A third-party plugin listed on <a href="https://paseo.sh">paseo.sh</a> or <a href="https://paseo.cafe">paseo.cafe</a>, not part of Paseo itself. Paseo plugins run on the daemon host without a sandbox. Mycelium is not affiliated with Paseo or OpenChamber, and their logos are their own.</p>
-</section>
-<section id="install" class="wrap install">
-<h2>Install</h2>
-<ol class="install-steps">
-<li><h3>Run the control plane</h3><p>One container and a Postgres database. The web client comes with it.</p></li>
-<li><h3>Add your machines</h3><pre class="my-mono"><code>curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- https://your-control-plane</code></pre><p>Approve the code it prints, and the machine appears in your list. NixOS, nix-darwin and home-manager modules are in the flake.</p></li>
-<li><h3>Open a conversation</h3><p>In the browser, or the Linux desktop app.</p></li>
-</ol>
-<div class="downloads">
-<h3>Download</h3>
-<ul>
-<li><a href="https://github.com/mycelium-app/mycelium/releases">Releases</a><span>Android APK, Linux desktop as .deb or .tar.gz, and the node binary, each with a SHA-256.</span></li>
-<li><a href="https://github.com/mycelium-app/mycelium/releases/latest/download/latest">Latest version</a><span>The tag the installer takes, as plain text.</span></li>
-<li><a href="install.md">Install guide</a><span>For you or for your agent. Nix modules and the container image are in it.</span></li>
-</ul>
-</div>
-<p class="install-more">Full steps, written so you can hand them to your agent: <a href="install.md">example.com/mycelium/install.md</a></p>
-</section>
-
-</main>
-</div>
-
-<footer class="wrap foot">
-<span>WTFPL</span>
-<a href="https://github.com/mycelium-app/mycelium">github.com/mycelium-app/mycelium</a>
-<span>Not affiliated with Anthropic or OpenAI.</span>
-</footer>
-</body>
+volumes:
+  db:
+  data:</code></pre></details><pre><code>docker compose up -d</code></pre><p>Open <a href="http://localhost:8080">http://localhost:8080</a>. Database migrations run automatically when the service starts.</p><div class="remote-config"><strong>Serving it beyond localhost</strong><p>Put it behind HTTPS, remove <code>MYCELIUM_DEV_LOGIN</code> and set <code>MYCELIUM_PUBLIC_URL</code>, <code>MYCELIUM_OIDC_ISSUER</code> and <code>MYCELIUM_OIDC_CLIENT_ID</code>. Register <code>&lt;public-url&gt;/auth/callback</code> with your provider and set <code>MYCELIUM_ALLOWED_EMAILS</code> to restrict who can sign in.</p></div></li><li><h3>Install the agents you use</h3><p>On each node, install the ACP adapter for each agent. Sign in to the agent accounts from Mycelium once the machine is connected.</p><pre><code>npm install -g @agentclientprotocol/claude-agent-acp
+npm install -g @agentclientprotocol/codex-acp</code></pre></li><li><h3>Join the machine</h3><p>For a node on the same machine as the local control plane:</p><pre><code>curl -fsSL https://github.com/mycelium-app/mycelium/releases/latest/download/install.sh | sh -s -- http://localhost:8080</code></pre><p>On another machine, use your control plane’s HTTPS address. Open the link the installer prints, check the code matches, and approve.</p><p>It verifies the download’s SHA-256 and starts a systemd service, per user when run without root.</p><details><summary>NixOS, nix-darwin and home-manager</summary><p>The release flake provides Linux x86_64 packages and NixOS and home-manager modules. The repository flake also covers nix-darwin:</p><pre><code>inputs.mycelium.url = "https://github.com/mycelium-app/mycelium/releases/latest/download/mycelium-flake.tar.gz";</code></pre><p>Use a versioned release-flake URL to pin a version.</p><pre><code>services.mycelium-node = {
+  enable = true;
+  controlPlane = "https://mycelium.example.com";
+};</code></pre><p>Join once to approve the node:</p><pre><code>mycelium node join https://mycelium.example.com</code></pre></details></li><li><h3>Open your workspace</h3><p>Use the web client the control plane serves, or the Linux desktop app or Android APK, which sign in with a device code.</p><div class="install-links"><a class="btn btn-primary" href="https://github.com/mycelium-app/mycelium/releases"><svg class="i"><use href="#download"/></svg>Downloads</a><a class="text-link" href="install.md">Install guide<svg class="i"><use href="#move"/></svg></a></div></li></ol></div></section>
+</div></main><footer class="landing-footer"><div class="footer-inner"><span class="footer-brand"><svg class="i" aria-hidden="true"><use href="#logo"/></svg>Mycelium</span></div></footer></body>
 </html>
