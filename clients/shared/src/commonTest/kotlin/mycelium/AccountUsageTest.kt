@@ -14,6 +14,8 @@ import mycelium.state.runsOutBeforeReset
 import mycelium.state.splitSignedOut
 import mycelium.state.usageClockTime
 import mycelium.state.usageProjection
+import mycelium.state.compactWindowUsage
+import mycelium.state.CompactWindowUsage
 import mycelium.state.windowName
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -121,6 +123,34 @@ class AccountUsageTest {
     fun aWindowWithNoRateOnlyGivesItsResetTime() {
         assertEquals("Resets 22:30", usageProjection(UsageWindow("five_hour", 5.0, resetsAt = "2026-10-23T22:30:00Z"), ::utc, Now))
         assertEquals("", usageProjection(UsageWindow("five_hour", 5.0), ::utc, Now))
+    }
+
+    @Test
+    fun aCompactWindowGivesItsForecastAndTimeLeft() {
+        val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T19:00:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T17:00:00Z")
+
+        assertEquals(CompactWindowUsage(64, "runs out ~17:00", "64% used, 5h left", true), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun aCompactWindowThatLastsUntilItResetsHasNoForecast() {
+        val window = UsageWindow("seven_day", 20.0, resetsAt = "2026-10-28T09:00:00Z", ratePerHour = 0.2)
+
+        assertEquals(CompactWindowUsage(20, null, "20% used, 4d left", false), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun aFullWindowDoesNotSayWhenItRunsOut() {
+        val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T14:06:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T13:57:00Z")
+
+        assertEquals(CompactWindowUsage(100, null, "100% used, 6m left", false), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun aWindowWhoseResetHasPassedShowsAsReset() {
+        val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T13:03:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T12:57:00Z")
+
+        assertEquals(CompactWindowUsage(0, null, "0% used, reset 13:03", false), compactWindowUsage(window, ::utc, Now))
     }
 
     @Test

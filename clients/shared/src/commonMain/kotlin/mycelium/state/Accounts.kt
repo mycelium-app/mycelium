@@ -130,6 +130,25 @@ fun usageProjection(window: UsageWindow, localDateTime: (Long) -> String?, now: 
     return listOfNotNull(runsOut ?: steady, resets).joinToString(", ").replaceFirstChar { it.uppercase() }
 }
 
+data class CompactWindowUsage(val percent: Int, val forecast: String?, val summary: String, val attention: Boolean)
+
+fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): CompactWindowUsage {
+    val resetsAt = window.resetsAt
+    val resets = resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
+
+    if (resetsAt != null && resets != null && resets <= now) {
+        return CompactWindowUsage(0, null, "0% used, reset ${usageClockTime(resetsAt, localDateTime, now)}", false)
+    }
+
+    val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
+    val attention = percent < 100 && runsOutBeforeReset(window)
+    val approximately = if (localDateTime(now.toEpochMilliseconds()) == null) "" else "~"
+    val forecast = window.runsOutAt?.takeIf { attention }?.let { "runs out $approximately${usageClockTime(it, localDateTime, now)}" }
+    val left = resetsAt?.let { ", ${until(it, now).removePrefix("in ")} left" }.orEmpty()
+
+    return CompactWindowUsage(percent, forecast, "$percent% used$left", attention)
+}
+
 fun accountMenuTitle(agent: String): String = when (agent) {
     "claude" -> "Claude account"
     "codex" -> "Codex account"

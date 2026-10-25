@@ -3,10 +3,10 @@ package mycelium.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,11 +20,11 @@ import androidx.compose.ui.semantics.semantics
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
-import kotlin.time.Instant
 import mycelium.api.ModelProviderUsage
+import mycelium.api.OpenRouterSpend
 import mycelium.state.AgentAccount
-import mycelium.state.runsOutBeforeReset
-import mycelium.state.usageProjection
+import mycelium.state.ago
+import mycelium.state.compactWindowUsage
 import mycelium.state.windowName
 
 @Composable
@@ -54,103 +54,138 @@ fun UsageCard(
                 Label("No account has reported usage yet.", Modifier.padding(Tokens.Space.S1_5), Tokens.Type.Meta, colors.textMuted)
             }
 
-            for ((account, thisChat) in reported) {
-                Hairline()
+            val accountBlocks: @Composable () -> Unit = {
+                for ((account, thisChat) in reported) {
+                    Hairline()
 
-                UsageBlock(account, thisChat)
-            }
-
-            for (provider in providers.sortedBy { it.providerId != currentProviderId }) {
-                Hairline()
-
-                Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                        Label("OpenRouter: ${provider.name}", Modifier.weight(1f), Tokens.Type.UiStrong)
-
-                        if (provider.providerId == currentProviderId) {
-                            Tag("This chat")
-                        }
-                    }
-
-                    Label("Key spend (USD)", style = Tokens.Type.Meta, color = colors.textMuted)
-                    val spend = provider.spend
-
-                    if (spend == null) {
-                        Label("Spend not reported yet.", style = Tokens.Type.Meta, color = colors.textMuted)
-                    } else {
-                        val amounts = listOf("Total" to spend.total, "Today" to spend.daily, "This week" to spend.weekly, "This month" to spend.monthly) +
-                            if (spend.limitRemaining != null) listOf("Key limit remaining" to spend.limitRemaining) else emptyList()
-
-                        for ((label, amount) in amounts) {
-                            val cents = amount?.let { (it * 100).roundToLong() }
-                            val sign = if (cents != null && cents < 0) "-" else ""
-                            val absoluteCents = cents?.absoluteValue
-                            val display = if (absoluteCents == null) "Not reported" else "$sign$${absoluteCents / 100}.${(absoluteCents % 100).toString().padStart(2, '0')}"
-
-                            Row {
-                                Label(label, Modifier.weight(1f), Tokens.Type.Meta)
-                                Label(display, style = Tokens.Type.Meta)
-                            }
-                        }
-                    }
-
-                    UsageUpdatedAt(provider.readAt)
+                    UsageBlock(account, thisChat)
                 }
             }
+            val providerBlocks: @Composable () -> Unit = {
+                for (provider in providers.sortedBy { it.providerId != currentProviderId }) {
+                    Hairline()
+
+                    ProviderBlock(provider, provider.providerId == currentProviderId)
+                }
+            }
+
+            if (providers.any { it.providerId == currentProviderId }) {
+                providerBlocks()
+                accountBlocks()
+            } else {
+                accountBlocks()
+                providerBlocks()
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageHeader(title: String, thisChat: Boolean, readAt: String?, leading: @Composable RowScope.() -> Unit = {}) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        leading()
+        Label(title, Modifier.weight(1f, fill = false), Tokens.Type.UiStrong, maxLines = 1)
+
+        if (thisChat) {
+            Tag("This chat")
+        }
+
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+            if (readAt != null) {
+                Label("last updated ${ago(readAt)}", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageLine(name: String, note: String?, value: String) {
+    val colors = MyTheme.colors
+
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        Label(name, style = Tokens.Type.Meta, maxLines = 1)
+
+        if (note != null) {
+            Label(note, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+        }
+
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+            Label(value, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
     }
 }
 
 @Composable
 private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
-    val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
 
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            Icon(agentIcon(account.agent), colors.text, Tokens.Size.IconMd)
-            Label(account.label.substringAfter('@'), Modifier.weight(1f, fill = false), Tokens.Type.UiStrong)
-
-            if (thisChat) {
-                Tag("This chat")
-            }
+        UsageHeader(account.label.substringAfter('@'), thisChat, account.usageReadAt) {
+            Icon(agentIcon(account.agent), MyTheme.colors.text, Tokens.Size.IconMd)
         }
 
-        UsageUpdatedAt(account.usageReadAt)
-
         for (window in account.windows) {
-            val percent = window.usedPercent.roundToInt().coerceIn(0, 100)
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
-            val projection = usageProjection(window, localDateTime)
+            val usage = compactWindowUsage(window, localDateTime)
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Label(name, Modifier.weight(1f), Tokens.Type.Meta, maxLines = 1)
-                    Label("$percent% used", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-                }
-
-                Meter(percent, "$name $percent% used", attention = runsOutBeforeReset(window))
-
-                if (projection.isNotEmpty()) {
-                    Label(projection, style = Tokens.Type.Meta, color = colors.textMuted)
-                }
+                UsageLine(name, usage.forecast, usage.summary)
+                Meter(usage.percent, "$name ${usage.percent}% used", attention = usage.attention)
             }
         }
     }
 }
 
 @Composable
-private fun UsageUpdatedAt(readAt: String?) {
-    val platform = LocalPlatform.current
-    val updated = readAt?.let { timestamp ->
-        val millis = runCatching { Instant.parse(timestamp).toEpochMilliseconds() }.getOrNull()
-        val local = millis?.let { platform?.localDateTime(it) }
+private fun ProviderBlock(provider: ModelProviderUsage, thisChat: Boolean) {
+    val title = if (provider.name.equals("OpenRouter", ignoreCase = true)) "OpenRouter" else "OpenRouter: ${provider.name}"
 
-        local?.replace('T', ' ') ?: timestamp
+    Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        UsageHeader(title, thisChat, provider.readAt)
+
+        val spend = provider.spend
+
+        if (spend == null) {
+            Label("Spend not reported yet.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+        } else {
+            SpendLines(spend)
+        }
+    }
+}
+
+@Composable
+private fun SpendLines(spend: OpenRouterSpend) {
+    val limit = spend.limit
+
+    if (limit != null) {
+        val (name, used) = when (spend.limitReset) {
+            "daily" -> "Daily limit" to spend.daily
+            "weekly" -> "Weekly limit" to spend.weekly
+            "monthly" -> "Monthly limit" to spend.monthly
+            else -> "Key limit" to spend.total
+        }
+        val percent = if (used == null || limit <= 0.0) 0 else (used / limit * 100).roundToInt().coerceIn(0, 100)
+
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+            UsageLine(name, null, "${usd(used)} / ${usd(limit)}")
+            Meter(percent, "$name $percent% used")
+        }
+    } else {
+        UsageLine("Today", null, usd(spend.daily))
     }
 
-    if (updated != null) {
-        Label("Last updated $updated", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+    if (limit == null && spend.limitRemaining != null) {
+        UsageLine("Key limit remaining", null, usd(spend.limitRemaining))
     }
+
+    UsageLine("Total", null, usd(spend.total))
+}
+
+private fun usd(amount: Double?): String {
+    val cents = amount?.let { (it * 100).roundToLong() } ?: return "Not reported"
+    val sign = if (cents < 0) "-" else ""
+    val absolute = cents.absoluteValue
+
+    return "$sign$${absolute / 100}.${(absolute % 100).toString().padStart(2, '0')}"
 }
