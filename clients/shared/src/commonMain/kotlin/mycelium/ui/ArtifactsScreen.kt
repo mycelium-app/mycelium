@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.heading
@@ -173,7 +174,7 @@ private fun ArtifactPreviewArea(artifact: Artifact, store: Store) {
 
     Box(Modifier.fillMaxWidth().aspectRatio(PreviewAspectRatio).clip(PreviewShape).background(colors.bgPanel), contentAlignment = Alignment.Center) {
         if (drawn != null) {
-            Image(drawn, contentDescription = null, Modifier.fillMaxSize(), alignment = Alignment.TopCenter, contentScale = ContentScale.Crop)
+            Image(drawn, contentDescription = null, Modifier.fillMaxSize(), alignment = Alignment.TopCenter, contentScale = ContentScale.Crop, filterQuality = FilterQuality.High)
         } else if (excerpt != null) {
             val density = LocalDensity.current
 

@@ -17,6 +17,10 @@ import mycelium.state.usageProjection
 import mycelium.state.compactWindowUsage
 import mycelium.state.CompactWindowUsage
 import mycelium.state.windowName
+import mycelium.state.evenPacePercent
+import mycelium.state.nextUsageTick
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.time.Instant
@@ -151,6 +155,30 @@ class AccountUsageTest {
         val window = UsageWindow("five_hour", 100.0, resetsAt = "2026-10-23T13:03:00Z", ratePerHour = 20.0, runsOutAt = "2026-10-23T12:57:00Z")
 
         assertEquals(CompactWindowUsage(0, null, "0% used, reset 13:03", false), compactWindowUsage(window, ::utc, Now))
+    }
+
+    @Test
+    fun evenPaceIsTheShareOfTheWindowThatHasElapsed() {
+        assertEquals(50, evenPacePercent(UsageWindow("five_hour", 5.0, resetsAt = "2026-10-23T16:30:00Z"), Now))
+        assertEquals(50, evenPacePercent(UsageWindow("seven_day", 5.0, resetsAt = "2026-10-27T02:00:00Z"), Now))
+        assertEquals(null, evenPacePercent(UsageWindow("five_hour", 5.0), Now))
+        assertEquals(null, evenPacePercent(UsageWindow("five_hour", 5.0, resetsAt = "2026-10-23T13:00:00Z"), Now))
+        assertEquals(null, evenPacePercent(UsageWindow("other", 5.0, resetsAt = "2026-10-23T16:00:00Z"), Now))
+        assertEquals(null, evenPacePercent(UsageWindow("five_hour", 5.0, resetsAt = "bad date"), Now))
+        assertEquals(null, evenPacePercent(UsageWindow("five_hour", 5.0, resetsAt = "2026-10-24T14:00:00Z"), Now))
+    }
+
+    @Test
+    fun theCardWakesAtTheNextResetOrWithinAMinute() {
+        val soon = UsageWindow("five_hour", 5.0, resetsAt = "2026-10-23T14:00:20Z")
+        val later = UsageWindow("seven_day", 5.0, resetsAt = "2026-10-25T14:00:00Z")
+        val passed = UsageWindow("five_hour", 5.0, resetsAt = "2026-10-23T13:00:00Z")
+
+        assertEquals(20.seconds, nextUsageTick(listOf(later, soon), Now))
+        assertEquals(1.minutes, nextUsageTick(listOf(later, passed), Now))
+        assertEquals(1.minutes, nextUsageTick(emptyList(), Now))
+        assertEquals(1.seconds, nextUsageTick(listOf(soon.copy(resetsAt = "2026-10-23T14:00:00.500Z")), Now))
+        assertEquals(1.minutes, nextUsageTick(listOf(soon.copy(resetsAt = "bad date")), Now))
     }
 
     @Test

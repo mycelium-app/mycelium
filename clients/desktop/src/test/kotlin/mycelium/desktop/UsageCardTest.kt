@@ -44,6 +44,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.minutes
 import kotlin.test.assertTrue
 import kotlin.test.assertEquals
 import java.util.concurrent.atomic.AtomicInteger
@@ -151,6 +152,16 @@ class UsageCardTest {
 
         assertEquals(updated.right, value.boundsInRoot.right.toDp(rule), 1.dp)
         assertTrue(value.config[SemanticsProperties.Text].single().text.endsWith("left"))
+    }
+
+    @Test
+    fun aWindowBarSaysWhereAnEvenPaceWouldBe() {
+        val resets = (kotlin.time.Clock.System.now() + 150.minutes).toString()
+        val account = AgentAccount("claude", "work@example.com", "oauth_token", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0, resetsAt = resets)))
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithContentDescription("5-hour window 5% used, even pace 50%").assertExists()
     }
 
     @Test

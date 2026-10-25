@@ -236,6 +236,20 @@ data class CpuPoint(@SerialName("at_ms") val atMs: Long, @SerialName("cpu_percen
 data class NodeResources(val latest: ResourceSample? = null, val history: List<CpuPoint> = emptyList())
 
 @Serializable
+data class ConversationUsage(
+    @SerialName("context_used") val contextUsed: Long? = null,
+    @SerialName("context_size") val contextSize: Long? = null,
+    @SerialName("input_tokens") val inputTokens: Long = 0,
+    @SerialName("output_tokens") val outputTokens: Long = 0,
+    @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
+    @SerialName("cache_write_tokens") val cacheWriteTokens: Long = 0,
+    @SerialName("cost_usd") val costUsd: Double? = null,
+    @SerialName("cost_estimated") val costEstimated: Boolean = false,
+) {
+    val tokens: Long get() = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+}
+
+@Serializable
 data class ActivityRow(
     val key: String,
     val name: String,

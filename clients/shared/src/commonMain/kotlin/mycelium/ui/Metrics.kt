@@ -61,8 +61,10 @@ fun Kpi(title: String, value: String, modifier: Modifier = Modifier, caption: St
     }
 }
 
+private val MarkerWidth = 2.dp
+
 @Composable
-fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, attention: Boolean = false) {
+fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, attention: Boolean = false, markerPercent: Int? = null) {
     val colors = MyTheme.colors
     val fill = when {
         percent >= AttentionPercent -> colors.statusFailed
@@ -83,6 +85,12 @@ fun Meter(percent: Int, description: String, modifier: Modifier = Modifier, atte
 
         drawRoundRect(colors.border, cornerRadius = radius)
         drawRoundRect(fill, Offset.Zero, Size(size.width * percent.coerceIn(0, 100) / 100f, size.height), radius)
+
+        if (markerPercent != null) {
+            val x = size.width * markerPercent.coerceIn(0, 100) / 100f
+
+            drawLine(colors.text, Offset(x, 0f), Offset(x, size.height), strokeWidth = MarkerWidth.toPx())
+        }
     }
 }
 

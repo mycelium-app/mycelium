@@ -169,6 +169,7 @@ object Tokens {
         val ComposerInput: Dp = 44.dp
         val ImagePreview: Dp = 160.dp
         val ProgressBar: Dp = 4.dp
+        val ContextMeter: Dp = 96.dp
         val FormColumn: Dp = 320.dp
         val ApproveColumn: Dp = 420.dp
         val Popover: Dp = 440.dp

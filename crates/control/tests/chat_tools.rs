@@ -1,5 +1,8 @@
 mod common;
 
+#[path = "common/fake_zulip.rs"]
+mod fake_zulip;
+
 use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -8,6 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use common::{Server, eventually, serve};
+use fake_zulip::{ACCOUNT, API_KEY, fake_zulip};
 use futures_util::StreamExt;
 use futures_util::stream;
 use serde_json::{Value, json};
@@ -110,7 +114,7 @@ fn anthropic_model(model: Arc<Model>) -> Router {
         model.requests.lock().unwrap().push(request);
 
         let event = |name: &str, data: Value| format!("event: {name}\ndata: {data}\n\n");
-        let mut lines = vec![event("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 3}}}))];
+        let mut lines = vec![event("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 3, "cache_read_input_tokens": 30, "cache_creation_input_tokens": 5}}}))];
 
         match model.next() {
             Reply::Say(text) => lines.push(event("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}}))),
@@ -595,6 +599,21 @@ async fn an_anthropic_chat_sends_tool_definitions_and_returns_results_as_tool_re
     assert_eq!((used["type"].clone(), used["name"].clone(), used["input"].clone()), (json!("tool_use"), json!(WEATHER), json!({"city": "Paris"})));
     assert_eq!((returned["type"].clone(), returned["tool_use_id"].clone(), returned["content"].clone()), (json!("tool_result"), used["id"].clone(), json!("Sunny in Paris")));
     assert_eq!(second["messages"][2]["role"], "user");
+
+    let (_, activity) = rig.server.user.json(rig.server.user.get("/api/v1/activity").query(&[("range", "today")])).await;
+
+    assert_eq!(activity["totals"]["input_tokens"], 6);
+    assert_eq!(activity["totals"]["output_tokens"], 4);
+    assert_eq!(activity["totals"]["cache_read_tokens"], 60);
+    assert_eq!(activity["totals"]["cache_write_tokens"], 10);
+
+    let (_, usage) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/conversations/{id}/usage"))).await;
+
+    assert_eq!(usage["context_used"], 38);
+    assert_eq!(usage["context_size"], Value::Null);
+    assert_eq!(usage["input_tokens"], 6);
+    assert_eq!(usage["cache_read_tokens"], 60);
+    assert_eq!(usage["cache_write_tokens"], 10);
 }
 
 #[tokio::test]
@@ -750,4 +769,39 @@ async fn a_very_long_tool_result_is_cut_before_it_is_stored_or_sent_to_the_model
 
     assert!(sent.chars().count() < 51_000);
     assert!(sent.ends_with("[Cut: the result was longer than 50000 characters.]"));
+}
+
+#[tokio::test]
+async fn sending_a_zulip_message_asks_every_time_even_when_the_integration_is_always_allowed() {
+    let rig = rig(vec![
+        Reply::Call("mcp__zulip__list_channels", json!({})),
+        Reply::Call("mcp__zulip__send_message", json!({"channel": "general", "topic": "lunch", "content": "Noon works."})),
+        Reply::Say("Sent."),
+        Reply::Call("mcp__zulip__send_message", json!({"channel": "general", "topic": "lunch", "content": "Again."})),
+        Reply::Say("Sent again."),
+    ])
+    .await;
+    let (router, zulip) = fake_zulip();
+    let base = serve(router).await;
+    let (status, added) = rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Zulip", "kind": "zulip", "url": base, "account": ACCOUNT, "bearer_token": API_KEY}))).await;
+    let (patched, _) = rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", added["id"].as_str().unwrap())).json(&json!({"always_allow": true}))).await;
+    let id = rig.chat("Tell the team noon works.").await;
+
+    let request = rig.request_waiting(&id).await;
+    assert_eq!(request["toolCall"]["title"], "mcp__zulip__send_message");
+    assert!(zulip.sent().is_empty());
+    rig.decide(&id, &request, "allow_always").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!((status, patched), (201, 200));
+    assert_eq!(events.iter().filter(|event| event["kind"] == "permission_request").count(), 1);
+    assert_eq!(zulip.sent().len(), 1);
+    assert!(zulip.paths().contains(&"/api/v1/users/me/subscriptions".to_string()));
+
+    rig.say(&id, "Once more.").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "reject_once").await;
+    rig.turns_ended(&id, 2).await;
+
+    assert_eq!(zulip.sent().len(), 1);
 }

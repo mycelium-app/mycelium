@@ -127,6 +127,20 @@ impl ChatMessage {
     }
 }
 
+fn cache_control() -> Value {
+    json!({"type": "ephemeral"})
+}
+
+fn mark_cache_breakpoint(content: &mut Value) {
+    if let Value::String(text) = content {
+        *content = json!([{"type": "text", "text": text}]);
+    }
+
+    if let Some(last) = content.as_array_mut().and_then(|parts| parts.last_mut()) {
+        last["cache_control"] = cache_control();
+    }
+}
+
 fn tool_definitions_json(kind: ModelProviderKind, tools: &[ToolDefinition]) -> Vec<Value> {
     tools
         .iter()
@@ -148,7 +162,42 @@ pub struct Delta {
     pub text: String,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Clone, Default)]
+pub struct ReportedUsage {
+    pub input: Option<i64>,
+    pub output: Option<i64>,
+    pub cache_read: Option<i64>,
+    pub cache_write: Option<i64>,
+}
+
+impl ReportedUsage {
+    pub fn absorb(&mut self, delta: &Delta, previous: &ReportedUsage) {
+        self.input = delta.input_tokens.map(|tokens| previous.input.unwrap_or(0) + tokens).or(self.input);
+        self.output = delta.output_tokens.map(|tokens| previous.output.unwrap_or(0) + tokens).or(self.output);
+        self.cache_read = delta.cache_read_tokens.map(|tokens| previous.cache_read.unwrap_or(0) + tokens).or(self.cache_read);
+        self.cache_write = delta.cache_write_tokens.map(|tokens| previous.cache_write.unwrap_or(0) + tokens).or(self.cache_write);
+    }
+
+    pub fn is_reported(&self) -> bool {
+        self.input.is_some() || self.output.is_some() || self.cache_read.is_some() || self.cache_write.is_some()
+    }
+}
+
+impl Delta {
+    fn without_cached_from_input(mut self, cache_read: Option<i64>, cache_write: Option<i64>) -> Delta {
+        let cached = cache_read.unwrap_or(0) + cache_write.unwrap_or(0);
+
+        self.input_tokens = self.input_tokens.map(|input| (input - cached).max(0));
+        self.cache_read_tokens = cache_read;
+        self.cache_write_tokens = cache_write;
+
+        self
+    }
 }
 
 pub struct ReplyStream {
@@ -233,22 +282,63 @@ impl ProviderRow {
         Ok(Ok(models))
     }
 
-    pub async fn stream_reply(&self, http: &reqwest::Client, model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolDefinition]) -> ApiResult<Result<ReplyStream, ProviderError>> {
-        let kind = self.parsed_kind()?;
+    fn caches_through_content_parts(&self, model: &str) -> bool {
+        let host = self.base_url.as_deref().and_then(|base| reqwest::Url::parse(base).ok()).and_then(|url| url.host_str().map(str::to_string));
+
+        host.as_deref() == Some("openrouter.ai") && (model.starts_with("anthropic/") || model.starts_with("google/"))
+    }
+
+    fn request_body(&self, kind: ModelProviderKind, model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolDefinition]) -> Value {
         let turns: Vec<Value> = messages.iter().flat_map(|message| message.to_json(kind)).collect();
         let mut body = match kind {
             ModelProviderKind::OpenaiCompatible => {
                 let mut all = vec![json!({"role": "system", "content": system})];
                 all.extend(turns);
 
+                if self.caches_through_content_parts(model) {
+                    let last_user = all.iter().rposition(|message| message["role"] == "user");
+
+                    for position in [Some(0), last_user].into_iter().flatten() {
+                        mark_cache_breakpoint(&mut all[position]["content"]);
+                    }
+                }
+
                 json!({"model": model, "messages": all, "stream": true, "stream_options": {"include_usage": true}})
             }
-            ModelProviderKind::Anthropic => json!({"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "system": system, "messages": turns, "stream": true}),
+            ModelProviderKind::Anthropic => {
+                let mut turns = turns;
+                let mut system = json!(system);
+
+                if let Some(last) = turns.last_mut() {
+                    mark_cache_breakpoint(&mut last["content"]);
+                }
+
+                if tools.is_empty() {
+                    mark_cache_breakpoint(&mut system);
+                }
+
+                json!({"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "system": system, "messages": turns, "stream": true})
+            }
         };
 
         if !tools.is_empty() {
-            body["tools"] = json!(tool_definitions_json(kind, tools));
+            let mut definitions = tool_definitions_json(kind, tools);
+
+            if kind == ModelProviderKind::Anthropic
+                && let Some(last) = definitions.last_mut()
+            {
+                last["cache_control"] = cache_control();
+            }
+
+            body["tools"] = json!(definitions);
         }
+
+        body
+    }
+
+    pub async fn stream_reply(&self, http: &reqwest::Client, model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolDefinition]) -> ApiResult<Result<ReplyStream, ProviderError>> {
+        let kind = self.parsed_kind()?;
+        let body = self.request_body(kind, model, system, messages, tools);
 
         let path = match kind {
             ModelProviderKind::OpenaiCompatible => "chat/completions",
@@ -332,6 +422,7 @@ impl ReplyStream {
                     output_tokens: event["usage"]["completion_tokens"].as_i64(),
                     ..Delta::default()
                 }
+                .without_cached_from_input(event["usage"]["prompt_tokens_details"]["cached_tokens"].as_i64(), event["usage"]["prompt_tokens_details"]["cache_write_tokens"].as_i64())
             }
             ModelProviderKind::Anthropic => match event["type"].as_str() {
                 Some("content_block_start") if event["content_block"]["type"] == "tool_use" => {
@@ -351,14 +442,19 @@ impl ReplyStream {
                     Delta::default()
                 }
                 Some("content_block_delta") => Delta { text: event["delta"]["text"].as_str().unwrap_or_default().to_string(), ..Delta::default() },
-                Some("message_start") => Delta { input_tokens: event["message"]["usage"]["input_tokens"].as_i64(), ..Delta::default() },
+                Some("message_start") => Delta {
+                    input_tokens: event["message"]["usage"]["input_tokens"].as_i64(),
+                    cache_read_tokens: event["message"]["usage"]["cache_read_input_tokens"].as_i64(),
+                    cache_write_tokens: event["message"]["usage"]["cache_creation_input_tokens"].as_i64(),
+                    ..Delta::default()
+                },
                 Some("message_delta") => Delta { output_tokens: event["usage"]["output_tokens"].as_i64(), ..Delta::default() },
                 Some("error") => return Err(ProviderError::Stopped(format!("The model stopped with an error: {}", event["error"]["message"].as_str().unwrap_or("no reason given")))),
                 _ => Delta::default(),
             },
         };
 
-        if !delta.text.is_empty() || delta.input_tokens.is_some() || delta.output_tokens.is_some() {
+        if !delta.text.is_empty() || delta.input_tokens.is_some() || delta.output_tokens.is_some() || delta.cache_read_tokens.is_some() || delta.cache_write_tokens.is_some() {
             self.pending.push_back(delta);
         }
 
@@ -510,4 +606,88 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(kind: ModelProviderKind, base_url: &str) -> ProviderRow {
+        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now() }
+    }
+
+    fn user(text: &str) -> ChatMessage {
+        ChatMessage { role: "user", content: text.into(), ..ChatMessage::default() }
+    }
+
+    fn tool() -> ToolDefinition {
+        ToolDefinition { name: "look".into(), description: "Look".into(), schema: json!({"type": "object"}) }
+    }
+
+    const MARK: &str = r#"{"type":"ephemeral"}"#;
+
+    fn marked(value: &Value) -> bool {
+        value["cache_control"].to_string() == MARK
+    }
+
+    #[test]
+    fn anthropic_marks_the_last_tool_and_the_last_message_block() {
+        let row = provider(ModelProviderKind::Anthropic, "https://api.anthropic.com");
+        let body = row.request_body(ModelProviderKind::Anthropic, "claude-sonnet-5-5", "sys", &[user("one"), user("two")], &[tool(), tool()]);
+
+        assert!(!marked(&body["tools"][0]));
+        assert!(marked(&body["tools"][1]));
+        assert_eq!(body["system"], json!("sys"));
+        assert!(!marked(&body["messages"][0]["content"][0]) && body["messages"][0]["content"] == json!("one"));
+        assert_eq!(body["messages"][1]["content"], json!([{"type": "text", "text": "two", "cache_control": {"type": "ephemeral"}}]));
+    }
+
+    #[test]
+    fn anthropic_without_tools_marks_the_system_block() {
+        let row = provider(ModelProviderKind::Anthropic, "https://api.anthropic.com");
+        let body = row.request_body(ModelProviderKind::Anthropic, "claude-sonnet-5-5", "sys", &[user("one")], &[]);
+
+        assert_eq!(body["system"], json!([{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]));
+        assert!(body.get("tools").is_none());
+    }
+
+    #[test]
+    fn anthropic_marks_the_last_block_of_a_tool_result_message() {
+        let results = ChatMessage { role: "user", tool_results: vec![ToolResult { call_id: "a".into(), content: "x".into(), is_error: false }], ..ChatMessage::default() };
+        let row = provider(ModelProviderKind::Anthropic, "https://api.anthropic.com");
+        let body = row.request_body(ModelProviderKind::Anthropic, "claude-sonnet-5-5", "sys", &[user("one"), results], &[tool()]);
+
+        assert!(marked(&body["messages"][1]["content"][0]));
+    }
+
+    #[test]
+    fn openrouter_anthropic_and_google_models_mark_the_system_and_last_user_message() {
+        let row = provider(ModelProviderKind::OpenaiCompatible, "https://openrouter.ai/api/v1");
+
+        for model in ["anthropic/claude-sonnet-5-5", "google/gemini-2.5-pro"] {
+            let body = row.request_body(ModelProviderKind::OpenaiCompatible, model, "sys", &[user("one"), user("two")], &[tool()]);
+
+            assert_eq!(body["messages"][0]["content"], json!([{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]));
+            assert_eq!(body["messages"][1]["content"], json!("one"));
+            assert_eq!(body["messages"][2]["content"], json!([{"type": "text", "text": "two", "cache_control": {"type": "ephemeral"}}]));
+            assert!(!marked(&body["tools"][0]));
+        }
+    }
+
+    #[test]
+    fn openrouter_models_that_cache_automatically_are_left_unchanged() {
+        let row = provider(ModelProviderKind::OpenaiCompatible, "https://openrouter.ai/api/v1");
+        let body = row.request_body(ModelProviderKind::OpenaiCompatible, "openai/gpt-5", "sys", &[user("one")], &[]);
+
+        assert_eq!(body, json!({"model": "openai/gpt-5", "messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "one"}], "stream": true, "stream_options": {"include_usage": true}}));
+    }
+
+    #[test]
+    fn other_openai_compatible_providers_are_left_unchanged_even_for_anthropic_model_ids() {
+        let row = provider(ModelProviderKind::OpenaiCompatible, "http://localhost:11434/v1");
+        let body = row.request_body(ModelProviderKind::OpenaiCompatible, "anthropic/claude-sonnet-5-5", "sys", &[user("one")], &[tool()]);
+
+        assert_eq!(body["messages"], json!([{"role": "system", "content": "sys"}, {"role": "user", "content": "one"}]));
+        assert!(!marked(&body["tools"][0]));
+    }
 }

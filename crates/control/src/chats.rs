@@ -5,7 +5,7 @@ use crate::chat_tools::{self, Toolbox};
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions::extensions_of;
-use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ToolCall, ToolResult};
+use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
 use axum::Json;
@@ -354,7 +354,7 @@ pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
 
 fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model: String, messages: Vec<ChatMessage>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
-        let mut usage = (None, None);
+        let mut usage = ReportedUsage::default();
         let outcome = relay(&state, owner, id, &provider, &model, messages, &mut usage).await;
         let stop_reason = match outcome {
             Ok(()) => "end_turn",
@@ -373,7 +373,7 @@ fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model
     })
 }
 
-async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: Vec<ChatMessage>, usage: &mut (Option<i64>, Option<i64>)) -> ApiResult<()> {
+async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: Vec<ChatMessage>, usage: &mut ReportedUsage) -> ApiResult<()> {
     let address = provider.address().unwrap_or_default();
     let extensions = extensions_of(state, owner).await?;
     let base_instructions = match extensions.rich_markdown {
@@ -402,6 +402,7 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
         };
         let mut said = String::new();
         let mut calls = Vec::new();
+        let previous_usage = usage.clone();
 
         loop {
             let next = stream.next().await.map_err(|error| error.into_api(&provider.name, &address))?;
@@ -409,8 +410,15 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
                 break;
             };
 
-            usage.0 = delta.input_tokens.or(usage.0);
-            usage.1 = delta.output_tokens.or(usage.1);
+            usage.absorb(&delta, &previous_usage);
+
+            if delta.input_tokens.is_some() || delta.cache_read_tokens.is_some() || delta.cache_write_tokens.is_some() {
+                let used = usage.input.unwrap_or(0) - previous_usage.input.unwrap_or(0)
+                    + usage.cache_read.unwrap_or(0) - previous_usage.cache_read.unwrap_or(0)
+                    + usage.cache_write.unwrap_or(0) - previous_usage.cache_write.unwrap_or(0);
+                record(state, owner, id, EventKind::AcpUpdate, &json!({"update": {"sessionUpdate": "usage_update", "used": used}})).await?;
+            }
+
             calls.extend(delta.tool_calls);
 
             if !delta.text.is_empty() {
@@ -452,7 +460,7 @@ async fn record_failure(state: &AppState, owner: Uuid, id: Uuid, message: &str) 
     record(state, owner, id, EventKind::Error, &json!({"message": message})).await
 }
 
-async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usage: Option<(Option<i64>, Option<i64>)>) -> ApiResult<()> {
+async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usage: Option<ReportedUsage>) -> ApiResult<()> {
     state.hub.forget_chat_turn(id);
 
     let mut tx = state.pool.begin().await?;
@@ -472,7 +480,7 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
 
     state.publish(Some(owner), StreamMessage::Conversation(review.to_proto()?));
 
-    let reported = usage.filter(|(input, output)| input.is_some() || output.is_some()).map(|(input, output)| json!({"inputTokens": input.unwrap_or(0), "outputTokens": output.unwrap_or(0)}));
+    let reported = usage.filter(ReportedUsage::is_reported).map(|usage| json!({"inputTokens": usage.input.unwrap_or(0), "outputTokens": usage.output.unwrap_or(0), "cachedReadTokens": usage.cache_read.unwrap_or(0), "cachedWriteTokens": usage.cache_write.unwrap_or(0)}));
 
     record_turn(state, id, reported.as_ref()).await?;
 

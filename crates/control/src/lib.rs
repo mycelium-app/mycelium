@@ -143,6 +143,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/close", post(conversations::close))
         .route("/api/v1/conversations/{id}/opened", post(conversations::opened))
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
+        .route("/api/v1/conversations/{id}/usage", get(activity::for_conversation))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
         .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
         .route("/api/v1/walkthroughs/{id}/uncovered", get(walkthroughs::uncovered))

@@ -10,6 +10,19 @@ description = "Rust tests in parallel; needs the throwaway Postgres on 55499"
 env = { CARGO_TARGET_DIR = "{{env.HOME}}/.cache/mycelium-target", CARGO_INCREMENTAL = "0", MYCELIUM_TEST_DATABASE_URL = "postgres://postgres:pw@127.0.0.1:55499/postgres" }
 run = "cargo nextest run --workspace --no-fail-fast"
 
+[tasks.prune]
+description = "Delete stale test binaries and the incremental cache from the Rust target directory"
+run = """
+deps="$HOME/.cache/mycelium-target/debug/deps"
+rm -rf "$HOME/.cache/mycelium-target/debug/incremental"
+cd "$deps" || exit 0
+for name in $(ls | grep -E -- '-[0-9a-f]{16}$' | sed -E 's/-[0-9a-f]{16}$//' | sort -u); do
+  ls -t | grep -E -- "^$name-[0-9a-f]{16}$" | tail -n +2 | while read -r stale; do
+    [ -x "$stale" ] && [ -f "$stale" ] && rm -f -- "$stale" "$stale.d"
+  done
+done
+"""
+
 [tasks.test-clients]
 description = "Client tests across JVM forks, plus the web and Android compiles"
 dir = "clients"

@@ -2,11 +2,11 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::pricing::Tokens;
 use crate::state::AppState;
-use crate::store::Tx;
+use crate::store::{Tx, find_owned};
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use mycelium_proto::api::{Activity, ActivityRow};
+use mycelium_proto::api::{Activity, ActivityRow, ConversationUsage};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -211,4 +211,39 @@ pub async fn per_conversation(State(state): State<AppState>, user: AuthUser) -> 
     .await?;
 
     Ok(Json(rows.into_iter().map(TotalsRow::to_proto).collect()))
+}
+
+pub async fn for_conversation(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<ConversationUsage>> {
+    let conversation = find_owned(&state.pool, id, user.id).await?;
+
+    let totals = sqlx::query_as::<_, (i64, i64, i64, i64, Option<f64>, bool)>(
+        "select coalesce(sum(input_tokens), 0)::bigint, coalesce(sum(output_tokens), 0)::bigint, coalesce(sum(cache_read_tokens), 0)::bigint, coalesce(sum(cache_write_tokens), 0)::bigint,
+                sum(cost_usd), coalesce(bool_or(cost_estimated), false)
+         from usage_turns where conversation_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.pool)
+    .await?;
+    let reported_context = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
+        "select (payload->'update'->>'used')::bigint, (payload->'update'->>'size')::bigint from events
+         where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'usage_update' and payload->'update'->>'used' is not null
+         order by seq desc limit 1",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (context_used, context_size) = match reported_context {
+        Some((used, size)) => (used, size.filter(|size| *size > 0)),
+        None if conversation.agent == "chat" => (None, None),
+        None => {
+            let last_prompt = sqlx::query_scalar::<_, i64>("select input_tokens + cache_read_tokens + cache_write_tokens from usage_turns where conversation_id = $1 and reported and input_tokens + cache_read_tokens + cache_write_tokens > 0 order by id desc limit 1")
+                .bind(id)
+                .fetch_optional(&state.pool)
+                .await?;
+
+            (last_prompt, None)
+        }
+    };
+
+    Ok(Json(ConversationUsage { context_used, context_size, input_tokens: totals.0, output_tokens: totals.1, cache_read_tokens: totals.2, cache_write_tokens: totals.3, cost_usd: totals.4, cost_estimated: totals.5 }))
 }

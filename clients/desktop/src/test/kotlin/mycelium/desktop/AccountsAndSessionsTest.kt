@@ -31,6 +31,7 @@ import mycelium.state.SignInPrefix
 import mycelium.state.SessionOptions
 import mycelium.state.Store
 import mycelium.state.accountChoices
+import mycelium.state.accountsElsewhere
 import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
 import mycelium.ui.MyceliumTheme
@@ -59,6 +60,14 @@ private const val CodexNodesJson = """[
 {"id":"n3","name":"orion","hostname":"orion","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.13","online":true,"draining":false,
  "agents":[{"agent":"codex","version":"0.1.0","available":true}],
  "logins":[{"agent":"codex","method":"oauth_token","state":"signed_out"}]}]"""
+
+private const val CodexMissingOnAtlasJson = """[
+{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","address":"100.64.4.18","online":true,"draining":false,
+ "agents":[{"agent":"codex","version":"0.1.0","available":true}],
+ "logins":[{"agent":"codex","account":"sam@example.com","method":"oauth_token","state":"signed_in"}]},
+{"id":"n2","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.12","online":true,"draining":false,
+ "agents":[{"agent":"codex","available":false}],
+ "logins":[]}]"""
 
 private const val SessionsJson = """[
 {"id":"s1","kind":"browser","label":"Firefox on Linux","hostname":"","address":"100.64.4.18","last_used_at":"2026-10-23T10:00:00Z","current":true},
@@ -151,6 +160,29 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("Sign in on orion").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
+    }
+
+    @Test
+    fun signInForCodexIsNotOfferedOnANodeWithoutTheCodexCli() {
+        val store = store(CodexMissingOnAtlasJson)
+        rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
+
+        rule.onNodeWithContentDescription("More for Codex").performClick()
+
+        rule.onNodeWithText("Sign in on willow").assertExists()
+        rule.onNodeWithText("Sign in on atlas").assertDoesNotExist()
+    }
+
+    @Test
+    fun accountsKnownElsewhereAreOnlyOfferedForSignInOnANodeWithTheCodexCli() {
+        val store = store(CodexMissingOnAtlasJson)
+        val nodes = store.state.value.nodes
+        val atlas = nodes.getValue("n2")
+        val willow = nodes.getValue("n1")
+
+        assertEquals(emptyList(), accountsElsewhere(nodes.values, atlas, "codex"))
+        assertEquals(emptyList(), accountsElsewhere(nodes.values, willow, "codex"))
+        assertEquals(listOf("sam@example.com"), accountsElsewhere(nodes.values, atlas.copy(agents = willow.agents), "codex"))
     }
 
     @Test

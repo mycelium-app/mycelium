@@ -13,6 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlin.time.Clock
+import kotlinx.coroutines.delay
+import mycelium.state.evenPacePercent
+import mycelium.state.nextUsageTick
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
@@ -111,13 +120,19 @@ private fun UsageLine(name: String, note: String?, value: String) {
 private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
     val platform = LocalPlatform.current
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
+    var now by remember { mutableStateOf(Clock.System.now()) }
+
+    LaunchedEffect(account.windows, now) {
+        delay(nextUsageTick(account.windows, now))
+        now = Clock.System.now()
+    }
 
     Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         UsageHeader(account.label.substringAfter('@'), thisChat, account.usageReadAt) {
             Icon(agentIcon(account.agent), MyTheme.colors.text, Tokens.Size.IconMd)
         }
 
-        val usages = account.windows.map { it to compactWindowUsage(it, localDateTime) }
+        val usages = account.windows.map { it to compactWindowUsage(it, localDateTime, now) }
         val weekExhausted = usages.any { (window, usage) -> window.name.startsWith("seven_day") && usage.percent >= 100 }
 
         for ((window, usage) in usages) {
@@ -127,7 +142,10 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
                 UsageLine(name, usage.forecast, usage.summary)
-                Meter(usage.percent, "$name ${usage.percent}% used", attention = usage.attention)
+                val pace = evenPacePercent(window, now)
+                val description = "$name ${usage.percent}% used" + (pace?.let { ", even pace $it%" } ?: "")
+
+                Meter(usage.percent, description, attention = usage.attention, markerPercent = pace)
             }
         }
     }

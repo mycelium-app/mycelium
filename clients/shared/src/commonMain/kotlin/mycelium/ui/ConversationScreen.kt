@@ -328,6 +328,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
 
+                ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd })
+
                 val parentId = conversation.parentId
 
                 if (conversation.isSubagent && parentId != null) {

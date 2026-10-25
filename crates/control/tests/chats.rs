@@ -59,7 +59,7 @@ fn fake_openai(key: Option<&'static str>) -> (Router, Arc<Fake>) {
             return event_stream(lines.drain(..1).collect(), true);
         }
 
-        lines.push(format!("data: {}\n\n", json!({"choices": [], "usage": {"prompt_tokens": 21, "completion_tokens": 4}})));
+        lines.push(format!("data: {}\n\n", json!({"choices": [], "usage": {"prompt_tokens": 21, "completion_tokens": 4, "prompt_tokens_details": {"cached_tokens": 12, "cache_write_tokens": 4}}})));
         lines.push("data: [DONE]\n\n".to_string());
 
         event_stream(lines, false)
@@ -85,7 +85,7 @@ fn fake_anthropic() -> (Router, Arc<Fake>) {
 
         let event = |name: &str, data: Value| format!("event: {name}\ndata: {data}\n\n");
         let mut lines = vec![
-            event("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 12, "output_tokens": 1}}})),
+            event("message_start", json!({"type": "message_start", "message": {"usage": {"input_tokens": 12, "output_tokens": 1, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 40}}})),
             event("content_block_start", json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})),
             event("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Bonjour"}})),
             event("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " tout le monde"}})),
@@ -282,18 +282,22 @@ async fn a_chat_streams_the_reply_token_by_token_as_conversation_events() {
     let chat = new_chat(&server, &provider, "Say hello to the lab").await;
     let id = chat["id"].as_str().unwrap().to_string();
     let first = stream.until(|message| match message {
-        StreamMessage::Event(event) if event.kind == EventKind::AcpUpdate => Some(event),
+        StreamMessage::Event(event) if event.kind == EventKind::AcpUpdate && event.payload["update"]["sessionUpdate"] == "agent_message_chunk" => Some(event),
         _ => None,
     })
     .await;
     let finished = stream.conversation_with_status("review").await;
     let events = server.events(id.parse().unwrap()).await;
-    let kinds: Vec<&str> = events.iter().map(|event| event["kind"].as_str().unwrap()).collect();
+    let chunks: Vec<&str> = events.iter().filter(|event| event["payload"]["update"]["sessionUpdate"] == "agent_message_chunk").filter_map(|event| event["payload"]["update"]["content"]["text"].as_str()).collect();
+    let context = events.iter().find(|event| event["payload"]["update"]["sessionUpdate"] == "usage_update").unwrap();
 
     assert_eq!(first.payload["update"]["sessionUpdate"], "agent_message_chunk");
     assert_eq!(first.payload["update"]["content"]["text"], "Hello");
     assert_eq!(finished.status, ConversationStatus::Review);
-    assert_eq!(kinds, ["user_message", "acp_update", "acp_update", "turn_end"]);
+    assert_eq!(events.first().unwrap()["kind"], "user_message");
+    assert_eq!(events.last().unwrap()["kind"], "turn_end");
+    assert_eq!(chunks, ["Hello", " there"]);
+    assert_eq!(context["payload"]["update"]["used"], 21);
     assert_eq!(reply_text(&events), "Hello there");
     assert_eq!((chat["agent"].clone(), chat["model"].clone(), chat["provider_id"].clone()), (json!("chat"), json!("llama3.2"), provider["id"].clone()));
     let request = fake.requests.lock().unwrap()[0].clone();
@@ -340,8 +344,9 @@ async fn an_anthropic_chat_streams_through_the_messages_api_and_records_the_toke
     assert_eq!(reply_text(&events), "Bonjour tout le monde");
     assert_eq!(request["model"], "claude-sonnet-5-5");
     assert!(request["system"].as_str().unwrap().contains("mycelium-ui"));
-    assert_eq!(request["messages"], json!([{"role": "user", "content": "Dis bonjour"}]));
+    assert_eq!(request["messages"], json!([{"role": "user", "content": [{"type": "text", "text": "Dis bonjour", "cache_control": {"type": "ephemeral"}}]}]));
     assert_eq!((activity["totals"]["turns"].clone(), activity["totals"]["input_tokens"].clone(), activity["totals"]["output_tokens"].clone()), (json!(1), json!(12), json!(5)));
+    assert_eq!((activity["totals"]["cache_read_tokens"].clone(), activity["totals"]["cache_write_tokens"].clone()), (json!(300), json!(40)));
     assert_eq!(activity["agents"][0]["key"], "chat");
     assert_eq!(activity["models"][0]["key"], "claude-sonnet-5-5");
     assert_eq!(activity["unreported_agents"], json!([]));
@@ -358,7 +363,8 @@ async fn an_openai_compatible_chat_records_the_tokens_from_the_final_usage_chunk
     reply_finished(&server, &chat).await;
     let activity = recorded_activity(&server).await;
 
-    assert_eq!((activity["totals"]["input_tokens"].clone(), activity["totals"]["output_tokens"].clone()), (json!(21), json!(4)));
+    assert_eq!((activity["totals"]["input_tokens"].clone(), activity["totals"]["output_tokens"].clone()), (json!(5), json!(4)));
+    assert_eq!((activity["totals"]["cache_read_tokens"].clone(), activity["totals"]["cache_write_tokens"].clone()), (json!(12), json!(4)));
 }
 
 #[tokio::test]
@@ -584,11 +590,11 @@ async fn switching_a_chat_to_another_provider_and_model_carries_the_history_and_
     assert_eq!(status, 200, "{switched}");
     assert_eq!((switched["provider_id"].clone(), switched["model"].clone()), (claude_provider["id"].clone(), json!("claude-opus-5-5")));
     assert_eq!(request["model"], "claude-opus-5-5");
-    assert_eq!(request["messages"], json!([{"role": "user", "content": "Plan the rollout"}, {"role": "assistant", "content": "Hello there"}, {"role": "user", "content": "And the office"}]));
+    assert_eq!(request["messages"], json!([{"role": "user", "content": "Plan the rollout"}, {"role": "assistant", "content": "Hello there"}, {"role": "user", "content": [{"type": "text", "text": "And the office", "cache_control": {"type": "ephemeral"}}]}]));
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0]["payload"]["provider_name"], "Anthropic");
     assert_eq!(changes[0]["payload"]["model"], "claude-opus-5-5");
-    assert_eq!(&order[order.len() - 6..order.len() - 4], ["turn_end", "model_changed"]);
+    assert!(order.windows(3).any(|events| events == ["turn_end", "model_changed", "user_message"]));
 }
 
 #[tokio::test]
@@ -628,7 +634,7 @@ async fn a_chat_whose_provider_was_removed_carries_on_once_another_model_is_chos
 
     assert_eq!(status, 200);
     assert_eq!(request["messages"][0]["content"], "Plan the rollout");
-    assert_eq!(request["messages"][2]["content"], "Carry on");
+    assert_eq!(request["messages"][2]["content"], json!([{"type": "text", "text": "Carry on", "cache_control": {"type": "ephemeral"}}]));
 }
 
 #[tokio::test]

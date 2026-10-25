@@ -223,3 +223,55 @@ async fn per_conversation_usage_does_not_show_another_persons_conversations() {
 
     assert_eq!(rows, json!([]));
 }
+
+#[tokio::test]
+async fn a_conversations_context_and_spend_are_reported_separately() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    let update = json!({"update": {"sessionUpdate": "usage_update", "used": 52000, "size": 200000, "cost": {"amount": 0.10, "currency": "USD"}}});
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 1, update }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 2, stop_reason: "end_turn".into(), usage: Some(usage(100, 50, 1000, 200)) }).await;
+    link.barrier(conversation, 3).await;
+    finish_turn(&mut link, conversation, 4, Some(usage(10, 5, 0, 0)), Some(0.25), None).await;
+
+    let (status, body) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/usage"))).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["context_used"], 10);
+    assert_eq!(body["context_size"], 200);
+    assert_eq!(body["input_tokens"], 110);
+    assert_eq!(body["output_tokens"], 55);
+    assert_eq!(body["cache_read_tokens"], 1000);
+    assert!((body["cost_usd"].as_f64().unwrap() - 0.25).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn chats_without_request_usage_do_not_treat_billed_tokens_as_context() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, conversation, 1, Some(usage(100, 50, 1000, 200)), None, None).await;
+    sqlx::query("update conversations set agent = 'chat' where id = $1").bind(conversation).execute(&server.pool).await.unwrap();
+
+    let (_, body) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/usage"))).await;
+
+    assert_eq!(body["context_used"], Value::Null);
+    assert_eq!(body["context_size"], Value::Null);
+    assert_eq!(body["input_tokens"], 100);
+    assert_eq!(body["cache_read_tokens"], 1000);
+}
+
+#[tokio::test]
+async fn context_without_a_reported_limit_falls_back_to_the_last_prompt_size() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, conversation, 1, Some(usage(100, 50, 1000, 200)), None, None).await;
+
+    let (_, body) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/usage"))).await;
+
+    assert_eq!(body["context_used"], 1300);
+    assert_eq!(body["context_size"], Value::Null);
+    assert_eq!(body["cost_usd"], Value::Null);
+}

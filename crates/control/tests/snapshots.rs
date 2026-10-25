@@ -118,6 +118,8 @@ async fn a_page_gets_a_png_snapshot() {
 
     assert_eq!(media_type, "image/png");
     assert_eq!(bytes[..8], PNG_SIGNATURE);
+    assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 2560);
+    assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), 1600);
 }
 
 #[tokio::test]
@@ -135,8 +137,8 @@ async fn a_design_gets_a_snapshot_of_its_first_artboard() {
     let bytes = server.user.get(&format!("/api/v1/artifacts/{id}/thumbnail")).send().await.unwrap().bytes().await.unwrap();
 
     assert_eq!(bytes[..8], PNG_SIGNATURE);
-    assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 200);
-    assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), 150);
+    assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 800);
+    assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), 600);
 }
 
 #[tokio::test]

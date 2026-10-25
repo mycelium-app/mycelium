@@ -1040,6 +1040,18 @@ pub struct ActivityRow {
     pub subagent_tokens: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConversationUsage {
+    pub context_used: Option<i64>,
+    pub context_size: Option<i64>,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub cost_estimated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Activity {
     pub range: String,

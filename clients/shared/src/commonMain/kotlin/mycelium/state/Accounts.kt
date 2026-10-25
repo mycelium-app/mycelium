@@ -7,6 +7,11 @@ import mycelium.api.UsageWindow
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 
 const val UnnamedAccount = "Account name not reported"
@@ -73,6 +78,10 @@ const val SignInPrefix = "sign in:"
 fun accountChoiceId(login: LoginInfo): String = login.account ?: DefaultAccountId
 
 fun accountsElsewhere(nodes: Collection<NodeSummary>, node: NodeSummary, agent: String): List<String> {
+    if (node.agents.none { it.agent == agent && it.available }) {
+        return emptyList()
+    }
+
     val here = accountsOn(node, agent).mapNotNull { it.account }.toSet()
 
     return nodes.filter { it.id != node.id }.flatMap { accountsOn(it, agent) }.mapNotNull { it.account }.distinct().filter { it !in here }.sorted()
@@ -146,6 +155,37 @@ fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, no
     val left = resetsAt?.let { ", ${until(it, now).removePrefix("in ")} left" }.orEmpty()
 
     return CompactWindowUsage(percent, forecast, "$percent% used$left", attention)
+}
+
+private val FiveHours = 5.hours
+private val SevenDays = 7.days
+private val UsageTickCeiling = 1.minutes
+private val UsageTickFloor = 1.seconds
+
+fun evenPacePercent(window: UsageWindow, now: Instant = Clock.System.now()): Int? {
+    val length = when {
+        window.name == "five_hour" -> FiveHours
+        window.name.startsWith("seven_day") -> SevenDays
+        else -> return null
+    }
+    val resets = window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null
+    val remaining = resets - now
+
+    if (remaining <= Duration.ZERO || remaining > length) {
+        return null
+    }
+
+    return ((length - remaining) / length * 100).roundToInt().coerceIn(0, 100)
+}
+
+fun nextUsageTick(windows: List<UsageWindow>, now: Instant = Clock.System.now()): Duration {
+    val untilReset = windows
+        .mapNotNull { window -> window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } }
+        .map { it - now }
+        .filter { it > Duration.ZERO }
+        .minOrNull() ?: UsageTickCeiling
+
+    return minOf(untilReset, UsageTickCeiling).coerceAtLeast(UsageTickFloor)
 }
 
 fun accountMenuTitle(agent: String): String = when (agent) {
