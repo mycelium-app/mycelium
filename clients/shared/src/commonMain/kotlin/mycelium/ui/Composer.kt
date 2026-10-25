@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
@@ -474,6 +475,22 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                 }
 
                 if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && onPaste()) {
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && (event.isCtrlPressed || event.isAltPressed) && text.selection.collapsed) {
+                    val end = text.selection.end
+                    var start = end
+
+                    while (start > 0 && text.text[start - 1].isWhitespace()) start--
+
+                    if (start > 0 && isPasteMarker(text.text[start - 1])) {
+                        start--
+                    } else {
+                        while (start > 0 && !text.text[start - 1].isWhitespace() && !isPasteMarker(text.text[start - 1])) start--
+                    }
+
+                    onTextChange(TextFieldValue(text.text.removeRange(start, end), TextRange(start)))
                     return@onPreviewKeyEvent true
                 }
 

@@ -119,6 +119,45 @@ class PasteBadgeTest {
     }
 
     @Test
+    fun ctrlBackspaceDeletesOnlyTheWordBeforeTheCursor() {
+        show(mutableListOf())
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("fix the composer bug")
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Backspace) } }
+
+        field.assertTextEquals("fix the composer ")
+    }
+
+    @Test
+    fun ctrlBackspaceAfterAnInlinePasteLeavesThePasteAlone() {
+        val sent = mutableListOf<String>()
+        show(sent)
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("see ")
+        field.performTextInput(long)
+        field.performTextInput(" and this word")
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Backspace) } }
+        field.performKeyInput { pressKey(Key.Enter) }
+
+        assertEquals(listOf("see ${pastedBlock(long)} and this"), sent)
+    }
+
+    @Test
+    fun ctrlBackspaceAfterSendingDeletesOnlyTheWordBeforeTheCursor() {
+        show(mutableListOf())
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("first message")
+        field.performKeyInput { pressKey(Key.Enter) }
+        field.performTextInput("second message here")
+        field.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Backspace) } }
+
+        field.assertTextEquals("second message ")
+    }
+
+    @Test
     fun aSentPastedBlockShowsAsACollapsedBadgeThatExpandsInPlace() {
         rule.setContent {
             MyceliumTheme(true) {
