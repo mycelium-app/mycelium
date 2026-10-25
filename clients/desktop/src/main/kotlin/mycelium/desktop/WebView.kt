@@ -1,7 +1,5 @@
 package mycelium.desktop
 
-import kotlin.math.roundToInt
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -15,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.awtEventOrNull
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.onKeyEvent
@@ -30,6 +29,8 @@ import org.cef.CefSettings
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefRendering
+import org.cef.handler.CefLifeSpanHandlerAdapter
+import javax.swing.SwingUtilities
 import org.cef.network.CefCookie
 import org.cef.network.CefCookieManager
 import java.net.URI
@@ -105,31 +106,53 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         return
     }
 
-    val client = remember { Jcef.createClient() }
     val host = remember { OffscreenBrowser() }
-    val browser: CefBrowser = remember {
-        client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(host, host.source), false).also { created ->
-            host.browser = created
-            created.createImmediately()
-            created.setWindowlessFrameRate(60)
+    var browserCreated by remember { mutableStateOf(false) }
+    val client = remember {
+        Jcef.createClient().also {
+            it.addLoadHandler(host.loaded)
+            it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
+                override fun onAfterCreated(browser: CefBrowser) {
+                    SwingUtilities.invokeLater { browserCreated = true }
+                }
+            })
         }
     }
+    var browser by remember { mutableStateOf<CefBrowser?>(null) }
+    var laidOut by remember { mutableStateOf(false) }
     val density = LocalDensity.current.density.toDouble()
     val focus = remember { FocusRequester() }
 
     DisposableEffect(Unit) {
         onDispose {
-            browser.close(true)
+            browser?.close(true)
             client.dispose()
         }
     }
 
-    LaunchedEffect(url, token) {
+    LaunchedEffect(laidOut) {
+        if (laidOut && browser == null) {
+            browser = client.createBrowser("about:blank", CefRendering.CefRenderingWithHandler(host, host.source), false).also { created ->
+                host.browser = created
+                created.createImmediately()
+                created.setWindowlessFrameRate(60)
+                host.applyZoom()
+            }
+        }
+    }
+
+    LaunchedEffect(url, token, browser, browserCreated) {
+        val created = browser ?: return@LaunchedEffect
+
+        if (!browserCreated) {
+            return@LaunchedEffect
+        }
+
         if (token != null) {
             Jcef.setSessionCookie(url, token)
         }
 
-        browser.loadURL(url)
+        created.loadURL(url)
     }
 
     Canvas(
@@ -141,9 +164,9 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
                 val screenScale = window?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
 
                 host.resize(coordinates.size.width, coordinates.size.height, density)
+                laidOut = coordinates.size.width > 0 && coordinates.size.height > 0
                 host.place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()))
             }
-            .pointerHoverIcon(host.cursor)
             .onKeyEvent { event ->
                 val native = event.awtEventOrNull ?: return@onKeyEvent false
 
@@ -161,18 +184,20 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
 
                         if (event.type == PointerEventType.Press) {
                             focus.requestFocus()
-                            browser.setFocus(true)
+                            browser?.setFocus(true)
                         }
 
                         host.mouse(native, change.position)
                         event.changes.forEach { it.consume() }
                     }
                 }
-            },
+            }
+            .pointerHoverIcon(host.cursor)
+            .clipToBounds(),
     ) {
         host.frames
         val frame = host.frame() ?: return@Canvas
 
-        drawImage(frame, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
+        drawImage(frame)
     }
 }

@@ -6,15 +6,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
 import org.cef.callback.CefDragData
+import org.cef.handler.CefLoadHandlerAdapter
 import org.cef.handler.CefRenderHandler
 import org.cef.handler.CefScreenInfo
-import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
 import java.awt.Canvas
 import java.awt.Component
@@ -26,19 +28,26 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import java.nio.ByteBuffer
 import javax.swing.SwingUtilities
+import kotlin.math.ln
 import kotlin.math.roundToInt
 
 private const val WheelNotchPixels = 40
+private const val ZoomStep = 1.2
 
-fun viewSize(widthPx: Int, heightPx: Int, scale: Double): Pair<Int, Int> =
-    (widthPx / scale).roundToInt().coerceAtLeast(1) to (heightPx / scale).roundToInt().coerceAtLeast(1)
+fun viewSize(widthPx: Int, heightPx: Int): Pair<Int, Int> =
+    widthPx.coerceAtLeast(1) to heightPx.coerceAtLeast(1)
+
+fun pageZoomLevel(scale: Double): Double = ln(scale) / ln(ZoomStep)
+
+fun awtCursorType(cursorType: Int): Int =
+    if (cursorType in Cursor.DEFAULT_CURSOR..Cursor.MOVE_CURSOR) cursorType else Cursor.DEFAULT_CURSOR
 
 fun browserMouseEvent(source: Component, native: MouseEvent, position: Offset, scale: Double): MouseEvent {
-    val x = (position.x / scale).roundToInt()
-    val y = (position.y / scale).roundToInt()
+    val x = position.x.roundToInt()
+    val y = position.y.roundToInt()
 
     if (native is MouseWheelEvent) {
-        val rotation = -native.preciseWheelRotation * WheelNotchPixels
+        val rotation = -native.preciseWheelRotation * WheelNotchPixels * scale
 
         return MouseWheelEvent(source, native.id, native.`when`, native.modifiersEx, x, y, x, y, native.clickCount, native.isPopupTrigger, native.scrollType, native.scrollAmount, rotation.roundToInt(), rotation)
     }
@@ -55,6 +64,14 @@ class OffscreenBrowser : CefRenderHandler {
             value?.wasResized(viewWidth, viewHeight)
         }
 
+    val loaded = object : CefLoadHandlerAdapter() {
+        override fun onLoadEnd(browser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
+            if (frame.isMain) {
+                applyZoom()
+            }
+        }
+    }
+
     var cursor by mutableStateOf(PointerIcon.Default)
         private set
 
@@ -69,22 +86,26 @@ class OffscreenBrowser : CefRenderHandler {
     private var pixels = ByteArray(0)
     private var frameWidth = 0
     private var frameHeight = 0
-    private val bitmap = Bitmap()
     private var image: ImageBitmap? = null
+    private var imageStale = false
 
-    fun resize(widthPx: Int, heightPx: Int, deviceScale: Double) {
-        val (width, height) = viewSize(widthPx, heightPx, deviceScale)
-        val rescaled = deviceScale != scale
+    fun resize(widthPx: Int, heightPx: Int, uiScale: Double) {
+        val (width, height) = viewSize(widthPx, heightPx)
+        val rescaled = uiScale != scale
 
-        scale = deviceScale
+        scale = uiScale
         viewWidth = width
         viewHeight = height
 
         if (rescaled) {
-            browser?.notifyScreenInfoChanged()
+            applyZoom()
         }
 
         browser?.wasResized(width, height)
+    }
+
+    fun applyZoom() {
+        browser?.zoomLevel = pageZoomLevel(scale)
     }
 
     fun place(origin: Point) {
@@ -110,13 +131,12 @@ class OffscreenBrowser : CefRenderHandler {
             return null
         }
 
-        if (bitmap.width != frameWidth || bitmap.height != frameHeight) {
-            bitmap.allocPixels(ImageInfo(frameWidth, frameHeight, ColorType.BGRA_8888, ColorAlphaType.PREMUL))
-            image = bitmap.asComposeImageBitmap()
-        }
+        if (imageStale || image == null) {
+            val info = ImageInfo(frameWidth, frameHeight, ColorType.BGRA_8888, ColorAlphaType.PREMUL)
 
-        bitmap.installPixels(pixels)
-        bitmap.notifyPixelsChanged()
+            image = Image.makeRaster(info, pixels, frameWidth * 4).toComposeImageBitmap()
+            imageStale = false
+        }
 
         image
     }
@@ -124,7 +144,7 @@ class OffscreenBrowser : CefRenderHandler {
     override fun getViewRect(browser: CefBrowser): Rectangle = Rectangle(0, 0, viewWidth, viewHeight)
 
     override fun getScreenInfo(browser: CefBrowser, screenInfo: CefScreenInfo): Boolean {
-        screenInfo.device_scale_factor = scale
+        screenInfo.device_scale_factor = 1.0
         screenInfo.depth = 32
         screenInfo.depth_per_component = 8
 
@@ -133,7 +153,7 @@ class OffscreenBrowser : CefRenderHandler {
 
     override fun getScreenPoint(browser: CefBrowser, viewPoint: Point): Point = Point(screenOrigin.x + viewPoint.x, screenOrigin.y + viewPoint.y)
 
-    override fun getDeviceScaleFactor(browser: CefBrowser): Double = scale
+    override fun getDeviceScaleFactor(browser: CefBrowser): Double = 1.0
 
     override fun onPopupShow(browser: CefBrowser, show: Boolean) = Unit
 
@@ -154,13 +174,14 @@ class OffscreenBrowser : CefRenderHandler {
             buffer.duplicate().apply { rewind() }.get(pixels, 0, minOf(length, buffer.capacity()))
             frameWidth = width
             frameHeight = height
+            imageStale = true
         }
 
         SwingUtilities.invokeLater { frames++ }
     }
 
     override fun onCursorChange(browser: CefBrowser, cursorType: Int): Boolean {
-        val shown = PointerIcon(Cursor.getPredefinedCursor(cursorType.coerceIn(Cursor.DEFAULT_CURSOR, Cursor.MOVE_CURSOR)))
+        val shown = PointerIcon(Cursor.getPredefinedCursor(awtCursorType(cursorType)))
 
         SwingUtilities.invokeLater { cursor = shown }
 
