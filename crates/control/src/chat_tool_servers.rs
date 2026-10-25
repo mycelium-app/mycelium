@@ -70,6 +70,24 @@ pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ServerRo
     Ok(rows)
 }
 
+async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Option<Uuid>) -> ApiResult<()> {
+    if name.is_empty() || slug(name).is_empty() {
+        return Err(ApiError::bad_request("name_required", "Enter a name for this server, using letters or numbers."));
+    }
+
+    if slug(name) == OWN_SERVER {
+        return Err(ApiError::bad_request("name_taken", "Enter a different name. mycelium is the name of Mycelium's own tools."));
+    }
+
+    let taken = list_owned(state, owner).await?.iter().any(|row| Some(row.id) != except && slug(&row.name) == slug(name));
+
+    if taken {
+        return Err(ApiError::conflict("name_taken", "Enter a different name. Another tool server already has this one."));
+    }
+
+    Ok(())
+}
+
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ChatToolServer>>> {
     let rows = list_owned(&state, user.id).await?;
 
@@ -81,24 +99,12 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     let token = request.bearer_token.as_deref().map(str::trim).filter(|token| !token.is_empty());
     let entered = request.url.trim();
 
-    if name.is_empty() || slug(name).is_empty() {
-        return Err(ApiError::bad_request("name_required", "Enter a name for this server, using letters or numbers."));
-    }
-
-    if slug(name) == OWN_SERVER {
-        return Err(ApiError::bad_request("name_taken", "Enter a different name. mycelium is the name of Mycelium's own tools."));
-    }
+    check_name(&state, user.id, name, None).await?;
 
     let parsed = url::Url::parse(entered).ok().filter(|parsed| matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some());
     let Some(parsed) = parsed else {
         return Err(ApiError::bad_request("url_invalid", "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp."));
     };
-
-    let taken = list_owned(&state, user.id).await?.iter().any(|row| slug(&row.name) == slug(name));
-
-    if taken {
-        return Err(ApiError::conflict("name_taken", "Enter a different name. Another tool server already has this one."));
-    }
 
     let tools = fetch_tools(&state, name, parsed.as_str(), token).await?;
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, url, bearer_token, tools) values ($1, $2, $3, $4, $5) returning {SERVER_COLUMNS}")))
@@ -115,13 +121,20 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchChatToolServerRequest>) -> ApiResult<Json<ChatToolServer>> {
+    let name = request.name.as_deref().map(str::trim);
+
+    if let Some(name) = name {
+        check_name(&state, user.id, name, Some(id)).await?;
+    }
+
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-        "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
+        "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow), name = coalesce($5, name) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
     )))
     .bind(id)
     .bind(user.id)
     .bind(request.enabled)
     .bind(request.always_allow)
+    .bind(name)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;

@@ -37,6 +37,9 @@ fun ChatToolsSettings(store: Store) {
     var url by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf<ChatToolServer?>(null) }
+    var renamed by remember { mutableStateOf("") }
+    var renameFailure by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         store.act { servers = store.api.chatToolServers() }
@@ -62,6 +65,22 @@ fun ChatToolsSettings(store: Store) {
                 failure = problem.message
             } catch (_: Exception) {
                 failure = "Could not reach the control plane. Check your connection and try again."
+            }
+        }
+    }
+
+    fun rename(target: ChatToolServer) {
+        scope.launch {
+            try {
+                replace(store.api.patchChatToolServer(target.id, PatchChatToolServerRequest(name = renamed.trim())))
+                renaming = null
+                renameFailure = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (problem: ApiException) {
+                renameFailure = problem.message
+            } catch (_: Exception) {
+                renameFailure = "Could not reach the control plane. Check your connection and try again."
             }
         }
     }
@@ -141,6 +160,12 @@ fun ChatToolsSettings(store: Store) {
                                 close()
                                 store.act { replace(store.api.refreshChatToolServer(server.id)) }
                             })
+                            MenuItem("Rename", onClick = {
+                                close()
+                                renamed = server.name
+                                renameFailure = null
+                                renaming = server
+                            })
                             MenuItem("Remove integration", onClick = {
                                 close()
                                 store.act {
@@ -153,6 +178,10 @@ fun ChatToolsSettings(store: Store) {
 
                     Hairline()
                 }
+            }
+
+            renaming?.let { target ->
+                RenameDialog("Rename integration", "Integration name", renamed, { renamed = it }, { rename(target) }, { renaming = null }, renameFailure, { renameFailure = null })
             }
         }
     }

@@ -656,6 +656,21 @@ fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
+fun RenameDialog(title: String, label: String, value: String, onValueChange: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit, failure: String? = null, onDismissFailure: () -> Unit = {}) {
+    Dialog(onDismiss) {
+        Label(title, Modifier.semantics { heading() }, Tokens.Type.Title)
+        TextInput(value, onValueChange, label = label, onSubmit = onSave)
+
+        failure?.let { ErrorBanner(it, onDismiss = onDismissFailure) }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            MyButton(onDismiss, text = "Cancel", muted = true)
+            MyButton(onSave, text = "Save", variant = ButtonVariant.Outline)
+        }
+    }
+}
+
+@Composable
 fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null) {
     val colors = MyTheme.colors
 

@@ -697,6 +697,37 @@ async fn tool_servers_are_added_checked_switched_and_removed_without_returning_t
 }
 
 #[tokio::test]
+async fn a_tool_server_is_renamed_with_the_same_rules_as_adding_one() {
+    let server = Server::start().await;
+    let (router, _) = remote_server(false);
+    let base = serve(router).await;
+    let url = format!("{base}/mcp");
+    let post = |name: &str| server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": name, "url": url, "bearer_token": MCP_TOKEN})));
+    let (_, lab) = post("Lab").await;
+    let (_, other) = post("Other").await;
+    let id = lab["id"].as_str().unwrap();
+    let rename = |id: &str, name: &str| server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": name})));
+
+    let (blank, blank_body) = rename(id, "  ").await;
+    let (reserved, reserved_body) = rename(id, "Mycelium").await;
+    let (taken, taken_body) = rename(id, " other ").await;
+    let (same, _) = rename(id, "LAB").await;
+    let (renamed, body) = rename(id, "  Weather  ").await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+    let someone = server.second_user("someone@example.com").await;
+    let (hidden, _) = someone.json(someone.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Mine"}))).await;
+
+    assert_eq!((blank, blank_body["error"].clone()), (400, json!("name_required")));
+    assert_eq!((reserved, reserved_body["error"].clone()), (400, json!("name_taken")));
+    assert_eq!((taken, taken_body["error"].clone()), (409, json!("name_taken")));
+    assert_eq!(same, 200);
+    assert_eq!((renamed, body["name"].clone()), (200, json!("Weather")));
+    assert_eq!(listed[0]["name"], "Weather");
+    assert_eq!(listed[1]["name"], other["name"]);
+    assert_eq!(hidden, 404);
+}
+
+#[tokio::test]
 async fn a_switched_off_server_is_not_searched_and_the_token_never_reaches_the_thread() {
     let rig = rig(vec![Reply::Call("tool_search", json!({"query": "weather"})), Reply::Say("Nothing.")]).await;
     let (_, servers) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;

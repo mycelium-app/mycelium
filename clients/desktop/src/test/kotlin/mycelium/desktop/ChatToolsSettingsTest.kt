@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -44,6 +45,7 @@ class ChatToolsSettingsTest {
     private val requests = CopyOnWriteArrayList<HttpRequestData>()
     private val bodies = CopyOnWriteArrayList<String>()
     private var listed = LabJson
+    private var patchAnswer: Pair<HttpStatusCode, String>? = null
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to GitHubJson
 
     private fun store(): Store {
@@ -54,7 +56,7 @@ class ChatToolsSettingsTest {
 
             when {
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
-                request.method == HttpMethod.Patch -> respond(LabJson.replace("\"enabled\":true", "\"enabled\":false"), HttpStatusCode.OK, json)
+                request.method == HttpMethod.Patch -> patchAnswer?.let { respond(it.second, it.first, json) } ?: respond(LabJson.replace("\"enabled\":true", "\"enabled\":false"), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
                 else -> respond("[$listed]", HttpStatusCode.OK, json)
             }
@@ -156,5 +158,37 @@ class ChatToolsSettingsTest {
         rule.onNodeWithContentDescription("More for Lab").performClick()
         rule.onNodeWithText("Remove integration").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun renamingAnIntegrationFromTheRowMenuSendsTheTrimmedNameAndShowsIt() {
+        patchAnswer = HttpStatusCode.OK to LabJson.replace("\"name\":\"Lab\"", "\"name\":\"Weather\"")
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithContentDescription("More for Lab").performClick()
+        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Integration name").performTextReplacement("  Weather  ")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Rename integration").fetchSemanticsNodes().isEmpty() }
+        assertEquals("""{"name":"Weather"}""", bodies.last { it.isNotEmpty() })
+        assertEquals("/api/v1/chat-tool-servers/s1", requests.last { it.method == HttpMethod.Patch }.url.encodedPath)
+        rule.onNodeWithText("Weather").assertExists()
+    }
+
+    @Test
+    fun aRefusedRenameShowsTheServersMessageAndKeepsTheDialog() {
+        patchAnswer = HttpStatusCode.Conflict to """{"error":"name_taken","message":"Enter a different name. Another tool server already has this one."}"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithContentDescription("More for Lab").performClick()
+        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Integration name").performTextReplacement("GitHub")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Enter a different name. Another tool server already has this one.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Rename integration").assertExists()
     }
 }

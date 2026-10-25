@@ -154,15 +154,7 @@ fun ModelProvidersSettings(store: Store) {
                 }
             }
 
-            Dialog(onDismiss = { renaming = null }) {
-                Label("Rename provider", Modifier.semantics { heading() }, Tokens.Type.Title)
-                TextInput(renamed, { renamed = it }, label = "Provider name", onSubmit = save)
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
-                    MyButton({ renaming = null }, text = "Cancel", muted = true)
-                    MyButton(save, text = "Save", variant = ButtonVariant.Outline)
-                }
-            }
+            RenameDialog("Rename provider", "Provider name", renamed, { renamed = it }, save, { renaming = null })
         }
 
         val browsing = providers.firstOrNull { it.id == expanded }
