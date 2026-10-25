@@ -1,5 +1,7 @@
 package mycelium.desktop
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -171,6 +173,6 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         host.frames
         val frame = host.frame() ?: return@Canvas
 
-        drawImage(frame)
+        drawImage(frame, dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()))
     }
 }
