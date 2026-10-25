@@ -1,8 +1,11 @@
 package mycelium.desktop
 
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithContentDescription
 import io.ktor.client.engine.mock.MockEngine
@@ -15,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import mycelium.api.MyceliumApi
 import mycelium.api.parseStreamMessage
 import mycelium.state.Store
+import mycelium.api.Me
+import mycelium.ui.SettingsScreen
+import mycelium.ui.SettingsSection
 import mycelium.ui.MemoriesSettings
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
@@ -27,7 +33,7 @@ class MemoriesLiveTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private fun showMemories(stored: List<String>): Store {
+    private fun showMemories(stored: List<String>, inSettings: Boolean = false): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val asked = request.url.parameters["query"].orEmpty()
@@ -37,7 +43,15 @@ class MemoriesLiveTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
 
-        rule.setContent { MyceliumTheme(true) { MemoriesSettings(store) } }
+        rule.setContent {
+            MyceliumTheme(true) {
+                if (inSettings) {
+                    SettingsScreen(store, Me("u", "reader@example.test", "Reader"), "https://mycelium.test", startOn = SettingsSection.Memories, onSignOut = {})
+                } else {
+                    MemoriesSettings(store)
+                }
+            }
+        }
 
         return store
     }
@@ -45,6 +59,41 @@ class MemoriesLiveTest {
     private fun shows(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
     private fun stream(store: Store, text: String) = store.receive(parseStreamMessage(text)!!)
+
+    @Test
+    fun memoriesOpenInsideSettingsAndScrollToTheLastEntry() {
+        showMemories((1..60).map { memory("m$it", "Memory entry $it") }, inSettings = true)
+        rule.waitUntil(5_000) { shows("Memory entry 60") }
+        rule.onNodeWithText("Memory entry 60").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun memoryActionsOpenFromTheRowMenu() {
+        showMemories(listOf(memory("m1", "Staging listens on 5433")))
+        rule.waitUntil(5_000) { shows("Staging listens on 5433") }
+        rule.onNodeWithContentDescription("More for Staging listens on 5433").performClick()
+        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithContentDescription("Memory text").assertExists()
+    }
+
+    @Test
+    fun aFailedLoadShowsAnErrorAndCanBeRetried() {
+        var attempts = 0
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val engine = MockEngine {
+            attempts++
+            if (attempts == 1) {
+                respond("{\"error\":\"unavailable\",\"message\":\"Memories are temporarily unavailable.\"}", HttpStatusCode.ServiceUnavailable, json)
+            } else {
+                respond("[${memory("m1", "Recovered memory")}]", HttpStatusCode.OK, json)
+            }
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        rule.setContent { MyceliumTheme(true) { MemoriesSettings(store) } }
+        rule.waitUntil(5_000) { shows("Memories are temporarily unavailable.") }
+        rule.onNodeWithText("Retry").performClick()
+        rule.waitUntil(5_000) { shows("Recovered memory") }
+    }
 
     @Test
     fun aMemoryStoredByAnAgentAppearsWhileTheTabIsOpenAndFollowsItsEditAndRemoval() {

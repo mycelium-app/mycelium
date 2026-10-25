@@ -37,7 +37,7 @@ fun ProjectGroupMenu(store: Store, state: AppState, projects: List<Project>, nam
         if (grouped) {
             MyButton({ open = true }, text = label, description = "Group of $name: $label", size = ButtonSize.Sm, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open)
         } else {
-            MyButton({ open = true }, icon = MyIcon.More, description = "Options for $name", size = ButtonSize.Sm, muted = true, selected = open)
+            MyButton({ open = true }, icon = MyIcon.MoreVertical, description = "Options for $name", size = ButtonSize.Sm, muted = true, selected = open)
         }
 
         if (open) {

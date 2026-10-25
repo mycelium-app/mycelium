@@ -71,7 +71,11 @@ fun ForgesSettings(store: Store) {
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-            Label("Forges", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Label("Forges", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                MyButton({ connecting = true }, text = "Connect a forge", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            }
+
 
             ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp), ColumnSpec(max = 160.dp))) {
                 ContentRow(header = true) {
@@ -98,18 +102,15 @@ fun ForgesSettings(store: Store) {
                         Label(forge.organisations.joinToString(", "), color = colors.textMuted)
 
                         Row(horizontalArrangement = Arrangement.End) {
-                            MyButton(
-                                {
+                            RowMenu("$name account ${forge.account} on $host") { close ->
+                                MenuItem("Disconnect", {
+                                    close()
                                     store.act {
                                         store.api.disconnectForge(forge.id)
                                         forges = forges.filter { it.id != forge.id }
                                     }
-                                },
-                                text = "Disconnect",
-                                size = ButtonSize.Sm,
-                                variant = ButtonVariant.Outline,
-                                description = "Disconnect $name account ${forge.account} on $host",
-                            )
+                                })
+                            }
                         }
                     }
 
@@ -119,7 +120,12 @@ fun ForgesSettings(store: Store) {
         }
 
         if (connecting) {
-            Column(Modifier.widthIn(max = Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+            Dialog(onDismiss = {
+                connecting = false
+                baseUrl = ""
+                token = ""
+                failure = null
+            }) {
                 Segmented(
                     ForgeKinds.keys.toList(),
                     ForgeKinds.entries.first { it.value == kind }.key,
@@ -145,10 +151,6 @@ fun ForgesSettings(store: Store) {
                         muted = true,
                     )
                 }
-            }
-        } else {
-            Row {
-                MyButton({ connecting = true }, text = "Connect a forge", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
             }
         }
     }

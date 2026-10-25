@@ -4,9 +4,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +38,8 @@ fun ModelProvidersSettings(store: Store) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
+    var expanded by remember { mutableStateOf<String?>(null) }
+    var search by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("openai_compatible") }
     var name by remember { mutableStateOf("") }
@@ -78,9 +83,12 @@ fun ModelProvidersSettings(store: Store) {
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            Label("Chat models", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Label("Chat models", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+                MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            }
 
-            ContentTable(listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp))) {
+            ContentTable(listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 64.dp))) {
                 ContentRow(header = true) {
                     Label("Provider", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Key", style = Tokens.Type.MetaStrong, color = colors.textMuted)
@@ -91,7 +99,7 @@ fun ModelProvidersSettings(store: Store) {
                 Hairline()
 
                 for (provider in providers) {
-                    val kindName = ProviderKinds.entries.first { it.value == provider.kind }.key
+                    val kindName = ProviderKinds.entries.firstOrNull { it.value == provider.kind }?.key ?: provider.kind
 
                     ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
                         Column {
@@ -100,32 +108,52 @@ fun ModelProvidersSettings(store: Store) {
                         }
 
                         Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted, maxLines = 1)
-                        Label(provider.models.joinToString(", ").ifEmpty { "No models found" }, color = colors.textMuted)
+                        MyButton(
+                            { expanded = if (expanded == provider.id) null else provider.id; search = "" },
+                            text = if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models",
+                            description = "${if (expanded == provider.id) "Hide" else "Browse"} models from ${provider.name}",
+                            trailingIcon = if (expanded == provider.id) MyIcon.ChevronDown else MyIcon.ChevronRight,
+                            muted = true,
+                            size = ButtonSize.Sm,
+                        )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End)) {
-                            MyButton(
-                                { store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } } },
-                                text = "Refresh",
-                                size = ButtonSize.Sm,
-                                variant = ButtonVariant.Outline,
-                                description = "Refresh the models of ${provider.name}",
-                            )
-                            MyButton(
-                                {
-                                    store.act {
-                                        store.api.deleteModelProvider(provider.id)
-                                        providers = providers.filter { it.id != provider.id }
-                                    }
-                                },
-                                text = "Remove",
-                                size = ButtonSize.Sm,
-                                variant = ButtonVariant.Outline,
-                                description = "Remove ${provider.name}",
-                            )
+                        RowMenu(provider.name) { close ->
+                            MenuItem("Refresh models", onClick = {
+                                close()
+                                store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
+                            })
+                            MenuItem("Remove provider", onClick = {
+                                close()
+                                store.act {
+                                    store.api.deleteModelProvider(provider.id)
+                                    providers = providers.filter { it.id != provider.id }
+                                }
+                            })
                         }
                     }
 
                     Hairline()
+                }
+            }
+        }
+
+        val browsing = providers.firstOrNull { it.id == expanded }
+
+        if (browsing != null) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("${browsing.name} models", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                TextInput(search, { search = it }, label = "Search ${browsing.name} models")
+
+                val matches = browsing.models.filter { it.contains(search, ignoreCase = true) }
+
+                if (matches.isEmpty()) {
+                    Label("No matching models", color = colors.textMuted)
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().height(minOf(280, matches.size * 32).dp)) {
+                        items(matches) { model ->
+                            Label(model, Modifier.padding(vertical = Tokens.Space.S1), Tokens.Type.Code)
+                        }
+                    }
                 }
             }
         }
@@ -167,10 +195,6 @@ fun ModelProvidersSettings(store: Store) {
                         muted = true,
                     )
                 }
-            }
-        } else {
-            Row {
-                MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
             }
         }
     }

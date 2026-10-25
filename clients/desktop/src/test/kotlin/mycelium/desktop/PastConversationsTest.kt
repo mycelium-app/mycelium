@@ -206,8 +206,9 @@ class PastConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Settings) } }
         rule.onNodeWithText("Import").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Import 3").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Import 3").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Claude Code imports on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for Claude Code imports on laptop").performClick()
+        rule.onNodeWithText("Import 3 conversations").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Importing 1 of 3").fetchSemanticsNodes().isNotEmpty() || rule.onAllNodesWithText("Importing 2 of 3").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Importing Claude Code conversations from laptop").assertExists()
 
@@ -217,8 +218,8 @@ class PastConversationsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 2, 1 could not be read").fetchSemanticsNodes().isNotEmpty() }
         rule.onAllNodesWithContentDescription("Importing Claude Code conversations from laptop").assertCountEquals(0)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Show which Claude Code conversations from laptop could not be read").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Show which Claude Code conversations from laptop could not be read").performClick()
+        rule.onNodeWithContentDescription("More for Claude Code imports on laptop").performClick()
+        rule.onNodeWithText("Show unreadable conversations").performClick()
         rule.onNodeWithText("bad.jsonl: There is no conversation in this file.").assertExists()
     }
 }

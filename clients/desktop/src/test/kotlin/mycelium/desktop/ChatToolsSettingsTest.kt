@@ -1,5 +1,6 @@
 package mycelium.desktop
 
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -8,6 +9,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
@@ -39,6 +42,7 @@ class ChatToolsSettingsTest {
 
     private val requests = mutableListOf<HttpRequestData>()
     private val bodies = mutableListOf<String>()
+    private var listed = LabJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to GitHubJson
 
     private fun store(): Store {
@@ -51,7 +55,7 @@ class ChatToolsSettingsTest {
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
                 request.method == HttpMethod.Patch -> respond(LabJson.replace("\"enabled\":true", "\"enabled\":false"), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
-                else -> respond("[$LabJson]", HttpStatusCode.OK, json)
+                else -> respond("[$listed]", HttpStatusCode.OK, json)
             }
         }
 
@@ -63,10 +67,12 @@ class ChatToolsSettingsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
+        rule.onNodeWithText("Integrations").assertExists()
         rule.onNodeWithText("Lab").assertExists()
+        rule.onNodeWithText("MCP").assertExists()
         rule.onNodeWithText("Ends in ••••cdef").assertExists()
-        rule.onNodeWithText("get_weather, list_files").assertExists()
-        rule.onNodeWithContentDescription("Use Lab in chats").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On"))
+        rule.onNodeWithText("2 tools").assertExists()
+        rule.onNodeWithContentDescription("Use Lab").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On"))
         rule.onNodeWithContentDescription("Always allow tools from Lab").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off"))
     }
 
@@ -75,17 +81,50 @@ class ChatToolsSettingsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
-        rule.onNodeWithText("Add a server").performClick()
+        rule.onNodeWithText("Add integration").performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("GitHub")
         rule.onNodeWithContentDescription("Streamable HTTP address").performTextInput("https://gh.test/mcp")
         rule.onNodeWithContentDescription("Bearer token, if the server needs one").performTextInput("ghp-secret")
         rule.onNodeWithContentDescription("Bearer token, if the server needs one").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Add server").performClick()
+        rule.onNodeWithText("Connect integration").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() && rule.onAllNodesWithText("Add a server").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() && rule.onAllNodesWithText("Add integration").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"name":"GitHub","url":"https://gh.test/mcp","bearer_token":"ghp-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("ghp-secret").assertCountEquals(0)
         rule.onNodeWithText("No token").assertExists()
+    }
+
+    @Test
+    fun aGatewayEndpointCanBeSubmittedFromTheBearerTokenFieldWithEnter() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithContentDescription("Name").performTextInput("Gateway")
+        rule.onNodeWithContentDescription("Streamable HTTP address").performTextInput("https://gateway.test/mcp")
+        rule.onNodeWithContentDescription("Bearer token, if the server needs one").performTextInput("test-gateway-key")
+        rule.onNodeWithContentDescription("Bearer token, if the server needs one").performKeyInput { pressKey(Key.Enter) }
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post } }
+        assertEquals("""{"name":"Gateway","url":"https://gateway.test/mcp","bearer_token":"test-gateway-key"}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("test-gateway-key").assertCountEquals(0)
+    }
+
+    @Test
+    fun hundredsOfToolsStayInACompactSummaryAndRefreshFromTheRowMenu() {
+        val tools = (1..500).joinToString(",") { """{"name":"tool_$it","description":"Tool $it"}""" }
+        listed = LabJson.replace("""{"name":"get_weather","description":"Get the weather"},{"name":"list_files","description":"List files"}""", tools)
+        postAnswer = HttpStatusCode.OK to LabJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("500 tools").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("tool_1").assertDoesNotExist()
+        rule.onNodeWithContentDescription("More for Lab").performClick()
+        rule.onNodeWithText("Refresh tools").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("2 tools").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("/api/v1/chat-tool-servers/s1/refresh", requests.last { it.method == HttpMethod.Post }.url.encodedPath)
     }
 
     @Test
@@ -94,9 +133,9 @@ class ChatToolsSettingsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
-        rule.onNodeWithText("Add a server").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add server").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Add server").performClick()
+        rule.onNodeWithText("Add integration").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Connect integration").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not accept this token. Check that it has not expired and is for this server, then try again.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Name").assertExists()
@@ -107,12 +146,13 @@ class ChatToolsSettingsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
 
-        rule.onNodeWithContentDescription("Use Lab in chats").performClick()
+        rule.onNodeWithContentDescription("Use Lab").performClick()
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
         assertEquals("""{"enabled":false}""", bodies.last { it.isNotEmpty() })
-        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Use Lab in chats").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off")) }.isSuccess }
+        rule.waitUntil(5_000) { runCatching { rule.onNodeWithContentDescription("Use Lab").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off")) }.isSuccess }
 
-        rule.onNodeWithContentDescription("Remove Lab").performClick()
+        rule.onNodeWithContentDescription("More for Lab").performClick()
+        rule.onNodeWithText("Remove integration").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isEmpty() }
     }
 }

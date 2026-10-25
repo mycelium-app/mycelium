@@ -187,7 +187,8 @@ class AgentSessionsTest {
         show()
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Agent access for Debug the sync").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Revoke Agent access for Debug the sync").performClick()
+        rule.onNodeWithContentDescription("More for Agent access for Debug the sync").performClick()
+        rule.onNodeWithText("Revoke").performClick()
 
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Agent access for Debug the sync").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/sessions/t1", sent.toList().last { it.method == HttpMethod.Delete }.path)

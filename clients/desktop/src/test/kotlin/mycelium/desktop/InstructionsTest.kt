@@ -120,7 +120,8 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithText("Your file is kept as CLAUDE.md.bak.").assertExists()
-        rule.onNodeWithContentDescription("Let Mycelium manage this CLAUDE.md on willow").performClick()
+        rule.onNodeWithContentDescription("More for instructions on willow").performScrollTo().performClick()
+        rule.onNodeWithText("Manage CLAUDE.md").performClick()
 
         requestTo(HttpMethod.Post, "/nodes/n1/instructions/take-over")
     }
@@ -158,7 +159,8 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("Add mycelium to slop").performClick()
+        rule.onNodeWithContentDescription("More for project mycelium in slop").performScrollTo().performClick()
+        rule.onNodeWithText("Add to slop").performClick()
 
         val patched = requestTo(HttpMethod.Patch, "/projects/p1")
         assertEquals("""{"group_id":"g1"}""", patched.third)
@@ -193,7 +195,7 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("Folder").performTextInput("/home/claude/other")
+        rule.onNodeWithContentDescription("Folder").performScrollTo().performTextInput("/home/claude/other")
         rule.onNodeWithText("Add folder").performClick()
 
         assertEquals("""{"prefix":"/home/claude/other"}""", requestTo(HttpMethod.Post, "/groups/g1/folders").third)
@@ -204,7 +206,8 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("Remove folder /srv/slop from slop").performClick()
+        rule.onNodeWithContentDescription("More for folder /srv/slop in slop").performScrollTo().performClick()
+        rule.onNodeWithText("Remove folder").performClick()
 
         requestTo(HttpMethod.Delete, "/groups/g1/folders/f2")
     }
@@ -215,7 +218,7 @@ class InstructionsTest {
 
         rule.onNodeWithText("Mycelium extensions").assertExists()
         rule.onNodeWithContentDescription("Generated UI").assertExists()
-        rule.onNodeWithContentDescription("Rich Markdown").performClick()
+        rule.onNodeWithContentDescription("Rich Markdown").performScrollTo().performClick()
 
         assertEquals("""{"generated_ui":true,"rich_markdown":false,"mycelium_tools":true}""", requestTo(HttpMethod.Put, "/extensions").third)
     }
@@ -230,7 +233,7 @@ class InstructionsTest {
     }
 
     @Test
-    fun theEditorIsCappedForALongFileAndEveryOtherControlComesBeforeIt() {
+    fun theEditorIsCappedAndPrecedesGroupMembershipAndNodeSynchronisation() {
         val longText = (1..300).joinToString("\\n") { "line $it" }
         show(DocumentJson.replace("## Diffs", longText).replace("Use British English.", longText))
 
@@ -243,8 +246,8 @@ class InstructionsTest {
 
         assertTrue(editorHeight in 320.dp..800.dp, "editor is $editorHeight")
 
-        for (before in listOf(rule.onNodeWithText("Folders in slop"), rule.onNodeWithText("Projects in slop"), rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Change repository"), rule.onNodeWithText("Node"))) {
-            assertTrue(before.getUnclippedBoundsInRoot().bottom <= editor.top, "a control sits below the editor")
+        for (after in listOf(rule.onNodeWithText("Folders in slop"), rule.onNodeWithText("Projects in slop"), rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Node synchronisation"))) {
+            assertTrue(after.getUnclippedBoundsInRoot().top >= editor.bottom, "operational controls precede the editor")
         }
 
         assertTrue(rule.onNodeWithText("Save and commit").getUnclippedBoundsInRoot().top >= editor.bottom)

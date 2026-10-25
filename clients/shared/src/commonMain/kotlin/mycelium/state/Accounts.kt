@@ -21,6 +21,12 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     for (node in nodes.sortedBy { it.name }) {
         for (login in node.logins) {
             val account = login.account?.trim()?.ifBlank { null }
+            val unused = login.state == LoginState.SignedOut && login.windows.isEmpty() && login.usageReadAt == null && login.usageLeft == null
+
+            if (unused && account?.matches(Regex("account-[0-9]{4}")) == true) {
+                continue
+            }
+
             val key = Triple(login.agent, account?.lowercase(), if (account == null) node.id else null)
             grouped.getOrPut(key) { mutableListOf() }.add(node to login)
         }

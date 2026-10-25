@@ -86,8 +86,9 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                         Label(if (session.current) "now" else timestamp(session.lastUsedAt, ago = true), color = colors.textMuted)
 
                         Row(horizontalArrangement = Arrangement.End) {
-                            MyButton(
-                                {
+                            RowMenu(where) { close ->
+                                MenuItem(if (session.kind == "agent") "Revoke" else "End session", {
+                                    close()
                                     if (session.current) {
                                         endingCurrent = session
                                     } else {
@@ -96,12 +97,8 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                                             sessions = sessions.filter { it.id != session.id }
                                         }
                                     }
-                                },
-                                text = if (session.kind == "agent") "Revoke" else "End session",
-                                size = ButtonSize.Sm,
-                                variant = ButtonVariant.Outline,
-                                description = if (session.kind == "agent") "Revoke $where" else "End session $where",
-                            )
+                                })
+                            }
                         }
                     }
 
@@ -134,7 +131,12 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                         Label(if (node.online) "online" else node.lastSeenAt?.let { timestamp(it, ago = true) } ?: "never", color = colors.textMuted)
 
                         Row(horizontalArrangement = Arrangement.End) {
-                            MyButton({ revoking = node }, text = "Revoke", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Revoke ${node.name}")
+                            RowMenu(node.name) { close ->
+                                MenuItem("Revoke", {
+                                    close()
+                                    revoking = node
+                                })
+                            }
                         }
                     }
 

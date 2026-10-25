@@ -4,7 +4,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -18,8 +21,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.ui.SettingsScreen
+import mycelium.ui.SettingsSection
 import mycelium.ui.ModelProvidersSettings
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
@@ -39,9 +45,10 @@ class ModelProvidersSettingsTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<HttpRequestData>())
     private val bodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private var listed = OllamaJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to AnthropicJson
 
-    private fun show() {
+    private fun show(inSettings: Boolean = false) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             requests += request
@@ -50,13 +57,36 @@ class ModelProvidersSettingsTest {
             when {
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
-                else -> respond("[$OllamaJson]", HttpStatusCode.OK, json)
+                else -> respond("[$listed]", HttpStatusCode.OK, json)
             }
         }
 
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        rule.setContent { MyceliumTheme(true) { ModelProvidersSettings(store) } }
+        rule.setContent {
+            MyceliumTheme(true) {
+                if (inSettings) {
+                    SettingsScreen(store, Me("u", "reader@example.test", "Reader"), "https://mycelium.test", startOn = SettingsSection.Accounts, onSignOut = {})
+                } else {
+                    ModelProvidersSettings(store)
+                }
+            }
+        }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun providersOpensChatModelsWithinTheGroupedSettingsNavigation() {
+        show(inSettings = true)
+
+        rule.onNodeWithText("Providers").assertExists()
+        rule.onNodeWithText("Agents and models").assertExists()
+        rule.onNodeWithText("Knowledge").assertExists()
+        rule.onNodeWithText("Services").assertExists()
+        rule.onNodeWithText("Your account").assertExists()
+        rule.onNodeWithText("Chat models").assertExists()
+        rule.onNodeWithText("Ollama").assertExists()
+        rule.onNodeWithText("Agent connections").assertExists()
+        rule.onNodeWithText("Integrations").assertExists()
     }
 
     @Test
@@ -64,8 +94,25 @@ class ModelProvidersSettingsTest {
         show()
 
         rule.onNodeWithText("Ollama").assertExists()
-        rule.onNodeWithText("llama3.2, qwen3").assertExists()
+        rule.onNodeWithText("2 models").assertExists()
+        rule.onNodeWithText("llama3.2").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Browse models from Ollama").performClick()
+        rule.onNodeWithText("llama3.2").assertExists()
         rule.onNodeWithText("No key").assertExists()
+    }
+
+    @Test
+    fun hundredsOfModelsStayCollapsedAndCanBeFoundBySearch() {
+        val models = (1..500).joinToString(",") { "\"model-$it\"" }
+        listed = OllamaJson.replace("\"llama3.2\",\"qwen3\"", models)
+        show()
+
+        rule.onNodeWithText("500 models").assertExists()
+        rule.onNodeWithText("model-500").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Browse models from Ollama").performClick()
+        rule.onNodeWithContentDescription("Search Ollama models").performTextInput("model-500")
+        rule.onNode(hasText("model-500") and hasSetTextAction().not()).assertExists()
+        rule.onNodeWithText("model-1").assertDoesNotExist()
     }
 
     @Test
@@ -79,7 +126,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Ollama serves this at http://<host>:11434/v1.").assertExists()
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add a provider").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Base URL").fetchSemanticsNodes().isEmpty() }
         assertEquals("""{"kind":"openai_compatible","name":"Ollama","base_url":"http://box:11434/v1"}""", bodies.last { it.isNotEmpty() })
     }
 
@@ -132,9 +179,11 @@ class ModelProvidersSettingsTest {
         postAnswer = HttpStatusCode.OK to OllamaJson.replace("llama3.2", "gemma3")
         show()
 
-        rule.onNodeWithContentDescription("Refresh the models of Ollama").performClick()
+        rule.onNodeWithContentDescription("More for Ollama").performClick()
+        rule.onNodeWithText("Refresh models").performClick()
+        rule.onNodeWithContentDescription("Browse models from Ollama").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("gemma3, qwen3").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("gemma3").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("/api/v1/model-providers/p1/refresh", requests.last { it.method == HttpMethod.Post }.url.encodedPath)
     }
 
@@ -142,9 +191,10 @@ class ModelProvidersSettingsTest {
     fun removingDeletesTheProviderAndItsRow() {
         show()
 
-        rule.onNodeWithContentDescription("Remove Ollama").performClick()
+        rule.onNodeWithContentDescription("More for Ollama").performClick()
+        rule.onNodeWithText("Remove provider").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("llama3.2, qwen3").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/model-providers/p1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
     }
 }

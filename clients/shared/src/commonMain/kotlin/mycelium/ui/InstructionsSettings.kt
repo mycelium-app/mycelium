@@ -122,23 +122,36 @@ fun InstructionsSettings(store: Store) {
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        InstructionProposals(store)
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+            Label("Instruction layers", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            Label("Global instructions apply first. A group's instructions are added for conversations in that group.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), itemVerticalAlignment = Alignment.CenterVertically) {
-            for (entry in layers) {
-                MyButton(
-                    { selected = entry.layer; renaming = false; deleting = false },
-                    text = entry.name,
-                    icon = if (entry.layer == GlobalLayer) MyIcon.Layers else null,
-                    variant = ButtonVariant.Outline,
-                    size = ButtonSize.Sm,
-                    muted = entry.layer != layer?.layer,
-                    selected = entry.layer == layer?.layer,
-                    description = if (entry.layer == GlobalLayer) "Global instructions" else "Instructions for the ${entry.name} group",
-                )
+            for ((title, entries) in listOf("Global" to layers.filter { it.layer == GlobalLayer }, "Groups" to layers.filter { it.layer != GlobalLayer })) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Label(title, Modifier.weight(1f).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
+
+                        if (title == "Groups") {
+                            MyButton({ naming = ""; newName = "" }, text = "New group", icon = MyIcon.Plus, description = "New group", size = ButtonSize.Sm, muted = true)
+                        }
+                    }
+
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+                        for (entry in entries) {
+                            MyButton(
+                                { selected = entry.layer; renaming = false; deleting = false },
+                                text = entry.name,
+                                icon = if (entry.layer == GlobalLayer) MyIcon.Layers else null,
+                                variant = ButtonVariant.Outline,
+                                size = ButtonSize.Sm,
+                                muted = entry.layer != layer?.layer,
+                                selected = entry.layer == layer?.layer,
+                                description = if (entry.layer == GlobalLayer) "Global instructions" else "Instructions for the ${entry.name} group",
+                            )
+                        }
+                    }
+                }
             }
-
-            MyButton({ naming = ""; newName = "" }, icon = MyIcon.Plus, description = "New group", size = ButtonSize.Sm, muted = true)
         }
 
         if (naming != null) {
@@ -159,21 +172,22 @@ fun InstructionsSettings(store: Store) {
         }
 
         if (layer != null) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
-                MyButton(
-                    {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Label(if (layer.layer == GlobalLayer) "Global instructions" else "${layer.name} instructions", Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
+
+                RowMenu("${layer.name} instructions") { close ->
+                    MenuItem(if (source != null) "Change repository" else "Connect a repository", onClick = {
+                        close()
                         choosingSource = !choosingSource
                         sourceForge = source?.forgeId ?: forges.firstOrNull()?.id
                         sourceRepository = source?.repository.orEmpty()
                         sourcePath = source?.path.orEmpty()
-                    },
-                    text = if (source != null) "Change repository" else "Connect a repository",
-                    muted = true,
-                )
+                    })
 
-                if (layer.layer != GlobalLayer) {
-                    MyButton({ renaming = !renaming; renamed = layer.name; deleting = false }, text = "Rename group", muted = true)
-                    MyButton({ deleting = !deleting; renaming = false }, text = "Delete group", muted = true)
+                    if (layer.layer != GlobalLayer) {
+                        MenuItem("Rename group", onClick = { close(); renaming = !renaming; renamed = layer.name; deleting = false })
+                        MenuItem("Delete group", onClick = { close(); deleting = !deleting; renaming = false })
+                    }
                 }
             }
 
@@ -274,6 +288,50 @@ fun InstructionsSettings(store: Store) {
             }
         }
 
+        if (layer != null) {
+            val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+            val editorCap = maxOf(Tokens.Size.InstructionsEditorCap, viewportHeight * 0.6f)
+
+            Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
+                Row(
+                    Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
+                    Label(layer.version?.let { "${shortVersion(it.id)} · ${timestamp(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                }
+
+                Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
+                        cursorBrush = SolidColor(colors.text),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Tokens.Size.InstructionsEditor)
+                            .padding(Tokens.Space.S3)
+                            .semantics { contentDescription = "Edit ${layer.name} instructions" },
+                    )
+                }
+            }
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
+                MyButton(
+                    { attempt { store.api.saveInstructions(layer.layer, draft); document = store.api.instructions() } },
+                    text = if (source != null) "Save and commit" else "Save",
+                    variant = ButtonVariant.Outline,
+                )
+
+                if (source != null) {
+                    MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
+                }
+            }
+        }
+
+        InstructionProposals(store)
+
         if (layer != null && layer.layer != GlobalLayer) {
             val folders = state.groups[layer.layer]?.folders.orEmpty()
 
@@ -287,14 +345,12 @@ fun InstructionsSettings(store: Store) {
                     Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label(folder.prefix, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
                         Label(nodeName, color = colors.textMuted, maxLines = 1)
-                        MyButton(
-                            { attempt { store.api.removeGroupFolder(layer.layer, folder.id); store.refreshGroups() } },
-                            text = "Remove",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            muted = true,
-                            description = "Remove folder ${folder.prefix} from ${layer.name}",
-                        )
+                        RowMenu("folder ${folder.prefix} in ${layer.name}") { close ->
+                            MenuItem("Remove folder", onClick = {
+                                close()
+                                attempt { store.api.removeGroupFolder(layer.layer, folder.id); store.refreshGroups() }
+                            })
+                        }
                     }
 
                     Hairline()
@@ -350,14 +406,12 @@ fun InstructionsSettings(store: Store) {
                     Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label(project.name, Modifier.weight(1f), maxLines = 1)
                         Label(state.nodes[project.nodeId]?.name.orEmpty(), color = colors.textMuted, maxLines = 1)
-                        MyButton(
-                            { store.act { store.setProjectGroup(project.id, if (member) null else layer.layer) } },
-                            text = if (member) "Remove" else "Add",
-                            size = ButtonSize.Sm,
-                            variant = ButtonVariant.Outline,
-                            muted = !member,
-                            description = if (member) "Remove ${project.name} from ${layer.name}" else "Add ${project.name} to ${layer.name}",
-                        )
+                        RowMenu("project ${project.name} in ${layer.name}") { close ->
+                            MenuItem(if (member) "Remove from ${layer.name}" else "Add to ${layer.name}", onClick = {
+                                close()
+                                store.act { store.setProjectGroup(project.id, if (member) null else layer.layer) }
+                            })
+                        }
                     }
 
                     Hairline()
@@ -382,11 +436,14 @@ fun InstructionsSettings(store: Store) {
             }
         }
 
-        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp))) {
+        Label("Node synchronisation", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp), ColumnSpec(max = 64.dp))) {
             ContentRow(header = true) {
                 Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                 Label("Holds", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                 Label("Sessions on an older version", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                Box(Modifier)
             }
 
             Hairline()
@@ -397,67 +454,29 @@ fun InstructionsSettings(store: Store) {
                         Label(node.name, maxLines = 1)
                         Label(heldVersion(node), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
                         Label(olderSessions(node), color = colors.textMuted)
+
+                        if (node.instructionsUnmanaged.isNotEmpty()) {
+                            RowMenu("instructions on ${node.name}") { close ->
+                                for (file in node.instructionsUnmanaged) {
+                                    MenuItem("Manage ${file.substringAfterLast('/')}", onClick = {
+                                        close()
+                                        attempt { store.api.takeOverInstructions(node.id) }
+                                    })
+                                }
+                            }
+                        } else {
+                            Box(Modifier)
+                        }
                     }
 
                     for (file in node.instructionsUnmanaged) {
                         Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
 
-                        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1)) {
-                            MyButton(
-                                { attempt { store.api.takeOverInstructions(node.id) } },
-                                text = "Let Mycelium manage this",
-                                description = "Let Mycelium manage this ${file.substringAfterLast('/')} on ${node.name}",
-                                variant = ButtonVariant.Outline,
-                                size = ButtonSize.Sm,
-                            )
-                            Label("Your file is kept as ${file.substringAfterLast('/')}.bak.", style = Tokens.Type.Meta, color = colors.textMuted)
-                        }
+                        Label("Your file is kept as ${file.substringAfterLast('/')}.bak.", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
                     }
                 }
 
                 Hairline()
-            }
-        }
-
-        if (layer != null) {
-            val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
-            val editorCap = maxOf(Tokens.Size.InstructionsEditorCap, viewportHeight * 0.6f)
-
-            Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
-                Row(
-                    Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                    Label(layer.version?.let { "${shortVersion(it.id)} · ${timestamp(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                }
-
-                Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {
-                    BasicTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
-                        cursorBrush = SolidColor(colors.text),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = Tokens.Size.InstructionsEditor)
-                            .padding(Tokens.Space.S3)
-                            .semantics { contentDescription = "Edit ${layer.name} instructions" },
-                    )
-                }
-            }
-
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
-                MyButton(
-                    { attempt { store.api.saveInstructions(layer.layer, draft); document = store.api.instructions() } },
-                    text = if (source != null) "Save and commit" else "Save",
-                    variant = ButtonVariant.Outline,
-                )
-
-                if (source != null) {
-                    MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
-                }
             }
         }
     }

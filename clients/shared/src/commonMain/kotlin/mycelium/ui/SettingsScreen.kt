@@ -42,24 +42,32 @@ import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
-    Accounts("Accounts", MyIcon.Person, "Agent logins and usage"),
+    Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
     Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
     ChatModels("Chat models", MyIcon.Chip),
-    Connections("Connections", MyIcon.Send, "Conversations allowed to message each other"),
-    ChatTools("Chat tools", MyIcon.Sliders, "MCP servers chats may call, each call asked first"),
+    Connections("Agent connections", MyIcon.Send, "Permissions for conversations to message each other"),
+    ChatTools("Integrations", MyIcon.Sliders, "Services and tools available to conversations"),
     Forges("Forges", MyIcon.Forge),
     Indexing("Indexing", MyIcon.Search),
     Account("Account", MyIcon.Settings, "Sign out and version"),
 }
 
+internal val SettingsGroups = listOf(
+    "General" to listOf(SettingsSection.Appearance),
+    "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
+    "Knowledge" to listOf(SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
+    "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
+    "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
+)
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, onSignOut: () -> Unit) {
-    var section by remember { mutableStateOf(startOn) }
+    var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
     val touch = LocalTouch.current
     val opened = section
     val waitingProposals = waitingInstructionProposals(store.state.collectAsState().value)
@@ -88,31 +96,35 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         if (touch) {
             if (opened == null) {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-                    for (entry in SettingsSection.entries) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = rowHeight())
-                                .pressable({ section = entry }, role = Role.Button, shape = BlockShape)
-                                .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2),
-                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(entry.icon, MyTheme.colors.textMuted)
+                    for ((group, entries) in SettingsGroups) {
+                        Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
-                            Column(Modifier.weight(1f)) {
-                                Label(entry.label, maxLines = 1)
-                                entry.summary?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+                        for (entry in entries) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = rowHeight())
+                                    .pressable({ section = entry }, role = Role.Button, shape = BlockShape)
+                                    .padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2),
+                                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(entry.icon, MyTheme.colors.textMuted)
+
+                                Column(Modifier.weight(1f)) {
+                                    Label(entry.label, maxLines = 1)
+                                    entry.summary?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+                                }
+
+                                if (entry == SettingsSection.Instructions && waitingProposals > 0) {
+                                    CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
+                                }
+
+                                Icon(MyIcon.ChevronRight, MyTheme.colors.textFaint, Tokens.Size.IconSm)
                             }
 
-                            if (entry == SettingsSection.Instructions && waitingProposals > 0) {
-                                CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
-                            }
-
-                            Icon(MyIcon.ChevronRight, MyTheme.colors.textFaint, Tokens.Size.IconSm)
+                            Hairline()
                         }
-
-                        Hairline()
                     }
                 }
             } else {
@@ -122,23 +134,27 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
             }
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
-                Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    for (entry in SettingsSection.entries) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = rowHeight())
-                                .pressable({ section = entry }, role = Role.Tab, selected = entry == (section ?: SettingsSection.Appearance), shape = BlockShape)
-                                .semantics { selected = entry == (section ?: SettingsSection.Appearance) }
-                                .padding(horizontal = Tokens.Space.S2),
-                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(entry.icon, MyTheme.colors.textMuted)
-                            Label(entry.label, maxLines = 1)
+                Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                    for ((group, entries) in SettingsGroups) {
+                        Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
-                            if (entry == SettingsSection.Instructions && waitingProposals > 0) {
-                                CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
+                        for (entry in entries) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = rowHeight())
+                                    .pressable({ section = entry }, role = Role.Tab, selected = entry == (section ?: SettingsSection.Appearance), shape = BlockShape)
+                                    .semantics { selected = entry == (section ?: SettingsSection.Appearance) }
+                                    .padding(horizontal = Tokens.Space.S2),
+                                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(entry.icon, MyTheme.colors.textMuted)
+                                Label(entry.label, maxLines = 1)
+
+                                if (entry == SettingsSection.Instructions && waitingProposals > 0) {
+                                    CountBadge(waitingProposals, "$waitingProposals proposed instruction edits waiting")
+                                }
                             }
                         }
                     }
@@ -159,13 +175,15 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
     ) {
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
-            SettingsSection.Accounts -> AccountsSettings(store)
+            SettingsSection.Accounts, SettingsSection.ChatModels -> {
+                AccountsSettings(store)
+                ModelProvidersSettings(store)
+            }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
             SettingsSection.Instructions -> InstructionsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
-            SettingsSection.ChatModels -> ModelProvidersSettings(store)
             SettingsSection.Connections -> ConversationConnectionsSettings(store)
             SettingsSection.ChatTools -> ChatToolsSettings(store)
             SettingsSection.Forges -> ForgesSettings(store)

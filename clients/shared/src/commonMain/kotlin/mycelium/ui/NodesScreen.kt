@@ -235,7 +235,7 @@ private fun NodeGroup(
             }
 
             Box {
-                MyButton({ moreOpen = true }, icon = MyIcon.More, size = ButtonSize.Sm, muted = true, description = "More for ${node.name}")
+                MyButton({ moreOpen = true }, icon = MyIcon.MoreVertical, size = ButtonSize.Sm, muted = true, description = "More for ${node.name}")
 
                 if (moreOpen) {
                     MenuPopup(onDismiss = { moreOpen = false }) {

@@ -3,9 +3,6 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
@@ -17,7 +14,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -86,11 +82,12 @@ fun ImportSettings(store: Store) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-                ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 200.dp))) {
+                ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 300.dp, flexible = true), ColumnSpec(max = 64.dp))) {
                     ContentRow(header = true) {
                         Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("Transcripts found", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("Imported", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Status", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Box(Modifier)
                     }
 
@@ -106,32 +103,34 @@ fun ImportSettings(store: Store) {
                             Label((status?.found ?: 0).toString(), color = colors.textMuted)
                             Label((status?.imported ?: 0).toString(), color = colors.textMuted)
 
-                            Column(horizontalAlignment = Alignment.End) {
+                            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                                 if (job?.running == true) {
                                     Label("Importing ${job.done} of ${job.total}", color = colors.textMuted)
                                     DeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}", if (job.total == 0) 0f else job.done.toFloat() / job.total)
-                                } else if (pending > 0) {
-                                    MyButton(
-                                        onClick = { store.act { jobs = jobs + ((node.id to agent) to store.api.startImport(ImportRequest(node.id, agent))) } },
-                                        text = "Import $pending",
-                                        size = ButtonSize.Sm,
-                                        description = "Import $pending ${agentName(agent)} conversations from ${node.name}",
-                                    )
+                                } else if (job != null) {
+                                    Label(importOutcome(job), style = Tokens.Type.Meta, color = colors.textMuted)
                                 } else {
-                                    Label("Up to date", color = colors.textMuted)
+                                    Label(if (pending > 0) "$pending ready to import" else "Up to date", color = colors.textMuted)
+                                }
+                            }
+
+                            RowMenu("${agentName(agent)} imports on ${node.name}") { close ->
+                                if (job?.running != true && pending > 0) {
+                                    MenuItem("Import $pending conversations", onClick = {
+                                        close()
+                                        store.act { jobs = jobs + ((node.id to agent) to store.api.startImport(ImportRequest(node.id, agent))) }
+                                    })
                                 }
 
-                                if (job != null && !job.running) {
-                                    Label(importOutcome(job), color = colors.textMuted)
+                                if (job != null && !job.running && job.failed.isNotEmpty()) {
+                                    MenuItem(if (node.id to agent in showingProblems) "Hide unreadable conversations" else "Show unreadable conversations", onClick = {
+                                        close()
+                                        showingProblems = if (node.id to agent in showingProblems) showingProblems - (node.id to agent) else showingProblems + (node.id to agent)
+                                    })
+                                }
 
-                                    if (job.failed.isNotEmpty()) {
-                                        MyButton(
-                                            onClick = { showingProblems = if (node.id to agent in showingProblems) showingProblems - (node.id to agent) else showingProblems + (node.id to agent) },
-                                            text = if (node.id to agent in showingProblems) "Hide which" else "Show which",
-                                            size = ButtonSize.Sm,
-                                            description = "Show which ${agentName(agent)} conversations from ${node.name} could not be read",
-                                        )
-                                    }
+                                if (job?.running == true || (pending == 0 && job?.failed.isNullOrEmpty())) {
+                                    MenuLabel(if (job?.running == true) "Import in progress" else "No imports waiting")
                                 }
                             }
                         }
@@ -147,7 +146,7 @@ fun ImportSettings(store: Store) {
                         Hairline()
                     }
                 }
-                }
+            }
         }
     }
 }

@@ -74,6 +74,18 @@ class AccountUsageTest {
     }
 
     @Test
+    fun unusedGeneratedSignedOutLoginsDoNotBecomeAccounts() {
+        val unused = LoginInfo("codex", "account-1234", "oauth_token", LoginState.SignedOut)
+        val used = unused.copy(account = "account-5678", windows = listOf(UsageWindow("five_hour", 20.0)))
+        val named = unused.copy(account = "sam@example.com")
+        val signedIn = unused.copy(account = "account-9012", state = LoginState.SignedIn)
+
+        val accounts = agentAccounts(listOf(node("n1", "laptop", unused, used, named, signedIn)))
+
+        assertEquals(listOf("account-5678", "account-9012", "sam@example.com"), accounts.map { it.label })
+    }
+
+    @Test
     fun aTimeLaterTodayIsShownAsTheClockTimeAndAnotherDayWithItsDate() {
         assertEquals("22:30", usageClockTime("2026-10-23T22:30:00Z", ::utc, Now))
         assertEquals("28 Oct 09:00", usageClockTime("2026-10-28T09:00:00Z", ::utc, Now))

@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
@@ -41,7 +40,6 @@ fun AccountsSettings(store: Store) {
     val accounts = agentAccounts(state.nodes.values)
     val agents = (accounts.map { it.agent } + state.nodes.values.flatMap { node -> node.agents.filter { it.available }.map { it.agent } }).distinct()
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
-    var menuFor by remember { mutableStateOf<String?>(null) }
     val startSignIn: (NodeSummary, String) -> Unit = { node, agent ->
         store.act {
             val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
@@ -50,7 +48,7 @@ fun AccountsSettings(store: Store) {
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
-        if (accounts.isEmpty()) {
+        if (agents.isEmpty()) {
             Label("No agent account is signed in on any node. Add a login from a node on the Nodes page.", color = colors.textMuted)
         }
 
@@ -59,7 +57,17 @@ fun AccountsSettings(store: Store) {
             val signInNodes = state.nodes.values.filter { node -> node.online && node.agents.any { it.agent == agent && it.available } }.sortedBy { it.name }
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Label(agentName(agent), Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+
+                    if (signInNodes.isNotEmpty()) {
+                        RowMenu(agentName(agent)) { close ->
+                            for (node in signInNodes) {
+                                MenuItem("Sign in on ${node.name}", onClick = { close(); startSignIn(node, agent) }, leading = nodeIcon(node))
+                            }
+                        }
+                    }
+                }
 
                 if (split.accounts.isNotEmpty()) {
                     ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 200.dp))) {
@@ -96,37 +104,8 @@ fun AccountsSettings(store: Store) {
                     }
                 }
 
-                if (split.signedOutNodes.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
-                        Label("Signed out on ${split.signedOutNodes.joinToString(", ")}", color = colors.textMuted)
-
-                        for (node in signInNodes.filter { it.name in split.signedOutNodes }) {
-                            MyButton({ startSignIn(node, agent) }, text = "Sign in on ${node.name}", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on ${node.name}")
-                        }
-                    }
-                }
-
-                if (signInNodes.isNotEmpty()) {
-                    Box {
-                        MyButton({ menuFor = agent }, text = "Sign in on a node", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Sign in ${agentName(agent)} on a node")
-
-                        if (menuFor == agent) {
-                            MenuPopup(onDismiss = { menuFor = null }) {
-                                MenuLabel("Sign in ${agentName(agent)} on")
-
-                                for (node in signInNodes) {
-                                    MenuItem(
-                                        node.name,
-                                        onClick = {
-                                            menuFor = null
-                                            startSignIn(node, agent)
-                                        },
-                                        leading = nodeIcon(node),
-                                    )
-                                }
-                            }
-                        }
-                    }
+                if (split.accounts.isEmpty()) {
+                    Label("No account signed in", color = colors.textMuted)
                 }
             }
         }

@@ -153,6 +153,8 @@ class ForgesSettingsTest {
         val store = store()
         showSettings(store)
 
+        rule.onNodeWithText("Disconnect").assertDoesNotExist()
+        rule.onNodeWithContentDescription("More for GitHub account samexample on github.com").performClick()
         rule.onNodeWithText("Disconnect").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isEmpty() }

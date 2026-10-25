@@ -139,15 +139,16 @@ class AccountsAndSessionsTest {
     }
 
     @Test
-    fun signedOutLoginsAreOneLineOfNodesWithASignInEachNotAccountRows() {
+    fun unusedSignedOutNodesStayOutOfTheTableAndSignInIsInTheHarnessMenu() {
         val store = store(CodexNodesJson)
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
         assertEquals(1, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
-        rule.onNodeWithText("Signed out on atlas, orion").assertExists()
+        rule.onNodeWithText("Signed out on atlas, orion").assertDoesNotExist()
         assertEquals(0, rule.onAllNodesWithText("Account name not reported").fetchSemanticsNodes().size)
 
-        rule.onNodeWithContentDescription("Sign in Codex on orion").performClick()
+        rule.onNodeWithContentDescription("More for Codex").performClick()
+        rule.onNodeWithText("Sign in on orion").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n3/logins") } }
     }
@@ -168,7 +169,8 @@ class AccountsAndSessionsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { SessionsSettings(store, onSignOut = {}) } }
 
-        rule.onNodeWithContentDescription("End session Desktop app on willow").performClick()
+        rule.onNodeWithContentDescription("More for Desktop app on willow").performClick()
+        rule.onNodeWithText("End session").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Desktop app on willow").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/sessions/s2", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
@@ -180,7 +182,8 @@ class AccountsAndSessionsTest {
         var signedOut = 0
         rule.setContent { MyceliumTheme(true) { SessionsSettings(store, onSignOut = { signedOut++ }) } }
 
-        rule.onNodeWithContentDescription("End session Firefox on Linux").performClick()
+        rule.onNodeWithContentDescription("More for Firefox on Linux").performClick()
+        rule.onNodeWithText("End session").performClick()
 
         rule.onNodeWithText("Sign out of this session?").assertExists()
         assertTrue(requests.none { it.method == HttpMethod.Delete })
@@ -196,7 +199,8 @@ class AccountsAndSessionsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { SessionsSettings(store, onSignOut = {}) } }
 
-        rule.onNodeWithContentDescription("Revoke atlas").performClick()
+        rule.onNodeWithContentDescription("More for atlas").performClick()
+        rule.onNodeWithText("Revoke").performClick()
         assertTrue(requests.none { it.method == HttpMethod.Delete })
 
         rule.onNodeWithText("Revoke atlas").performClick()
@@ -236,8 +240,8 @@ class AccountsAndSessionsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
-        rule.onNodeWithContentDescription("Sign in Claude Code on a node").performClick()
-        rule.onAllNodesWithText("willow").onLast().performClick()
+        rule.onNodeWithContentDescription("More for Claude Code").performClick()
+        rule.onNodeWithText("Sign in on willow").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/nodes/n1/logins") } }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in Claude Code").fetchSemanticsNodes().isNotEmpty() }

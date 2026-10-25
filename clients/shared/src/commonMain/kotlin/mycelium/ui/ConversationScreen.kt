@@ -529,7 +529,7 @@ private fun ConversationHeader(
 
         Box {
             if (!compact) {
-                MyButton({ menuOpen = true }, icon = MyIcon.More, description = "More", muted = true)
+                MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = "More", muted = true)
             }
 
             if (menuOpen) {
