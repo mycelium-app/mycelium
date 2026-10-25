@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.1
+
+- The Usage card puts "last updated" at the right edge, keeps use and time left whole, gives the forecast as a relative time, and draws bars at 90% or more in red.
+- A full weekly window hides the 5-hour window, which cannot be used until the week resets.
+- Integrations can be renamed from their row menu, with the same naming rules as adding one.
+- The desktop's built-in browser fills its panel again at UI scales above 100%.
+
 ## v0.8.0
 
 - Chat models can propose tasks and ask questions without leaving unreadable tasks. Tool failures are reported as failures rather than declined approvals, and existing affected tasks are repaired.
