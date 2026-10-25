@@ -117,9 +117,13 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
             Icon(agentIcon(account.agent), MyTheme.colors.text, Tokens.Size.IconMd)
         }
 
-        for (window in account.windows) {
+        val usages = account.windows.map { it to compactWindowUsage(it, localDateTime) }
+        val weekExhausted = usages.any { (window, usage) -> window.name.startsWith("seven_day") && usage.percent >= 100 }
+
+        for ((window, usage) in usages) {
+            if (weekExhausted && window.name == "five_hour") continue
+
             val name = windowName(window.name).replaceFirstChar { it.uppercase() }
-            val usage = compactWindowUsage(window, localDateTime)
 
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
                 UsageLine(name, usage.forecast, usage.summary)

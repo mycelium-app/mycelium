@@ -154,6 +154,17 @@ class UsageCardTest {
     }
 
     @Test
+    fun aFullWeeklyWindowHidesTheFiveHourWindow() {
+        val windows = listOf(UsageWindow("five_hour", 5.0, resetsAt = "2099-01-01T15:00:00Z"), UsageWindow("seven_day", 100.0, resetsAt = "2099-01-03T10:00:00Z"))
+        val account = AgentAccount("claude", "work@example.com", "oauth_token", emptyList(), windows = windows)
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("Weekly window").assertIsDisplayed()
+        rule.onNodeWithText("5-hour window").assertDoesNotExist()
+    }
+
+    @Test
     fun aBarAtNinetyPercentOrMoreIsRed() {
         var failed = Color.Unspecified
 
