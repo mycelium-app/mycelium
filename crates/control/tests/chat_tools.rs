@@ -482,6 +482,102 @@ async fn mycelium_tools_run_in_the_control_plane_and_say_plainly_when_they_need_
 }
 
 #[tokio::test]
+async fn a_chat_proposes_a_task_for_a_named_project_and_asks_a_question() {
+    let body = "Compare the routers.\n\n".repeat(500);
+    let rig = rig(vec![
+        Reply::Call("mcp__mycelium__propose_task", json!({"title": "Compare AI routers", "body": body, "project": "Homelab"})),
+        Reply::Call("mcp__mycelium__ask_question", json!({"question": "Which router should we try?", "options": ["First", "Second"]})),
+        Reply::Say("Recorded."),
+    ])
+    .await;
+    let node = rig.server.online_node("lab").await;
+    let owner = sqlx::query_scalar::<_, uuid::Uuid>("select id from users limit 1").fetch_one(&rig.server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, uuid::Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'homelab', '/work/homelab') returning id").bind(owner).bind(node.id).fetch_one(&rig.server.pool).await.unwrap();
+    let id = rig.chat("Plan the router comparison").await;
+
+    for count in 1..=2 {
+        let request = rig.request_waiting(&id).await;
+        rig.decide(&id, &request, "allow_once").await;
+        let answer = eventually("the tool result", || async {
+            let events = rig.events(&id).await;
+            let answers = updates(&events, "tool_call_update");
+
+            answers.get(count - 1).map(|answer| (*answer).clone())
+        })
+        .await;
+        assert_eq!(answer["status"], "completed", "{answer}");
+    }
+
+    let events = rig.turns_ended(&id, 1).await;
+    let answers = updates(&events, "tool_call_update");
+    assert_eq!(answers.len(), 2, "{events:?}");
+    assert!(answers.iter().all(|answer| answer["status"] == "completed"), "{answers:?}");
+
+    let (status, tasks) = rig.server.user.json(rig.server.user.get("/api/v1/tasks")).await;
+    assert_eq!(status, 200, "{tasks}");
+    let proposed = tasks.as_array().unwrap().iter().find(|task| task["status"] == "proposed").unwrap();
+    assert_eq!(proposed["project_id"], json!(project));
+    assert_eq!(proposed["node_id"], json!(node.id));
+    assert_eq!(proposed["cwd"], "/work/homelab");
+    assert_eq!(proposed["agent"], "claude");
+    assert_eq!(proposed["source_id"], id);
+    assert_eq!(proposed["prompt"], body.trim());
+    let question = tasks.as_array().unwrap().iter().find(|task| task["status"] == "question").unwrap();
+    assert_eq!(question["options"], json!(["First", "Second"]));
+    assert_eq!(question["source_id"], id);
+    assert_eq!(question["agent"], "claude");
+
+    sqlx::query("update tasks set agent = 'chat' where source_id = $1").bind(id.parse::<uuid::Uuid>().unwrap()).execute(&rig.server.pool).await.unwrap();
+    sqlx::raw_sql(include_str!("../migrations/0063_chat_task_agents.sql")).execute(&rig.server.pool).await.unwrap();
+    let (status, repaired) = rig.server.user.json(rig.server.user.get("/api/v1/tasks")).await;
+    assert_eq!(status, 200, "{repaired}");
+    assert_eq!(repaired, tasks);
+}
+
+#[tokio::test]
+async fn a_chat_task_uses_the_named_projects_existing_workspace_harness() {
+    let rig = rig(vec![Reply::Call("mcp__mycelium__propose_task", json!({"title": "Compare routers", "project": "homelab"})), Reply::Say("Recorded.")]).await;
+    let node = rig.server.online_node("lab").await;
+    let owner = sqlx::query_scalar::<_, uuid::Uuid>("select id from users limit 1").fetch_one(&rig.server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, uuid::Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'homelab', '/work/homelab') returning id").bind(owner).bind(node.id).fetch_one(&rig.server.pool).await.unwrap();
+    sqlx::query("insert into conversations (owner, node_id, agent, cwd, project_id, title, status) values ($1, $2, 'codex', '/work/homelab', $3, 'Workspace', 'done')").bind(owner).bind(node.id).bind(project).execute(&rig.server.pool).await.unwrap();
+    let id = rig.chat("Plan a comparison").await;
+    let request = rig.request_waiting(&id).await;
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    let (status, tasks) = rig.server.user.json(rig.server.user.get("/api/v1/tasks")).await;
+    assert_eq!(status, 200, "{tasks}");
+    assert_eq!(tasks[0]["agent"], "codex");
+}
+
+#[tokio::test]
+async fn a_failed_mycelium_tool_returns_the_error_to_the_model_and_keeps_it_in_the_chat_history() {
+    let rig = rig(vec![
+        Reply::Call("mcp__mycelium__propose_task", json!({"title": "Compare routers"})),
+        Reply::Say("The server could not record the proposal."),
+        Reply::Say("The tool failed earlier."),
+    ])
+    .await;
+    let id = rig.chat("Plan a comparison").await;
+    let request = rig.request_waiting(&id).await;
+    sqlx::query("alter table tasks rename to unavailable_tasks").execute(&rig.server.pool).await.unwrap();
+    rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    let returned = rig.model.request(1);
+    let result = returned["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap();
+    assert!(result.contains("failed"), "{result}");
+    assert!(result.contains("did not decline"), "{result}");
+    assert!(result.contains("Something went wrong on the server"), "{result}");
+
+    rig.say(&id, "What happened?").await;
+    rig.turns_ended(&id, 2).await;
+    let replayed = rig.model.request(2);
+    assert!(replayed["messages"].as_array().unwrap().iter().any(|message| message["role"] == "tool" && message["content"] == result), "{replayed}");
+}
+
+#[tokio::test]
 async fn an_anthropic_chat_sends_tool_definitions_and_returns_results_as_tool_result_blocks() {
     let rig = rig_with(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny.")], true, false, false).await;
     let id = rig.chat("Weather in Paris?").await;

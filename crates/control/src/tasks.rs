@@ -149,7 +149,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 }
 
 pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus, title: &str, prompt: Option<&str>, options: &[String], project_name: Option<&str>, depends_on: &[Uuid]) -> ApiResult<Result<Task, String>> {
-    let (owner, node_id, agent, cwd, conversation_project) =
+    let (owner, node_id, mut agent, cwd, conversation_project) =
         sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let mut place = (node_id, cwd, conversation_project);
 
@@ -160,6 +160,16 @@ pub async fn record(state: &AppState, conversation_id: Uuid, status: TaskStatus,
         };
 
         place = (project_node, path, Some(project_id));
+    }
+
+    if agent == chats::CHAT_AGENT {
+        agent = sqlx::query_scalar::<_, String>("select agent from conversations where owner = $1 and agent in ('claude', 'codex') and (id = (select parent_id from conversations where id = $2) or project_id = $3) order by (id = (select parent_id from conversations where id = $2)) desc nulls last, updated_at desc limit 1")
+            .bind(owner)
+            .bind(conversation_id)
+            .bind(place.2)
+            .fetch_optional(&state.pool)
+            .await?
+            .unwrap_or_else(|| "claude".to_string());
     }
 
     if unknown_dependencies(state, owner, depends_on).await? {

@@ -263,7 +263,10 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
     }
 
-    let (text, is_error) = toolbox.call(state, id, &tool, &call.input).await?;
+    let (text, is_error) = match toolbox.call(state, id, &tool, &call.input).await {
+        Ok(result) => result,
+        Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
+    };
 
     Ok((text, is_error, None))
 }
