@@ -77,6 +77,17 @@ impl ControlClient {
         Ok(Some(Content { media_type, bytes }))
     }
 
+    pub async fn save_version(&self, slug: &str, subject: &str, bytes: Bytes) -> Result<(StatusCode, Value)> {
+        let mut url = self.url(slug, &["versions"])?;
+        url.query_pairs_mut().append_pair("subject", subject);
+
+        let response = self.http.post(url).bearer_auth(&self.token).body(bytes).send().await?;
+        let status = response.status();
+        let body: Value = response.json().await.unwrap_or(Value::Null);
+
+        Ok((status, body))
+    }
+
     pub async fn data(&self, slug: &str) -> Result<Option<Value>> {
         let response = self.http.get(self.url(slug, &["data"])?).bearer_auth(&self.token).send().await?;
 

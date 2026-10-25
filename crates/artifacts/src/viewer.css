@@ -1,0 +1,22 @@
+.myceliumSave svg {
+  display: block;
+  margin: auto;
+}
+
+#myceliumSaveStatus {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  background: #1f1f23;
+  color: #fff;
+  font: 14px system-ui, sans-serif;
+  z-index: 10000;
+}
+
+#myceliumSaveStatus:empty {
+  display: none;
+}

@@ -202,6 +202,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/artifacts/{id}/data/{key}", put(artifacts::replace_data))
         .route("/internal/artifacts/by-slug/{slug}", get(artifacts::host_artifact))
         .route("/internal/artifacts/by-slug/{slug}/content", get(artifacts::host_content))
+        .route("/internal/artifacts/by-slug/{slug}/versions", post(artifacts::host_create_version).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
         .route("/internal/artifacts/by-slug/{slug}/data", get(artifacts::host_data))
         .route("/internal/artifacts/by-slug/{slug}/data/{key}", put(artifacts::host_replace_data))
         .route("/design", get(artifacts::editor))

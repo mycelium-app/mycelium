@@ -6,7 +6,8 @@ use crate::session::{SESSION_COOKIE, Sessions, cookie};
 use anyhow::Result;
 use axum::Json;
 use axum::Router;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE, HOST, ORIGIN};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -18,6 +19,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
+
+const MAX_SAVED_BYTES: usize = 20 * 1024 * 1024;
+const PDF_MAGIC: &[u8] = b"%PDF-";
+const VIEWER_SCRIPT: &str = include_str!("viewer.js");
+const VIEWER_STYLE: &str = include_str!("viewer.css");
+const VIEWER_INCLUDES: &str = "<link rel=\"stylesheet\" href=\"../mycelium-viewer.css\"><script src=\"../mycelium-viewer.js\"></script>";
 
 struct Inner {
     config: Config,
@@ -42,8 +49,8 @@ impl AppState {
         &self.0.sessions
     }
 
-    fn signed_in(&self, headers: &HeaderMap) -> bool {
-        cookie(headers, SESSION_COOKIE).is_some_and(|value| self.0.sessions.valid(value, chrono::Utc::now().timestamp()))
+    fn signed_in_subject(&self, headers: &HeaderMap) -> Option<String> {
+        cookie(headers, SESSION_COOKIE).and_then(|value| self.0.sessions.subject(value, chrono::Utc::now().timestamp()))
     }
 }
 
@@ -113,6 +120,7 @@ pub fn router(config: Config) -> Result<Router> {
         .route("/_pdfjs/{*path}", get(pdf_viewer_asset))
         .route("/_data", get(data_list))
         .route("/_data/{key}", put(data_put))
+        .route("/_content", put(content_put).layer(DefaultBodyLimit::max(MAX_SAVED_BYTES)))
         .fallback(content)
         .with_state(state))
 }
@@ -163,7 +171,7 @@ async fn gate(state: &AppState, site: &Site, headers: &HeaderMap, uri: &Uri, nav
         }
     };
 
-    if artifact.public || state.signed_in(headers) {
+    if artifact.public || state.signed_in_subject(headers).is_some() {
         return Gate::Open(artifact);
     }
 
@@ -226,9 +234,33 @@ fn existing_asset(directory: &std::path::Path, path: &str) -> Option<std::path::
     (plain && !requested.as_os_str().is_empty() && asset.is_file()).then_some(asset)
 }
 
+fn with_viewer_includes(html: &[u8]) -> Vec<u8> {
+    let html = String::from_utf8_lossy(html);
+    let included = if html.contains("<script") { html.replacen("<script", &format!("{VIEWER_INCLUDES}<script"), 1) } else { format!("{html}{VIEWER_INCLUDES}") };
+
+    included.into_bytes()
+}
+
+fn viewer_own_asset(path: &str) -> Option<Response> {
+    let (body, media_type) = match path {
+        "mycelium-viewer.js" => (VIEWER_SCRIPT, "text/javascript; charset=utf-8"),
+        "mycelium-viewer.css" => (VIEWER_STYLE, "text/css; charset=utf-8"),
+        _ => return None,
+    };
+    let mut response = body.into_response();
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(media_type));
+
+    Some(no_cache(hardened(response, PDF_VIEWER_POLICY)))
+}
+
 async fn pdf_viewer_asset(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    if let Some(own) = viewer_own_asset(&path) {
+        return own;
+    }
+
     let Some(asset) = existing_asset(&state.config().pdfjs_dir, &path) else { return not_found() };
     let Ok(bytes) = tokio::fs::read(&asset).await else { return not_found() };
+    let bytes = if path.trim_start_matches('/') == "web/viewer.html" { with_viewer_includes(&bytes) } else { bytes };
 
     let mut response = bytes.into_response();
     response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(editor_media_type(&asset)));
@@ -365,7 +397,7 @@ async fn data_put(State(state): State<AppState>, site: Site, Path(key): Path<Str
         return response;
     }
 
-    if !state.signed_in(&headers) {
+    if state.signed_in_subject(&headers).is_none() {
         return unauthorised();
     }
 
@@ -382,6 +414,39 @@ async fn data_put(State(state): State<AppState>, site: Site, Path(key): Path<Str
             tracing::warn!("saving data of {slug}: {error}");
 
             bad_gateway()
+        }
+    }
+}
+
+async fn content_put(State(state): State<AppState>, site: Site, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
+    let artifact = match gate(&state, &site, &headers, &uri, false).await {
+        Gate::Open(artifact) => artifact,
+        Gate::Closed(response) => return response,
+    };
+
+    let Some(subject) = state.signed_in_subject(&headers) else { return unauthorised() };
+
+    if let Some(refusal) = refuse_cross_site(&headers, &site) {
+        return refusal;
+    }
+
+    if artifact.kind != "file" || artifact.media_type != "application/pdf" || !body.starts_with(PDF_MAGIC) {
+        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, Json(json!({"error": "not_a_pdf", "message": "Only a PDF can be saved here."}))).into_response();
+    }
+
+    let slug = site.slug(&state.config().domain).unwrap_or_default();
+
+    match state.0.control.save_version(slug, &subject, body).await {
+        Ok((status, saved)) if status.is_success() => Json(json!({"version": saved["latest_version"]})).into_response(),
+        Ok((status, refused)) => {
+            let message = refused["message"].as_str().unwrap_or("Mycelium could not save this PDF. Try again in a minute.");
+
+            (StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY), Json(json!({"error": "not_saved", "message": message}))).into_response()
+        }
+        Err(error) => {
+            tracing::warn!("saving a version of {slug}: {error}");
+
+            (StatusCode::BAD_GATEWAY, Json(json!({"error": "unreachable", "message": "The artefact host could not reach Mycelium. Try again in a minute."}))).into_response()
         }
     }
 }

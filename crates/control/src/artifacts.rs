@@ -6,6 +6,7 @@ use crate::snapshots;
 use crate::state::AppState;
 use crate::store::find_owned;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{StatusCode, Uri, header};
@@ -674,6 +675,28 @@ pub async fn host_data(State(state): State<AppState>, _host: ArtifactHost, Path(
     let row = with_slug(&state, &slug).await?;
 
     Ok(Json(data_of(&state, row.id).await?))
+}
+
+#[derive(Deserialize)]
+pub struct HostSigner {
+    subject: String,
+}
+
+pub async fn host_create_version(State(state): State<AppState>, _host: ArtifactHost, Path(slug): Path<String>, Query(signer): Query<HostSigner>, body: Bytes) -> ApiResult<(StatusCode, Json<Artifact>)> {
+    let row = with_slug(&state, &slug).await?;
+    let person = sqlx::query_scalar::<_, Uuid>("select id from users where subject = $1").bind(format!("oidc:{}", signer.subject)).fetch_optional(&state.pool).await?;
+
+    if person != Some(row.owner) {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "edit_forbidden", "You cannot save changes to this artefact. Ask its owner to open it, or save a copy of your own."));
+    }
+
+    if parse_kind(&row.kind)? != ArtifactKind::File {
+        return Err(ApiError::bad_request("artifact_not_file", "Only a file artefact can be saved from the viewer."));
+    }
+
+    let artifact = add_version(&state, &row, ArtifactAuthor::Person, &body, Some("Saved from the viewer")).await?;
+
+    Ok((StatusCode::CREATED, Json(artifact)))
 }
 
 pub async fn editor(State(state): State<AppState>, user: Result<AuthUser, ApiError>, request: Request) -> Response {

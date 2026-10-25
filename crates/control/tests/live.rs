@@ -78,6 +78,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/artifact-access-requests/{id}/decline",
     "POST /api/v1/artifacts",
     "POST /api/v1/artifacts/{id}/versions",
+    "POST /internal/artifacts/by-slug/{slug}/versions",
     "PATCH /api/v1/artifacts/{id}",
     "DELETE /api/v1/artifacts/{id}",
     "POST /api/v1/artifacts/{id}/comments",
@@ -1187,6 +1188,26 @@ async fn a_remembered_memory_and_its_edit_and_deletion_reach_every_stream_client
     })
     .await;
     assert_eq!((status, removed), (204, remembered.id));
+}
+
+#[tokio::test]
+async fn a_version_saved_by_the_artifact_host_is_streamed_to_its_owner() {
+    let server = Server::start_with(|config| config.artifact_host_token = Some("host-token".into())).await;
+    let mut stream = server.user.stream().await;
+    let user = &server.user;
+    let (_, artifact) = user.json(user.post("/api/v1/artifacts").json(&json!({"kind": "file", "title": "Report", "content": "a", "media_type": "application/pdf"}))).await;
+    sqlx::query("update users set subject = 'oidc:reader'").execute(&server.pool).await.unwrap();
+    let anonymous = server.anonymous();
+    let slug = artifact["slug"].as_str().unwrap();
+
+    anonymous.json(anonymous.post(&format!("/internal/artifacts/by-slug/{slug}/versions")).query(&[("subject", "reader")]).header("authorization", "Bearer host-token").body("b")).await;
+    let versioned = stream.until(|message| match message {
+        StreamMessage::Artifact(artifact) if artifact.latest_version == 2 => Some(artifact),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!(versioned.title, "Report");
 }
 
 #[tokio::test]

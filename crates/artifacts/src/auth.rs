@@ -158,7 +158,8 @@ async fn finish(state: &AppState, site: &Site, headers: &HeaderMap, query: Callb
     }
 
     let next = safe_next(&config.domain, pending["next"].as_str().map(str::to_string));
-    let session = state.sessions().issue(chrono::Utc::now().timestamp());
+    let subject = claims["sub"].as_str().filter(|subject| !subject.is_empty()).ok_or_else(rejected)?;
+    let session = state.sessions().issue(chrono::Utc::now().timestamp(), subject);
     let session_cookie = format!("{SESSION_COOKIE}={session}; HttpOnly; Secure; SameSite=Lax; Path=/; Domain=.{}; Max-Age={}", config.domain, SESSION_DAYS * 86400);
     let mut response = Redirect::to(&next).into_response();
     response.headers_mut().append(SET_COOKIE, header_value(&session_cookie)?);

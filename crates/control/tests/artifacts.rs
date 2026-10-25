@@ -301,6 +301,34 @@ async fn the_internal_api_refuses_without_or_with_a_wrong_token_and_works_with_t
 }
 
 #[tokio::test]
+async fn the_host_saves_a_new_version_only_for_the_signed_in_owner_of_a_file() {
+    let server = Server::start_with(|config| config.artifact_host_token = Some(TOKEN.into())).await;
+    let (status, file) = create(&server.user, json!({"kind": "file", "title": "Report", "content_base64": "JVBERi0xLjQ=", "media_type": "application/pdf"})).await;
+    let page = created(&server.user, "page", "Board", "<p>hi</p>").await;
+    let owner: uuid::Uuid = file["owner"].as_str().unwrap().parse().unwrap();
+    sqlx::query("update users set subject = 'oidc:owner-sub' where id = $1").bind(owner).execute(&server.pool).await.unwrap();
+    sqlx::query("insert into users (subject, email, name) values ('oidc:other-sub', 'other@example.com', 'Other')").execute(&server.pool).await.unwrap();
+    let anonymous = server.anonymous();
+    let slug = file["slug"].as_str().unwrap();
+    let save = |slug: &str, subject: &str, token: &str| anonymous.post(&format!("/internal/artifacts/by-slug/{slug}/versions")).query(&[("subject", subject)]).header("authorization", format!("Bearer {token}")).body(b"%PDF-1.4 annotated".to_vec());
+
+    let (wrong_token, _) = anonymous.json(save(slug, "owner-sub", "nope")).await;
+    let (stranger, refusal) = anonymous.json(save(slug, "other-sub", TOKEN)).await;
+    let (unknown_person, _) = anonymous.json(save(slug, "nobody", TOKEN)).await;
+    let (not_a_file, _) = anonymous.json(save(page["slug"].as_str().unwrap(), "owner-sub", TOKEN)).await;
+    let (still_one, unchanged) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{}", file["id"].as_str().unwrap()))).await;
+    let (saved_status, saved) = anonymous.json(save(slug, "owner-sub", TOKEN)).await;
+    let (_, bytes) = content_of(&server.user, file["id"].as_str().unwrap(), 2).await;
+
+    assert_eq!(status, 201, "{file}");
+    assert_eq!((wrong_token, stranger, unknown_person, not_a_file), (401, 403, 403, 400));
+    assert_eq!(refusal["error"], "edit_forbidden");
+    assert_eq!((still_one, unchanged["latest_version"].as_i64()), (200, Some(1)));
+    assert_eq!((saved_status, saved["latest_version"].as_i64()), (201, Some(2)), "{saved}");
+    assert_eq!(bytes, b"%PDF-1.4 annotated");
+}
+
+#[tokio::test]
 async fn the_internal_api_is_off_while_no_token_is_configured() {
     let server = Server::start().await;
     let artifact = created(&server.user, "page", "Board", "x").await;

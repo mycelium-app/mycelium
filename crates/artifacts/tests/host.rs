@@ -33,6 +33,7 @@ fn fixture(kind: &'static str, public: bool, media_type: &'static str, bytes: &[
 struct Control {
     artifacts: HashMap<&'static str, Fixture>,
     data: Mutex<HashMap<String, Map<String, Value>>>,
+    saved: Mutex<Vec<(String, String, Vec<u8>)>>,
 }
 
 fn authorised(headers: &HeaderMap) -> bool {
@@ -71,6 +72,20 @@ async fn control_put_data(State(control): State<Arc<Control>>, headers: HeaderMa
     Json(json!({"key": key, "value": value})).into_response()
 }
 
+async fn control_save_version(State(control): State<Arc<Control>>, headers: HeaderMap, Path(slug): Path<String>, axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>, body: axum::body::Bytes) -> Response {
+    if !authorised(&headers) || !control.artifacts.contains_key(slug.as_str()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    if query["subject"] != "reader" {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "edit_forbidden", "message": "You cannot save changes to this artefact."}))).into_response();
+    }
+
+    control.saved.lock().unwrap().push((slug, query["subject"].clone(), body.to_vec()));
+
+    (StatusCode::CREATED, Json(json!({"latest_version": 2}))).into_response()
+}
+
 #[derive(Clone)]
 struct Idp {
     base: String,
@@ -96,6 +111,7 @@ async fn listen() -> (TcpListener, String) {
 }
 
 struct Harness {
+    control: Arc<Control>,
     base: String,
     http: reqwest::Client,
     nonce: Arc<Mutex<String>>,
@@ -115,14 +131,15 @@ impl Harness {
             ("open-board", fixture("page", true, "text/html", b"<h1>Board</h1>")),
             ("layout", fixture("design", true, "application/vnd.mycelium.design+json", br#"{"pages":[]}"#)),
         ]);
-        let control = Arc::new(Control { artifacts, data: Mutex::new(HashMap::new()) });
+        let control = Arc::new(Control { artifacts, data: Mutex::new(HashMap::new()), saved: Mutex::new(Vec::new()) });
         let (control_listener, control_base) = listen().await;
         let control_app = Router::new()
             .route("/internal/artifacts/by-slug/{slug}", get(control_artifact))
             .route("/internal/artifacts/by-slug/{slug}/content", get(control_content))
+            .route("/internal/artifacts/by-slug/{slug}/versions", axum::routing::post(control_save_version))
             .route("/internal/artifacts/by-slug/{slug}/data", get(control_data))
             .route("/internal/artifacts/by-slug/{slug}/data/{key}", axum::routing::put(control_put_data))
-            .with_state(control);
+            .with_state(control.clone());
         tokio::spawn(async move { axum::serve(control_listener, control_app).await });
 
         let (idp_listener, idp_base) = listen().await;
@@ -139,7 +156,7 @@ impl Harness {
         let pdfjs = tempfile::tempdir().unwrap();
         std::fs::create_dir(pdfjs.path().join("web")).unwrap();
         std::fs::create_dir(pdfjs.path().join("build")).unwrap();
-        std::fs::write(pdfjs.path().join("web/viewer.html"), "<!doctype html><title>PDF.js</title>").unwrap();
+        std::fs::write(pdfjs.path().join("web/viewer.html"), "<!doctype html><title>PDF.js</title><script src=\"../build/pdf.mjs\" type=\"module\"></script><script src=\"viewer.mjs\" type=\"module\"></script>").unwrap();
         std::fs::write(pdfjs.path().join("build/pdf.mjs"), "export {};").unwrap();
 
         let config = Config {
@@ -154,7 +171,7 @@ impl Harness {
         let (listener, base) = listen().await;
         tokio::spawn(mycelium_artifacts::run(config, listener));
 
-        Harness { base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, _editor: editor, _pdfjs: pdfjs }
+        Harness { control, base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, _editor: editor, _pdfjs: pdfjs }
     }
 
     fn request(&self, method: reqwest::Method, host: &str, path: &str, cookie: Option<&str>) -> reqwest::RequestBuilder {
@@ -315,10 +332,93 @@ async fn the_pdf_viewer_assets_are_served_with_their_types_and_a_viewer_policy()
     let missing = harness.get("report", "/_pdfjs/web/nothing.js", None).await;
 
     assert_eq!(page.headers()["content-type"], "text/html; charset=utf-8");
-    assert!(page.headers()["content-security-policy"].to_str().unwrap().contains("script-src 'self' 'wasm-unsafe-eval'"));
+    let policy = page.headers()["content-security-policy"].to_str().unwrap().to_string();
+    assert!(policy.contains("script-src 'self' 'wasm-unsafe-eval'"));
+    assert!(policy.contains("style-src 'self';"));
+    assert!(!policy.contains("unsafe-inline"));
     assert_eq!(page.headers()["x-content-type-options"], "nosniff");
     assert_eq!(script.headers()["content-type"], "text/javascript; charset=utf-8");
     assert_eq!(missing.status(), 404);
+}
+
+#[tokio::test]
+async fn the_pdf_viewer_loads_the_host_script_that_turns_pdf_scripting_off_before_the_viewer_starts() {
+    let harness = Harness::start().await;
+
+    let page = harness.get("report", "/_pdfjs/web/viewer.html", None).await.text().await.unwrap();
+    let script = harness.get("report", "/_pdfjs/mycelium-viewer.js", None).await;
+    let style = harness.get("report", "/_pdfjs/mycelium-viewer.css", None).await;
+
+    let ours = page.find("mycelium-viewer.js").unwrap();
+    assert!(ours < page.find("pdf.mjs").unwrap());
+    assert!(page.contains("mycelium-viewer.css"));
+    assert_eq!(script.headers()["content-type"], "text/javascript; charset=utf-8");
+    let source = script.text().await.unwrap();
+    assert!(source.contains("\"enableScripting\", false"));
+    assert!(source.contains("\"disablePreferences\", true"));
+    assert_eq!(style.headers()["content-type"], "text/css; charset=utf-8");
+}
+
+async fn save(harness: &Harness, slug: &str, cookie: Option<&str>, origin: Option<&str>, body: Vec<u8>) -> reqwest::Response {
+    let request = harness.request(reqwest::Method::PUT, &format!("{slug}.{DOMAIN}"), "/_content", cookie).body(body);
+
+    match origin {
+        Some(origin) => request.header("origin", origin).send().await.unwrap(),
+        None => request.send().await.unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn a_signed_in_visitor_saves_an_edited_pdf_and_it_reaches_the_control_plane_under_their_identity() {
+    let harness = Harness::start().await;
+    let cookie = harness.session().await;
+
+    let response = save(&harness, "report", Some(&cookie), Some(&format!("https://report.{DOMAIN}")), b"%PDF-1.7 edited".to_vec()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({"version": 2}));
+    assert_eq!(*harness.control.saved.lock().unwrap(), vec![("report".to_string(), "reader".to_string(), b"%PDF-1.7 edited".to_vec())]);
+}
+
+#[tokio::test]
+async fn saving_a_pdf_without_a_session_or_from_another_site_is_refused_and_nothing_is_forwarded() {
+    let harness = Harness::start().await;
+    let cookie = harness.session().await;
+
+    let signed_out = save(&harness, "report", None, None, b"%PDF-1.7".to_vec()).await;
+    let cross_site = save(&harness, "report", Some(&cookie), Some("https://evil.example"), b"%PDF-1.7".to_vec()).await;
+
+    assert_eq!((signed_out.status(), cross_site.status()), (StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN));
+    assert!(harness.control.saved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn saving_something_too_large_or_not_a_pdf_is_refused_and_nothing_is_forwarded() {
+    let harness = Harness::start().await;
+    let cookie = harness.session().await;
+    let mut huge = b"%PDF-".to_vec();
+    huge.resize(21 * 1024 * 1024, 0);
+
+    let too_large = save(&harness, "report", Some(&cookie), None, huge).await;
+    let not_a_pdf = save(&harness, "report", Some(&cookie), None, b"<html>".to_vec()).await;
+    let not_a_file = save(&harness, "board", Some(&cookie), None, b"%PDF-1.7".to_vec()).await;
+
+    assert_eq!((too_large.status(), not_a_pdf.status(), not_a_file.status()), (StatusCode::PAYLOAD_TOO_LARGE, StatusCode::UNSUPPORTED_MEDIA_TYPE, StatusCode::UNSUPPORTED_MEDIA_TYPE));
+    assert!(harness.control.saved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_session_cookie_for_another_identity_cannot_save() {
+    let harness = Harness::start().await;
+    let cookie = harness.session().await;
+    let (claims, mac) = cookie.rsplit_once('.').unwrap();
+    let (expiry, _) = claims.trim_start_matches("myc_artifacts=").split_once('.').unwrap();
+    let forged = format!("myc_artifacts={expiry}.{}.{mac}", URL_SAFE_NO_PAD.encode("someone-else"));
+
+    let refused = save(&harness, "report", Some(&forged), None, b"%PDF-1.7".to_vec()).await;
+
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    assert!(harness.control.saved.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

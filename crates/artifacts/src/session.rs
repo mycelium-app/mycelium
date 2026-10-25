@@ -51,19 +51,21 @@ impl Sessions {
         Sessions { key: Sha256::digest(format!("mycelium-artifact-session:{secret}").as_bytes()).to_vec() }
     }
 
-    pub fn issue(&self, now: i64) -> String {
-        let expiry = (now + SESSION_DAYS * 86400).to_string();
-        let mac = URL_SAFE_NO_PAD.encode(hmac_sha256(&self.key, expiry.as_bytes()));
+    pub fn issue(&self, now: i64, subject: &str) -> String {
+        let claims = format!("{}.{}", now + SESSION_DAYS * 86400, URL_SAFE_NO_PAD.encode(subject));
+        let mac = URL_SAFE_NO_PAD.encode(hmac_sha256(&self.key, claims.as_bytes()));
 
-        format!("{expiry}.{mac}")
+        format!("{claims}.{mac}")
     }
 
-    pub fn valid(&self, value: &str, now: i64) -> bool {
-        let Some((expiry, mac)) = value.split_once('.') else { return false };
-        let Ok(mac) = URL_SAFE_NO_PAD.decode(mac) else { return false };
-        let Ok(expiry_time) = expiry.parse::<i64>() else { return false };
+    pub fn subject(&self, value: &str, now: i64) -> Option<String> {
+        let (claims, mac) = value.rsplit_once('.')?;
+        let (expiry, subject) = claims.split_once('.')?;
+        let mac = URL_SAFE_NO_PAD.decode(mac).ok()?;
+        let expiry_time = expiry.parse::<i64>().ok()?;
+        let subject = String::from_utf8(URL_SAFE_NO_PAD.decode(subject).ok()?).ok()?;
 
-        same(&hmac_sha256(&self.key, expiry.as_bytes()), &mac) && expiry_time > now
+        (same(&hmac_sha256(&self.key, claims.as_bytes()), &mac) && expiry_time > now).then_some(subject)
     }
 }
 
@@ -82,11 +84,22 @@ mod tests {
     #[test]
     fn a_session_is_valid_until_it_expires_and_not_under_another_key() {
         let sessions = Sessions::new("one");
-        let value = sessions.issue(1000);
+        let value = sessions.issue(1000, "ada");
 
-        assert!(sessions.valid(&value, 1001));
-        assert!(!sessions.valid(&value, 1000 + SESSION_DAYS * 86400));
-        assert!(!Sessions::new("two").valid(&value, 1001));
-        assert!(!sessions.valid("nonsense", 1001));
+        assert_eq!(sessions.subject(&value, 1001).as_deref(), Some("ada"));
+        assert_eq!(sessions.subject(&value, 1000 + SESSION_DAYS * 86400), None);
+        assert_eq!(Sessions::new("two").subject(&value, 1001), None);
+        assert_eq!(sessions.subject("nonsense", 1001), None);
+    }
+
+    #[test]
+    fn a_session_cannot_be_moved_to_another_subject() {
+        let sessions = Sessions::new("one");
+        let value = sessions.issue(1000, "ada");
+        let (claims, mac) = value.rsplit_once('.').unwrap();
+        let (expiry, _) = claims.split_once('.').unwrap();
+        let forged = format!("{expiry}.{}.{mac}", URL_SAFE_NO_PAD.encode("grace"));
+
+        assert_eq!(sessions.subject(&forged, 1001), None);
     }
 }
