@@ -27,8 +27,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.serialization.decodeFromString
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
@@ -92,11 +91,14 @@ class GitStackTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val opened = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val opened = CopyOnWriteArrayList<String>()
 
     private fun open(fake: StackFake) {
         val conversation = MyceliumJson.decodeFromString<Conversation>(StackConversationJson)
-        val store = Store(fake.api, CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fake.api, scopes.create())
         val handler = object : UriHandler {
             override fun openUri(uri: String) {
                 opened += uri

@@ -4,13 +4,12 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.state.Store
 import mycelium.ui.Route
 import mycelium.ui.Shell
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -26,10 +25,12 @@ private fun message(seq: Int) =
 
 @OptIn(InternalComposeUiApi::class)
 class ScrollbarRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
     private val me = Me("u", "sam@example.com", "Sam")
 
     private fun render(name: String, route: Route, extra: Map<String, String>, nodes: String, x: Float, y: Float) {
-        val store = Store(fakeApi(nodes, extra), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fakeApi(nodes, extra), scopes.create())
 
         runBlocking {
             store.refresh()

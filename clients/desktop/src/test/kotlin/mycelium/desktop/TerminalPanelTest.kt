@@ -16,8 +16,6 @@ import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
@@ -30,6 +28,7 @@ import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.TerminalPanel
 import java.util.concurrent.CopyOnWriteArrayList
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -38,6 +37,8 @@ private const val ConversationJson = """{"id":"c1","owner":"u","node_id":"n","ag
 
 @OptIn(InternalComposeUiApi::class)
 class TerminalPanelTest {
+    @get:Rule
+    val scopes = TestScopes()
     private val requests = CopyOnWriteArrayList<String>()
     private val bodies = CopyOnWriteArrayList<String>()
 
@@ -50,7 +51,7 @@ class TerminalPanelTest {
             if (request.url.encodedPath.endsWith("/terminal")) respond("""{"terminal_id":"t1"}""", HttpStatusCode.OK, json) else respond("", HttpStatusCode.NoContent)
         }
 
-        return Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
     }
 
     private fun waitFor(scene: ImageComposeScene?, what: String, done: () -> Boolean) {

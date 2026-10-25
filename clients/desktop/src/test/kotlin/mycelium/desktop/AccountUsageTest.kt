@@ -10,8 +10,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Platform
 import mycelium.api.MyceliumApi
@@ -52,10 +50,13 @@ class AccountUsageTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request -> if (request.url.encodedPath.endsWith("/nodes")) respond(UsageNodes, HttpStatusCode.OK, json) else respond("[]", HttpStatusCode.OK, json) }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
 

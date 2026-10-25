@@ -21,6 +21,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.util.concurrent.CopyOnWriteArrayList
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ChatToolsSettings
@@ -40,8 +41,8 @@ class ChatToolsSettingsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = mutableListOf<HttpRequestData>()
-    private val bodies = mutableListOf<String>()
+    private val requests = CopyOnWriteArrayList<HttpRequestData>()
+    private val bodies = CopyOnWriteArrayList<String>()
     private var listed = LabJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to GitHubJson
 
@@ -88,7 +89,7 @@ class ChatToolsSettingsTest {
         rule.onNodeWithContentDescription("Bearer token, if the server needs one").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         rule.onNodeWithText("Connect integration").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() && rule.onAllNodesWithText("Add integration").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("ghp-secret").fetchSemanticsNodes().isEmpty() && rule.onAllNodesWithText("No token").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"name":"GitHub","url":"https://gh.test/mcp","bearer_token":"ghp-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("ghp-secret").assertCountEquals(0)
         rule.onNodeWithText("No token").assertExists()
@@ -107,6 +108,7 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post } }
         assertEquals("""{"name":"Gateway","url":"https://gateway.test/mcp","bearer_token":"test-gateway-key"}""", bodies.last { it.isNotEmpty() })
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("test-gateway-key").fetchSemanticsNodes().isEmpty() }
         rule.onAllNodesWithText("test-gateway-key").assertCountEquals(0)
     }
 

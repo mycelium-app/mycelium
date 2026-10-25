@@ -27,8 +27,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -54,7 +53,10 @@ class WalkthroughTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<Pair<String, String>>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = CopyOnWriteArrayList<Pair<String, String>>()
     private var reads = "[]"
     private var uncovered = "[]"
     private var notes = "[]"
@@ -83,7 +85,7 @@ class WalkthroughTest {
 
             respond(reply, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
         rule.setContent { MyceliumTheme(true) { Shell(store, HandsOffPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }

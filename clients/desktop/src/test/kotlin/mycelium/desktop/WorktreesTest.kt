@@ -15,8 +15,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
@@ -40,7 +39,10 @@ class WorktreesTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val bodies = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val bodies = CopyOnWriteArrayList<String>()
     private var conversationAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to ConversationJson
 
     private fun store(): Store {
@@ -59,7 +61,7 @@ class WorktreesTest {
                 else -> respond("{}", HttpStatusCode.OK, json)
             }
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh(); store.refreshProjects() }
 

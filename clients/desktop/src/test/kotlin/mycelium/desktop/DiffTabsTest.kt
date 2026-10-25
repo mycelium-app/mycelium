@@ -20,6 +20,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -53,7 +54,7 @@ class DiffTabsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = mutableListOf<String>()
+    private val requests = CopyOnWriteArrayList<String>()
 
     private fun show() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

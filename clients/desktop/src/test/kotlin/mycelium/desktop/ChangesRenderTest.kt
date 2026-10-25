@@ -12,8 +12,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.api.Conversation
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
@@ -21,6 +19,7 @@ import mycelium.state.Store
 import mycelium.state.changesTab
 import mycelium.ui.ChangesTabView
 import mycelium.ui.MyTheme
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -47,6 +46,8 @@ private val Rows = """{"ranges":[
 
 @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
 class ChangesRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
     @Test
     fun threeFilesOneLongOneCollapsedOneUntracked() {
         val conversation = MyceliumJson.decodeFromString<Conversation>("""{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work","title":"Importer","status":"review","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}""")
@@ -59,7 +60,7 @@ class ChangesRenderTest {
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         val file = renderAt("changes-view", true, false, interact = { scene ->
             for (frame in 1..40) {

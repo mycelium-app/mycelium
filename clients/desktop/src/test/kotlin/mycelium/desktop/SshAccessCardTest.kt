@@ -20,8 +20,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import mycelium.api.Event
@@ -59,6 +57,9 @@ class SshAccessCardTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private val sent = java.util.Collections.synchronizedList(mutableListOf<SshSent>())
 
     private fun show() {
@@ -76,7 +77,7 @@ class SshAccessCardTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         val items = buildThread(requestSshAccess())
 
         rule.setContent {

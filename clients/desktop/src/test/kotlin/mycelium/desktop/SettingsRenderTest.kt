@@ -11,14 +11,13 @@ import mycelium.ui.Accent
 import mycelium.ui.Appearance
 import mycelium.ui.LocalAppearance
 import mycelium.ui.MyTheme
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.state.Store
 import mycelium.ui.InstructionsSettings
 import mycelium.ui.SettingsSection
 import mycelium.ui.SettingsScreen
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -29,6 +28,9 @@ private fun Surface(content: @Composable () -> Unit) {
 
 @OptIn(InternalComposeUiApi::class)
 class SettingsRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
+
     private val long = (1..120).joinToString("\\n") { "Rule $it: keep the diff small." }
     private val extra = mapOf(
         "/instructions" to """{"source":null,"revision":"a","layers":[{"layer":"global","name":"Global","path":"AGENTS.md","text":"$long","version":null}]}""",
@@ -37,7 +39,7 @@ class SettingsRenderTest {
         "/memories" to """[{"id":"m1","text":"Keep immich ui in step with the backups packages.","scopes":["work"],"created_by":"claude","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}]""",
     )
 
-    private fun store() = Store(fakeApi(extra = extra), CoroutineScope(Dispatchers.Unconfined)).also { runBlocking { it.refresh() } }
+    private fun store() = Store(fakeApi(extra = extra), scopes.create()).also { runBlocking { it.refresh() } }
 
     @Test
     fun settingsListMemoriesAndInstructionsRender() {

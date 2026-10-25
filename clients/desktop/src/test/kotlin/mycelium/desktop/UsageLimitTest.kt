@@ -12,6 +12,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -39,8 +40,8 @@ class UsageLimitTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val calls = mutableListOf<String>()
-    private val bodies = mutableListOf<String>()
+    private val calls = CopyOnWriteArrayList<String>()
+    private val bodies = CopyOnWriteArrayList<String>()
 
     private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

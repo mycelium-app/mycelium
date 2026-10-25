@@ -15,8 +15,6 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.state.Lane
@@ -32,6 +30,7 @@ import mycelium.ui.InstructionsSettings
 import mycelium.ui.Route
 import mycelium.ui.SessionsSettings
 import mycelium.ui.Shell
+import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -207,10 +206,12 @@ private fun click(scene: ImageComposeScene, x: Float, y: Float) {
 
 @OptIn(InternalComposeUiApi::class)
 class BoardsRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
     private val me = Me("u", "sam@example.com", "Sam")
 
     private fun store(extra: Map<String, String> = emptyMap(), open: String? = BackupsId, board: Boolean = false): Store {
-        val store = Store(boardApi(extra), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(boardApi(extra), scopes.create())
 
         runBlocking {
             store.refresh()

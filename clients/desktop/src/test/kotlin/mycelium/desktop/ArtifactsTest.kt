@@ -23,6 +23,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.util.concurrent.CopyOnWriteArrayList
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
@@ -75,7 +76,7 @@ class ArtifactsScreenTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
     private val platform = ArtifactsPlatform()
-    private val opened = mutableListOf<String>()
+    private val opened = CopyOnWriteArrayList<String>()
 
     private fun showArtifacts(list: String = Artifacts, accessRequests: String = "[]", links: String = "[]") {
         var linked = true

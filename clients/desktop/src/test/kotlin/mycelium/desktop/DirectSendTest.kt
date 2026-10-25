@@ -10,8 +10,6 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -46,6 +44,9 @@ class DirectSendTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     @Test
     fun aMessageToAnIdleConversationShowsInTheChatAtOnceRatherThanAsSending() {
         val never = CompletableDeferred<Unit>()
@@ -65,7 +66,7 @@ class DirectSendTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, QuietPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
 

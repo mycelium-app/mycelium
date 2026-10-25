@@ -8,8 +8,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
@@ -39,11 +37,14 @@ class NavigationTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     @Test
     fun tasksAndSchedulesSitUnderNodesInTheSidebarAndOpenTheirPages() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { respond("[]", HttpStatusCode.OK, json) }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         rule.setContent { MyceliumTheme(true) { Shell(store, NavigationPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
 
         rule.onNodeWithText("Tasks").performClick()

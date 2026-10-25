@@ -18,7 +18,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mycelium.api.MyceliumApi
@@ -38,6 +37,9 @@ class LazyHistoryTest {
     @get:Rule
     val rule = createComposeRule()
 
+    @get:Rule
+    val scopes = TestScopes()
+
     private val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     private fun showLongConversation(): Store {
@@ -52,7 +54,7 @@ class LazyHistoryTest {
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.open("c1") }
 
         rule.setContent {

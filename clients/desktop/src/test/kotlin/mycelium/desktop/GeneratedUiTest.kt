@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import java.util.concurrent.CopyOnWriteArrayList
 import mycelium.state.ThreadItem
 import mycelium.ui.GeneratedUiActions
 import mycelium.ui.LocalGeneratedUiActions
@@ -41,8 +42,8 @@ class GeneratedUiTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val sent = mutableListOf<String>()
-    private val sideChats = mutableListOf<String>()
+    private val sent = CopyOnWriteArrayList<String>()
+    private val sideChats = CopyOnWriteArrayList<String>()
 
     private fun thread(text: String, canOpenFiles: Boolean = true) {
         rule.setContent {

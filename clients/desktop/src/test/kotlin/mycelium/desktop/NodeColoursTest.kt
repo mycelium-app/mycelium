@@ -14,8 +14,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -50,7 +49,10 @@ class NodeColoursTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<HttpRequestData>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = CopyOnWriteArrayList<HttpRequestData>()
 
     private fun showNodes() {
         val engine = MockEngine { request ->
@@ -63,7 +65,7 @@ class NodeColoursTest {
 
             respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, ColoursPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
     }

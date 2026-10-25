@@ -16,8 +16,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
@@ -33,7 +32,10 @@ class ProjectIconsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val patches = mutableListOf<Pair<String, String>>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val patches = CopyOnWriteArrayList<Pair<String, String>>()
 
     private fun show(icon: String? = null) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -55,7 +57,7 @@ class ProjectIconsTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
     }

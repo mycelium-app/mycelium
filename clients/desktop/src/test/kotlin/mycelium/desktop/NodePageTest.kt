@@ -11,8 +11,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -63,7 +62,10 @@ class NodePageTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val stopped = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val stopped = CopyOnWriteArrayList<String>()
 
     private fun showNodes(nodes: String, watched: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -86,7 +88,7 @@ class NodePageTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         NodePagePlatform.opened = null
         rule.setContent { MyceliumTheme(true) { Shell(store, NodePagePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
@@ -199,6 +201,7 @@ class NodePageTest {
         showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
 
         openNode("Ports")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescriptionCount("Open port 3000 on willow in the browser") == 1 }
         rule.onNodeWithContentDescription("Open port 3000 on willow in the browser").performClick()
 
         assertEquals("http://10.0.0.5:3000", NodePagePlatform.opened)

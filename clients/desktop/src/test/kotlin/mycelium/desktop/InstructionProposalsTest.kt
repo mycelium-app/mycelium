@@ -19,8 +19,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import mycelium.api.MyceliumApi
 import mycelium.api.parseStreamMessage
 import mycelium.state.Store
@@ -40,6 +38,9 @@ private const val Edited = "# Rules\\nBe brief.\\nUse British English.\\nKeep di
 class InstructionProposalsTest {
     @get:Rule
     val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Triple<HttpMethod, String, String>>())
 
@@ -62,7 +63,7 @@ class InstructionProposalsTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalOpenConversation provides { opened += it }) { InstructionProposals(store) } } }
 
         return store
@@ -145,10 +146,12 @@ class InstructionProposalsTest {
 }
 
 class InstructionProposalsRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
     @Test
     fun theProposalsListRendersWithAMarkedDiff() {
         val listed = "[${proposal("p1", Edited)},${proposal("p2", Edited, outOfDate = true)},${proposal("p3", Edited, state = "declined", note = "Too broad")}]"
-        val store = Store(fakeApi(extra = mapOf("/instruction-proposals" to listed)), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(fakeApi(extra = mapOf("/instruction-proposals" to listed)), scopes.create())
         kotlinx.coroutines.runBlocking { store.refreshInstructionProposals() }
 
         for (phone in listOf(false, true)) {

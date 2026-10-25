@@ -19,8 +19,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -72,7 +71,10 @@ class ActivityTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val asked = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val asked = CopyOnWriteArrayList<String>()
 
     private fun shown(text: String): Boolean = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
@@ -92,7 +94,7 @@ class ActivityTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Box(Modifier.width(width)) { Shell(store, ActivityPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } } }
         rule.onNodeWithContentDescription("Activity").performClick()

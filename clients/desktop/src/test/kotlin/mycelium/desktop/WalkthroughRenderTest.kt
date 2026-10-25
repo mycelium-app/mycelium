@@ -10,8 +10,6 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import mycelium.api.MyceliumApi
@@ -24,6 +22,7 @@ import mycelium.ui.Route
 import mycelium.ui.Shell
 import mycelium.ui.MyTheme
 import mycelium.ui.WalkthroughView
+import org.junit.Rule
 import org.junit.Test
 import kotlin.test.assertTrue
 
@@ -42,6 +41,8 @@ private const val RenderUncovered = """[{"path":"src/restore/Backoff.ts","diff":
 
 @OptIn(ExperimentalComposeUiApi::class)
 class WalkthroughRenderTest {
+    @get:Rule
+    val scopes = TestScopes()
     private fun render(name: String, interact: (androidx.compose.ui.ImageComposeScene) -> Unit = {}) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -55,7 +56,7 @@ class WalkthroughRenderTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         val walkthrough = MyceliumJson.decodeFromString(Walkthrough.serializer(), RenderWalkthrough)
 
         val file = renderAt(name, true, false, interact = interact) {
@@ -103,7 +104,7 @@ class WalkthroughRenderTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
 
         runBlocking { store.refresh() }
 

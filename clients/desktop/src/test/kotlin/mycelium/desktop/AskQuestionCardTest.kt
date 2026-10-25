@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import mycelium.api.Event
@@ -50,7 +51,7 @@ class AskQuestionCardTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val answers = mutableListOf<String>()
+    private val answers = CopyOnWriteArrayList<String>()
     private var task by mutableStateOf<Task?>(question())
 
     private fun show(events: List<Event>) {

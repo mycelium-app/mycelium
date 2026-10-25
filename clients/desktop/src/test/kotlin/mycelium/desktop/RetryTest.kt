@@ -9,8 +9,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
@@ -31,7 +30,10 @@ class RetryTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val retried = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val retried = CopyOnWriteArrayList<String>()
 
     private fun store(): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -54,7 +56,7 @@ class RetryTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
 
         return store

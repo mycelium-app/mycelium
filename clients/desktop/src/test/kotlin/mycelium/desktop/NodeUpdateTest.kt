@@ -10,8 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -46,7 +45,10 @@ class NodeUpdateTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val updates = mutableListOf<String>()
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val updates = CopyOnWriteArrayList<String>()
 
     private fun openNode(nodes: String) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -70,7 +72,7 @@ class NodeUpdateTest {
 
             respond(body, HttpStatusCode.OK, json)
         }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), CoroutineScope(Dispatchers.Unconfined))
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, UpdatePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
         rule.onNodeWithContentDescription("Open willow").performClick()

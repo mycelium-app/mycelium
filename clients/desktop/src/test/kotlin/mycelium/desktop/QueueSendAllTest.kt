@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -23,7 +24,7 @@ class QueueSendAllTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private val requests = mutableListOf<Pair<HttpMethod, String>>()
+    private val requests = CopyOnWriteArrayList<Pair<HttpMethod, String>>()
 
     private val api = MyceliumApi(
         "https://mycelium.test",
