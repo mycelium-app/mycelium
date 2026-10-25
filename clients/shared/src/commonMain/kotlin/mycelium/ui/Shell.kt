@@ -312,7 +312,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
-                Box(Modifier.weight(1f).fillMaxWidth().then(openDrag)) {
+                Box(Modifier.weight(1f).fillMaxWidth().then(if (route is Route.Artefact) Modifier else openDrag)) {
                     RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }

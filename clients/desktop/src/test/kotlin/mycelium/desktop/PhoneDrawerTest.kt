@@ -53,7 +53,7 @@ class PhoneDrawerTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private fun show() {
+    private fun show(route: Route = Route.Chat("c1")) {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
@@ -70,7 +70,7 @@ class PhoneDrawerTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalTouch provides true) {
-                    Shell(store, PhonePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1"))
+                    Shell(store, PhonePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = route)
                 }
             }
         }
@@ -96,6 +96,16 @@ class PhoneDrawerTest {
         rule.waitForIdle()
 
         assertEquals(true, drawerIsOpen())
+    }
+
+    @Test
+    fun swipingRightOnAnOpenArtefactLeavesTheSidebarClosed() {
+        show(Route.Artefact("a1"))
+
+        rule.onRoot().performTouchInput { swipe(Offset(width / 2f, height / 2f), Offset(width * 0.95f, height / 2f)) }
+        rule.waitForIdle()
+
+        assertEquals(false, drawerIsOpen())
     }
 
     @Test
