@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.0
+
+- Email, Stoat and Zulip connect directly from Integrations. Agents can read and search them, and sending from a chat always asks for approval. Email requires TLS or STARTTLS.
+- The open conversation shows its reported context use and recorded spend above the composer.
+- Anthropic chats and supported models on OpenRouter use prompt caching, with cache reads and writes included in usage.
+- Projects find an icon in their repository without replacing one you chose. Existing conversations in project folders and worktrees regain their project association.
+- The desktop browser renders at native resolution, relays page cursors and refreshes reliably when an artefact first opens.
+- Artefact previews render at 2× pixel density, and usage bars show an even-pace marker and refresh when a window resets.
+- PDF artefacts open in PDF.js with scripting disabled. Save to Mycelium stores annotations as a new version for the owner.
+- The design editor keeps toolbar controls apart, makes small objects easier to select, shows resize cursors and can zoom to an artboard.
+- Swiping inside an open artefact no longer opens the phone sidebar, and Codex sign-in is only offered on nodes where Codex is installed.
+
 ## v0.8.1
 
 - The Usage card puts "last updated" at the right edge, keeps use and time left whole, gives the forecast as a relative time, and draws bars at 90% or more in red.
