@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1
+
+- Workspace rows in the sidebar show their project name in bold before the title again.
+
 ## v0.7.0
 
 - Artefacts belong to projects and chats, with view/edit links, access requests and agent discovery.
