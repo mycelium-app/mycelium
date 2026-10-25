@@ -24,7 +24,7 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 static MIGRATOR: Migrator = sqlx::migrate!();
 
 pub fn new_state(config: Config) -> Result<AppState> {
-    let pool = PgPoolOptions::new().max_connections(10).acquire_timeout(Duration::from_secs(3)).connect_lazy(&config.database_url)?;
+    let pool = PgPoolOptions::new().max_connections(config.database_pool_size).acquire_timeout(config.database_acquire_timeout).connect_lazy(&config.database_url)?;
     let (stream, _) = broadcast::channel(1024);
     let forge_cache = Arc::new(ForgeCache::new(config.forge_cache_ttl));
 

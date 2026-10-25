@@ -309,6 +309,7 @@ pub enum GitCommand {
     ReadFile {
         path: String,
     },
+    FindLogo,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

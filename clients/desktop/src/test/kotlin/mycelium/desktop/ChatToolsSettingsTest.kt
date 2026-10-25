@@ -33,6 +33,12 @@ import kotlin.test.assertEquals
 
 private const val LabJson = """{"id":"s1","name":"Lab","url":"https://lab.test/mcp","token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"get_weather","description":"Get the weather"},{"name":"list_files","description":"List files"}],"created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val ZulipJson = """{"id":"s3","name":"Zulip","kind":"zulip","url":"https://chat.test","account":"ada@example.com","token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"list_channels","description":"List channels"},{"name":"send_message","description":"Send a message"}],"created_at":"2026-10-22T12:00:00Z"}"""
+
+private const val EmailJson = """{"id":"s4","name":"Email","kind":"email","url":"","account":"ada@example.com","settings":{"imap_host":"imap.example.com","imap_port":993,"imap_tls":"tls","smtp_host":"smtp.example.com","smtp_port":587,"smtp_tls":"starttls"},"token_hint":"••••0123","enabled":true,"always_allow":false,"tools":[{"name":"list_folders","description":"List folders"},{"name":"send_message","description":"Send"}],"created_at":"2026-10-22T13:00:00Z"}"""
+
+private const val StoatJson = """{"id":"s5","name":"Stoat","kind":"stoat","url":"https://api.stoat.chat","settings":{"token_kind":"bot"},"token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"list_servers","description":"List servers"}],"created_at":"2026-10-22T14:00:00Z"}"""
+
 private const val GitHubJson = """{"id":"s2","name":"GitHub","url":"https://gh.test/mcp","enabled":true,"always_allow":false,"tools":[],"created_at":"2026-10-22T11:00:00Z"}"""
 
 class ChatToolsSettingsTest {
@@ -190,5 +196,96 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Enter a different name. Another tool server already has this one.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Rename integration").assertExists()
+    }
+
+    @Test
+    fun choosingZulipAsksForTheServerEmailAndApiKeyAndShowsItAsBuiltIn() {
+        postAnswer = HttpStatusCode.Created to ZulipJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Zulip").performClick()
+        rule.onNodeWithContentDescription("Zulip server address").performTextInput("https://chat.test")
+        rule.onNodeWithContentDescription("Zulip email address").performTextInput("ada@example.com")
+        rule.onNodeWithContentDescription("Zulip API key").performTextInput("zulip-secret")
+        rule.onNodeWithContentDescription("Zulip API key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built-in").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("""{"name":"Zulip","url":"https://chat.test","bearer_token":"zulip-secret","kind":"zulip","account":"ada@example.com"}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("zulip-secret").assertCountEquals(0)
+        rule.onNodeWithText("ada@example.com").assertExists()
+    }
+
+    @Test
+    fun aBuiltInIntegrationHasNoRefreshToolsMenuItem() {
+        listed = ZulipJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built-in").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for Zulip").performClick()
+        rule.onNodeWithText("Rename").assertExists()
+        rule.onNodeWithText("Refresh tools").assertDoesNotExist()
+    }
+
+    @Test
+    fun choosingEmailAsksForTheMailServersAndSendsTheirSettingsWithoutShowingThePassword() {
+        postAnswer = HttpStatusCode.Created to EmailJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Email").performClick()
+        rule.onNodeWithContentDescription("Email username").performTextInput("ada@example.com")
+        rule.onNodeWithContentDescription("Email password or app password").performTextInput("mail-secret")
+        rule.onNodeWithContentDescription("Email password or app password").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithContentDescription("IMAP server").performTextInput("imap.example.com")
+        rule.onNodeWithContentDescription("SMTP server").performTextInput("smtp.example.com")
+        rule.onNodeWithContentDescription("SMTP port, if not the usual one").performTextInput("587")
+        rule.onAllNodesWithText("STARTTLS")[1].performClick()
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built-in").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(
+            """{"name":"Email","url":"","bearer_token":"mail-secret","kind":"email","account":"ada@example.com","settings":{"imap_host":"imap.example.com","imap_tls":"tls","smtp_host":"smtp.example.com","smtp_tls":"starttls","smtp_port":587}}""",
+            bodies.last { it.isNotEmpty() },
+        )
+        rule.onAllNodesWithText("mail-secret").assertCountEquals(0)
+        rule.onNodeWithText("ada@example.com").assertExists()
+    }
+
+    @Test
+    fun anEmailPortThatIsNotANumberIsExplainedAndNothingIsSent() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Email").performClick()
+        rule.onNodeWithContentDescription("IMAP port, if not the usual one").performTextInput("imap")
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.onNodeWithText("Enter the IMAP port as a number, for example 993.").assertExists()
+        assertEquals(0, requests.count { it.method == HttpMethod.Post })
+    }
+
+    @Test
+    fun choosingStoatAsksForTheServerAddressAndTokenAndSendsTheTokenType() {
+        postAnswer = HttpStatusCode.Created to StoatJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Stoat").performClick()
+        rule.onNodeWithContentDescription("Stoat API address").performTextInput("https://api.stoat.chat")
+        rule.onNodeWithText("Bot").performClick()
+        rule.onNodeWithContentDescription("Stoat token").performTextInput("stoat-secret")
+        rule.onNodeWithContentDescription("Stoat token").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built-in").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("""{"name":"Stoat","url":"https://api.stoat.chat","bearer_token":"stoat-secret","kind":"stoat","settings":{"token_kind":"bot"}}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("stoat-secret").assertCountEquals(0)
     }
 }

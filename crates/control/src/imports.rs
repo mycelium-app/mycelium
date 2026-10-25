@@ -792,7 +792,7 @@ async fn import_file(state: AppState, owner: Uuid, node_id: Uuid, agent: AgentId
     let mut tx = state.pool.begin().await.map_err(|cause| store_failure(&path, cause))?;
     let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
         "insert into conversations (owner, node_id, agent, cwd, title, status, acp_session_id, imported_from, created_at, updated_at, archived_at, project_id)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, (select id from projects where owner = $1 and node_id = $2 and ($4 = path or left($4, length(path) + 1) = path || '/') order by length(path) desc limit 1))
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, project_for_folder($1, $2, $4))
          on conflict (node_id, imported_from) where imported_from is not null do nothing
          returning {CONVERSATION_COLUMNS}"
     )))

@@ -171,8 +171,12 @@ impl NodeLink {
         loop {
             let message = self.raw().await;
 
-            if !matches!(message, ControlToNode::Ack { .. }) {
-                return message;
+            match message {
+                ControlToNode::Ack { .. } => {}
+                ControlToNode::Git { request_id, command: mycelium_proto::link::GitCommand::FindLogo, .. } => {
+                    self.send(NodeToControl::GitResult { request_id, ok: true, output: Value::Null, error: None }).await;
+                }
+                other => return other,
             }
         }
     }
@@ -288,6 +292,7 @@ impl Server {
     }
 
     pub async fn start_on(database_url: String, configure: impl FnOnce(&mut Config)) -> Server {
+        let _ = tracing_subscriber::fmt().with_test_writer().with_max_level(tracing::Level::WARN).try_init();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let directory = TempDir::new().unwrap();
@@ -318,6 +323,8 @@ impl Server {
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
             scheduler_tick: mycelium_control::SCHEDULER_TICK,
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
+            database_pool_size: 30,
+            database_acquire_timeout: std::time::Duration::from_secs(30),
         };
         configure(&mut config);
         let has_dev_login = config.dev_login.is_some();

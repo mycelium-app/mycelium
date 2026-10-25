@@ -457,7 +457,13 @@ pub struct ChatToolInfo {
 pub struct ChatToolServer {
     pub id: Uuid,
     pub name: String,
+    #[serde(default = "mcp_kind")]
+    pub kind: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub settings: Value,
     pub token_hint: Option<String>,
     pub enabled: bool,
     pub always_allow: bool,
@@ -468,14 +474,24 @@ pub struct ChatToolServer {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatToolServerRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
 }
 
+fn mcp_kind() -> String {
+    "mcp".to_string()
+}
+
 impl std::fmt::Debug for CreateChatToolServerRequest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("CreateChatToolServerRequest").field("name", &self.name).field("url", &self.url).field("bearer_token", &"<hidden>").finish()
+        formatter.debug_struct("CreateChatToolServerRequest").field("name", &self.name).field("kind", &self.kind).field("url", &self.url).field("account", &self.account).field("bearer_token", &"<hidden>").finish()
     }
 }
 

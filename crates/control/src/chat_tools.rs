@@ -1,4 +1,4 @@
-use crate::chat_tool_servers::{OWN_SERVER, list_owned, slug};
+use crate::chat_tool_servers::{OWN_SERVER, ServerRow, list_owned, slug};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
 use crate::mcp;
@@ -27,6 +27,7 @@ const DECLINED_TEXT: &str = "The person declined this tool call.";
 enum Source {
     Own,
     Remote { url: String, token: Option<String>, always_allow: bool, server_id: Uuid },
+    BuiltIn { server: Box<ServerRow> },
 }
 
 #[derive(Clone)]
@@ -80,15 +81,13 @@ impl Toolbox {
         let mut loaded: BTreeSet<String> = tools.iter().map(|tool| tool.name.clone()).collect();
 
         for server in list_owned(state, owner).await?.into_iter().filter(|server| server.enabled) {
-            for stored in &server.tools.0 {
-                tools.push(Tool {
-                    name: model_name(&server.name, &stored.name),
-                    server: server.name.clone(),
-                    original: stored.name.clone(),
-                    description: stored.description.clone(),
-                    schema: stored.input_schema.clone(),
-                    source: Source::Remote { url: server.url.clone(), token: server.bearer_token.clone(), always_allow: server.always_allow, server_id: server.id },
-                });
+            for stored in server.tool_list() {
+                let source = match server.integration() {
+                    Some(_) => Source::BuiltIn { server: Box::new(server.clone()) },
+                    None => Source::Remote { url: server.url.clone(), token: server.bearer_token.clone(), always_allow: server.always_allow, server_id: server.id },
+                };
+
+                tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: stored.input_schema, source });
             }
         }
 
@@ -127,7 +126,7 @@ impl Toolbox {
     pub fn instructions(&self) -> String {
         let mut servers: Vec<(&str, Vec<&str>)> = Vec::new();
 
-        for tool in self.tools.iter().filter(|tool| matches!(tool.source, Source::Remote { .. })) {
+        for tool in self.tools.iter().filter(|tool| !matches!(tool.source, Source::Own)) {
             match servers.iter_mut().find(|(name, _)| *name == tool.server) {
                 Some((_, names)) => names.push(&tool.original),
                 None => servers.push((&tool.server, vec![&tool.original])),
@@ -191,6 +190,12 @@ impl Toolbox {
     }
 
     fn needs_approval(&self, tool: &Tool) -> bool {
+        if let Source::BuiltIn { server } = &tool.source {
+            let always_asks = server.integration().is_some_and(|integration| integration.always_asks(&tool.original));
+
+            return always_asks || (!server.always_allow && !self.always_allowed.contains(&tool.name));
+        }
+
         let server_trusted = matches!(tool.source, Source::Remote { always_allow: true, .. });
 
         !server_trusted && !self.always_allowed.contains(&tool.name)
@@ -200,6 +205,14 @@ impl Toolbox {
         match &tool.source {
             Source::Own if tool.original == "walkthrough" => Ok(("A walkthrough is about the changes in a workspace, and this chat has no workspace. Open a conversation on a node to write one.".to_string(), true)),
             Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, &tool.original, input).await,
+            Source::BuiltIn { server } => {
+                let Some(integration) = server.integration() else {
+                    return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
+                };
+                let output = integration.call(&state.http, &server.credentials(), &tool.original, input).await;
+
+                Ok((output.text, output.is_error))
+            }
             Source::Remote { url, token, server_id, .. } => {
                 let connection = self.connections.entry(*server_id).or_insert_with(|| McpConnection::new(&state.http, url, token.as_deref()));
 

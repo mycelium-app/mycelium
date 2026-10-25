@@ -155,7 +155,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, (select id from projects where owner = $1 and node_id = $2 and ($4 = path or left($4, length(path) + 1) = path || '/') order by length(path) desc limit 1)), $9, $10, $11, $12)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12)
          returning {CONVERSATION_COLUMNS}",
     )),
     )

@@ -26,6 +26,8 @@ mod forges;
 mod imports;
 mod instruction_proposals;
 mod instructions;
+mod email;
+mod integrations;
 mod issues;
 mod link;
 mod mcp;
@@ -60,6 +62,8 @@ mod walkthroughs;
 mod web;
 mod worktrees;
 mod workflows;
+mod stoat;
+mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
 pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, VERSION_CHECK_INTERVAL};
@@ -220,6 +224,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))
+        .route("/api/v1/projects/{id}/find-icon", post(projects::find_icon))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-provider-usage", get(provider_usage::list))

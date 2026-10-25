@@ -6,6 +6,8 @@ use std::time::Duration;
 pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
 pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
+pub const DATABASE_POOL_SIZE: u32 = 10;
+pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -72,6 +74,8 @@ pub struct Config {
     pub version_check_interval: Duration,
     pub scheduler_tick: Duration,
     pub forge_cache_ttl: Duration,
+    pub database_pool_size: u32,
+    pub database_acquire_timeout: Duration,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -140,6 +144,8 @@ impl Config {
             version_check_interval: VERSION_CHECK_INTERVAL,
             scheduler_tick: SCHEDULER_TICK,
             forge_cache_ttl: crate::forge_cache::FORGE_CACHE_TTL,
+            database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
+            database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
         })
     }
 }
@@ -214,6 +220,23 @@ mod tests {
         values.push(("MYCELIUM_TRUSTED_PROXIES", "10.0.0.0/33"));
 
         assert!(config_from(&values).unwrap_err().to_string().contains("prefix length"));
+    }
+
+    #[test]
+    fn the_database_pool_defaults_and_can_be_set_from_the_environment() {
+        let base = [("MYCELIUM_DATABASE_URL", "postgres://x"), ("MYCELIUM_PUBLIC_URL", "http://127.0.0.1:8080"), ("MYCELIUM_DEV_LOGIN", "me@example.com")];
+        let defaults = config_from(&base).unwrap();
+
+        assert_eq!(defaults.database_pool_size, 10);
+        assert_eq!(defaults.database_acquire_timeout, Duration::from_secs(3));
+
+        let mut tuned = base.to_vec();
+        tuned.push(("MYCELIUM_DATABASE_POOL_SIZE", "25"));
+        tuned.push(("MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS", "30"));
+        let tuned = config_from(&tuned).unwrap();
+
+        assert_eq!(tuned.database_pool_size, 25);
+        assert_eq!(tuned.database_acquire_timeout, Duration::from_secs(30));
     }
 
     #[test]

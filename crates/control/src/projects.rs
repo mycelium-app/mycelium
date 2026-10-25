@@ -93,11 +93,10 @@ fn check_checkout(answer: &Value, registered: &str, base_url: &str, clone_urls: 
 
 async fn link_conversations(state: &AppState, owner: Uuid, project: &ProjectRow) -> ApiResult<()> {
     let linked = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-        "update conversations set project_id = $4 where owner = $1 and node_id = $2 and project_id is null and (cwd = $3 or left(cwd, length($3) + 1) = $3 || '/') returning {CONVERSATION_COLUMNS}",
+        "update conversations set project_id = $3 where owner = $1 and node_id = $2 and project_id is null and project_for_folder(owner, node_id, cwd) = $3 returning {CONVERSATION_COLUMNS}",
     )))
     .bind(owner)
     .bind(project.node_id)
-    .bind(&project.path)
     .bind(project.id)
     .fetch_all(&state.pool)
     .await?;
@@ -197,6 +196,9 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     match inserted {
         Ok(row) => {
             link_conversations(&state, user.id, &row).await?;
+            let background = state.clone();
+            let (owner, project_id) = (user.id, row.id);
+            tokio::spawn(async move { find_automatic_icon(&background, owner, project_id).await });
 
             Ok((StatusCode::CREATED, Json(row.to_proto())))
         }
@@ -219,7 +221,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     let row = if changes_icon {
-        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set icon = $3, avatar_sha256 = null where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set icon = $3, avatar_sha256 = null, avatar_automatic = false where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
             .bind(id)
             .bind(user.id)
             .bind(icon)
@@ -260,17 +262,66 @@ pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(i
         return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "avatar_too_large", "The logo is larger than 256 KB. Choose a smaller image."));
     }
 
-    let (sha256, _, _) = attachments::store(&state, user.id, &body, &media_type).await?;
-    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set avatar_sha256 = $3, icon = null where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
-        .bind(id)
-        .bind(user.id)
-        .bind(&sha256)
-        .fetch_one(&state.pool)
-        .await?;
+    let row = store_avatar(&state, user.id, id, &media_type, &body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
 
     publish_conversations(&state, user.id, id).await?;
 
     Ok(Json(row.to_proto()))
+}
+
+async fn store_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &str, body: &[u8], automatic: bool) -> ApiResult<Option<ProjectRow>> {
+    let (sha256, _, _) = attachments::store(state, owner, body, media_type).await?;
+    let row = sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!(
+        "update projects set avatar_sha256 = $3, icon = null, avatar_automatic = $4 where id = $1 and owner = $2 and (not $4 or avatar_automatic or (icon is null and avatar_sha256 is null)) returning {PROJECT_COLUMNS}",
+    )))
+    .bind(id)
+    .bind(owner)
+    .bind(&sha256)
+    .bind(automatic)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    Ok(row)
+}
+
+pub async fn find_icon(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Project>> {
+    find_owned(&state, id, user.id).await?;
+    find_automatic_icon(&state, user.id, id).await;
+
+    Ok(Json(find_owned(&state, id, user.id).await?.to_proto()))
+}
+
+pub async fn find_automatic_icon(state: &AppState, owner: Uuid, id: Uuid) {
+    use base64::Engine;
+
+    let wanting = sqlx::query_as::<_, (Uuid, String, String)>("select p.node_id, p.path, n.version from projects p join nodes n on n.id = p.node_id where p.id = $1 and p.owner = $2 and (p.avatar_automatic or (p.icon is null and p.avatar_sha256 is null))").bind(id).bind(owner).fetch_optional(&state.pool).await;
+    let Ok(Some((node_id, path, version))) = wanting else {
+        return;
+    };
+
+    let supported = semver::Version::parse(version.trim_start_matches('v')).is_ok_and(|version| version >= semver::Version::new(0, 9, 0));
+
+    if !supported || !state.hub.is_online(node_id) {
+        return;
+    }
+
+    let Ok(answer) = relay(state, node_id, path, GitCommand::FindLogo).await else {
+        return;
+    };
+    let (Some(media_type), Some(data)) = (answer["media_type"].as_str(), answer["data"].as_str()) else {
+        return;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        return;
+    };
+
+    if !AVATAR_MEDIA_TYPES.contains(&media_type) || bytes.is_empty() || bytes.len() > MAX_AVATAR_BYTES {
+        return;
+    }
+
+    if let Ok(Some(_)) = store_avatar(state, owner, id, media_type, &bytes, true).await {
+        let _ = publish_conversations(state, owner, id).await;
+    }
 }
 
 async fn publish_conversations(state: &AppState, owner: Uuid, project_id: Uuid) -> ApiResult<()> {

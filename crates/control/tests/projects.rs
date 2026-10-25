@@ -255,6 +255,34 @@ async fn a_conversation_started_in_a_folder_inside_a_project_belongs_to_that_pro
 }
 
 #[tokio::test]
+async fn a_conversation_started_in_a_worktree_folder_of_a_project_belongs_to_that_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    let (_, worktree) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app-worktrees/feature-login"}))).await;
+    let (_, sibling) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app-worktreesx/other"}))).await;
+
+    assert_eq!(worktree["project_id"], listed[0]["id"]);
+    assert_eq!(sibling["project_id"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_conversation_in_a_worktree_folder_joins_a_project_registered_afterwards() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, before) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app-worktrees/feature-login"}))).await;
+    assert_eq!(before["project_id"], Value::Null);
+
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    let (_, after) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}", before["id"].as_str().unwrap()))).await;
+
+    assert_eq!(after["project_id"], listed[0]["id"]);
+}
+
+#[tokio::test]
 async fn a_conversation_from_a_project_needs_the_node_it_lives_on_and_a_project_of_your_own() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

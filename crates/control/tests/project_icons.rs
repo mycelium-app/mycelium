@@ -166,3 +166,127 @@ async fn an_agent_without_a_project_cannot_set_a_project_icon() {
     assert_eq!(response["result"]["isError"], true, "{response}");
     assert!(response["result"]["content"][0]["text"].as_str().unwrap().contains("project"));
 }
+
+async fn find_icon_with_node_answer(server: &Server, link: &mut common::NodeLink, project: Uuid, answer: Value) -> Value {
+    use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
+    sqlx::query("update nodes set version = '0.9.0' where id = $1").bind(link.id).execute(&server.pool).await.unwrap();
+    let client = server.user.clone();
+    let pending = tokio::spawn(async move { client.json(client.post(&format!("/api/v1/projects/{project}/find-icon"))).await });
+    let request_id = loop {
+        if let ControlToNode::Git { request_id, command, .. } = link.raw().await {
+            assert_eq!(command, GitCommand::FindLogo);
+            break request_id;
+        }
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: answer, error: None }).await;
+    let (status, body) = pending.await.unwrap();
+    assert_eq!(status, 200, "{body}");
+
+    body
+}
+
+fn found(bytes: &[u8]) -> Value {
+    use base64::Engine;
+
+    json!({"path": "logo.png", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(bytes)})
+}
+
+#[tokio::test]
+async fn a_logo_found_on_the_node_is_stored_for_a_project_with_no_icon() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+
+    let project = find_icon_with_node_answer(&server, &mut link, id, found(&PNG)).await;
+    let sha256 = project["avatar_sha256"].as_str().unwrap();
+    let served = server.user.get(&format!("/api/v1/attachments/{sha256}")).send().await.unwrap();
+
+    assert_eq!(served.bytes().await.unwrap().as_ref(), PNG);
+}
+
+#[tokio::test]
+async fn a_logo_found_on_the_node_does_not_replace_a_persons_own_choice() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, icon) values ($1, $2, 'app', '/work/app', 'rocket') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+
+    let (status, project) = server.user.json(server.user.post(&format!("/api/v1/projects/{id}/find-icon"))).await;
+
+    assert_eq!((status, project["icon"].clone(), project["avatar_sha256"].clone()), (200, json!("rocket"), Value::Null));
+}
+
+#[tokio::test]
+async fn a_logo_found_on_the_node_does_not_replace_an_uploaded_logo() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+    let (_, uploaded) = upload_logo(&server.user, id, "image/png", PNG.to_vec()).await;
+
+    let (_, project) = server.user.json(server.user.post(&format!("/api/v1/projects/{id}/find-icon"))).await;
+
+    assert_eq!(project["avatar_sha256"], uploaded["avatar_sha256"]);
+}
+
+#[tokio::test]
+async fn an_automatic_logo_is_replaced_by_a_newer_find_but_a_person_can_still_choose_over_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+    let first = find_icon_with_node_answer(&server, &mut link, id, found(&PNG)).await;
+    let mut newer = PNG.to_vec();
+    newer.push(1);
+
+    let second = find_icon_with_node_answer(&server, &mut link, id, found(&newer)).await;
+    let (_, chosen) = server.user.json(server.user.patch(&format!("/api/v1/projects/{id}")).json(&json!({"icon": "leaf"}))).await;
+
+    assert_ne!(first["avatar_sha256"], second["avatar_sha256"]);
+    assert_eq!((chosen["icon"].clone(), chosen["avatar_sha256"].clone()), (json!("leaf"), Value::Null));
+}
+
+#[tokio::test]
+async fn connecting_a_supported_node_finds_a_logo_for_an_existing_project_and_preserves_a_chosen_icon() {
+    use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
+    let server = Server::start().await;
+    let (node_id, token) = server.join("node", "laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(node_id).fetch_one(&server.pool).await.unwrap();
+    let chosen = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, icon) values ($1, $2, 'chosen', '/work/chosen', 'rocket') returning id").bind(owner).bind(node_id).fetch_one(&server.pool).await.unwrap();
+    let mut link = server.connect_node(node_id, &token).await;
+
+    link.hello_as("v0.9.0", vec![]).await;
+
+    let request_id = match link.raw().await {
+        ControlToNode::Git { request_id, cwd, command } => {
+            assert_eq!((cwd.as_str(), command), ("/work/app", GitCommand::FindLogo));
+            request_id
+        }
+        other => panic!("expected logo discovery, got {other:?}"),
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: found(&PNG), error: None }).await;
+    common::eventually("automatic project logo", || async {
+        let avatar = sqlx::query_scalar::<_, Option<String>>("select avatar_sha256 from projects where id = $1").bind(id).fetch_one(&server.pool).await.unwrap();
+
+        avatar
+    }).await;
+
+    let icon = sqlx::query_scalar::<_, String>("select icon from projects where id = $1").bind(chosen).fetch_one(&server.pool).await.unwrap();
+    assert_eq!(icon, "rocket");
+}
+
+#[tokio::test]
+async fn finding_a_logo_on_an_older_node_returns_unchanged_without_sending_an_unknown_command() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update nodes set version = '0.8.1' where id = $1").bind(link.id).execute(&server.pool).await.unwrap();
+
+    let (status, project) = server.user.json(server.user.post(&format!("/api/v1/projects/{id}/find-icon"))).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(project["avatar_sha256"], Value::Null);
+}

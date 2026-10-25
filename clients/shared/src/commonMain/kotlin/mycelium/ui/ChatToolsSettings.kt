@@ -21,11 +21,23 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import mycelium.api.ApiException
 import mycelium.api.ChatToolServer
 import mycelium.api.CreateChatToolServerRequest
 import mycelium.api.PatchChatToolServerRequest
 import mycelium.state.Store
+
+private const val McpType = "MCP"
+private const val ZulipType = "Zulip"
+private const val EmailType = "Email"
+private const val StoatType = "Stoat"
+private const val Tls = "TLS"
+private const val StartTls = "STARTTLS"
+private const val UserSession = "User session"
+private const val Bot = "Bot"
 
 @Composable
 fun ChatToolsSettings(store: Store) {
@@ -36,6 +48,16 @@ fun ChatToolsSettings(store: Store) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf(McpType) }
+    var account by remember { mutableStateOf("") }
+    var imapHost by remember { mutableStateOf("") }
+    var imapPort by remember { mutableStateOf("") }
+    var imapSecurity by remember { mutableStateOf(Tls) }
+    var smtpHost by remember { mutableStateOf("") }
+    var smtpPort by remember { mutableStateOf("") }
+    var smtpSecurity by remember { mutableStateOf(Tls) }
+    var sender by remember { mutableStateOf("") }
+    var tokenType by remember { mutableStateOf(UserSession) }
     var failure by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<ChatToolServer?>(null) }
     var renamed by remember { mutableStateOf("") }
@@ -49,16 +71,66 @@ fun ChatToolsSettings(store: Store) {
         servers = servers.map { if (it.id == updated.id) updated else it }
     }
 
+    fun resetForm() {
+        adding = false
+        name = ""
+        url = ""
+        token = ""
+        account = ""
+        imapHost = ""
+        imapPort = ""
+        imapSecurity = Tls
+        smtpHost = ""
+        smtpPort = ""
+        smtpSecurity = Tls
+        sender = ""
+        tokenType = UserSession
+        failure = null
+    }
+
+    fun emailSettings(): JsonObject? {
+        val imap = imapPort.trim()
+        val smtp = smtpPort.trim()
+
+        if (imap.isNotEmpty() && imap.toIntOrNull() == null) {
+            failure = "Enter the IMAP port as a number, for example 993."
+            return null
+        }
+
+        if (smtp.isNotEmpty() && smtp.toIntOrNull() == null) {
+            failure = "Enter the SMTP port as a number, for example 465."
+            return null
+        }
+
+        val fields = mutableMapOf<String, JsonElement>(
+            "imap_host" to JsonPrimitive(imapHost.trim()),
+            "imap_tls" to JsonPrimitive(if (imapSecurity == Tls) "tls" else "starttls"),
+            "smtp_host" to JsonPrimitive(smtpHost.trim()),
+            "smtp_tls" to JsonPrimitive(if (smtpSecurity == Tls) "tls" else "starttls"),
+        )
+
+        imap.toIntOrNull()?.let { fields["imap_port"] = JsonPrimitive(it) }
+        smtp.toIntOrNull()?.let { fields["smtp_port"] = JsonPrimitive(it) }
+
+        if (sender.isNotBlank()) {
+            fields["from"] = JsonPrimitive(sender.trim())
+        }
+
+        return JsonObject(fields)
+    }
+
     fun add() {
         scope.launch {
             try {
-                val added = store.api.createChatToolServer(CreateChatToolServerRequest(name.trim(), url.trim(), token.trim().ifEmpty { null }))
+                val request = when (kind) {
+                    ZulipType -> CreateChatToolServerRequest(name.trim().ifEmpty { ZulipType }, url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
+                    EmailType -> CreateChatToolServerRequest(name.trim().ifEmpty { EmailType }, "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
+                    StoatType -> CreateChatToolServerRequest(name.trim().ifEmpty { StoatType }, url.trim(), token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
+                    else -> CreateChatToolServerRequest(name.trim(), url.trim(), token.trim().ifEmpty { null })
+                }
+                val added = store.api.createChatToolServer(request)
                 servers = servers.filter { it.id != added.id } + added
-                adding = false
-                name = ""
-                url = ""
-                token = ""
-                failure = null
+                resetForm()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (problem: ApiException) {
@@ -96,24 +168,46 @@ fun ChatToolsSettings(store: Store) {
 
             if (adding) {
                 Column(Modifier.widthIn(max = Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    Label("Connect an MCP integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                    Label("Use a direct MCP server or a gateway such as LiteLLM. Enter its Streamable HTTP endpoint and bearer token, if required.", style = Tokens.Type.Meta, color = colors.textMuted)
-                    TextInput(name, { name = it }, label = "Name", placeholder = "GitHub")
-                    TextInput(url, { url = it }, label = "Streamable HTTP address", placeholder = "https://example.com/mcp", mono = true)
-                    TextInput(token, { token = it }, label = "Bearer token, if the server needs one", mono = true, masked = true, onSubmit = ::add)
+                    Label("Add an integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                    Segmented(listOf(McpType, ZulipType, EmailType, StoatType), kind, { kind = it; failure = null }, "Integration type")
+
+                    if (kind == ZulipType) {
+                        Label("Chats and agents can read and search your Zulip messages and, with your approval, send them. Find your API key in Zulip under Personal settings, Account and privacy.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = "Zulip")
+                        TextInput(url, { url = it }, label = "Zulip server address", placeholder = "https://example.zulipchat.com", mono = true)
+                        TextInput(account, { account = it }, label = "Zulip email address", mono = true)
+                        TextInput(token, { token = it }, label = "Zulip API key", mono = true, masked = true, onSubmit = ::add)
+                    } else if (kind == EmailType) {
+                        Label("Chats and agents can read and search your mail and, with your approval, send it. Your provider may need an app password instead of your usual one.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = "Email")
+                        TextInput(account, { account = it }, label = "Email username", placeholder = "ada@example.com", mono = true)
+                        TextInput(token, { token = it }, label = "Email password or app password", mono = true, masked = true)
+                        TextInput(imapHost, { imapHost = it }, label = "IMAP server", placeholder = "imap.example.com", mono = true)
+                        TextInput(imapPort, { imapPort = it }, label = "IMAP port, if not the usual one", placeholder = if (imapSecurity == Tls) "993" else "143", mono = true)
+                        Segmented(listOf(Tls, StartTls), imapSecurity, { imapSecurity = it }, "IMAP security")
+                        TextInput(smtpHost, { smtpHost = it }, label = "SMTP server", placeholder = "smtp.example.com", mono = true)
+                        TextInput(smtpPort, { smtpPort = it }, label = "SMTP port, if not the usual one", placeholder = if (smtpSecurity == Tls) "465" else "587", mono = true)
+                        Segmented(listOf(Tls, StartTls), smtpSecurity, { smtpSecurity = it }, "SMTP security")
+                        TextInput(sender, { sender = it }, label = "Send from address, if it differs from the username", mono = true, onSubmit = ::add)
+                    } else if (kind == StoatType) {
+                        Label("Chats and agents can read and search Stoat messages and, with your approval, send them. Use a bot token for a bot, or your session token to act as yourself.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = "Stoat")
+                        TextInput(url, { url = it }, label = "Stoat API address", placeholder = "https://api.stoat.chat", mono = true)
+                        Segmented(listOf(UserSession, Bot), tokenType, { tokenType = it }, "Stoat token type")
+                        TextInput(token, { token = it }, label = "Stoat token", mono = true, masked = true, onSubmit = ::add)
+                    } else {
+                        Label("Use a direct MCP server or a gateway such as LiteLLM. Enter its Streamable HTTP endpoint and bearer token, if required.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = "GitHub")
+                        TextInput(url, { url = it }, label = "Streamable HTTP address", placeholder = "https://example.com/mcp", mono = true)
+                        TextInput(token, { token = it }, label = "Bearer token, if the server needs one", mono = true, masked = true, onSubmit = ::add)
+                    }
 
                     failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                         MyButton(::add, text = "Connect integration", variant = ButtonVariant.Outline)
                         MyButton(
-                            {
-                                adding = false
-                                name = ""
-                                url = ""
-                                token = ""
-                                failure = null
-                            },
+                            ::resetForm,
                             text = "Cancel",
                             muted = true,
                         )
@@ -136,11 +230,15 @@ fun ChatToolsSettings(store: Store) {
                     ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
                         Column {
                             Label(server.name, maxLines = 1)
-                            Label(server.url, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                            if (server.url.isNotBlank()) {
+                                Label(server.url, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                            }
+
+                            server.account?.let { Label(it, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                             Label(server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                         }
 
-                        Label("MCP", color = colors.textMuted, maxLines = 1)
+                        Label(if (server.kind == "mcp") "MCP" else "Built-in", color = colors.textMuted, maxLines = 1)
                         Label(if (server.tools.isEmpty()) "No tools found" else "${server.tools.size} tools", color = colors.textMuted, maxLines = 1)
 
                         Column {
@@ -156,10 +254,13 @@ fun ChatToolsSettings(store: Store) {
                         }
 
                         RowMenu(server.name) { close ->
-                            MenuItem("Refresh tools", onClick = {
-                                close()
-                                store.act { replace(store.api.refreshChatToolServer(server.id)) }
-                            })
+                            if (server.kind == "mcp") {
+                                MenuItem("Refresh tools", onClick = {
+                                    close()
+                                    store.act { replace(store.api.refreshChatToolServer(server.id)) }
+                                })
+                            }
+
                             MenuItem("Rename", onClick = {
                                 close()
                                 renamed = server.name

@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::token_hint;
+use crate::integrations::{Credentials, Integration};
 use crate::mcp_client::{McpConnection, McpTool};
 use crate::state::AppState;
 use axum::Json;
@@ -11,13 +12,16 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub const OWN_SERVER: &str = "mycelium";
-const SERVER_COLUMNS: &str = "id, name, url, bearer_token, enabled, always_allow, tools, created_at";
+const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, enabled, always_allow, tools, created_at";
 
-#[derive(sqlx::FromRow)]
+#[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
     pub id: Uuid,
     pub name: String,
+    pub kind: String,
     pub url: String,
+    pub account: Option<String>,
+    pub settings: sqlx::types::Json<Value>,
     pub bearer_token: Option<String>,
     pub enabled: bool,
     pub always_allow: bool,
@@ -43,11 +47,14 @@ impl ServerRow {
         ChatToolServer {
             id: self.id,
             name: self.name.clone(),
+            kind: self.kind.clone(),
             url: self.url.clone(),
+            account: self.account.clone(),
+            settings: self.settings.0.clone(),
             token_hint: self.bearer_token.as_deref().map(token_hint),
             enabled: self.enabled,
             always_allow: self.always_allow,
-            tools: self.tools.0.iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone() }).collect(),
+            tools: self.tool_list().iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone() }).collect(),
             created_at: self.created_at,
         }
     }
@@ -101,18 +108,60 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     check_name(&state, user.id, name, None).await?;
 
-    let parsed = url::Url::parse(entered).ok().filter(|parsed| matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some());
-    let Some(parsed) = parsed else {
-        return Err(ApiError::bad_request("url_invalid", "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp."));
+    let kind = request.kind.as_deref().map(str::trim).filter(|kind| !kind.is_empty()).unwrap_or("mcp");
+    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+    let integration = match kind {
+        "mcp" => None,
+        other => match Integration::parse(other) {
+            Some(integration) => Some(integration),
+            None => return Err(ApiError::bad_request("kind_invalid", "Choose MCP or one of the built-in integrations, such as Zulip, Email or Stoat.")),
+        },
+    };
+    let address = match integration {
+        Some(integration) if !integration.needs_address() => String::new(),
+        _ => {
+            let parsed = url::Url::parse(entered).ok().filter(|parsed| matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some());
+            let Some(parsed) = parsed else {
+                return Err(ApiError::bad_request("url_invalid", "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp, or https://example.zulipchat.com for Zulip."));
+            };
+
+            parsed.as_str().to_string()
+        }
     };
 
-    let tools = fetch_tools(&state, name, parsed.as_str(), token).await?;
-    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, url, bearer_token, tools) values ($1, $2, $3, $4, $5) returning {SERVER_COLUMNS}")))
+    let mut settings = Value::Object(Default::default());
+    let tools = match integration {
+        Some(integration) => {
+            let account = match (integration.account_prompt(), account) {
+                (Some(prompt), None) => return Err(ApiError::bad_request("account_required", prompt)),
+                (_, account) => account,
+            };
+            let Some(secret) = token else {
+                return Err(ApiError::bad_request("api_key_required", integration.secret_prompt()));
+            };
+            settings = integration.normalise_settings(request.settings.as_ref().unwrap_or(&Value::Null)).map_err(|reason| ApiError::bad_request("settings_invalid", reason))?;
+
+            if settings.is_null() {
+                settings = Value::Object(Default::default());
+            }
+
+            let credentials = Credentials { address: address.clone(), account: account.unwrap_or_default().to_string(), secret: secret.to_string(), settings: settings.clone() };
+
+            integration.verify(&state.http, &credentials).await.map_err(|reason| ApiError::bad_request("tool_server_failed", reason))?;
+
+            Vec::new()
+        }
+        None => fetch_tools(&state, name, &address, token).await?,
+    };
+    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, kind, url, account, bearer_token, tools, settings) values ($1, $2, $3, $4, $5, $6, $7, $8) returning {SERVER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
-        .bind(parsed.as_str())
+        .bind(kind)
+        .bind(&address)
+        .bind(account)
         .bind(token)
         .bind(sqlx::types::Json(tools))
+        .bind(sqlx::types::Json(settings))
         .fetch_one(&state.pool)
         .await?;
     state.hub.tools_changed(user.id);
@@ -145,6 +194,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
 pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<ChatToolServer>> {
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1 and owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That tool server"))?;
+    if row.integration().is_some() {
+        return Ok(Json(row.to_proto()));
+    }
+
     let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref()).await?;
     let updated = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("update chat_tool_servers set tools = $2 where id = $1 returning {SERVER_COLUMNS}"))).bind(id).bind(sqlx::types::Json(tools)).fetch_one(&state.pool).await?;
     state.hub.tools_changed(user.id);

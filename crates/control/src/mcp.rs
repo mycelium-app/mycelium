@@ -418,13 +418,19 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
             let owner = node_owner(&state, node.id).await?;
             let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled).collect();
             let http = &state.http;
-            let listed = join_all(servers.iter().map(|server| async move {
+            let listed = join_all(servers.iter().filter(|server| server.integration().is_none()).map(|server| async move {
                 let mut connection = McpConnection::new(http, &server.url, server.bearer_token.as_deref());
 
                 connection.list_tools().await.map(|tools| (server, tools))
             }))
             .await;
             let mut tools = tool_definitions().as_array().cloned().unwrap_or_default();
+
+            for server in servers.iter().filter(|server| server.integration().is_some()) {
+                for tool in server.tool_list() {
+                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+                }
+            }
 
             for (server, remote) in listed.into_iter().flatten() {
                 for tool in remote {
@@ -833,6 +839,12 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     if !server.enabled {
                         return Ok(reply(&id, tool_text(&format!("{} is switched off in Mycelium. Switch it on in the tool server settings, then try again.", server.name), true)));
+                    }
+
+                    if let Some(integration) = server.integration() {
+                        let output = integration.call(&state.http, &server.credentials(), tool, &arguments).await;
+
+                        return Ok(reply(&id, tool_text(&output.text, output.is_error)));
                     }
 
                     let mut connection = McpConnection::new(&state.http, &server.url, server.bearer_token.as_deref());

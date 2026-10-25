@@ -27,6 +27,7 @@ russh.workspace = true
 rand.workspace = true
 nix.workspace = true
 sha2.workspace = true
+resvg.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

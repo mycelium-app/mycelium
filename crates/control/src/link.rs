@@ -59,6 +59,7 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
     let mut ping = interval_at(Instant::now() + PING_INTERVAL, PING_INTERVAL);
     let mut last_frame = Instant::now();
     let mut batch = UpdateBatch::default();
+    let mut icons_checked = false;
 
     loop {
         let flush_at = batch.deadline;
@@ -103,8 +104,31 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
                         Ok(message) => {
                             batch.flush(&state, node_id).await;
 
+                            let first_hello = matches!(&message, NodeToControl::Hello { .. }) && !icons_checked;
+
                             if let Err(cause) = handle(&state, node_id, message).await {
                                 tracing::warn!("node {node_id} message failed: {cause:?}");
+                            } else if first_hello {
+                                icons_checked = true;
+                                let background = state.clone();
+
+                                tokio::spawn(async move {
+                                    let projects = sqlx::query_as::<_, (Uuid, Uuid)>("select owner, id from projects where node_id = $1 and icon is null and avatar_sha256 is null order by created_at")
+                                        .bind(node_id)
+                                        .fetch_all(&background.pool)
+                                        .await;
+                                    let Ok(projects) = projects else {
+                                        return;
+                                    };
+
+                                    for (owner, project_id) in projects {
+                                        if background.hub.is_replaced(node_id, connection_id) || !background.hub.is_online(node_id) {
+                                            break;
+                                        }
+
+                                        crate::projects::find_automatic_icon(&background, owner, project_id).await;
+                                    }
+                                });
                             }
                         }
                         Err(cause) => tracing::warn!("node {node_id} sent an unreadable frame: {cause}"),

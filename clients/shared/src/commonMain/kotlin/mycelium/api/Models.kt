@@ -437,7 +437,10 @@ data class ChatToolInfo(val name: String, val description: String = "")
 data class ChatToolServer(
     val id: String,
     val name: String,
+    val kind: String = "mcp",
     val url: String,
+    val account: String? = null,
+    val settings: JsonObject? = null,
     @SerialName("token_hint") val tokenHint: String? = null,
     val enabled: Boolean = true,
     @SerialName("always_allow") val alwaysAllow: Boolean = false,
@@ -446,7 +449,7 @@ data class ChatToolServer(
 )
 
 @Serializable
-data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null)
+data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null)
 
 @Serializable
 data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null)

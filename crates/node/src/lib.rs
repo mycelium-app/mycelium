@@ -10,6 +10,7 @@ pub mod instructions;
 pub mod join;
 pub mod link;
 pub mod login;
+pub mod logo;
 pub mod resources;
 pub mod session;
 pub mod ssh;
