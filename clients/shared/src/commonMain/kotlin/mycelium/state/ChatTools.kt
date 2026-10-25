@@ -8,13 +8,18 @@ const val ToolSearchName = "tool_search"
 private const val MaxArgumentLength = 240
 
 private val chatToolTitle = Regex("^mcp__(.+?)__(.+)$")
+private val codexToolTitle = Regex("^mcp\\.([^.]+)\\.(.+)$")
 
 data class ChatToolName(val server: String, val tool: String) {
-    val heading: String get() = tool.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    val heading: String get() = if (server == "functions" && tool == "exec") "Run tools" else tool.replace('_', ' ').replaceFirstChar { it.uppercase() }
 }
 
 fun chatToolName(title: String): ChatToolName? {
-    val parts = chatToolTitle.matchEntire(title)?.groupValues ?: return null
+    if (title == "functions.exec") {
+        return ChatToolName("functions", "exec")
+    }
+
+    val parts = chatToolTitle.matchEntire(title)?.groupValues ?: codexToolTitle.matchEntire(title)?.groupValues ?: return null
 
     return ChatToolName(parts[1], parts[2])
 }

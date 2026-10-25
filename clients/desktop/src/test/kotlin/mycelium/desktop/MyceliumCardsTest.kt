@@ -101,10 +101,13 @@ class MyceliumCardsTest {
     }
 
     @Test
-    fun aCallWithUnreadableInputKeepsTheGenericRowWithAReadableLabel() {
+    fun aCallWithUnreadableInputShowsAGenericCardWithoutInventingAQuery() {
         show(call("t1", 1, "mcp__mycelium__recall", """{"limit":3}""", "completed", "ok"))
 
-        rule.onNodeWithText("Search memory").assertExists()
+        rule.onNodeWithContentDescription("Search memory, mycelium, done").assertExists()
+        rule.onNodeWithContentDescription("limit: 3").assertExists()
+        rule.onNodeWithText("ok", useUnmergedTree = true).assertExists()
+        assertEquals(0, rule.onAllNodesWithText("Searched memory", substring = true).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("mcp__mycelium__recall").fetchSemanticsNodes().size)
     }
 

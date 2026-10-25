@@ -16,6 +16,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolSearchName
 import mycelium.state.ToolStatus
 import mycelium.state.readableArguments
+import mycelium.state.myceliumTool
 
 private const val OutputLines = 6
 
@@ -35,7 +36,7 @@ internal fun ArgumentLines(input: JsonObject?) {
 internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
     val colors = MyTheme.colors
     val searching = call.title == ToolSearchName
-    val heading = if (searching) "Searched for tools" else name?.heading ?: call.title
+    val heading = if (searching) "Searched for tools" else myceliumTool(call.title)?.label ?: name?.heading ?: call.title
     val status = if (call.awaitingApproval) ToolStatus.Pending else call.status
     val state = when (status) {
         ToolStatus.Failed -> "Failed"

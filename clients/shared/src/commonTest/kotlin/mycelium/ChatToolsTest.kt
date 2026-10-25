@@ -32,6 +32,55 @@ class ChatToolsTest {
     }
 
     @Test
+    fun codexMcpTitlesNameTheirServerAndHumanHeading() {
+        assertEquals(ChatToolName("mycelium", "get_instructions"), chatToolName("mcp.mycelium.get_instructions"))
+        assertEquals(ChatToolName("lab", "get_weather"), chatToolName("mcp.lab.get_weather"))
+        assertNull(chatToolName("echo mcp.lab.get_weather"))
+    }
+
+    @Test
+    fun codexMcpArgumentsAndOpaqueResultsAreReadFromTheirAdapterEnvelope() {
+        val thread = buildThread(
+            listOf(
+                update(1, """{"sessionUpdate":"tool_call","toolCallId":"mcp_1","title":"mcp.mycelium.recall","kind":"execute","status":"in_progress","rawInput":{"server":"mycelium","tool":"recall","arguments":{"query":"release"}},"_meta":{"is_mcp_tool_call":true}}"""),
+                update(2, """{"sessionUpdate":"tool_call_update","toolCallId":"mcp_1","status":"completed","rawOutput":{"result":{"content":[{"type":"text","text":"No memories match that query."}]},"error":null}}"""),
+            ),
+        )
+        val call = assertIs<ThreadItem.ToolCall>(thread.single())
+
+        assertEquals(listOf("query" to "release"), readableArguments(call.input))
+        assertEquals("No memories match that query.", call.output)
+        assertEquals(ToolStatus.Done, call.status)
+    }
+
+    @Test
+    fun codexMcpErrorsAndStructuredResultsRemainReadable() {
+        val failed = assertIs<ThreadItem.ToolCall>(buildThread(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"mcp_1","title":"mcp.lab.get_weather","kind":"execute","status":"failed","rawInput":{"server":"lab","tool":"get_weather","arguments":{}},"rawOutput":{"result":null,"error":{"message":"Weather service is unavailable."}}}"""),
+        )).single())
+        val structured = assertIs<ThreadItem.ToolCall>(buildThread(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"mcp_2","title":"mcp.lab.get_weather","kind":"execute","status":"completed","rawOutput":{"result":{"content":[],"structuredContent":{"city":"Paris","temperature":18}},"error":null}}"""),
+        )).single())
+
+        assertEquals("Weather service is unavailable.", failed.output)
+        assertEquals("""{"city":"Paris","temperature":18}""", structured.output)
+    }
+
+    @Test
+    fun codexBatchedToolExecutionKeepsItsNameCodeAndOutput() {
+        val code = "const results = await Promise.all([tools.mcp__mycelium__recall({query: 'release'}), tools.mcp__mycelium__get_instructions({})]); results.forEach(text);"
+        val thread = buildThread(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"batch","name":"functions.exec","title":"exec","kind":"execute","status":"in_progress","rawInput":{"arguments":{"code":"$code"}}}"""),
+            update(2, """{"sessionUpdate":"tool_call_update","toolCallId":"batch","name":"functions.exec","status":"completed","content":[{"type":"content","content":{"type":"text","text":"No memories match that query.\nGlobal instructions"}}]}"""),
+        ))
+        val call = assertIs<ThreadItem.ToolCall>(thread.single())
+
+        assertEquals("functions.exec", call.title)
+        assertEquals(listOf("code" to code), readableArguments(call.input))
+        assertEquals("No memories match that query.\nGlobal instructions", call.output)
+    }
+
+    @Test
     fun argumentsReadAsPlainTextAndLongValuesAreShortened() {
         val input: JsonObject = buildJsonObject {
             put("city", "Paris")

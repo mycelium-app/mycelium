@@ -774,6 +774,20 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
         return
     }
 
+    val mycelium = myceliumCall(call)
+
+    if (mycelium != null) {
+        MyceliumCard(call, mycelium)
+        return
+    }
+
+    val remote = chatToolName(call.title)
+
+    if (remote != null) {
+        ChatToolCard(call, remote)
+        return
+    }
+
     if (call.kind == "execute") {
         CommandCard(call)
         return
@@ -807,13 +821,6 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
             }
         }
 
-        return
-    }
-
-    val mycelium = myceliumCall(call)
-
-    if (mycelium != null) {
-        MyceliumCard(call, mycelium)
         return
     }
 

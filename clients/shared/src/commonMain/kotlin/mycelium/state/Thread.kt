@@ -2,12 +2,14 @@ package mycelium.state
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import mycelium.api.Attachment
 import mycelium.api.Event
 import mycelium.api.EventKinds
+import mycelium.api.MyceliumJson
 
 enum class ToolStatus { Pending, Running, Done, Failed }
 
@@ -339,7 +341,7 @@ private fun appendAgentText(items: MutableList<ThreadItem>, key: String, text: S
 
 private fun toolCallFrom(key: String, update: JsonObject): ThreadItem.ToolCall {
     val kind = update.string("kind") ?: "other"
-    val title = update.string("title") ?: kind
+    val title = update.string("name")?.takeIf { it == "functions.exec" } ?: update.string("title") ?: kind
 
     return ThreadItem.ToolCall(
         key = key,
@@ -364,7 +366,7 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
     }
 
     val current = items[index] as ThreadItem.ToolCall
-    val title = update.string("title") ?: current.title
+    val title = update.string("name")?.takeIf { it == "functions.exec" } ?: update.string("title") ?: current.title
     val argument = toolArgument(update, title)
     val namesInput = argument != title || current.argument == current.title
 
@@ -379,7 +381,30 @@ private fun mergeToolUpdate(items: MutableList<ThreadItem>, update: JsonObject) 
     )
 }
 
-private fun inputFrom(update: JsonObject): JsonObject? = (update["rawInput"] as? JsonObject)?.takeIf { it.isNotEmpty() }
+private fun inputFrom(update: JsonObject): JsonObject? {
+    val input = update["rawInput"] as? JsonObject ?: return null
+    val batch = update.string("name") == "functions.exec" || update.string("title") == "functions.exec"
+    val wrapped = batch || input.string("server") != null && input.string("tool") != null
+    val arguments = input["arguments"]
+
+    if (wrapped && arguments is JsonObject) {
+        return arguments
+    }
+
+    if (wrapped && arguments is JsonPrimitive && arguments.isString) {
+        val parsed = runCatching { MyceliumJson.parseToJsonElement(arguments.content) }.getOrNull()
+
+        if (parsed is JsonObject) {
+            return parsed
+        }
+
+        if (batch) {
+            return JsonObject(mapOf("code" to arguments))
+        }
+    }
+
+    return input.takeIf { it.isNotEmpty() }
+}
 
 private fun toolArgument(update: JsonObject, title: String): String {
     val locations = update["locations"] as? JsonArray
@@ -442,7 +467,22 @@ private fun outputFrom(update: JsonObject): String? {
         .filter { it.string("type") == "content" }
         .mapNotNull { (it["content"] as? JsonObject)?.string("text") }
 
-    return texts.takeIf { it.isNotEmpty() }?.joinToString("\n") { unfenced(it) }
+    if (texts.isNotEmpty()) {
+        return texts.joinToString("\n") { unfenced(it) }
+    }
+
+    val raw = update["rawOutput"] as? JsonObject ?: return null
+    val result = raw["result"] as? JsonObject
+    val error = (raw["error"] as? JsonObject)?.string("message")
+    val resultTexts = (result?.get("content") as? JsonArray).orEmpty().mapNotNull {
+        val content = it as? JsonObject ?: return@mapNotNull null
+
+        content.string("text")?.takeIf { content.string("type") == "text" }
+    }
+    val text = resultTexts.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    val structured = result?.get("structuredContent")?.takeUnless { it == JsonNull }?.toString()
+
+    return listOfNotNull(text ?: structured, error).takeIf { it.isNotEmpty() }?.joinToString("\n")
 }
 
 private fun unfenced(text: String): String {

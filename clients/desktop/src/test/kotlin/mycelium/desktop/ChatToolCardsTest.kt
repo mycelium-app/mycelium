@@ -42,15 +42,44 @@ class ChatToolCardsTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private fun show(events: List<Event>, answered: MutableList<Pair<String, String>> = mutableListOf()) {
+    private fun show(events: List<Event>, answered: MutableList<Pair<String, String>> = mutableListOf(), agent: String = "chat") {
         val items = buildThread(events)
         rule.setContent {
             MyceliumTheme(true) {
                 Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) {
-                    ThreadView(items, onAnswer = { request, option -> answered += request to option }, onStopWorkflow = {}, agent = "chat")
+                    ThreadView(items, onAnswer = { request, option -> answered += request to option }, onStopWorkflow = {}, agent = agent)
                 }
             }
         }
+    }
+
+    @Test
+    fun codexMcpCallsShowHumanNamesArgumentsAndResultsBesideGuardianReviews() {
+        show(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"guardian_assessment:1","title":"Guardian Review","kind":"think","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Status: Approved"}}]}"""),
+            update(2, """{"sessionUpdate":"tool_call","toolCallId":"recall","title":"mcp.mycelium.recall","kind":"execute","status":"completed","rawInput":{"server":"mycelium","tool":"recall","arguments":{"query":"release"}},"rawOutput":{"result":{"content":[{"type":"text","text":"No memories match that query."}]},"error":null}}"""),
+            update(3, """{"sessionUpdate":"tool_call","toolCallId":"instructions","title":"mcp.mycelium.get_instructions","kind":"execute","status":"completed","rawInput":{"server":"mycelium","tool":"get_instructions","arguments":{"layer":"global"}},"rawOutput":{"result":{"content":[{"type":"text","text":"Use British English."}]},"error":null}}"""),
+        ), agent = "codex")
+
+        rule.onNodeWithContentDescription("Guardian Review").assertExists()
+        rule.onNodeWithContentDescription("Searched memory for “release”").assertExists()
+        rule.onNodeWithContentDescription("Get instructions, mycelium, done").assertExists()
+        rule.onNodeWithContentDescription("layer: global").assertExists()
+        rule.onNodeWithText("Use British English.", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun codexExternalMcpAndBatchedFunctionsExecUseToolCards() {
+        show(listOf(
+            update(1, """{"sessionUpdate":"tool_call","toolCallId":"weather","title":"mcp.lab.get_weather","kind":"execute","status":"completed","rawInput":{"server":"lab","tool":"get_weather","arguments":{"city":"Paris"}},"rawOutput":{"result":{"content":[{"type":"text","text":"Sunny in Paris"}]},"error":null}}"""),
+            update(2, """{"sessionUpdate":"tool_call","toolCallId":"batch","name":"functions.exec","title":"exec","kind":"execute","status":"completed","rawInput":{"arguments":"const results = await Promise.all([tools.mcp__mycelium__recall({query: 'release'}), tools.mcp__mycelium__get_instructions({})]); results.forEach(text);"},"content":[{"type":"content","content":{"type":"text","text":"No memories match that query.\nUse British English."}}]}"""),
+        ), agent = "codex")
+
+        rule.onNodeWithContentDescription("Get weather, lab, done").assertExists()
+        rule.onNodeWithContentDescription("city: Paris").assertExists()
+        rule.onNodeWithText("Sunny in Paris", useUnmergedTree = true).assertExists()
+        rule.onNodeWithContentDescription("Run tools, functions, done").assertExists()
+        rule.onNodeWithText("No memories match that query.\nUse British English.", useUnmergedTree = true).assertExists()
     }
 
     @Test
