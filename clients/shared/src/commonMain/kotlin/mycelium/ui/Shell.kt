@@ -496,7 +496,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                         if (state.groups.isNotEmpty()) {
                             val choices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
 
-                            OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show conversations in")
+                            OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show conversations in", size = ButtonSize.Sm)
                         }
                     }
                 }
