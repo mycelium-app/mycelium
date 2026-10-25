@@ -44,7 +44,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -646,6 +652,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val statusName = if (row.resumeAt != null) WaitingForReset else statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
+    val projectName = project?.takeIf { !row.isChat }?.name
+    val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
 
     Box(
         Modifier
@@ -702,7 +710,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected,
                     shape = BlockShape,
-                    description = "${row.title}, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
+                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -733,7 +741,15 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
 
             Column(Modifier.weight(1f)) {
-                Label(row.title, color = if (notRunning) colors.textMuted else colors.text, maxLines = 1)
+                val title = buildAnnotatedString {
+                    if (projectName != null) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(projectName) }
+                        append(" ")
+                    }
+
+                    append(row.title)
+                }
+                BasicText(title, style = Tokens.Type.Ui.themed().copy(color = if (notRunning) colors.textMuted else colors.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
 
                 if (row.resumeAt != null) {
                     Label(WaitingForReset, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
