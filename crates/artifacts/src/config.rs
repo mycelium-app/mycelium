@@ -17,6 +17,7 @@ pub struct Config {
     pub oidc: Option<OidcConfig>,
     pub listen: SocketAddr,
     pub editor_dir: PathBuf,
+    pub pdfjs_dir: PathBuf,
 }
 
 type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
@@ -56,6 +57,7 @@ impl Config {
             oidc,
             listen: optional(lookup, "MYCELIUM_ARTIFACT_LISTEN").unwrap_or_else(|| "0.0.0.0:8081".into()).parse()?,
             editor_dir: optional(lookup, "MYCELIUM_EDITOR_DIR").unwrap_or_else(|| "/usr/share/mycelium/editor".into()).into(),
+            pdfjs_dir: optional(lookup, "MYCELIUM_PDFJS_DIR").unwrap_or_else(|| "/usr/share/mycelium/pdfjs".into()).into(),
         })
     }
 }

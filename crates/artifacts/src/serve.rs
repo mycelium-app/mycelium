@@ -1,7 +1,7 @@
 use crate::auth;
 use crate::config::Config;
 use crate::control::{Artifact, ControlClient};
-use crate::render::{self, DOCUMENT_POLICY, EDITOR_POLICY, FILE_POLICY, PAGE_POLICY, hardened, notice};
+use crate::render::{self, DOCUMENT_POLICY, EDITOR_POLICY, FILE_POLICY, PAGE_POLICY, PDF_VIEWER_POLICY, hardened, notice};
 use crate::session::{SESSION_COOKIE, Sessions, cookie};
 use anyhow::Result;
 use axum::Json;
@@ -110,6 +110,7 @@ pub fn router(config: Config) -> Result<Router> {
         .route("/_auth/login", get(auth::login))
         .route("/_auth/callback", get(auth::callback))
         .route("/_artifact.json", get(design_json))
+        .route("/_pdfjs/{*path}", get(pdf_viewer_asset))
         .route("/_data", get(data_list))
         .route("/_data/{key}", put(data_put))
         .fallback(content)
@@ -212,18 +213,33 @@ fn editor_media_type(path: &std::path::Path) -> &'static str {
         "woff" => "font/woff",
         "ttf" => "font/ttf",
         "wasm" => "application/wasm",
-        "txt" => "text/plain; charset=utf-8",
+        "txt" | "ftl" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
+}
+
+fn existing_asset(directory: &std::path::Path, path: &str) -> Option<std::path::PathBuf> {
+    let requested = std::path::Path::new(path.trim_start_matches('/'));
+    let plain = requested.components().all(|component| matches!(component, std::path::Component::Normal(_)));
+    let asset = directory.join(requested);
+
+    (plain && !requested.as_os_str().is_empty() && asset.is_file()).then_some(asset)
+}
+
+async fn pdf_viewer_asset(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    let Some(asset) = existing_asset(&state.config().pdfjs_dir, &path) else { return not_found() };
+    let Ok(bytes) = tokio::fs::read(&asset).await else { return not_found() };
+
+    let mut response = bytes.into_response();
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static(editor_media_type(&asset)));
+
+    no_cache(hardened(response, PDF_VIEWER_POLICY))
 }
 
 async fn editor_asset(state: &AppState, uri: &Uri) -> Response {
     let directory = &state.config().editor_dir;
     let path = uri.path().strip_prefix("/design").unwrap_or(uri.path());
-    let requested = std::path::Path::new(path.trim_start_matches('/'));
-    let plain = requested.components().all(|component| matches!(component, std::path::Component::Normal(_)));
-    let asset = directory.join(requested);
-    let wanted = if plain && !requested.as_os_str().is_empty() && asset.is_file() { asset } else { directory.join("index.html") };
+    let wanted = existing_asset(directory, path).unwrap_or_else(|| directory.join("index.html"));
 
     let Ok(bytes) = tokio::fs::read(&wanted).await else {
         return notice(StatusCode::SERVICE_UNAVAILABLE, "The Design viewer is not installed", "This artefact host has no editor files. Ask the person who runs it to set MYCELIUM_EDITOR_DIR.");
@@ -280,6 +296,12 @@ async fn content(State(state): State<AppState>, site: Site, method: Method, uri:
         "markdown" => no_cache(render::markdown(&artifact.title, &String::from_utf8_lossy(&stored.bytes))),
         _ => {
             let media_type = if stored.media_type.is_empty() { artifact.media_type.clone() } else { stored.media_type.clone() };
+            let viewing_pdf = media_type == "application/pdf" && !uri.query().is_some_and(|query| query.split('&').any(|pair| pair == "raw=1"));
+
+            if viewing_pdf {
+                return Redirect::to("/_pdfjs/web/viewer.html?file=%2F%3Fraw%3D1").into_response();
+            }
+
             let inline = media_type == "application/pdf" || (media_type.starts_with("image/") && media_type != "image/svg+xml");
             let name = download_name(&artifact.title, slug);
             let disposition = if inline { format!("inline; filename=\"{name}\"") } else { format!("attachment; filename=\"{name}\"") };

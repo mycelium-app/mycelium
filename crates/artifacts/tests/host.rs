@@ -100,6 +100,7 @@ struct Harness {
     http: reqwest::Client,
     nonce: Arc<Mutex<String>>,
     _editor: TempDir,
+    _pdfjs: TempDir,
 }
 
 impl Harness {
@@ -135,6 +136,12 @@ impl Harness {
         std::fs::create_dir(editor.path().join("assets")).unwrap();
         std::fs::write(editor.path().join("assets/index.js"), "export {};").unwrap();
 
+        let pdfjs = tempfile::tempdir().unwrap();
+        std::fs::create_dir(pdfjs.path().join("web")).unwrap();
+        std::fs::create_dir(pdfjs.path().join("build")).unwrap();
+        std::fs::write(pdfjs.path().join("web/viewer.html"), "<!doctype html><title>PDF.js</title>").unwrap();
+        std::fs::write(pdfjs.path().join("build/pdf.mjs"), "export {};").unwrap();
+
         let config = Config {
             domain: DOMAIN.into(),
             control_url: control_base,
@@ -142,11 +149,12 @@ impl Harness {
             oidc: Some(OidcConfig { issuer: idp_base, client_id: "artifacts".into(), client_secret: Some("secret".into()) }),
             listen: "127.0.0.1:0".parse().unwrap(),
             editor_dir: editor.path().to_path_buf(),
+            pdfjs_dir: pdfjs.path().to_path_buf(),
         };
         let (listener, base) = listen().await;
         tokio::spawn(mycelium_artifacts::run(config, listener));
 
-        Harness { base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, _editor: editor }
+        Harness { base, http: reqwest::Client::builder().redirect(Policy::none()).build().unwrap(), nonce, _editor: editor, _pdfjs: pdfjs }
     }
 
     fn request(&self, method: reqwest::Method, host: &str, path: &str, cookie: Option<&str>) -> reqwest::RequestBuilder {
@@ -285,15 +293,40 @@ async fn markdown_is_rendered_with_raw_html_and_script_links_made_inert() {
 }
 
 #[tokio::test]
-async fn a_pdf_is_shown_inline_and_other_files_are_downloaded() {
+async fn a_pdf_opens_in_the_viewer_and_its_bytes_stay_reachable_for_it() {
     let harness = Harness::start().await;
 
-    let pdf = harness.get("report", "/", None).await;
+    let opened = harness.get("report", "/", None).await;
+    let raw = harness.get("report", "/?raw=1", None).await;
+
+    assert_eq!(opened.status(), 303);
+    assert_eq!(opened.headers()["location"], "/_pdfjs/web/viewer.html?file=%2F%3Fraw%3D1");
+    assert_eq!(raw.headers()["content-type"], "application/pdf");
+    assert!(raw.headers()["content-disposition"].to_str().unwrap().starts_with("inline"));
+    assert_eq!(raw.bytes().await.unwrap().as_ref(), b"%PDF-1.4");
+}
+
+#[tokio::test]
+async fn the_pdf_viewer_assets_are_served_with_their_types_and_a_viewer_policy() {
+    let harness = Harness::start().await;
+
+    let page = harness.get("report", "/_pdfjs/web/viewer.html", None).await;
+    let script = harness.get("report", "/_pdfjs/build/pdf.mjs", None).await;
+    let missing = harness.get("report", "/_pdfjs/web/nothing.js", None).await;
+
+    assert_eq!(page.headers()["content-type"], "text/html; charset=utf-8");
+    assert!(page.headers()["content-security-policy"].to_str().unwrap().contains("script-src 'self' 'wasm-unsafe-eval'"));
+    assert_eq!(page.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(script.headers()["content-type"], "text/javascript; charset=utf-8");
+    assert_eq!(missing.status(), 404);
+}
+
+#[tokio::test]
+async fn other_files_are_downloaded() {
+    let harness = Harness::start().await;
+
     let archive = harness.get("archive", "/", None).await;
 
-    assert_eq!(pdf.headers()["content-type"], "application/pdf");
-    assert!(pdf.headers()["content-disposition"].to_str().unwrap().starts_with("inline"));
-    assert_eq!(pdf.bytes().await.unwrap().as_ref(), b"%PDF-1.4");
     assert_eq!(archive.headers()["content-type"], "application/zip");
     assert!(archive.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
     assert_eq!(archive.headers()["content-security-policy"], "sandbox");

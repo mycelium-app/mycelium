@@ -191,6 +191,7 @@ The entry shows in Workspaces mode, where History lives. Whether Chats mode gets
 | `MYCELIUM_ARTIFACT_OIDC_ISSUER`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_ID`, `MYCELIUM_ARTIFACT_OIDC_CLIENT_SECRET` | The host's own identity provider. Without them only public artefacts open. |
 | `MYCELIUM_ARTIFACT_LISTEN` | Listen address. Defaults to `0.0.0.0:8081`. |
 | `MYCELIUM_EDITOR_DIR` | The built Design editor, used for the view-only mode. Defaults to `/usr/share/mycelium/editor`. |
+| `MYCELIUM_PDFJS_DIR` | The PDF.js generic viewer that PDF artefacts open in, served at `/_pdfjs/`. Defaults to `/usr/share/mycelium/pdfjs`. |
 
 - **DNS.** A wildcard record, `*.<domain>`, and a record for `<domain>` itself, both pointing at the host.
 - **TLS.** One certificate covering `<domain>` and `*.<domain>`, terminated in front of the host, which speaks plain HTTP. A wildcard needs a DNS-01 challenge.

@@ -42,14 +42,23 @@ COPY editor ./
 RUN pnpm install --frozen-lockfile \
  && pnpm build
 
+FROM alpine:${ALPINE_VERSION} AS pdfjs
+ARG PDFJS_VERSION=6.4.299
+RUN apk add --no-cache curl unzip \
+ && curl -fsSL -o /tmp/pdfjs.zip "https://github.com/mozilla/pdf.js/releases/download/v${PDFJS_VERSION}/pdfjs-${PDFJS_VERSION}-dist.zip" \
+ && unzip -q /tmp/pdfjs.zip -d /pdfjs \
+ && find /pdfjs -name '*.map' -delete \
+ && rm -f /pdfjs/web/compressed.tracemonkey-pldi-09.pdf /pdfjs/web/debugger.*
+
 FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache dumb-init ca-certificates \
  && addgroup -g 1000 mycelium && adduser -u 1000 -G mycelium -s /bin/sh -D mycelium \
- && mkdir -p /var/lib/mycelium /usr/share/mycelium/web /usr/share/mycelium/editor \
+ && mkdir -p /var/lib/mycelium /usr/share/mycelium/web /usr/share/mycelium/editor /usr/share/mycelium/pdfjs \
  && chown mycelium:mycelium /var/lib/mycelium
 COPY --from=binary /mycelium /usr/local/bin/mycelium
 COPY --from=web /web /usr/share/mycelium/web
 COPY --from=editor /src/editor/dist /usr/share/mycelium/editor
+COPY --from=pdfjs /pdfjs /usr/share/mycelium/pdfjs
 USER mycelium
 ENV MYCELIUM_LISTEN=0.0.0.0:8080 \
     MYCELIUM_DATA_DIR=/var/lib/mycelium \
