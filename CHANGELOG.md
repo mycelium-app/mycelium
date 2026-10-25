@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.0
+## v0.9.1
 
 - Email, Stoat and Zulip connect directly from Integrations. Agents can read and search them, and sending from a chat always asks for approval. Email requires TLS or STARTTLS.
 - The open conversation shows its reported context use and recorded spend above the composer.
