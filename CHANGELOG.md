@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Chat models can propose tasks and ask questions without leaving unreadable tasks. Tool failures are reported as failures rather than declined approvals, and existing affected tasks are repaired.
+- Codex MCP calls show tool cards with arguments and results, including batched tool execution, instead of shell command blocks.
+- Settings has grouped navigation and a Providers page combining harness accounts and chat models. Unused generated signed-out accounts stay hidden, and large model lists are searchable and compact.
+- Import separates progress from row actions, Instructions shows global and group layers, and Memories scrolls correctly with retryable load errors and less padding.
+- Integrations replaces Chat tools, with compact MCP rows and direct or gateway connections. Agent connections has a clearer name, and Sessions sits above Account.
+- Row actions use vertical three-dot menus consistently across Settings and the existing conversation, node and project menus.
+
 ## v0.7.1
 
 - Workspace rows in the sidebar show their project name in bold before the title again.
