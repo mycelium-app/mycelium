@@ -251,6 +251,27 @@ async fn refreshing_a_provider_fetches_its_models_again_and_removing_it_forgets_
 }
 
 #[tokio::test]
+async fn renaming_a_provider_trims_the_name_and_only_its_owner_can() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let id = provider["id"].as_str().unwrap();
+    let path = format!("/api/v1/model-providers/{id}");
+
+    let (status, renamed) = server.user.json(server.user.patch(&path).json(&json!({"name": "  Workstation  "}))).await;
+    let (blank, rejected) = server.user.json(server.user.patch(&path).json(&json!({"name": " "}))).await;
+    let other = server.second_user("someone@example.com").await;
+    let (hidden, _) = other.json(other.patch(&path).json(&json!({"name": "Mine now"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/model-providers")).await;
+
+    assert_eq!((status, renamed["name"].clone(), renamed["models"].clone()), (200, json!("Workstation"), provider["models"].clone()));
+    assert_eq!((blank, rejected["error"].clone()), (400, json!("name_required")));
+    assert_eq!(hidden, 404);
+    assert_eq!(listed[0]["name"], "Workstation");
+}
+
+#[tokio::test]
 async fn a_chat_streams_the_reply_token_by_token_as_conversation_events() {
     let server = Server::start().await;
     let (router, fake) = fake_openai(None);

@@ -415,6 +415,8 @@ data class OpenRouterSpend(
     val weekly: Double? = null,
     val monthly: Double? = null,
     @SerialName("limit_remaining") val limitRemaining: Double? = null,
+    val limit: Double? = null,
+    @SerialName("limit_reset") val limitReset: String? = null,
 )
 
 @Serializable
@@ -424,6 +426,9 @@ data class CreateModelProviderRequest(
     @SerialName("base_url") val baseUrl: String? = null,
     @SerialName("api_key") val apiKey: String? = null,
 )
+
+@Serializable
+data class UpdateModelProviderRequest(val name: String)
 
 @Serializable
 data class ChatToolInfo(val name: String, val description: String = "")

@@ -21,6 +21,8 @@ pub struct OpenRouterSpend {
     #[serde(rename(deserialize = "usage_monthly"))]
     pub monthly: Option<f64>,
     pub limit_remaining: Option<f64>,
+    pub limit: Option<f64>,
+    pub limit_reset: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +58,7 @@ async fn fetch(http: &reqwest::Client, address: &str, key: &str) -> Option<OpenR
         || spend
             .limit_remaining
             .is_some_and(|value| !value.is_finite())
+        || spend.limit.is_some_and(|value| !value.is_finite() || value < 0.0)
     {
         return None;
     }
@@ -138,7 +141,7 @@ mod tests {
             }
 
             Ok(Json(
-                json!({"data":{"usage":12.3,"usage_daily":0.4,"usage_weekly":2.0,"usage_monthly":8.0,"limit_remaining":null}}),
+                json!({"data":{"usage":12.3,"usage_daily":0.4,"usage_weekly":2.0,"usage_monthly":8.0,"limit_remaining":null,"limit":25.0,"limit_reset":"monthly"}}),
             ))
         }
 
@@ -152,6 +155,10 @@ mod tests {
                     .route(
                         "/invalid",
                         get(|| async { Json(json!({"data":{"usage":-1.0}})) }),
+                    )
+                    .route(
+                        "/negative",
+                        get(|| async { Json(json!({"data":{"usage":1.0,"limit":-1.0}})) }),
                     )
                     .route(
                         "/exhausted",
@@ -170,6 +177,8 @@ mod tests {
         assert_eq!(spend.weekly, Some(2.0));
         assert_eq!(spend.monthly, Some(8.0));
         assert_eq!(spend.limit_remaining, None);
+        assert_eq!(spend.limit, Some(25.0));
+        assert_eq!(spend.limit_reset.as_deref(), Some("monthly"));
         assert!(fetch(&http, &address, "wrong-key").await.is_none());
         assert!(
             fetch(&http, &address.replace("/key", "/invalid"), "test-key")
@@ -181,6 +190,10 @@ mod tests {
             .unwrap();
         assert_eq!(exhausted.limit_remaining, Some(-0.1));
         assert_eq!(exhausted.daily, None);
+        assert_eq!(exhausted.limit, None);
+        assert_eq!(exhausted.limit_reset, None);
+        let negative = fetch(&http, &address.replace("/key", "/negative"), "test-key").await;
+        assert!(negative.is_none());
         task.abort();
     }
 }

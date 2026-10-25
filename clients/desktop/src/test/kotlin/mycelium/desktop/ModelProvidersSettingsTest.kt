@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -56,6 +57,7 @@ class ModelProvidersSettingsTest {
 
             when {
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
+                request.method == HttpMethod.Patch -> respond(OllamaJson.replace("\"Ollama\"", "\"Workstation\""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
                 else -> respond("[$listed]", HttpStatusCode.OK, json)
             }
@@ -185,6 +187,23 @@ class ModelProvidersSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("gemma3").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("/api/v1/model-providers/p1/refresh", requests.last { it.method == HttpMethod.Post }.url.encodedPath)
+    }
+
+    @Test
+    fun renamingSendsTheTrimmedNameAndShowsItInTheList() {
+        show()
+
+        rule.onNodeWithContentDescription("More for Ollama").performClick()
+        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Provider name").performTextClearance()
+        rule.onNodeWithContentDescription("Provider name").performTextInput("  Workstation ")
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Workstation").fetchSemanticsNodes().isNotEmpty() }
+        val patch = requests.indexOfLast { it.method == HttpMethod.Patch }
+        assertEquals("/api/v1/model-providers/p1", requests[patch].url.encodedPath)
+        assertEquals("""{"name":"Workstation"}""", bodies[patch])
+        rule.onNodeWithText("Ollama").assertDoesNotExist()
     }
 
     @Test

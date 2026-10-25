@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.CreateModelProviderRequest
 import mycelium.api.ModelProvider
+import mycelium.api.UpdateModelProviderRequest
 import mycelium.state.Store
 
 private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic", "OpenRouter" to "openrouter")
@@ -39,6 +40,8 @@ fun ModelProvidersSettings(store: Store) {
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var expanded by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf<ModelProvider?>(null) }
+    var renamed by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("openai_compatible") }
@@ -122,6 +125,11 @@ fun ModelProvidersSettings(store: Store) {
                                 close()
                                 store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
                             })
+                            MenuItem("Rename", onClick = {
+                                close()
+                                renamed = provider.name
+                                renaming = provider
+                            })
                             MenuItem("Remove provider", onClick = {
                                 close()
                                 store.act {
@@ -133,6 +141,26 @@ fun ModelProvidersSettings(store: Store) {
                     }
 
                     Hairline()
+                }
+            }
+        }
+
+        renaming?.let { target ->
+            val save = {
+                renaming = null
+                store.act {
+                    val updated = store.api.updateModelProvider(target.id, UpdateModelProviderRequest(renamed.trim()))
+                    providers = providers.map { if (it.id == updated.id) updated else it }
+                }
+            }
+
+            Dialog(onDismiss = { renaming = null }) {
+                Label("Rename provider", Modifier.semantics { heading() }, Tokens.Type.Title)
+                TextInput(renamed, { renamed = it }, label = "Provider name", onSubmit = save)
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                    MyButton({ renaming = null }, text = "Cancel", muted = true)
+                    MyButton(save, text = "Save", variant = ButtonVariant.Outline)
                 }
             }
         }

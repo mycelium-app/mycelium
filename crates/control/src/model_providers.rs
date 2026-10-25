@@ -6,7 +6,7 @@ use crate::store::{enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind};
+use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind, UpdateModelProviderRequest};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
@@ -480,6 +480,26 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         .await?;
 
     Ok(Json(updated.to_proto()?))
+}
+
+pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateModelProviderRequest>) -> ApiResult<Json<ModelProvider>> {
+    let name = request.name.trim();
+
+    if name.is_empty() {
+        return Err(ApiError::bad_request("name_required", "Enter a name for this provider."));
+    }
+
+    let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set name = $3 where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
+        .bind(id)
+        .bind(user.id)
+        .bind(name)
+        .fetch_optional(&state.pool)
+        .await?;
+    let Some(row) = row else {
+        return Err(ApiError::not_found("That model provider"));
+    };
+
+    Ok(Json(row.to_proto()?))
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

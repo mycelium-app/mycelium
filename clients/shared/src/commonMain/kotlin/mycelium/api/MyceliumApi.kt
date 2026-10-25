@@ -234,6 +234,9 @@ class MyceliumApi(
     suspend fun createModelProvider(request: CreateModelProviderRequest): ModelProvider =
         call("/model-providers") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun updateModelProvider(id: String, request: UpdateModelProviderRequest): ModelProvider =
+        call("/model-providers/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
     suspend fun refreshModelProvider(id: String): ModelProvider =
         call("/model-providers/$id/refresh") { client.post(it) { authorise() } }.body()
 

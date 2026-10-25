@@ -443,6 +443,11 @@ impl std::fmt::Debug for CreateModelProviderRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateModelProviderRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatToolInfo {
     pub name: String,
     pub description: String,
