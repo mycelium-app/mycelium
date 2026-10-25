@@ -299,6 +299,11 @@ async fn a_workflow_started_by_an_agent_returns_its_result_to_the_calling_conver
             .unwrap()
             .contains("Approved the implementation")
     );
-    let delivered = sqlx::query_scalar::<_,i64>("select count(*) from workflow_dispatches where workflow_id=$1 and operation='notify' and result is not null").bind(id.parse::<uuid::Uuid>().unwrap()).fetch_one(&server.pool).await.unwrap();
+    let workflow = id.parse::<uuid::Uuid>().unwrap();
+    let delivered = eventually("notify recorded", || async {
+        let count = sqlx::query_scalar::<_,i64>("select count(*) from workflow_dispatches where workflow_id=$1 and operation='notify' and result is not null").bind(workflow).fetch_one(&server.pool).await.unwrap();
+        (count > 0).then_some(count)
+    })
+    .await;
     assert_eq!(delivered, 1);
 }
