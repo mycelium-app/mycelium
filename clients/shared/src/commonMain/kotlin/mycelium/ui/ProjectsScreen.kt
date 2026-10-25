@@ -32,6 +32,7 @@ import mycelium.state.lastActivity
 import mycelium.state.Store
 import mycelium.state.projectsOfRepository
 import mycelium.state.registeredFolders
+import mycelium.state.setUpRepositories
 
 private fun forgeName(forge: Forge): String =
     if (forge.kind == "github") "GitHub" else forge.baseUrl.substringAfter("://").trimEnd('/')
@@ -45,9 +46,7 @@ private sealed interface ProjectRow {
     val at: Instant?
 }
 
-private class RepositoryRow(val repository: Repository) : ProjectRow {
-    override val at = repository.updatedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
-}
+private class RepositoryRow(val repository: Repository, override val at: Instant?) : ProjectRow
 
 private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow {
     override val at = runCatching { Instant.parse(updatedAt) }.getOrNull()
@@ -96,16 +95,21 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     val connected = forges.orEmpty()
     val folders = if (forgeId == null && organisation == null) registeredFolders(state.projects.values).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.nodeId == nodeFilter) } else emptyList()
     val organisations = listing?.organisations.orEmpty().filter { forgeId == null || it.forgeId == forgeId }.map { it.name }.distinct()
-    val repositories = listing?.repositories.orEmpty().filter { repository ->
-        val setUp = projectsOfRepository(state.projects.values, repository)
+    val setUpListed = setUpRepositories(state.projects.values, listing?.repositories.orEmpty()).filter { repository ->
+        val matchesSearch = (forgeId == null || repository.forgeId == forgeId) && (organisation == null || repository.owner == organisation) && repository.fullName.contains(query.trim(), ignoreCase = true)
 
-        when (nodeFilter) {
-            null -> true
-            NotSetUpAnywhere -> setUp.isEmpty()
-            else -> setUp.any { it.nodeId == nodeFilter }
-        }
+        matchesSearch && (nodeFilter == null || projectsOfRepository(state.projects.values, repository).any { it.nodeId == nodeFilter })
     }
-    val rows = (repositories.map(::RepositoryRow) + folders.map { FolderRow(it, lastActivity(it, state.conversations.values)) }).sortedByDescending { it.at ?: Instant.DISTANT_PAST }
+    val notSetUp = listing?.repositories.orEmpty().filter { repository ->
+        (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(state.projects.values, repository).isEmpty()
+    }
+    val repositories = setUpListed + notSetUp
+    val initialised = setUpListed.map { repository ->
+        val active = projectsOfRepository(state.projects.values, repository).mapNotNull { runCatching { Instant.parse(lastActivity(it, state.conversations.values)) }.getOrNull() }.maxOrNull()
+
+        RepositoryRow(repository, active)
+    } + folders.map { FolderRow(it, lastActivity(it, state.conversations.values)) }
+    val rows = initialised.sortedByDescending { it.at ?: Instant.DISTANT_PAST } + notSetUp.map { RepositoryRow(it, it.updatedAt?.let { at -> runCatching { Instant.parse(at) }.getOrNull() }) }.sortedByDescending { it.at ?: Instant.DISTANT_PAST }
     val chosenNode = state.nodes[nodeFilter]
 
     Column(Modifier.fillMaxSize()) {

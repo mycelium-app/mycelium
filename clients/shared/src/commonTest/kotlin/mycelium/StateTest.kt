@@ -19,6 +19,7 @@ import mycelium.state.reduce
 import mycelium.state.registeredFolders
 import mycelium.state.relativeTime
 import mycelium.state.sidebarSections
+import mycelium.state.setUpRepositories
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -329,6 +330,21 @@ class ProjectJoinTest {
         )
 
         assertEquals(listOf("a", "b"), projectsOfRepository(projects, backups).map { it.id })
+    }
+
+    @Test
+    fun aSetUpRepositoryIsListedOnceBeforeTheForgeAnswersAndTakesTheForgeDetailsOnceItHas() {
+        val projects = listOf(
+            project("a", "n1", "f1", "acme-org/acme-backups"),
+            project("b", "n2", "f1", "acme-org/acme-backups"),
+            project("c", "n1", null, null, "scratch"),
+        )
+
+        assertEquals(listOf(Repository("f1", "acme-org", "acme-backups", "acme-org/acme-backups")), setUpRepositories(projects, emptyList()))
+
+        val listed = backups.copy(updatedAt = "2026-10-25T09:00:00Z")
+
+        assertEquals(listOf(listed), setUpRepositories(projects, listOf(listed, Repository("f1", "acme-org", "other", "acme-org/other"))))
     }
 
     @Test

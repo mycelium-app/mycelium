@@ -201,6 +201,11 @@ fun AppState.hasOlderEvents(id: String): Boolean {
 fun projectsOfRepository(projects: Collection<Project>, repository: Repository): List<Project> =
     projects.filter { it.forgeId == repository.forgeId && it.repository == repository.fullName }
 
+fun setUpRepositories(projects: Collection<Project>, listed: List<Repository>): List<Repository> =
+    projects.mapNotNull { project -> project.forgeId?.let { forgeId -> project.repository?.let { forgeId to it } } }.distinct().map { (forgeId, fullName) ->
+        listed.firstOrNull { it.forgeId == forgeId && it.fullName == fullName } ?: Repository(forgeId, fullName.substringBeforeLast('/'), fullName.substringAfterLast('/'), fullName)
+    }
+
 fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
 
 fun lastActivity(project: Project, conversations: Collection<Conversation>): String =
