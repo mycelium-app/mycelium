@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.8.0
 
 - Chat models can propose tasks and ask questions without leaving unreadable tasks. Tool failures are reported as failures rather than declined approvals, and existing affected tasks are repaired.
 - Codex MCP calls show tool cards with arguments and results, including batched tool execution, instead of shell command blocks.
@@ -8,6 +8,9 @@
 - Import separates progress from row actions, Instructions shows global and group layers, and Memories scrolls correctly with retryable load errors and less padding.
 - Integrations replaces Chat tools, with compact MCP rows and direct or gateway connections. Agent connections has a clearer name, and Sessions sits above Account.
 - Row actions use vertical three-dot menus consistently across Settings and the existing conversation, node and project menus.
+- The Usage card is compact: each window shows its forecast, use and time left on one line above its bar, a window whose reset has passed shows as reset, and a full window no longer predicts when it runs out.
+- OpenRouter usage shows spend against the key's active limit with a bar and the total below, sorts first when the open chat uses it, drops the repeated "OpenRouter: OpenRouter" name, and providers can be renamed in Settings.
+- Ctrl+Backspace in the composer deletes only the word before the cursor, and a pasted badge counts as one word.
 
 ## v0.7.1
 
