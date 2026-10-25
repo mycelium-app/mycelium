@@ -3,6 +3,7 @@
   import FloatingToolbar from './FloatingToolbar.svelte';
   import ItemView from './ItemView.svelte';
   import { type Bounds, type Handle, type ItemType, findItem, itemBounds, simplifyPoints } from './lib/doc';
+  import { cursorFor, handleCursor, hitItem, visibleHandles } from './lib/hit';
   import { editor } from './lib/instance';
   import { type Point, panBy, screenToWorld, wheelZoomFactor, zoomAt } from './lib/viewport';
 
@@ -14,20 +15,31 @@
     | { kind: 'draw' }
     | { kind: 'pinch'; distance: number; centre: Point };
 
-  const handles: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
   const createTools = ['artboard', 'rect', 'ellipse', 'note', 'text'];
   const interactiveSelector = 'button, input, textarea, select, .floating, .thread, .pin-anchor';
   const moveThreshold = 3;
 
   let canvas: HTMLDivElement;
-  let gesture: Gesture | null = null;
+  let gesture = $state.raw<Gesture | null>(null);
   let spaceHeld = $state(false);
+  let hoveredId = $state<string | null>(null);
   let ghost = $state.raw<(Bounds & { type: string }) | null>(null);
   let stroke = $state.raw<[number, number][]>([]);
   const pointers = new Map<number, Point>();
 
   const selection = $derived(editor.selected && editor.editingId !== editor.selected.id ? itemBounds(editor.selected) : null);
-  const resizable = $derived(editor.selected !== undefined && editor.selected.type !== 'path' && !editor.viewOnly);
+  const handles = $derived(selection && editor.selected?.type !== 'path' && !editor.viewOnly ? visibleHandles(selection, editor.viewport.zoom) : []);
+  const cursor = $derived(cursorFor({
+    tool: editor.tool,
+    panning,
+    panGesture: gesture?.kind === 'pan',
+    moving: gesture?.kind === 'move' && gesture.moved,
+    resizeHandle: gesture?.kind === 'resize' ? gesture.handle : null,
+    hovered: hoveredId ? findItem(editor.doc, hoveredId) : undefined,
+    selectedId: editor.selectedId,
+    editingId: editor.editingId,
+    editable: !editor.viewOnly,
+  }));
   const panning = $derived(editor.tool === 'hand' || spaceHeld);
 
   function localPoint(event: { clientX: number; clientY: number }): Point
@@ -42,9 +54,13 @@
     return screenToWorld(editor.viewport, localPoint(event));
   }
 
-  function itemAt(target: EventTarget | null): string | null
+  function itemAt(event: { clientX: number; clientY: number; target: EventTarget | null }): string | null
   {
-    const element = (target as Element | null)?.closest('[data-item]');
+    const hit = hitItem(editor.page, worldPoint(event), editor.viewport.zoom);
+
+    if (hit) return hit.id;
+
+    const element = (event.target as Element | null)?.closest('[data-item]');
 
     return element?.getAttribute('data-item') ?? null;
   }
@@ -64,7 +80,7 @@
   function placeComment(event: PointerEvent)
   {
     const world = worldPoint(event);
-    const id = itemAt(event.target);
+    const id = itemAt(event);
     const item = id ? findItem(editor.doc, id) : undefined;
     const origin = item ? itemBounds(item) : { x: 0, y: 0 };
 
@@ -98,7 +114,7 @@
 
     if (editor.tool === 'select')
     {
-      const id = itemAt(event.target);
+      const id = itemAt(event);
 
       editor.select(id);
 
@@ -134,7 +150,11 @@
 
   function onPointerMove(event: PointerEvent)
   {
-    if (!gesture) return;
+    if (!gesture)
+    {
+      hoveredId = itemAt(event);
+      return;
+    }
 
     if (gesture.kind === 'pinch')
     {
@@ -165,7 +185,7 @@
       if (!gesture.moved)
       {
         canvas.setPointerCapture(event.pointerId);
-        gesture.moved = true;
+        gesture = { ...gesture, moved: true };
       }
 
       editor.previewDraft(editor.moveBy(gesture.id, world.x - gesture.start.x, world.y - gesture.start.y));
@@ -306,8 +326,7 @@
 
 <div
   class="canvas"
-  class:panning
-  class:crosshair={editor.tool !== 'select' && !panning}
+  style:cursor
   bind:this={canvas}
   use:observeSize
   use:captureWheel
@@ -324,11 +343,9 @@
     {/each}
     {#if selection}
       <div class="selection" style:left={`${selection.x}px`} style:top={`${selection.y}px`} style:width={`${selection.w}px`} style:height={`${selection.h}px`}>
-        {#if resizable}
-          {#each handles as handle (handle)}
-            <div class={`selection-handle handle-${handle}`} onpointerdown={(event) => startResize(event, handle)} role="presentation"></div>
-          {/each}
-        {/if}
+        {#each handles as handle (handle)}
+          <div class={`selection-handle handle-${handle}`} style:cursor={handleCursor(handle)} onpointerdown={(event) => startResize(event, handle)} role="presentation"></div>
+        {/each}
       </div>
     {/if}
     {#if ghost}

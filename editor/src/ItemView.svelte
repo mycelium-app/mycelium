@@ -89,6 +89,7 @@
       {:else}
         <span class="artboard-name" ondblclick={(event) => { event.stopPropagation(); renaming = editable; }} role="presentation">{item.name}</span>
       {/if}
+      <button class="mini" type="button" aria-label={`Zoom to ${item.name}`} title="Zoom to" onclick={() => editor.fit(item.id)}><Icon name="fit" /></button>
       <button class="mini" type="button" aria-label={`Present ${item.name}`} title="Present" onclick={() => editor.present(item.id)}><Icon name="expand" /></button>
       <button class="mini" type="button" aria-label={`Download ${item.name}`} title="Download" onclick={download}><Icon name="download" /></button>
     </div>

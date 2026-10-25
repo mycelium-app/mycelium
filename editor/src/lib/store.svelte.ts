@@ -116,9 +116,10 @@ export class Editor
     this.canvasSize = { w, h };
   }
 
-  fit(): void
+  fit(itemId?: string): void
   {
-    const bounds = unionBounds(this.page.items.map(itemBounds));
+    const items = itemId ? this.page.items.filter((item) => item.id === itemId) : this.page.items;
+    const bounds = unionBounds(items.map(itemBounds));
 
     this.viewport = fitBounds(bounds, this.canvasSize);
   }

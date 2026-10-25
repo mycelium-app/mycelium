@@ -70,8 +70,10 @@
   <main class="editor">
     <h1 class="doc-title">{editor.title}</h1>
     <Canvas />
-    <Toolbar />
-    <Zoombar />
+    <div class="chrome">
+      <Toolbar />
+      <Zoombar />
+    </div>
     {#if editor.versionsOpen && !editor.viewOnly}
       <Versions />
     {/if}
