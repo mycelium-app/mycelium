@@ -218,11 +218,15 @@ val LocalReducedMotion = staticCompositionLocalOf { false }
 
 @Composable
 fun TextStyle.themed(): TextStyle {
-    val fonts = LocalFonts.current
+    val codeScale = if (fontFamily == FontFamily.Monospace) LocalAppearance.current.display.codeSize.scale else 1f
 
+    return themedWith(LocalFonts.current, codeScale)
+}
+
+fun TextStyle.themedWith(fonts: Fonts, codeScale: Float): TextStyle {
     return when (fontFamily) {
         FontFamily.SansSerif -> copy(fontFamily = fonts.sans)
-        FontFamily.Monospace -> copy(fontFamily = fonts.mono).scaledForCode()
+        FontFamily.Monospace -> copy(fontFamily = fonts.mono).let { if (codeScale == 1f) it else it.copy(fontSize = it.fontSize * codeScale, lineHeight = it.lineHeight * codeScale) }
         else -> this
     }
 }
