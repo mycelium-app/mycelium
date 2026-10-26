@@ -98,6 +98,9 @@ sealed interface MyceliumCall {
 
 private val toolName = Regex("mycelium[_.:/ -]+(${MyceliumTool.entries.joinToString("|") { it.key }})\\b", RegexOption.IGNORE_CASE)
 private val recalledMemory = Regex("^[0-9a-fA-F-]{36}: (.*)$")
+private val fencedMemory = Regex("<memory [^>\n]*>\n(.*?)\n</memory>", RegexOption.DOT_MATCHES_ALL)
+private const val recallPreface = "Recalled memories are notes written by earlier agents."
+private const val banksOpen = "Banks open here:"
 private val rememberedAs = Regex("^Remembered as \\S+?, shared with (.+)\\.$")
 private val proposedLayer = Regex("made for the (.+) instructions\\.")
 private val askedQuestion = Regex("^Question (\\S+) asked")
@@ -130,8 +133,9 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
     return when (tool) {
         MyceliumTool.Recall -> {
             val query = fields.requiredString("query", input) ?: return null
-            val lines = output.lines().filter { it.isNotBlank() }
-            val memories = lines.mapNotNull { recalledMemory.matchEntire(it)?.groupValues?.get(1) }
+            val fenced = fencedMemory.findAll(output).map { it.groupValues[1].replace("<\\/memory", "</memory") }.toList()
+            val lines = fencedMemory.replace(output, "").lines().filter { it.isNotBlank() && !it.startsWith(recallPreface) && !it.startsWith(banksOpen) }
+            val memories = fenced + lines.mapNotNull { recalledMemory.matchEntire(it)?.groupValues?.get(1) }
             val omitted = lines.lastOrNull { recalledMemory.matchEntire(it) == null && !it.startsWith("No memories match") }
 
             MyceliumCall.Recall(query, memories, omitted)
