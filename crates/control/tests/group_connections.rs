@@ -208,3 +208,101 @@ async fn sending_and_connecting_groups_sends_once_and_connects_the_groups() {
     propose(&fleet.server, &fleet.link, fleet.immich_chat, fleet.yucca_chat).await;
     assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 1);
 }
+
+fn text(result: &Value) -> String {
+    result["content"][0]["text"].as_str().unwrap().to_string()
+}
+
+async fn project_in(fleet: &Fleet, name: &str, group: Option<Uuid>) -> Uuid {
+    sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path, group_id) values ((select owner from conversations where id = $1), $2, $3, $4, $5) returning id")
+        .bind(fleet.yucca_chat)
+        .bind(fleet.link.id)
+        .bind(name)
+        .bind(format!("/work/{name}"))
+        .bind(group)
+        .fetch_one(&fleet.server.pool)
+        .await
+        .unwrap()
+}
+
+fn start_arguments(group: &str, project: &str) -> Value {
+    json!({"group": group, "project": project, "title": "Billing follow-up", "prompt": "Please add the export column", "reason": "The release needs it"})
+}
+
+#[tokio::test]
+async fn start_conversation_is_not_listed_until_the_experiment_is_on() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let listed = |tools: Value| tools["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "start_conversation");
+    let list = |server: &Server| {
+        let anonymous = server.anonymous();
+        let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+        async move { anonymous.json(request).await.1 }
+    };
+
+    assert!(!listed(list(&server).await));
+
+    turn_on(&server).await;
+    assert!(listed(list(&server).await));
+}
+
+#[tokio::test]
+async fn starting_a_conversation_in_a_connected_groups_project_queues_the_prompt_from_the_caller() {
+    let mut fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+
+    let started = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("immich", "billing")).await;
+
+    assert_eq!(started["isError"], false, "{started}");
+    assert!(text(&started).starts_with("Started Billing follow-up ("), "{started}");
+    assert!(text(&started).contains(") in Immich on laptop."), "{started}");
+    let new_chat: Uuid = text(&started).split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap();
+    fleet.link.expect_start_session().await;
+    fleet.link.start_session(new_chat, "acp-new").await;
+    let (_, prompt) = fleet.link.expect_prompt().await;
+    assert_eq!(prompt, "From Plan the release:\n\nPlease add the export column");
+}
+
+#[tokio::test]
+async fn starting_in_an_unconnected_group_starts_nothing_and_says_how_to_connect() {
+    let fleet = fleet().await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "billing")).await;
+
+    assert_eq!(refused["isError"], true);
+    assert_eq!(text(&refused), "Nothing was started. The yucca and Immich groups are not connected. Ask the person to connect them in Settings, Agent connections.");
+    let (_, conversations) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversations")).await;
+    assert_eq!(conversations.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn starting_in_a_project_outside_the_named_group_is_refused() {
+    let fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "ungrouped", None).await;
+
+    let refused = call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "ungrouped")).await;
+
+    assert_eq!(refused["isError"], true);
+    assert_eq!(text(&refused), "Nothing was started. The project ungrouped is not in the Immich group.");
+}
+
+#[tokio::test]
+async fn a_started_conversation_can_reply_to_its_starter_without_approval() {
+    let mut fleet = fleet().await;
+    connect(&fleet.server, fleet.yucca, fleet.immich).await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+    let started = text(&call(&fleet.server, &fleet.link, fleet.yucca_chat, "start_conversation", start_arguments("Immich", "billing")).await);
+    let new_chat: Uuid = started.split('(').nth(1).unwrap().split(')').next().unwrap().parse().unwrap();
+    fleet.link.expect_start_session().await;
+
+    let (_, connections) = fleet.server.user.json(fleet.server.user.get("/api/v1/conversation-connections")).await;
+    assert_eq!(connections.as_array().unwrap().len(), 1);
+
+    let replied = call(&fleet.server, &fleet.link, new_chat, "send_to_conversation", json!({"conversation": fleet.yucca_chat.to_string(), "message": "Column added", "reason": "You asked for it"})).await;
+
+    assert!(text(&replied).starts_with("Sent to Plan the release"), "{replied}");
+    assert_eq!(queue(&fleet.server, fleet.yucca_chat).await.len(), 1);
+}
