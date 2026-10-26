@@ -649,7 +649,7 @@ data class StartChatToolServerOAuthRequest(val name: String, val url: String, va
 data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
 
 @Serializable
-data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null)
+data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null, @SerialName("bearer_token") val bearerToken: String? = null)
 
 @Serializable
 data class CreateChatRequest(

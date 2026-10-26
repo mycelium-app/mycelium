@@ -38,7 +38,7 @@ private val ForgeDefaultHosts = mapOf("github" to "https://github.com", "gitlab"
 
 private fun forgeName(forge: Forge): String = if (forge.kind == "gitlab") "GitLab" else "GitHub"
 
-private fun mcpAddress(forge: Forge): String = if (forge.kind == "gitlab") "${forge.baseUrl.trimEnd('/')}/api/v4/mcp" else "https://api.githubcopilot.com/mcp/"
+internal fun mcpAddress(forge: Forge): String = if (forge.kind == "gitlab") "${forge.baseUrl.trimEnd('/')}/api/v4/mcp" else "https://api.githubcopilot.com/mcp/"
 
 private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind == "gitlab" || baseUrl.isBlank() || baseUrl.trim().trimEnd('/') == "https://github.com"
 

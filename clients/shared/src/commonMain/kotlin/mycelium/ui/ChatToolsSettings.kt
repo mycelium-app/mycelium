@@ -1,11 +1,9 @@
 package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +25,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import mycelium.api.ApiException
+import mycelium.api.Forge
 import mycelium.api.ChatToolServer
 import mycelium.api.CreateChatToolServerRequest
 import mycelium.api.PatchChatToolServerRequest
@@ -47,12 +46,26 @@ private const val StartTls = "STARTTLS"
 private const val UserSession = "User session"
 private const val Bot = "Bot"
 
-private fun serverType(server: ChatToolServer): String = when {
-    server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> OutlineType
-    server.kind == "mcp" -> McpType
-    server.kind == "litellm" -> LiteLlmType
-    server.kind == "lastfm" -> LastFmType
-    else -> "Built-in"
+private sealed interface IntegrationsView {
+    data object Home : IntegrationsView
+
+    data object Catalogue : IntegrationsView
+
+    data class Setup(val kind: String, val returnTo: IntegrationsView) : IntegrationsView
+
+    data class Page(val key: String) : IntegrationsView
+
+    data class Activity(val key: String?) : IntegrationsView
+}
+
+private fun formKind(entry: CatalogueEntry): String = when (entry.kind) {
+    "email" -> EmailType
+    "zulip" -> ZulipType
+    "stoat" -> StoatType
+    "outline" -> OutlineType
+    "lastfm" -> LastFmType
+    "litellm" -> LiteLlmType
+    else -> McpType
 }
 
 @Composable
@@ -60,7 +73,8 @@ fun ChatToolsSettings(store: Store) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
     var servers by remember { mutableStateOf<List<ChatToolServer>>(emptyList()) }
-    var adding by remember { mutableStateOf(false) }
+    var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
+    var view by remember { mutableStateOf<IntegrationsView>(IntegrationsView.Home) }
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
@@ -76,21 +90,15 @@ fun ChatToolsSettings(store: Store) {
     var tokenType by remember { mutableStateOf(UserSession) }
     var apiKey by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
-    var renaming by remember { mutableStateOf<ChatToolServer?>(null) }
-    var renamed by remember { mutableStateOf("") }
-    var renameFailure by remember { mutableStateOf<String?>(null) }
-    var approving by remember { mutableStateOf<ChatToolServer?>(null) }
+    var removing by remember { mutableStateOf<Integration?>(null) }
 
     val live by store.state.collectAsState()
     val platform = LocalPlatform.current
+    val openConversation = LocalOpenConversation.current
     var signingIn by remember { mutableStateOf(false) }
 
-    fun replace(updated: ChatToolServer) {
-        servers = servers.map { if (it.id == updated.id) updated else it }
-    }
-
     fun resetForm() {
-        adding = false
+        (view as? IntegrationsView.Setup)?.let { view = it.returnTo }
         name = ""
         url = ""
         token = ""
@@ -109,11 +117,18 @@ fun ChatToolsSettings(store: Store) {
     }
 
     LaunchedEffect(live.integrationsRevision) {
-        store.act { servers = store.api.chatToolServers() }
+        val known = servers.map { it.id }.toSet()
 
-        if (signingIn) {
-            resetForm()
+        store.act {
+            servers = store.api.chatToolServers()
+
+            if (signingIn) {
+                resetForm()
+                integrationsOf(servers).firstOrNull { integration -> integration.accounts.any { it.id !in known } }?.let { view = IntegrationsView.Page(it.key) }
+            }
         }
+
+        store.act { forges = store.api.forges() }
     }
 
     fun emailSettings(): JsonObject? {
@@ -147,21 +162,33 @@ fun ChatToolsSettings(store: Store) {
         return JsonObject(fields)
     }
 
+    fun named(fallback: String): String {
+        val typed = name.trim()
+        val addingAccount = (view as? IntegrationsView.Setup)?.returnTo is IntegrationsView.Page
+
+        return when {
+            typed.isNotEmpty() -> typed
+            addingAccount -> "$fallback ${account.trim().ifEmpty { url.trim().removePrefix("https://").trimEnd('/') }}".trim()
+            else -> fallback
+        }
+    }
+
     fun add() {
         scope.launch {
             try {
                 val request = when (kind) {
-                    LiteLlmType -> CreateChatToolServerRequest(name.trim().ifEmpty { LiteLlmType }, url.trim(), token.trim().ifEmpty { null }, kind = "litellm")
-                    OutlineType -> CreateChatToolServerRequest(name.trim().ifEmpty { OutlineType }, url.trim(), token.trim().ifEmpty { null }, kind = "outline")
-                    ZulipType -> CreateChatToolServerRequest(name.trim().ifEmpty { ZulipType }, url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
-                    EmailType -> CreateChatToolServerRequest(name.trim().ifEmpty { EmailType }, "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
-                    StoatType -> CreateChatToolServerRequest(name.trim().ifEmpty { StoatType }, url.trim().ifEmpty { StoatAddress }, token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
-                    LastFmType -> CreateChatToolServerRequest(name.trim().ifEmpty { LastFmType }, "", token.trim().ifEmpty { null }, kind = "lastfm", account = account.trim().ifEmpty { null }, settings = JsonObject(mapOf("api_key" to JsonPrimitive(apiKey.trim()))))
+                    LiteLlmType -> CreateChatToolServerRequest(named(LiteLlmType), url.trim(), token.trim().ifEmpty { null }, kind = "litellm")
+                    OutlineType -> CreateChatToolServerRequest(named(OutlineType), url.trim(), token.trim().ifEmpty { null }, kind = "outline")
+                    ZulipType -> CreateChatToolServerRequest(named(ZulipType), url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
+                    EmailType -> CreateChatToolServerRequest(named(EmailType), "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
+                    StoatType -> CreateChatToolServerRequest(named(StoatType), url.trim().ifEmpty { StoatAddress }, token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
+                    LastFmType -> CreateChatToolServerRequest(named(LastFmType), "", token.trim().ifEmpty { null }, kind = "lastfm", account = account.trim().ifEmpty { null }, settings = JsonObject(mapOf("api_key" to JsonPrimitive(apiKey.trim()))))
                     else -> CreateChatToolServerRequest(name.trim(), url.trim(), token.trim().ifEmpty { null })
                 }
                 val added = store.api.createChatToolServer(request)
                 servers = servers.filter { it.id != added.id } + added
                 resetForm()
+                view = IntegrationsView.Page(integrationsOf(servers).first { integration -> integration.accounts.any { it.id == added.id } }.key)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (problem: ApiException) {
@@ -175,7 +202,7 @@ fun ChatToolsSettings(store: Store) {
     fun signIn() {
         scope.launch {
             try {
-                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(name.trim().ifEmpty { if (kind == OutlineType) OutlineType else "MCP server" }, url.trim(), if (kind == OutlineType) "outline" else null))
+                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(named(if (kind == OutlineType) OutlineType else "MCP server"), url.trim(), if (kind == OutlineType) "outline" else null))
                 platform?.openUrl(started.authorizeUrl)
                 signingIn = true
                 failure = null
@@ -196,36 +223,105 @@ fun ChatToolsSettings(store: Store) {
         }
     }
 
-    fun rename(target: ChatToolServer) {
-        scope.launch {
-            try {
-                replace(store.api.patchChatToolServer(target.id, PatchChatToolServerRequest(name = renamed.trim())))
-                renaming = null
-                renameFailure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                renameFailure = problem.message
-            } catch (_: Exception) {
-                renameFailure = "Could not reach the control plane. Check your connection and try again."
+    fun reauthenticate(target: ChatToolServer) {
+        if (target.kind == "lastfm") {
+            signInToLastFm(target)
+        } else if (target.oauth) {
+            store.act {
+                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(target.name, target.url, if (target.settings?.get("app")?.jsonPrimitive?.content == "outline") "outline" else null, forgeId = target.forgeId))
+                platform?.openUrl(started.authorizeUrl)
             }
         }
     }
 
+    fun addForgeServer(forge: Forge) {
+        store.act {
+            val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(forgeProduct(forge), mcpAddress(forge), forgeId = forge.id))
+            platform?.openUrl(started.authorizeUrl)
+        }
+    }
+
+    fun replace(updated: ChatToolServer) {
+        servers = servers.map { if (it.id == updated.id) updated else it }
+    }
+
+    val integrations = integrationsOf(servers)
+    val current = view
+
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Label("Integrations", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
-                MyButton({ adding = true }, text = "Add integration", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        when (current) {
+            IntegrationsView.Home -> IntegrationsHome(
+                servers,
+                IntegrationActions(
+                    { view = IntegrationsView.Page(it.key) },
+                    { integration ->
+                        val only = integration.accounts.singleOrNull()
+
+                        if (only != null && (only.oauth || only.kind == "lastfm")) {
+                            reauthenticate(only)
+                        } else {
+                            view = IntegrationsView.Page(integration.key)
+                        }
+                    },
+                    { integration ->
+                        val enable = integration.group == IntegrationGroup.Disabled
+
+                        for (account in integration.accounts) {
+                            store.act { replace(store.api.patchChatToolServer(account.id, PatchChatToolServerRequest(enabled = enable))) }
+                        }
+                    },
+                    { removing = it },
+                ),
+                { view = IntegrationsView.Catalogue },
+                { view = IntegrationsView.Activity(null) },
+            )
+
+            IntegrationsView.Catalogue -> IntegrationsCatalogue(
+                integrations,
+                forges,
+                { view = IntegrationsView.Home },
+                { entry ->
+                    kind = formKind(entry)
+                    failure = null
+                    view = IntegrationsView.Setup(kind, IntegrationsView.Catalogue)
+                },
+                { view = IntegrationsView.Page(it.key) },
+                ::addForgeServer,
+            )
+
+            is IntegrationsView.Page -> {
+                val integration = integrations.find { it.key == current.key }
+
+                if (integration == null) {
+                    view = IntegrationsView.Home
+                } else {
+                    IntegrationPage(
+                        store,
+                        integration,
+                        PageActions(
+                            { view = IntegrationsView.Home },
+                            {
+                                kind = formKind(entryFor(integration) ?: AnyMcpEntry)
+                                failure = null
+                                view = IntegrationsView.Setup(kind, current)
+                            },
+                            ::replace,
+                            { removed -> servers = servers.filter { it.id != removed.id } },
+                            ::reauthenticate,
+                            { view = IntegrationsView.Activity(it.key) },
+                        ),
+                        { openConversation?.invoke(it) },
+                    )
+                }
             }
 
-            Label("Connect services to agents and chats. Chats ask before calling tools unless you always allow an integration.", style = Tokens.Type.Meta, color = colors.textMuted)
+            is IntegrationsView.Activity -> IntegrationsActivity(store, integrations, integrations.find { it.key == current.key }, { view = IntegrationsView.Home }, { openConversation?.invoke(it) })
 
-            if (adding) {
+            is IntegrationsView.Setup -> {
+                BackButton(if (current.returnTo is IntegrationsView.Page) "the integration" else "Add integration", ::resetForm, showText = true)
+
                 Column(Modifier.widthIn(max = Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    Label("Add an integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                    Segmented(listOf(McpType, LiteLlmType, OutlineType, ZulipType, EmailType, StoatType, LastFmType), kind, { kind = it; failure = null }, "Integration type")
-
+                    Label(if (current.returnTo is IntegrationsView.Page) "Add an account" else "Add an integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                     if (kind == LiteLlmType) {
                         Label("Chats and agents can use the MCP servers your LiteLLM proxy exposes to this key. Enter the proxy's address, or its /mcp/ address for an access group.", style = Tokens.Type.Meta, color = colors.textMuted)
                         TextInput(name, { name = it }, label = "Name", placeholder = "LiteLLM")
@@ -294,115 +390,18 @@ fun ChatToolsSettings(store: Store) {
                     }
                 }
             }
+        }
+    }
 
-            ContentTable(listOf(ColumnSpec(max = 360.dp, flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 240.dp), ColumnSpec(max = 64.dp))) {
-                ContentRow(header = true) {
-                    Label("Integration", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Type", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Tools", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Access", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
+    removing?.let { target ->
+        ConfirmDialog("Remove ${target.name}?", "Removes ${target.name}, its ${if (target.accounts.size == 1) "account" else "${target.accounts.size} accounts"} and their credentials.", "Remove", { removing = null }) {
+            removing = null
+            store.act {
+                for (account in target.accounts) {
+                    store.api.deleteChatToolServer(account.id)
                 }
 
-                Hairline()
-
-                for (server in servers) {
-                    ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
-                        Column {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                IntegrationLogo(server)
-                                Label(server.name, maxLines = 1)
-                            }
-
-                            if (server.url.isNotBlank()) {
-                                Label(server.url, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                            }
-
-                            server.account?.let { Label(it, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
-                            Label(if (server.oauth) "Signed in with OAuth" else server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-
-                            expiryNote(server)?.let { note ->
-                                Label(note, style = Tokens.Type.Meta, color = if (server.status == "connected") colors.textMuted else colors.statusFailed)
-                            }
-
-                            if (server.kind == "lastfm") {
-                                Label(if (server.signedIn) "Signed in to Last.fm" else "Not signed in: needed to love tracks and scrobble", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-                            }
-                        }
-
-                        Label(serverType(server), color = colors.textMuted, maxLines = 1)
-                        Label(if (server.tools.isEmpty()) "No tools found" else "${server.tools.size} tools", color = colors.textMuted, maxLines = 1)
-
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(server.enabled, "Use ${server.name}", { store.act { replace(store.api.patchChatToolServer(server.id, PatchChatToolServerRequest(enabled = !server.enabled))) } }, checkedState = "On", uncheckedState = "Off")
-                                Label("Enabled", maxLines = 1)
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(server.alwaysAllow, "Always allow tools from ${server.name}", { store.act { replace(store.api.patchChatToolServer(server.id, PatchChatToolServerRequest(alwaysAllow = !server.alwaysAllow))) } }, checkedState = "On", uncheckedState = "Off")
-                                Label("Always allow in chats", maxLines = 1)
-                            }
-                        }
-
-                        RowMenu(server.name) { close ->
-                            if (server.kind == "mcp" || server.kind == "litellm") {
-                                MenuItem("Refresh tools", onClick = {
-                                    close()
-                                    store.act { replace(store.api.refreshChatToolServer(server.id)) }
-                                })
-                            }
-
-                            if (server.kind == "lastfm") {
-                                if (server.signedIn) {
-                                    MenuItem("Sign out of Last.fm", onClick = {
-                                        close()
-                                        store.act {
-                                            store.api.signOutOfLastFm(server.id)
-                                            replace(server.copy(signedIn = false))
-                                        }
-                                    })
-                                } else {
-                                    MenuItem("Sign in to Last.fm", onClick = {
-                                        close()
-                                        signInToLastFm(server)
-                                    })
-                                }
-                            }
-
-                            MenuItem("Approvals", onClick = {
-                                close()
-                                approving = server
-                            })
-                            MenuItem("Rename", onClick = {
-                                close()
-                                renamed = server.name
-                                renameFailure = null
-                                renaming = server
-                            })
-                            MenuItem("Remove integration", onClick = {
-                                close()
-                                store.act {
-                                    store.api.deleteChatToolServer(server.id)
-                                    servers = servers.filter { it.id != server.id }
-                                }
-                            })
-                        }
-                    }
-
-                    Hairline()
-                }
-            }
-
-            approving?.let { target ->
-                IntegrationPolicyDialog(target, { policy ->
-                    approving = null
-                    store.act { replace(store.api.patchChatToolServer(target.id, PatchChatToolServerRequest(policy = policy))) }
-                }, { approving = null })
-            }
-
-            renaming?.let { target ->
-                RenameDialog("Rename integration", "Integration name", renamed, { renamed = it }, { rename(target) }, { renaming = null }, renameFailure, { renameFailure = null })
+                servers = servers.filter { server -> target.accounts.none { it.id == server.id } }
             }
         }
     }
