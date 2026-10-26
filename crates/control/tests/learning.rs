@@ -149,7 +149,7 @@ async fn a_check_answer_says_correct_or_not_quite() {
     assert_eq!((right["correct"].clone(), right["explanation"].clone()), (json!(true), json!("Step 2 reads it from strings.")));
 
     let (_, recorded) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{walkthrough_id}/answers"))).await;
-    assert_eq!(recorded, json!([{"step": 2, "choice": 1, "correct": true, "explanation": ""}]));
+    assert_eq!(recorded, json!([{"step": 2, "choice": 1, "correct": true, "explanation": "Step 2 reads it from strings."}]));
 }
 
 #[tokio::test]

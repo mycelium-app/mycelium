@@ -259,8 +259,10 @@ pub async fn answers(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     find_owned_walkthrough(&state, id, user.id).await?;
 
     let rows = sqlx::query_as::<_, (i32, i32, bool)>("select step, choice, correct from walkthrough_answers where walkthrough_id = $1 and owner = $2 order by step").bind(id).bind(user.id).fetch_all(&state.pool).await?;
+    let checks = sqlx::query_scalar::<_, Option<Value>>("select checks from walkthroughs where id = $1").bind(id).fetch_one(&state.pool).await?.and_then(|checks| checks.as_array().cloned()).unwrap_or_default();
+    let explanation = |step: i32| checks.iter().find(|check| check.get("step").and_then(Value::as_i64) == Some(i64::from(step))).map(|check| text_of(check, "explanation")).unwrap_or_default();
 
-    Ok(Json(rows.into_iter().map(|(step, choice, correct)| WalkthroughAnswer { step, choice, correct, explanation: String::new() }).collect()))
+    Ok(Json(rows.into_iter().map(|(step, choice, correct)| WalkthroughAnswer { step, choice, correct, explanation: explanation(step) }).collect()))
 }
 
 pub async fn answer(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>, Json(request): Json<WalkthroughAnswerRequest>) -> ApiResult<Json<WalkthroughAnswer>> {
