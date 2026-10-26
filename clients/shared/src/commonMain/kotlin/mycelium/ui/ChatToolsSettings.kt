@@ -79,6 +79,7 @@ fun ChatToolsSettings(store: Store) {
     var renaming by remember { mutableStateOf<ChatToolServer?>(null) }
     var renamed by remember { mutableStateOf("") }
     var renameFailure by remember { mutableStateOf<String?>(null) }
+    var approving by remember { mutableStateOf<ChatToolServer?>(null) }
 
     val live by store.state.collectAsState()
     val platform = LocalPlatform.current
@@ -320,6 +321,10 @@ fun ChatToolsSettings(store: Store) {
                             server.account?.let { Label(it, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                             Label(if (server.oauth) "Signed in with OAuth" else server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
 
+                            expiryNote(server)?.let { note ->
+                                Label(note, style = Tokens.Type.Meta, color = if (server.status == "connected") colors.textMuted else colors.statusFailed)
+                            }
+
                             if (server.kind == "lastfm") {
                                 Label(if (server.signedIn) "Signed in to Last.fm" else "Not signed in: needed to love tracks and scrobble", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                             }
@@ -365,6 +370,10 @@ fun ChatToolsSettings(store: Store) {
                                 }
                             }
 
+                            MenuItem("Approvals", onClick = {
+                                close()
+                                approving = server
+                            })
                             MenuItem("Rename", onClick = {
                                 close()
                                 renamed = server.name
@@ -383,6 +392,13 @@ fun ChatToolsSettings(store: Store) {
 
                     Hairline()
                 }
+            }
+
+            approving?.let { target ->
+                IntegrationPolicyDialog(target, { policy ->
+                    approving = null
+                    store.act { replace(store.api.patchChatToolServer(target.id, PatchChatToolServerRequest(policy = policy))) }
+                }, { approving = null })
             }
 
             renaming?.let { target ->

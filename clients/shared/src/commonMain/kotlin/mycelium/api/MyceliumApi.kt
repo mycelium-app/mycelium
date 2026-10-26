@@ -292,6 +292,12 @@ class MyceliumApi(
     suspend fun refreshChatToolServer(id: String): ChatToolServer =
         call("/chat-tool-servers/$id/refresh") { client.post(it) { authorise() } }.body()
 
+    suspend fun setChatToolServerGroups(id: String, groups: List<String>): ChatToolServer =
+        call("/chat-tool-servers/$id/groups") { client.put(it) { authorise(); json(SetIntegrationGroupsRequest(groups)) } }.body()
+
+    suspend fun integrationCalls(server: String? = null, before: String? = null): List<IntegrationCall> =
+        call("/integration-calls") { client.get(it) { authorise(); server?.let { value -> parameter("server", value) }; before?.let { value -> parameter("before", value) } } }.body()
+
     suspend fun deleteChatToolServer(id: String) {
         call("/chat-tool-servers/$id") { client.delete(it) { authorise() } }
     }

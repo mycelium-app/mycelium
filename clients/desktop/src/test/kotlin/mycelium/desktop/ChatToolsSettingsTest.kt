@@ -405,6 +405,41 @@ class ChatToolsSettingsTest {
     }
 
     @Test
+    fun anExpiringTokenShowsItsDateAndAnExpiredOneSaysToReplaceIt() {
+        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"status\":\"expires_soon\",\"token_expires_at\":\"2027-01-24T00:00:00Z\"")
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Expires 24 Jan 2027. Replace the token before then.").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun anExpiredTokenIsShownAsExpired() {
+        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"status\":\"expired\",\"token_expires_at\":\"2026-10-01T00:00:00Z\"")
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Expired 1 Oct 2026. Replace the token to reconnect.").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theApprovalsEditorShowsWhereEachToolInheritsFromAndSavesTheOverrides() {
+        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"policy\":{\"ask\":{\"all\":false}}")
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for Lab").performClick()
+        rule.onNodeWithText("Approvals").performClick()
+
+        rule.onAllNodesWithText("Inherited from the integration default: no").assertCountEquals(4)
+        rule.onNodeWithText("Save approvals").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
+        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"policy\""), bodies.last())
+    }
+
+    @Test
     fun lastFmNeedsAKeyASecretAndAUsernameAndSendsThemWithoutAnAddress() {
         postAnswer = HttpStatusCode.Created to LastFmJson
         val store = store()
@@ -420,6 +455,7 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { bodies.any { it.contains("secret-5678") } }
         assertEquals("""{"name":"Last.fm","url":"","bearer_token":"secret-5678","kind":"lastfm","account":"ada","settings":{"api_key":"key-1"}}""", bodies.last { it.isNotEmpty() })
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
         rule.onAllNodesWithText("secret-5678").assertCountEquals(0)
     }
 

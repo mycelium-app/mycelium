@@ -581,7 +581,37 @@ data class UpdateModelProviderRequest(val name: String? = null, @SerialName("mod
 data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
 
 @Serializable
-data class ChatToolInfo(val name: String, val description: String = "")
+data class ChatToolInfo(val name: String, val description: String = "", val kind: String = "write", val asks: Boolean = false)
+
+@Serializable
+data class PolicyLevel(
+    val all: Boolean? = null,
+    val read: Boolean? = null,
+    val write: Boolean? = null,
+    val tools: Map<String, Boolean> = emptyMap(),
+)
+
+@Serializable
+data class IntegrationPolicy(val ask: PolicyLevel = PolicyLevel(), val review: PolicyLevel = PolicyLevel())
+
+@Serializable
+data class IntegrationCall(
+    val id: String,
+    @SerialName("server_id") val serverId: String? = null,
+    @SerialName("server_name") val serverName: String,
+    val tool: String,
+    val kind: String = "write",
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val surface: String,
+    val provider: String? = null,
+    val decision: String,
+    val review: String? = null,
+    @SerialName("is_error") val isError: Boolean = false,
+    val at: String,
+)
+
+@Serializable
+data class SetIntegrationGroupsRequest(val groups: List<String>)
 
 @Serializable
 data class ChatToolServer(
@@ -599,6 +629,13 @@ data class ChatToolServer(
     @SerialName("created_at") val createdAt: String,
     @SerialName("signed_in") val signedIn: Boolean = false,
     @SerialName("forge_id") val forgeId: String? = null,
+    val status: String = "connected",
+    @SerialName("token_expires_at") val tokenExpiresAt: String? = null,
+    @SerialName("last_used_at") val lastUsedAt: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+    val policy: IntegrationPolicy = IntegrationPolicy(),
+    val locked: Boolean = false,
+    val groups: List<String> = emptyList(),
 )
 
 @Serializable
@@ -611,7 +648,7 @@ data class StartChatToolServerOAuthRequest(val name: String, val url: String, va
 data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
 
 @Serializable
-data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null)
+data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null)
 
 @Serializable
 data class CreateChatRequest(
