@@ -1,3 +1,4 @@
+use crate::continuation;
 use crate::attachments;
 use crate::auth::AuthUser;
 use crate::activity::record_turn;
@@ -214,8 +215,16 @@ async fn chat_content(state: &AppState, text: String, attachments: Vec<Attachmen
 }
 
 async fn history(state: &AppState, id: Uuid) -> ApiResult<Vec<ChatMessage>> {
-    let rows = sqlx::query_as::<_, (String, sqlx::types::Json<Value>)>("select kind, payload from events where conversation_id = $1 and kind in ('user_message', 'acp_update', 'turn_end') order by seq").bind(id).fetch_all(&state.pool).await?;
+    let marker = continuation::last_handoff_marker(state, id).await?;
+    let rows = sqlx::query_as::<_, (String, sqlx::types::Json<Value>)>("select kind, payload from events where conversation_id = $1 and seq > $2 and kind in ('user_message', 'acp_update', 'turn_end') order by seq").bind(id).bind(marker.unwrap_or(0)).fetch_all(&state.pool).await?;
     let mut messages: Vec<ChatMessage> = Vec::new();
+
+    if let Some(marker) = marker {
+        let content = continuation::handoff(state, id, marker).await?;
+
+        messages.push(ChatMessage { role: "user", content, ..ChatMessage::default() });
+    }
+
     let mut said = String::new();
     let mut calls: Vec<ToolCall> = Vec::new();
     let mut results: Vec<ToolResult> = Vec::new();

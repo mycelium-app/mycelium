@@ -1,10 +1,53 @@
 mod common;
 
-use common::{NodeLink, Server};
+use axum::Json;
+use axum::Router;
+use axum::body::{Body, Bytes};
+use axum::extract::State;
+use axum::response::Response;
+use axum::routing::{get, post};
+use common::{NodeLink, Server, serve};
+use futures_util::stream;
 use mycelium_proto::conversation::{AgentId, LoginInfo, LoginState};
 use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
+use std::convert::Infallible;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+type Requests = Arc<Mutex<Vec<Value>>>;
+
+fn fake_openai() -> (Router, Requests) {
+    async fn models() -> Json<Value> {
+        Json(json!({"object": "list", "data": [{"id": "llama3.2"}]}))
+    }
+
+    async fn completions(State(requests): State<Requests>, Json(request): Json<Value>) -> Response {
+        requests.lock().unwrap().push(request);
+
+        let chunk = |content: &str| format!("data: {}\n\n", json!({"choices": [{"delta": {"content": content}}]}));
+        let lines = vec![chunk("Hello"), chunk(" there"), "data: [DONE]\n\n".to_string()];
+        let body = stream::iter(lines.into_iter().map(|line| Ok::<Bytes, Infallible>(Bytes::from(line))));
+
+        Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(body)).unwrap()
+    }
+
+    let requests = Requests::default();
+    let router = Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions)).with_state(requests.clone());
+
+    (router, requests)
+}
+
+async fn add_provider(server: &Server, base: &str) -> Value {
+    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "Ollama", "base_url": format!("{base}/v1")}))).await;
+    assert_eq!(status, 201, "{provider}");
+
+    provider
+}
+
+async fn finished_turns(server: &Server, id: Uuid, turns: usize) {
+    common::eventually("the reply to end", || async { (server.events(id).await.iter().filter(|event| event["kind"] == "turn_end").count() == turns).then_some(()) }).await;
+}
 
 fn login(account: &str, state: LoginState) -> LoginInfo {
     LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
@@ -170,4 +213,94 @@ async fn continuing_on_an_outdated_node_asks_for_an_update() {
 
     assert_eq!((status, body["error"].as_str()), (409, Some("node_outdated")));
     assert_eq!(body["message"], "Update laptop to continue on another account.");
+}
+
+#[tokio::test]
+async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    let touched = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Edit", "locations": [{"path": "/work/app/src/lib.rs"}]}});
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 10, update: touched }).await;
+    link.barrier(id, 11).await;
+
+    let (status, body) = continue_on(&server, id, json!({"agent": "codex"})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((body["agent"].clone(), body["acp_session_id"].clone()), (json!("codex"), Value::Null));
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Carry on"}))).await;
+    match next_command(&mut link).await {
+        ControlToNode::CloseSession { .. } => {}
+        other => panic!("expected close_session, got {other:?}"),
+    }
+    match next_command(&mut link).await {
+        ControlToNode::StartSession { agent, resume, .. } => assert_eq!((agent, resume), (AgentId::Codex, None)),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+
+    link.start_session(id, "codex-1").await;
+    let first = expect_prompt(&mut link).await;
+    assert!(first.starts_with("This conversation continues from Claude Code (sam@example.com)."), "{first}");
+    assert!(first.contains("Fix the flaky test") && first.contains("/work/app/src/lib.rs"), "{first}");
+    assert!(first.ends_with("Carry on"), "{first}");
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 20, stop_reason: "end_turn".into(), usage: None }).await;
+    let user = server.user.clone();
+    common::eventually("the second turn to end", || async { (user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["status"] == "review").then_some(()) }).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Again"}))).await;
+
+    assert_eq!(expect_prompt(&mut link).await, "Again");
+
+    let events = server.events(id).await;
+    let typed: Vec<&str> = events.iter().filter(|event| event["kind"] == "user_message").map(|event| event["payload"]["text"].as_str().unwrap()).collect();
+    assert_eq!(typed, vec!["Fix the flaky test", "Carry on", "Again"]);
+}
+
+#[tokio::test]
+async fn the_previous_session_is_not_offered_for_import_after_a_harness_switch() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    continue_on(&server, id, json!({"agent": "codex"})).await;
+    sqlx::query("insert into transcripts (node_id, path, bytes) values ($1, '.claude/projects/-work-app/acp-1.jsonl', 10)").bind(link.id).execute(&server.pool).await.unwrap();
+
+    let (_, statuses) = server.user.json(server.user.get("/api/v1/imports")).await;
+    let claude = statuses.as_array().unwrap().iter().find(|row| row["node_id"] == json!(link.id) && row["agent"] == "claude").unwrap();
+
+    assert_eq!((claude["found"].clone(), claude["imported"].clone()), (json!(1), json!(1)));
+}
+
+#[tokio::test]
+async fn continuing_on_a_chat_model_sends_the_handoff_then_only_new_turns_and_can_return_to_the_harness() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let (router, requests) = fake_openai();
+    let base = serve(router).await;
+    let provider = add_provider(&server, &base).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+
+    let (status, body) = continue_on(&server, id, json!({"agent": "chat", "provider_id": provider["id"]})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((body["agent"].clone(), body["model"].clone()), (json!("chat"), json!("llama3.2")));
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "More"}))).await;
+    finished_turns(&server, id, 2).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Again"}))).await;
+    finished_turns(&server, id, 3).await;
+
+    let sent = requests.lock().unwrap().clone();
+    let said = |request: &Value| request["messages"].as_array().unwrap().iter().filter(|message| message["role"] != "system").cloned().collect::<Vec<_>>();
+    let first = said(&sent[0]);
+    let content = first[0]["content"].as_str().unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(content.starts_with("This conversation continues from Claude Code (sam@example.com)."), "{content}");
+    assert!(content.contains("Fix the flaky test") && content.ends_with("More"), "{content}");
+    assert_eq!(said(&sent[1]).len(), 3);
+
+    let (status, back) = continue_on(&server, id, json!({"agent": "claude"})).await;
+    assert_eq!(status, 200, "{back}");
+    assert_eq!((back["node_id"].clone(), back["cwd"].clone(), back["agent"].clone()), (json!(link.id), json!("/work/app"), json!("claude")));
 }

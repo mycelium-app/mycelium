@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::chats;
+use crate::continuation;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions;
 use crate::model_providers;
@@ -21,8 +22,6 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 const TITLE_LIMIT: usize = 60;
-const SUMMARY_MESSAGES: i64 = 8;
-const SUMMARY_MESSAGE_LIMIT: usize = 1500;
 
 fn forks_natively(parent: &ConversationRow) -> bool {
     parent.agent == enum_text(&AgentId::Claude) && parent.acp_session_id.is_some()
@@ -226,20 +225,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
     }
 
     let summary = if request.kind == SideKind::Fork && !forks_natively(&parent) {
-        let said = sqlx::query_as::<_, (String, String)>(
-            "select * from (
-                select e.kind, s.text, s.seq from search_entries s join events e on e.conversation_id = s.conversation_id and e.seq = s.seq
-                where s.conversation_id = $1 order by s.seq desc limit $2
-             ) recent order by seq",
-        )
-        .bind(id)
-        .bind(SUMMARY_MESSAGES)
-        .fetch_all(&state.pool)
-        .await?;
-        let lines: Vec<String> = said
-            .into_iter()
-            .map(|(kind, text)| format!("{}: {}", if kind == "user_message" { "User" } else { "Agent" }, text.chars().take(SUMMARY_MESSAGE_LIMIT).collect::<String>()))
-            .collect();
+        let lines = continuation::recent_turns(&state, id, i64::MAX, continuation::SUMMARY_MESSAGES).await?;
 
         Some(format!("Continuing from: {}\n\nThis conversation continues an earlier one. This is what was said most recently:\n\n{}\n\nContinue from here.", parent.title, lines.join("\n\n")))
     } else {

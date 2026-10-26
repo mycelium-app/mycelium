@@ -450,8 +450,9 @@ async fn importable_paths(state: &AppState, node_id: Uuid, agent: AgentId) -> Ap
         .bind(node_id)
         .fetch_all(&state.pool)
         .await?;
+    let previous_sessions = sqlx::query_scalar::<_, String>("select unnest(previous_session_ids) from conversations where node_id = $1").bind(node_id).fetch_all(&state.pool).await?;
     let imported_paths: HashSet<&str> = known.iter().filter_map(|(path, _)| path.as_deref()).collect();
-    let session_ids: HashSet<&str> = known.iter().filter_map(|(_, session)| session.as_deref()).collect();
+    let session_ids: HashSet<&str> = known.iter().filter_map(|(_, session)| session.as_deref()).chain(previous_sessions.iter().map(String::as_str)).collect();
     let (subagents, sessions): (Vec<String>, Vec<String>) = paths.into_iter().filter(|path| !path.contains("/subagents/") || subagent_session(path).is_some()).partition(|path| subagent_session(path).is_some());
     let parent_sessions: HashSet<String> = sessions.iter().map(|path| session_id_of_path(agent, path)).chain(session_ids.iter().map(|session| session.to_string())).collect();
     let subagents: Vec<String> = subagents.into_iter().filter(|path| subagent_session(path).is_some_and(|session| parent_sessions.contains(session))).collect();

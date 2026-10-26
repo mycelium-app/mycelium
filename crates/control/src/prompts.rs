@@ -1,6 +1,7 @@
 use crate::attachments;
 use crate::auth::AuthUser;
 use crate::chats;
+use crate::continuation;
 use crate::error::{ApiError, ApiResult};
 use crate::conversations::derived_title;
 use crate::instructions;
@@ -25,7 +26,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     let mut tx = state.pool.begin().await?;
     let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(sqlx::AssertSqlSafe(format!(
         "select owner, node_id, archived_at is not null,
-                acp_session_id is not null and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
+                (acp_session_id is not null or exists (select 1 from events where conversation_id = conversations.id and kind = 'continued')) and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
     )))
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
@@ -48,6 +49,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     };
 
+    let handoff_marker = continuation::pending_handoff(state, conversation_id).await?;
     let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?;
 
     sqlx::query("update conversations set predicted_title = coalesce(predicted_title, $2), title = case when title_user_set then title else coalesce(predicted_title, $2) end where id = $1")
@@ -68,6 +70,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, fork: false, account, instructions });
     }
 
+    let text = match handoff_marker {
+        Some(marker) => format!("{}\n\n{text}", continuation::handoff(state, conversation_id, marker).await?),
+        None => text,
+    };
     let loaded = attachments::for_node(state, &attachments).await?;
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: text.clone(), attachments });
     state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text, attachments: loaded });
