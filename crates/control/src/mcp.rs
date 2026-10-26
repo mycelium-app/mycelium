@@ -6,11 +6,11 @@ use crate::conversation_connections;
 use crate::group_connections;
 use crate::auth::AuthNode;
 use crate::experiments::{self, Experiment};
-use crate::chat_tool_servers::{bearer, list_owned, slug};
+use crate::chat_tool_servers::{bearer, list_owned, refreshable_after_rejection, renew, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search, usable_banks};
-use crate::mcp_client::McpConnection;
+use crate::mcp_client::{McpConnection, McpError};
 use crate::message_proposals;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::ssh_access;
@@ -531,10 +531,24 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
             let held = &state;
             let http = &state.http;
             let listed = join_all(servers.iter().filter(|server| server.integration().is_none()).map(|server| async move {
-                let token = bearer(held, server).await.ok().flatten();
+                let token = match bearer(held, server).await {
+                    Ok(token) => token,
+                    Err(error) => return (server, Err(Some(error.message().to_string()))),
+                };
                 let mut connection = McpConnection::new(http, &server.url, token.as_deref(), server.key_header());
+                let mut tools = connection.list_tools().await;
 
-                connection.list_tools().await.map(|tools| (server, tools))
+                if matches!(tools, Err(McpError::Rejected)) && refreshable_after_rejection(server) {
+                    match renew(held, server).await {
+                        Ok(token) => {
+                            connection.set_token(token.as_deref());
+                            tools = connection.list_tools().await;
+                        }
+                        Err(error) => return (server, Err(Some(error.message().to_string()))),
+                    }
+                }
+
+                (server, tools.map_err(|_| None))
             }))
             .await;
             let enabled = experiments::of(&state, owner).await?;
@@ -547,9 +561,15 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                 }
             }
 
-            for (server, remote) in listed.into_iter().flatten() {
-                for tool in remote {
-                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+            for (server, remote) in listed {
+                match remote {
+                    Ok(remote) => {
+                        for tool in remote {
+                            tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+                        }
+                    }
+                    Err(Some(message)) => tools.push(json!({"name": format!("{}__sign_in_again", slug(&server.name)), "description": format!("{}: {message}", server.name), "inputSchema": {"type": "object"}})),
+                    Err(None) => {}
                 }
             }
 
@@ -1070,7 +1090,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                             None => format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
                         };
 
-                        return Ok(nothing(format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections.")));
+                        return Ok(nothing(message));
                     }
 
                     let place = match (field("project"), field("folder"), field("node")) {
@@ -1242,7 +1262,19 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let mut connection = McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header());
 
-                    match connection.call_tool(tool, &arguments).await {
+                    let mut called = connection.call_tool(tool, &arguments).await;
+
+                    if matches!(called, Err(McpError::Rejected)) && refreshable_after_rejection(server) {
+                        match renew(&state, server).await {
+                            Ok(token) => {
+                                connection.set_token(token.as_deref());
+                                called = connection.call_tool(tool, &arguments).await;
+                            }
+                            Err(error) => return Ok(reply(&id, tool_text(error.message(), true))),
+                        }
+                    }
+
+                    match called {
                         Ok(output) => reply(&id, tool_text(&output.text, output.is_error)),
                         Err(error) => reply(&id, tool_text(&error.describe(&server.name), true)),
                     }

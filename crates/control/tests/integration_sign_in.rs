@@ -203,3 +203,40 @@ async fn an_app_without_client_registration_is_told_to_use_an_api_key() {
 
     assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (400, Some("oauth_unsupported"), Some("This app does not let Mycelium sign in. Use an API key instead.")));
 }
+
+async fn listed_tools(server: &Server, node_token: &str) -> Vec<Value> {
+    let anonymous = server.anonymous();
+    let (_, listed) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {node_token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))).await;
+
+    listed["result"]["tools"].as_array().cloned().unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_failed_oauth_refresh_tells_the_person_to_sign_in_again_in_the_tool_list() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, _) = start_app(false, 1).await;
+    let query = sign_in(&server, &base).await;
+    callback(&server, &param(&query, "state")).await;
+    sqlx::query("update chat_tool_servers set oauth = jsonb_set(oauth, '{token_endpoint}', '\"http://127.0.0.1:1/token\"')").execute(&server.pool).await.unwrap();
+
+    let tools = listed_tools(&server, &node_token).await;
+    let notice = tools.iter().find(|tool| tool["name"] == "docs__sign_in_again").expect("a sign in again notice");
+
+    assert_eq!(notice["description"], "Docs: Sign in to Docs again in Settings, Integrations.");
+}
+
+#[tokio::test]
+async fn a_rejected_oauth_token_with_no_known_expiry_is_refreshed_and_the_tools_listed() {
+    let server = Server::start().await;
+    let (_, node_token) = server.join("node", "laptop").await;
+    let (base, app) = start_app(false, 3600).await;
+    let query = sign_in(&server, &base).await;
+    callback(&server, &param(&query, "state")).await;
+    sqlx::query("update chat_tool_servers set bearer_token = 'stale', oauth_expires_at = null").execute(&server.pool).await.unwrap();
+
+    let tools = listed_tools(&server, &node_token).await;
+
+    assert!(tools.iter().any(|tool| tool["name"] == "docs__search"), "{tools:?}");
+    assert_eq!(app.mcp_authorisations.lock().unwrap().last().map(String::as_str), Some("Bearer access-2"));
+}

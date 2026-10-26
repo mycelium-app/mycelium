@@ -1,8 +1,8 @@
-use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, slug};
+use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew, slug};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
 use crate::mcp;
-use crate::mcp_client::McpConnection;
+use crate::mcp_client::{McpConnection, McpError};
 use crate::model_providers::{ToolCall, ToolDefinition, ToolResult};
 use crate::state::AppState;
 use crate::store::{append_event, set_status};
@@ -221,7 +221,19 @@ impl Toolbox {
                 let connection = self.connections.entry(server.id).or_insert_with(|| McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header()));
                 connection.set_token(token.as_deref());
 
-                Ok(match connection.call_tool(&tool.original, input).await {
+                let mut called = connection.call_tool(&tool.original, input).await;
+
+                if matches!(called, Err(McpError::Rejected)) && refreshable_after_rejection(server) {
+                    match renew(state, server).await {
+                        Ok(token) => {
+                            connection.set_token(token.as_deref());
+                            called = connection.call_tool(&tool.original, input).await;
+                        }
+                        Err(error) => return Ok((error.message().to_string(), true)),
+                    }
+                }
+
+                Ok(match called {
                     Ok(output) => (output.text, output.is_error),
                     Err(error) => (error.describe(&tool.server), true),
                 })

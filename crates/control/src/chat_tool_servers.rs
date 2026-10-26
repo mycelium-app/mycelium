@@ -145,9 +145,23 @@ pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<Strin
         return Ok(row.bearer_token.clone());
     }
 
-    let current = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1"))).bind(row.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That tool server"))?;
+    let current = reload(state, row).await?;
     let expiring = current.oauth_expires_at.is_some_and(|expires_at| expires_at - chrono::Utc::now() < REFRESH_MARGIN);
-    let (true, Some(refresh_token), Some(oauth)) = (expiring, current.oauth_refresh_token.as_deref(), current.oauth.as_ref()) else {
+
+    if !expiring {
+        return Ok(current.bearer_token);
+    }
+
+    renew(state, row).await
+}
+
+pub fn refreshable_after_rejection(row: &ServerRow) -> bool {
+    row.oauth.is_some() && row.oauth_refresh_token.is_some() && row.oauth_expires_at.is_none()
+}
+
+pub async fn renew(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {
+    let current = reload(state, row).await?;
+    let (Some(refresh_token), Some(oauth)) = (current.oauth_refresh_token.as_deref(), current.oauth.as_ref()) else {
         return Ok(current.bearer_token);
     };
     let tokens = crate::mcp_oauth::refresh(state, &oauth.0, refresh_token).await.map_err(|_| ApiError::conflict("sign_in_again", format!("Sign in to {} again in Settings, Integrations.", current.name)))?;
@@ -161,6 +175,10 @@ pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<Strin
         .await?;
 
     Ok(Some(tokens.access_token))
+}
+
+async fn reload(state: &AppState, row: &ServerRow) -> ApiResult<ServerRow> {
+    sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1"))).bind(row.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That tool server"))
 }
 
 pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ServerRow>> {
