@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 pub const OWN_SERVER: &str = "mycelium";
 
+const DEFAULT_KEY_HEADER: &str = "authorization";
+
 pub struct KnownApp {
     pub id: &'static str,
     pub stored_kind: &'static str,
@@ -21,9 +23,10 @@ pub struct KnownApp {
     pub refused: &'static str,
     pub default_path: &'static str,
     pub keeps_path: fn(&str) -> bool,
+    pub key_header: &'static str,
 }
 
-pub const KNOWN_APPS: [KnownApp; 1] = [KnownApp {
+pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
     id: "outline",
     stored_kind: "mcp",
     stored_in_settings: true,
@@ -31,6 +34,16 @@ pub const KNOWN_APPS: [KnownApp; 1] = [KnownApp {
     refused: "Outline refused that API key. Check it was copied whole and has not been revoked.",
     default_path: "/mcp",
     keeps_path: |path| path.trim_end_matches('/').ends_with("/mcp"),
+    key_header: DEFAULT_KEY_HEADER,
+}, KnownApp {
+    id: "litellm",
+    stored_kind: "litellm",
+    stored_in_settings: false,
+    key_prompt: "Enter your LiteLLM key.",
+    refused: "LiteLLM refused that key. Check it was copied whole and has not been revoked.",
+    default_path: "/mcp/",
+    keeps_path: |path| !matches!(path, "" | "/"),
+    key_header: "x-litellm-api-key",
 }];
 
 impl KnownApp {
@@ -86,6 +99,10 @@ impl ServerRow {
         known_app(&self.kind).or_else(|| self.settings["app"].as_str().and_then(known_app))
     }
 
+    pub fn key_header(&self) -> &'static str {
+        self.known_app().map_or(DEFAULT_KEY_HEADER, |app| app.key_header)
+    }
+
     pub fn to_proto(&self) -> ChatToolServer {
         ChatToolServer {
             id: self.id,
@@ -107,8 +124,8 @@ fn stored(tools: Vec<McpTool>) -> Vec<StoredTool> {
     tools.into_iter().map(|tool| StoredTool { name: tool.name, description: tool.description, input_schema: tool.input_schema }).collect()
 }
 
-async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
-    let mut connection = McpConnection::new(&state.http, url, token);
+async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, key_header: &'static str, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
+    let mut connection = McpConnection::new(&state.http, url, token, key_header);
     let tools = connection.list_tools().await.map_err(|error| match (&error, app) {
         (McpError::Rejected, Some(app)) => ApiError::bad_request("tool_server_failed", app.refused),
         _ => ApiError::bad_request("tool_server_failed", error.describe(name)),
@@ -211,7 +228,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 settings = json!({"app": kind});
             }
 
-            fetch_tools(&state, name, &address, token, app).await?
+            fetch_tools(&state, name, &address, token, app.map_or(DEFAULT_KEY_HEADER, |app| app.key_header), app).await?
         }
     };
     let kind = app.map_or(kind, |app| app.stored_kind);
@@ -260,7 +277,7 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Ok(Json(row.to_proto()));
     }
 
-    let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref(), row.known_app()).await?;
+    let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref(), row.key_header(), row.known_app()).await?;
     let updated = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("update chat_tool_servers set tools = $2 where id = $1 returning {SERVER_COLUMNS}"))).bind(id).bind(sqlx::types::Json(tools)).fetch_one(&state.pool).await?;
     state.hub.tools_changed(user.id);
 

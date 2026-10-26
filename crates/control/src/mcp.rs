@@ -431,7 +431,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
             let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled).collect();
             let http = &state.http;
             let listed = join_all(servers.iter().filter(|server| server.integration().is_none()).map(|server| async move {
-                let mut connection = McpConnection::new(http, &server.url, server.bearer_token.as_deref());
+                let mut connection = McpConnection::new(http, &server.url, server.bearer_token.as_deref(), server.key_header());
 
                 connection.list_tools().await.map(|tools| (server, tools))
             }))
@@ -891,7 +891,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         return Ok(reply(&id, tool_text(&output.text, output.is_error)));
                     }
 
-                    let mut connection = McpConnection::new(&state.http, &server.url, server.bearer_token.as_deref());
+                    let mut connection = McpConnection::new(&state.http, &server.url, server.bearer_token.as_deref(), server.key_header());
 
                     match connection.call_tool(tool, &arguments).await {
                         Ok(output) => reply(&id, tool_text(&output.text, output.is_error)),

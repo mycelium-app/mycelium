@@ -125,6 +125,38 @@ class ChatToolsSettingsTest {
     }
 
     @Test
+    fun addingALiteLlmGatewaySendsItsKindAddressAndMaskedKey() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("LiteLLM").performClick()
+        rule.onNodeWithContentDescription("LiteLLM address").performTextInput("https://litellm.test")
+        rule.onNodeWithContentDescription("LiteLLM key").performTextInput("sk-secret-1")
+        rule.onNodeWithContentDescription("LiteLLM key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
+        assertEquals("""{"name":"LiteLLM","url":"https://litellm.test","bearer_token":"sk-secret-1","kind":"litellm"}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("sk-secret-1").assertCountEquals(0)
+    }
+
+    @Test
+    fun aLiteLlmGatewayRowShowsItsTypeAndCanBeRefreshed() {
+        listed = """{"id":"s7","name":"Gateway","kind":"litellm","url":"https://litellm.test/mcp/","token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"a","description":"A"}],"created_at":"2026-10-22T15:00:00Z"}"""
+        postAnswer = HttpStatusCode.OK to listed
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Gateway").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("LiteLLM").assertExists()
+        rule.onNodeWithContentDescription("More for Gateway").performClick()
+        rule.onNodeWithText("Refresh tools").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/s7/refresh") } }
+    }
+
+    @Test
     fun aGatewayEndpointCanBeSubmittedFromTheBearerTokenFieldWithEnter() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }

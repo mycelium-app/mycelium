@@ -154,11 +154,17 @@ fn lab_tools() -> Value {
 }
 
 fn remote_server(legacy: bool) -> (Router, Arc<Remote>) {
-    async fn mcp(State((remote, legacy)): State<(Arc<Remote>, bool)>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    keyed_server(legacy, "authorization")
+}
+
+fn keyed_server(legacy: bool, key_header: &'static str) -> (Router, Arc<Remote>) {
+    async fn mcp(State((remote, legacy, key_header)): State<(Arc<Remote>, bool, &'static str)>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
         let method = body["method"].as_str().unwrap_or_default().to_string();
         remote.seen.lock().unwrap().push((method.clone(), body["params"].clone(), headers.clone()));
 
-        if headers.get("authorization").and_then(|value| value.to_str().ok()) != Some(&format!("Bearer {MCP_TOKEN}")) {
+        let stray_authorization = key_header != "authorization" && headers.contains_key("authorization");
+
+        if stray_authorization || headers.get(key_header).and_then(|value| value.to_str().ok()) != Some(&format!("Bearer {MCP_TOKEN}")) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
 
@@ -197,7 +203,7 @@ fn remote_server(legacy: bool) -> (Router, Arc<Remote>) {
 
     let remote = Arc::new(Remote::default());
 
-    (Router::new().route("/mcp", post(mcp)).with_state((remote.clone(), legacy)), remote)
+    (Router::new().route("/mcp", post(mcp)).route("/mcp/", post(mcp)).route("/mcp/{group}", post(mcp)).with_state((remote.clone(), legacy, key_header)), remote)
 }
 
 impl Remote {
@@ -218,6 +224,10 @@ async fn rig(replies: Vec<Reply>) -> Rig {
 }
 
 async fn rig_with(replies: Vec<Reply>, anthropic: bool, legacy: bool, reject_tools: bool) -> Rig {
+    rig_over(replies, anthropic, legacy, reject_tools, false).await
+}
+
+async fn rig_over(replies: Vec<Reply>, anthropic: bool, legacy: bool, reject_tools: bool, gateway: bool) -> Rig {
     let server = Server::start().await;
     let model = script(replies, reject_tools);
     let base = serve(if anthropic { anthropic_model(model.clone()) } else { openai_model(model.clone()) }).await;
@@ -229,9 +239,14 @@ async fn rig_with(replies: Vec<Reply>, anthropic: bool, legacy: bool, reject_too
     let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&body)).await;
     assert_eq!(status, 201, "{provider}");
 
-    let (router, remote) = remote_server(legacy);
+    let (router, remote) = keyed_server(legacy, if gateway { "x-litellm-api-key" } else { "authorization" });
     let remote_base = serve(router).await;
-    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Lab", "url": format!("{remote_base}/mcp"), "bearer_token": MCP_TOKEN}))).await;
+    let tool_server = if gateway {
+        json!({"name": "Lab", "kind": "litellm", "url": remote_base, "bearer_token": MCP_TOKEN})
+    } else {
+        json!({"name": "Lab", "url": format!("{remote_base}/mcp"), "bearer_token": MCP_TOKEN})
+    };
+    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&tool_server)).await;
     assert_eq!(status, 201, "{added}");
 
     Rig { server, model, remote, provider }
@@ -760,6 +775,76 @@ async fn outline_refusing_the_api_key_says_to_check_the_key_and_stores_nothing()
     assert_eq!((status, refused["message"].as_str()), (400, Some("Outline refused that API key. Check it was copied whole and has not been revoked.")));
     assert_eq!((missing["error"].as_str(), missing["message"].as_str()), (Some("api_key_required"), Some("Enter your Outline API key. Create one in Outline under Settings, API & Apps.")));
     assert_eq!(listed, json!([]));
+}
+
+async fn add_gateway(server: &Server, url: &str, key: Option<&str>) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Gateway", "kind": "litellm", "url": url, "bearer_token": key}))).await
+}
+
+#[tokio::test]
+async fn a_litellm_gateway_is_reached_at_its_mcp_address_with_the_key_in_its_own_header() {
+    let server = Server::start().await;
+    let (router, remote) = keyed_server(false, "x-litellm-api-key");
+    let base = serve(router).await;
+
+    let (status, added) = add_gateway(&server, &base, Some(MCP_TOKEN)).await;
+
+    assert_eq!(status, 201, "{added}");
+    assert_eq!((added["kind"].as_str(), added["url"].as_str().map(str::to_string)), (Some("litellm"), Some(format!("{base}/mcp/"))));
+    assert_eq!(added["tools"][0]["name"], "get_weather");
+    assert!(remote.seen.lock().unwrap().iter().all(|(_, _, headers)| headers.contains_key("x-litellm-api-key") && !headers.contains_key("authorization")));
+}
+
+#[tokio::test]
+async fn a_litellm_address_with_a_path_is_kept_as_typed() {
+    let server = Server::start().await;
+    let (router, _) = keyed_server(false, "x-litellm-api-key");
+    let base = serve(router).await;
+
+    let (_, added) = add_gateway(&server, &format!("{base}/mcp/dev_group"), Some(MCP_TOKEN)).await;
+
+    assert_eq!(added["url"], json!(format!("{base}/mcp/dev_group")));
+}
+
+#[tokio::test]
+async fn a_litellm_gateway_without_a_key_asks_for_one() {
+    let server = Server::start().await;
+    let (router, _) = keyed_server(false, "x-litellm-api-key");
+    let base = serve(router).await;
+
+    let (status, missing) = add_gateway(&server, &base, None).await;
+
+    assert_eq!((status, missing["error"].as_str(), missing["message"].as_str()), (400, Some("api_key_required"), Some("Enter your LiteLLM key.")));
+}
+
+#[tokio::test]
+async fn refreshing_a_litellm_gateway_lists_its_tools_again() {
+    let server = Server::start().await;
+    let (router, remote) = keyed_server(false, "x-litellm-api-key");
+    let base = serve(router).await;
+    let (_, added) = add_gateway(&server, &base, Some(MCP_TOKEN)).await;
+    let id = added["id"].as_str().unwrap();
+    let listings = || remote.seen.lock().unwrap().iter().filter(|(method, _, _)| method == "tools/list").count();
+    let before = listings();
+
+    let (status, refreshed) = server.user.json(server.user.post(&format!("/api/v1/chat-tool-servers/{id}/refresh"))).await;
+
+    assert_eq!((status, refreshed["tools"].as_array().map(Vec::len)), (200, Some(3)));
+    assert!(listings() > before);
+}
+
+#[tokio::test]
+async fn a_chat_calls_a_litellm_tool_with_the_key_in_its_own_header() {
+    let rig = rig_over(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("It is sunny.")], false, false, false, true).await;
+    let id = rig.chat("Weather in Paris?").await;
+
+    let request = rig.request_waiting(&id).await;
+    let (allowed, _) = rig.decide(&id, &request, "allow_once").await;
+    rig.turns_ended(&id, 1).await;
+
+    assert_eq!(allowed, 204);
+    assert_eq!(rig.remote.calls().len(), 1);
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "Sunny in Paris");
 }
 
 #[tokio::test]

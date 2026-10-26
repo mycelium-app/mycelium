@@ -2,7 +2,8 @@ mod common;
 
 use axum::Json;
 use axum::Router;
-use axum::http::StatusCode;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use common::{Server, serve};
@@ -19,7 +20,17 @@ async fn mcp(server: &Server, token: &str, body: Value) -> Value {
 }
 
 fn fake_server() -> Router {
-    async fn handle(Json(body): Json<Value>) -> Response {
+    gateway_server("authorization")
+}
+
+fn gateway_server(key_header: &'static str) -> Router {
+    async fn handle(State(key_header): State<&'static str>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+        let key_in_its_own_header = headers.contains_key(key_header) && (key_header == "authorization" || !headers.contains_key("authorization"));
+
+        if key_header != "authorization" && !key_in_its_own_header {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+
         if body["params"].get("_meta").is_some() {
             return StatusCode::BAD_REQUEST.into_response();
         }
@@ -38,7 +49,7 @@ fn fake_server() -> Router {
         Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
     }
 
-    Router::new().route("/mcp", post(handle))
+    Router::new().route("/mcp", post(handle)).route("/mcp/", post(handle)).with_state(key_header)
 }
 
 async fn add_lab(server: &Server) -> (String, Uuid) {
@@ -79,6 +90,21 @@ async fn tools_list_includes_a_connected_servers_tools_under_a_prefixed_name_and
     let called = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "lab__get_weather", "arguments": {"city": "Oslo"}}})).await;
     assert_eq!(called["result"]["content"][0]["text"], "Sunny in Oslo");
     assert_eq!(called["result"]["isError"], false);
+}
+
+#[tokio::test]
+async fn workspace_agents_list_and_call_litellm_tools_through_mycelium() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let base = serve(gateway_server("x-litellm-api-key")).await;
+    let (status, added) = server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Lab", "kind": "litellm", "url": base, "bearer_token": "sk-lite"}))).await;
+    assert_eq!(status, 201, "{added}");
+
+    let listed = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    let called = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "lab__get_weather", "arguments": {"city": "Oslo"}}})).await;
+
+    assert!(names(&listed).contains(&"lab__get_weather".to_string()));
+    assert_eq!(called["result"]["content"][0]["text"], "Sunny in Oslo");
 }
 
 #[tokio::test]

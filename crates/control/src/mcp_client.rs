@@ -35,6 +35,7 @@ pub struct McpConnection {
     http: reqwest::Client,
     url: String,
     token: Option<String>,
+    key_header: &'static str,
     era: Era,
     next_id: i64,
 }
@@ -57,8 +58,8 @@ impl McpError {
 }
 
 impl McpConnection {
-    pub fn new(http: &reqwest::Client, url: &str, token: Option<&str>) -> McpConnection {
-        McpConnection { http: http.clone(), url: url.to_string(), token: token.map(str::to_string), era: Era::Unknown, next_id: 0 }
+    pub fn new(http: &reqwest::Client, url: &str, token: Option<&str>, key_header: &'static str) -> McpConnection {
+        McpConnection { http: http.clone(), url: url.to_string(), token: token.map(str::to_string), key_header, era: Era::Unknown, next_id: 0 }
     }
 
     pub async fn list_tools(&mut self) -> Result<Vec<McpTool>, McpError> {
@@ -181,7 +182,7 @@ impl McpConnection {
             .header("accept", "application/json, text/event-stream");
 
         if let Some(token) = &self.token {
-            request = request.bearer_auth(token);
+            request = request.header(self.key_header, format!("Bearer {token}"));
         }
 
         request = match &self.era {

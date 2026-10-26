@@ -32,6 +32,7 @@ import mycelium.api.PatchChatToolServerRequest
 import mycelium.state.Store
 
 private const val McpType = "MCP"
+private const val LiteLlmType = "LiteLLM"
 private const val OutlineType = "Outline"
 private const val ZulipType = "Zulip"
 private const val EmailType = "Email"
@@ -40,6 +41,13 @@ private const val Tls = "TLS"
 private const val StartTls = "STARTTLS"
 private const val UserSession = "User session"
 private const val Bot = "Bot"
+
+private fun serverType(server: ChatToolServer): String = when {
+    server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> OutlineType
+    server.kind == "mcp" -> McpType
+    server.kind == "litellm" -> LiteLlmType
+    else -> "Built-in"
+}
 
 @Composable
 fun ChatToolsSettings(store: Store) {
@@ -125,6 +133,7 @@ fun ChatToolsSettings(store: Store) {
         scope.launch {
             try {
                 val request = when (kind) {
+                    LiteLlmType -> CreateChatToolServerRequest(name.trim().ifEmpty { LiteLlmType }, url.trim(), token.trim().ifEmpty { null }, kind = "litellm")
                     OutlineType -> CreateChatToolServerRequest(name.trim().ifEmpty { OutlineType }, url.trim(), token.trim().ifEmpty { null }, kind = "outline")
                     ZulipType -> CreateChatToolServerRequest(name.trim().ifEmpty { ZulipType }, url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
                     EmailType -> CreateChatToolServerRequest(name.trim().ifEmpty { EmailType }, "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
@@ -172,9 +181,14 @@ fun ChatToolsSettings(store: Store) {
             if (adding) {
                 Column(Modifier.widthIn(max = Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                     Label("Add an integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                    Segmented(listOf(McpType, OutlineType, ZulipType, EmailType, StoatType), kind, { kind = it; failure = null }, "Integration type")
+                    Segmented(listOf(McpType, LiteLlmType, OutlineType, ZulipType, EmailType, StoatType), kind, { kind = it; failure = null }, "Integration type")
 
-                    if (kind == OutlineType) {
+                    if (kind == LiteLlmType) {
+                        Label("Chats and agents can use the MCP servers your LiteLLM proxy exposes to this key. Enter the proxy's address, or its /mcp/ address for an access group.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = "LiteLLM")
+                        TextInput(url, { url = it }, label = "LiteLLM address", placeholder = "https://litellm.example.com", mono = true)
+                        TextInput(token, { token = it }, label = "LiteLLM key", mono = true, masked = true, onSubmit = ::add)
+                    } else if (kind == OutlineType) {
                         Label("Chats and agents can search and read your Outline documents and, with your approval, change them. Create an API key in Outline under Settings, API & Apps.", style = Tokens.Type.Meta, color = colors.textMuted)
                         TextInput(name, { name = it }, label = "Name", placeholder = "Outline")
                         TextInput(url, { url = it }, label = "Outline address", placeholder = "https://docs.example.com", mono = true)
@@ -246,7 +260,7 @@ fun ChatToolsSettings(store: Store) {
                             Label(server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                         }
 
-                        Label(if (server.settings?.get("app")?.jsonPrimitive?.content == "outline") OutlineType else if (server.kind == "mcp") "MCP" else "Built-in", color = colors.textMuted, maxLines = 1)
+                        Label(serverType(server), color = colors.textMuted, maxLines = 1)
                         Label(if (server.tools.isEmpty()) "No tools found" else "${server.tools.size} tools", color = colors.textMuted, maxLines = 1)
 
                         Column {
@@ -262,7 +276,7 @@ fun ChatToolsSettings(store: Store) {
                         }
 
                         RowMenu(server.name) { close ->
-                            if (server.kind == "mcp") {
+                            if (server.kind == "mcp" || server.kind == "litellm") {
                                 MenuItem("Refresh tools", onClick = {
                                     close()
                                     store.act { replace(store.api.refreshChatToolServer(server.id)) }

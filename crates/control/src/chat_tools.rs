@@ -26,7 +26,7 @@ pub const DECLINED_TEXT: &str = "The person declined this tool call.";
 #[derive(Clone)]
 enum Source {
     Own,
-    Remote { url: String, token: Option<String>, always_allow: bool, server_id: Uuid },
+    Remote { url: String, token: Option<String>, key_header: &'static str, always_allow: bool, server_id: Uuid },
     BuiltIn { server: Box<ServerRow> },
 }
 
@@ -84,7 +84,7 @@ impl Toolbox {
             for stored in server.tool_list() {
                 let source = match server.integration() {
                     Some(_) => Source::BuiltIn { server: Box::new(server.clone()) },
-                    None => Source::Remote { url: server.url.clone(), token: server.bearer_token.clone(), always_allow: server.always_allow, server_id: server.id },
+                    None => Source::Remote { url: server.url.clone(), token: server.bearer_token.clone(), key_header: server.key_header(), always_allow: server.always_allow, server_id: server.id },
                 };
 
                 tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: stored.input_schema, source });
@@ -213,8 +213,8 @@ impl Toolbox {
 
                 Ok((output.text, output.is_error))
             }
-            Source::Remote { url, token, server_id, .. } => {
-                let connection = self.connections.entry(*server_id).or_insert_with(|| McpConnection::new(&state.http, url, token.as_deref()));
+            Source::Remote { url, token, key_header, server_id, .. } => {
+                let connection = self.connections.entry(*server_id).or_insert_with(|| McpConnection::new(&state.http, url, token.as_deref(), key_header));
 
                 Ok(match connection.call_tool(&tool.original, input).await {
                     Ok(output) => (output.text, output.is_error),
