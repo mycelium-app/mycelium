@@ -362,6 +362,10 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     let assistant = load(&state, user.id, id).await?;
     let text = request.text.trim();
 
+    if assistant.archived_at.is_some() {
+        return Err(ApiError::conflict("assistant_archived", "This assistant is archived. Restore it, then send your message again."));
+    }
+
     if text.is_empty() && request.attachments.is_empty() {
         return Err(ApiError::bad_request("text_required", "Enter a message for the assistant."));
     }

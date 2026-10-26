@@ -875,3 +875,17 @@ async fn oversized_instructions_are_refused_without_creating_the_assistant() {
 
     assert_eq!((status, refused["error"].clone(), listed), (413, json!("file_too_large"), json!([])));
 }
+
+#[tokio::test]
+async fn an_archived_assistant_cannot_be_prompted_until_restored() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
+    let id = assistant["id"].as_str().unwrap();
+    server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true}))).await;
+
+    let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "Hello"}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("assistant_archived")));
+    assert!(refused["message"].as_str().unwrap().contains("Restore"));
+}
