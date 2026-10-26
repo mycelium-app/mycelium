@@ -548,59 +548,23 @@ private fun Prose(text: String) {
 @Composable
 internal fun TableBlock(table: MarkdownBlock.Table) {
     val colors = MyTheme.colors
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val rows = listOf(table.header) + table.rows
-    val styles = listOf(Tokens.Type.UiStrong.themed()) + List(table.rows.size) { Tokens.Type.Prose.themed() }
-    val marked = rows.mapIndexed { index, row -> row.map { inlineText(it, colors.text) to styles[index] } }
-    val natural = table.header.indices.map { column ->
-        val widest = marked.maxOf { row -> measurer.measure(row[column].first, row[column].second).size.width }
+    val header = table.header.map { inlineText(it, colors.text) }
+    val body = table.rows.map { row -> row.map { inlineText(it, colors.text) } }
 
-        with(density) { widest.toDp() + Tokens.Space.S3 * 2 }
+    val columns = table.header.indices.map { column ->
+        val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
+
+        Col("", if (align == ColumnAlign.End) 56.dp else 96.dp, weight = if (align == ColumnAlign.End) 0f else 1f, align = align, overflow = Overflow.Wrap, numeric = align == ColumnAlign.End)
     }
 
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val capped = natural.map { minOf(it, Tokens.Size.TableCell) }
-        val spare = maxWidth - capped.fold(0.dp) { total, width -> total + width }
-        val wanted = natural.zip(capped) { full, cap -> full - cap }.fold(0.dp) { total, width -> total + width }
-        val widths = natural.zip(capped) { full, cap ->
-            if (spare > 0.dp && wanted > 0.dp) cap + minOf(full - cap, spare * ((full - cap) / wanted)) else cap
-        }
-
-        Box(Modifier.border(Tokens.Size.Hairline, colors.border, BlockShape).horizontalScroll(rememberScrollState())) {
-            Column(Modifier.width(IntrinsicSize.Max)) {
-                marked.forEachIndexed { index, row ->
-                    if (index > 0) {
-                        Hairline()
-                    }
-
-                    Row(Modifier.height(IntrinsicSize.Min).background(if (index == 0) colors.bgPanel else Color.Transparent)) {
-                        row.forEachIndexed { column, (text, style) ->
-                            val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
-
-                            Box(
-                                Modifier.width(widths[column]).fillMaxHeight().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                                contentAlignment = when (align) {
-                                    ColumnAlign.Start -> Alignment.TopStart
-                                    ColumnAlign.Center -> Alignment.TopCenter
-                                    ColumnAlign.End -> Alignment.TopEnd
-                                },
-                            ) {
-                                BasicText(
-                                    text,
-                                    style = style.copy(textAlign = when (align) {
-                                        ColumnAlign.Start -> TextAlign.Start
-                                        ColumnAlign.Center -> TextAlign.Center
-                                        ColumnAlign.End -> TextAlign.End
-                                    }),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    Table(
+        columns,
+        body.size,
+        { row, column -> TableCell.Rich(body[row][column], Tokens.Type.Prose) },
+        fill = false,
+        lazy = false,
+        headerCell = { column -> TableCell.Rich(header[column], Tokens.Type.UiStrong) },
+    )
 }
 
 @Composable
