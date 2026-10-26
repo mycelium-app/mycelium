@@ -83,11 +83,11 @@ class AssistantsTest {
     private fun present(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().size
 
     @Test
-    fun turningOnTheExperimentShowsAssistantsInTheSidebarAndShowAllOpensThePage() {
+    fun turningOnTheExperimentListsAssistantsInTheSidebarIdleOnesTooAndShowAllOpensThePage() {
         shell(mutableListOf(assistantJson("Stand-up", pinned = true), assistantJson("War room")))
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(0, rule.onAllNodesWithContentDescription("War room, Idle").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithContentDescription("War room, Idle").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Show all assistants").performClick()
 
@@ -121,7 +121,6 @@ class AssistantsTest {
         shell(mutableListOf(assistantJson("Stand-up")), Route.Assistants)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Stand-up").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(0, rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("More for Stand-up").performClick()
         rule.onNodeWithText("Pin").performClick()

@@ -16,8 +16,8 @@ private fun mostRecent(assistant: Assistant): String = assistant.lastActiveAt ?:
 
 fun sidebarAssistants(assistants: Collection<Assistant>, groupFilter: String): List<Assistant> =
     assistants
-        .filter { it.archivedAt == null && inGroup(it.groupId, groupFilter) && (it.pinnedAt != null || it.state != "idle") }
-        .sortedWith(compareByDescending<Assistant> { it.pinnedAt != null }.thenByDescending(::mostRecent))
+        .filter { it.archivedAt == null && inGroup(it.groupId, groupFilter) }
+        .sortedWith(compareByDescending<Assistant> { it.pinnedAt != null }.thenByDescending { it.state != "idle" }.thenByDescending(::mostRecent))
         .take(SidebarAssistantLimit)
 
 fun harnessModels(conversations: Collection<Conversation>, agent: String): List<Choice> =

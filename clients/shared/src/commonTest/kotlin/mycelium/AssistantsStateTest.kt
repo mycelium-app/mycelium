@@ -44,6 +44,17 @@ class AssistantsStateTest {
     }
 
     @Test
+    fun anIdleAssistantStaysInTheSidebarWhenThereIsRoom() {
+        val all = listOf(
+            assistant("older", active = "2026-10-20T10:00:00Z"),
+            assistant("newer", active = "2026-10-23T10:00:00Z"),
+            assistant("busy", state = "working", active = "2026-10-01T10:00:00Z"),
+        )
+
+        assertEquals(listOf("busy", "newer", "older"), sidebarAssistants(all, AllGroups).map { it.name })
+    }
+
+    @Test
     fun searchMatchesDescriptions() {
         val all = listOf(assistant("Stand-up", description = "Daily summary"), assistant("War room", description = "Incidents"))
 
