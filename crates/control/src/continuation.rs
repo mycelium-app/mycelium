@@ -15,7 +15,7 @@ use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub const ADOPT_SINCE: (u64, u64, u64) = (0, 11, 0);
+pub const ADOPT_SINCE: (u64, u64, u64) = (0, 10, 0);
 pub const SUMMARY_MESSAGES: i64 = 8;
 pub const SUMMARY_MESSAGE_LIMIT: usize = 1500;
 const FILES_LISTED: i64 = 30;

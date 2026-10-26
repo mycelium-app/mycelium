@@ -206,7 +206,7 @@ async fn continuing_while_the_agent_is_working_is_refused() {
 async fn continuing_on_an_outdated_node_asks_for_an_update() {
     let server = Server::start().await;
     enable(&server).await;
-    let mut link = node_with_accounts(&server, "v0.10.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
+    let mut link = node_with_accounts(&server, "v0.9.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
 
     let (status, body) = continue_on(&server, id, json!({"agent": "claude", "account": "work@example.org"})).await;
