@@ -448,6 +448,28 @@ class MyceliumApi(
     suspend fun saveReflectionSchedule(request: ReflectionScheduleRequest): ReflectionSchedule =
         call("/reflections/schedule") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun skills(): List<Skill> = call("/skills") { client.get(it) { authorise() } }.body()
+
+    suspend fun hideSkill(skill: Skill) {
+        call("/skills/hidden") { client.put(it) { authorise(); json(HiddenSkillRequest(skill.kind, skill.name)) } }
+    }
+
+    suspend fun exercises(): List<Exercise> = call("/exercises") { client.get(it) { authorise() } }.body()
+
+    suspend fun suggestedExercises(): List<Exercise> = call("/exercises/suggested") { client.get(it) { authorise() } }.body()
+
+    suspend fun startExercise(id: String): Exercise = call("/exercises/$id/start") { client.post(it) { authorise() } }.body()
+
+    suspend fun exerciseNotNow(id: String): Exercise = call("/exercises/$id/not-now") { client.post(it) { authorise() } }.body()
+
+    suspend fun runExerciseTests(id: String): ExerciseTests = call("/exercises/$id/tests") { client.post(it) { authorise() } }.body()
+
+    suspend fun reviewExercise(id: String): Exercise = call("/exercises/$id/review") { client.post(it) { authorise() } }.body()
+
+    suspend fun finishExercise(id: String): Exercise = call("/exercises/$id/done") { client.post(it) { authorise() } }.body()
+
+    suspend fun exerciseSolution(id: String): List<SolutionFile> = call("/exercises/$id/solution") { client.get(it) { authorise() } }.body()
+
     suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveInstructions(layer: String, text: String): InstructionLayer =

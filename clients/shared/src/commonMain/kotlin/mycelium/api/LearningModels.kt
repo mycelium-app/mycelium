@@ -53,3 +53,60 @@ data class ReflectionSchedule(
 
 @Serializable
 data class RedraftReflection(@SerialName("conversation_id") val conversationId: String)
+
+@Serializable
+data class Skill(
+    val kind: String,
+    val name: String,
+    @SerialName("own_lines") val ownLines: Long,
+    @SerialName("agent_lines") val agentLines: Long,
+    @SerialName("own_share") val ownShare: Double? = null,
+    @SerialName("weekly_own_lines") val weeklyOwnLines: List<Long> = emptyList(),
+    @SerialName("last_practised") val lastPractised: String? = null,
+)
+
+@Serializable
+data class HiddenSkillRequest(val kind: String, val name: String)
+
+@Serializable
+data class ExerciseTests(
+    val exit: Int = 0,
+    val passed: Int? = null,
+    val failed: Int = 0,
+    val failing: List<String> = emptyList(),
+    @SerialName("timed_out") val timedOut: Boolean = false,
+    @SerialName("output_tail") val outputTail: String = "",
+)
+
+@Serializable
+data class ReviewComment(val path: String, val line: Int, val body: String, val praise: Boolean = false)
+
+@Serializable
+data class ExerciseReview(
+    val id: String,
+    val summary: String,
+    val comments: List<ReviewComment> = emptyList(),
+    val tests: ExerciseTests? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class Exercise(
+    val id: String,
+    val kind: String,
+    val name: String,
+    val title: String,
+    val brief: String,
+    val minutes: Int? = null,
+    val state: String,
+    val branch: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val reviewing: Boolean = false,
+    val tests: ExerciseTests? = null,
+    val review: ExerciseReview? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("started_at") val startedAt: String? = null,
+)
+
+@Serializable
+data class SolutionFile(val path: String, val diff: String)

@@ -40,7 +40,8 @@ import mycelium.state.WellnessState
 import mycelium.state.weekdayOf
 import mycelium.state.WeekdayNames
 
-private const val WellnessTabName = "Wellness"
+private const val WellnessTabName = "Overview"
+private const val SkillsTabName = "Skills"
 private const val ReflectionsTabName = "Reflections"
 private const val MinuteMillis = 60_000L
 private val ChartHeight = 120.dp
@@ -99,9 +100,9 @@ fun WellnessPresence(store: Store, platform: Platform) {
 }
 
 @Composable
-fun WellnessScreen(store: Store, platform: Platform) {
+fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview") {
     val wellness by store.wellness.state.collectAsState()
-    var tab by remember { mutableStateOf(WellnessTabName) }
+    var tab by remember { mutableStateOf(if (startOn == "skills") SkillsTabName else WellnessTabName) }
 
     LaunchedEffect(Unit) {
         store.wellness.load()
@@ -113,14 +114,19 @@ fun WellnessScreen(store: Store, platform: Platform) {
             BarTitle("Wellness & Learning")
         }
 
-        TabRow(listOf(WellnessTabName, ReflectionsTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
+        TabRow(listOf(WellnessTabName, SkillsTabName, ReflectionsTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
             if (tab == WellnessTabName) {
                 WellnessOverview(wellness)
+                LaunchedEffect(Unit) { store.learning.loadSkills() }
+                SuggestedExerciseCard(store, Modifier.widthIn(max = Tokens.Size.Page))
+                SkillsOverTime(store, { tab = SkillsTabName }, Modifier.widthIn(max = Tokens.Size.Page))
                 PomodoroCard(store, wellness)
                 PuzzlesCard(store, wellness, platform)
+            } else if (tab == SkillsTabName) {
+                SkillsTab(store)
             } else {
                 ReflectionsTab(store)
             }
