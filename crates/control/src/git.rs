@@ -104,6 +104,7 @@ pub struct PushRequest {
 
 pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCommand) -> ApiResult<Value> {
     let timeout = match command {
+        GitCommand::RunTests { timeout_secs, .. } => Duration::from_secs(u64::from(timeout_secs) + 30),
         GitCommand::Remote { .. } | GitCommand::Fetch | GitCommand::Pull { .. } | GitCommand::Push { .. } | GitCommand::Snapshot { .. } | GitCommand::Apply { .. } | GitCommand::Undo { .. } => FETCH_TIMEOUT,
         GitCommand::TownSync | GitCommand::TownPropose => TOWN_TIMEOUT,
         GitCommand::Clone { .. } => CLONE_TIMEOUT,

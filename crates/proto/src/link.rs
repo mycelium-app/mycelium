@@ -273,6 +273,11 @@ pub enum GitCommand {
     },
     Diff { path: String, staged: bool },
     ScopeDiff { scope: String },
+    RunTests {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        timeout_secs: u32,
+    },
     ChangesLayout,
     ChangesRows { ranges: Vec<RowRange> },
     Stage { paths: Vec<String> },

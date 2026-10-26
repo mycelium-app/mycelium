@@ -20,6 +20,7 @@ pub mod ssh;
 pub mod ssh_proxy;
 pub mod status;
 pub mod terminal;
+pub mod test_run;
 pub mod transcripts;
 pub mod update;
 pub mod usage;

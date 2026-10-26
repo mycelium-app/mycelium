@@ -41,6 +41,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Switch { branch, create, track } => switch(cwd, &branch, create, track.as_deref()),
         GitCommand::Diff { path, staged } => diff(cwd, &path, staged),
         GitCommand::ScopeDiff { scope } => scope_diff(cwd, &scope),
+        GitCommand::RunTests { command, timeout_secs } => crate::test_run::run(cwd, command.as_deref(), timeout_secs),
         GitCommand::ChangesLayout => changes::layout(cwd),
         GitCommand::ChangesRows { ranges } => changes::rows(cwd, &ranges),
         GitCommand::Stage { paths } => changed(cwd, &["add", "--"], &paths),
