@@ -28,6 +28,7 @@ import mycelium.state.mediaTypeOf
 
 private const val ConversationsChannel = "conversations"
 private const val QuietConversationsChannel = "conversations-quiet"
+private const val WellnessChannel = "wellness"
 
 const val ConversationExtra = "conversation_id"
 
@@ -120,6 +121,28 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
             .setAutoCancel(true)
 
         manager.notify(conversationId.hashCode(), notification.build())
+    }
+
+    override fun breakNotification(title: String, body: String) {
+        val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+        if (!allowed) {
+            return
+        }
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(NotificationChannel(WellnessChannel, "Wellness", NotificationManager.IMPORTANCE_LOW))
+
+        val open = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val tap = PendingIntent.getActivity(context, WellnessChannel.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = Notification.Builder(context, WellnessChannel)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+
+        manager.notify(WellnessChannel.hashCode(), notification.build())
     }
 
     override fun loadConnection(): Connection? {

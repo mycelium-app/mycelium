@@ -197,6 +197,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.IntegrationsChanged -> state.copy(integrationsRevision = state.integrationsRevision + 1)
 
+    is StreamMessage.WellnessChanged -> state
+
     is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId, resources = state.resources - message.nodeId)
 
     is StreamMessage.NodeResourcesSampled -> {

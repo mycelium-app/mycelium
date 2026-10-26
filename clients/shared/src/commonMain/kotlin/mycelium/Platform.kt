@@ -91,5 +91,7 @@ interface Platform {
 
     fun chime() = Unit
 
+    fun breakNotification(title: String, body: String) = Unit
+
     fun listenForNotificationOpens(listener: ((String) -> Unit)?) = Unit
 }

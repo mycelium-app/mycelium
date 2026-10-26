@@ -408,6 +408,28 @@ class MyceliumApi(
     suspend fun saveUsageLimitSetting(setting: UsageLimitSetting): UsageLimitSetting =
         call("/usage-limit") { client.put(it) { authorise(); json(setting) } }.body()
 
+    suspend fun wellnessSettings(): WellnessSettings = call("/wellness/settings") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveWellnessSettings(settings: WellnessSettings): WellnessSettings =
+        call("/wellness/settings") { client.put(it) { authorise(); json(settings) } }.body()
+
+    suspend fun wellnessOverview(days: Int = 7): WellnessOverview = call("/wellness/overview?days=$days") { client.get(it) { authorise() } }.body()
+
+    suspend fun wellnessHeartbeat(seconds: Int) {
+        call("/wellness/heartbeat") { client.post(it) { authorise(); json(WellnessHeartbeat(seconds)) } }
+    }
+
+    suspend fun startWellnessBreak(minutes: Int): WellnessBreak =
+        call("/wellness/breaks") { client.post(it) { authorise(); json(StartBreakRequest(minutes)) } }.body()
+
+    suspend fun endWellnessBreak() {
+        call("/wellness/breaks/current") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun setPuzzlePlayed(puzzle: String, played: Boolean) {
+        call("/wellness/puzzles/$puzzle/today") { if (played) client.put(it) { authorise() } else client.delete(it) { authorise() } }
+    }
+
     suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveInstructions(layer: String, text: String): InstructionLayer =

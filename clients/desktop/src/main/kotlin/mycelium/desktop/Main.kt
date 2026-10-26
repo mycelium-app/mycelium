@@ -171,6 +171,8 @@ private object DesktopPlatform : Platform {
         }
     }
 
+    override fun breakNotification(title: String, body: String) = notify(title, body, "", false)
+
     private fun notifyOnLinux(title: String, body: String, conversationId: String) {
         val clicked = runCatching {
             val process = ProcessBuilder("notify-send", "--app-name=Mycelium", "--expire-time=5000", "--action=open=Open", "--wait", title, body).redirectErrorStream(true).start()

@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import mycelium.state.ColumnAlign
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
 import mycelium.api.Project

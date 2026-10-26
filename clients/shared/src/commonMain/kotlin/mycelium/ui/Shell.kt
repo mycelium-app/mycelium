@@ -138,6 +138,8 @@ sealed interface Route {
     data object Workflows : Route
     data object Schedules : Route
 
+    data object Wellness : Route
+
     data object Projects : Route
 
     data object Issues : Route
@@ -393,6 +395,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
             Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Schedules -> SchedulesScreen(store, state)
+            Route.Wellness -> WellnessScreen(store, platform)
             Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
             Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
@@ -405,6 +408,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
         }
+
+        WellnessPresence(store, platform)
     }
 }
 
@@ -523,6 +528,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
 
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
+                SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tintWhenSelected = true) { onRoute(Route.Wellness) }
             }
         }
 
@@ -659,7 +665,7 @@ private fun LazyListScope.conversationRows(
 }
 
 @Composable
-private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: () -> Unit) {
+private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tintWhenSelected: Boolean = false, onClick: () -> Unit) {
     val colors = MyTheme.colors
 
     Row(
@@ -671,7 +677,7 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, colors.textMuted, Tokens.Size.IconMd)
+        Icon(icon, if (tintWhenSelected && selected) colors.accent else colors.textMuted, Tokens.Size.IconMd)
         Label(text, maxLines = 1)
     }
 }

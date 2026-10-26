@@ -42,6 +42,7 @@ import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
+    TimeAndFocus("Time and focus", MyIcon.Clock),
     Experiments("Experiments", MyIcon.Sliders),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
@@ -59,7 +60,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 }
 
 internal val SettingsGroups = listOf(
-    "General" to listOf(SettingsSection.Appearance, SettingsSection.Experiments),
+    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Experiments),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
@@ -180,6 +181,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
     ) {
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
+            SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store)
             SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Accounts, SettingsSection.ChatModels -> {
                 AccountsSettings(store)

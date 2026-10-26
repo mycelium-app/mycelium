@@ -46,6 +46,8 @@ enum class MyIcon(vararg val paths: String) {
     ChevronRight("m9 6 6 6-6 6"),
     Search(circle(11f, 11f, 7f), "m20 20-3.5-3.5"),
     Plus("M12 5v14M5 12h14"),
+    Leaf("M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z", "M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"),
+    Cup("M10 2v2M14 2v2M6 2v2", "M16 8h1a4 4 0 1 1 0 8h-1", "M4 8h12v9a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4Z"),
     Minus("M5 12h14"),
     Alert(circle(12f, 12f, 9f), "M12 8v4M12 16h.01"),
     Question(circle(12f, 12f, 9f), "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"),

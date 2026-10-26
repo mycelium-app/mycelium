@@ -73,6 +73,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private val previewCache = LinkedHashMap<String, ByteArray>()
     private val experimentsLock = Mutex()
 
+    val wellness = WellnessStore(api, scope, platform)
     val composerDrafts = ComposerDrafts()
     val pinDismissals = PinDismissals()
 
@@ -153,6 +154,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             mutableWalkthroughNotes.update { it + (message.conversationId to message.notes) }
         }
 
+        if (message is StreamMessage.WellnessChanged) {
+            wellness.reload()
+        }
+
         announceFinished(before, message)
     }
 
@@ -184,6 +189,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val node = before.nodes[updated.nodeId]?.name
         val wantsSound = platform.loadPreference(NotifySoundPreference) != false.toString()
 
+        if (wellness.holdsNotifications()) {
+            wellness.hold(HeldNotification(updated.title, updated.id))
+
+            return
+        }
+
         if (platform.loadPreference(NotifyFinishedPreference) != false.toString()) {
             platform.notify(updated.title, listOfNotNull(outcome, node).joinToString(" · "), updated.id, wantsSound)
         }
@@ -209,6 +220,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     suspend fun refresh() {
         refreshExperiments()
+        wellness.load()
         val conversations = api.conversations(archived = false)
         val nodes = api.nodes()
 
