@@ -40,6 +40,8 @@ import mycelium.state.WellnessState
 import mycelium.state.weekdayOf
 import mycelium.state.WeekdayNames
 
+private const val WellnessTabName = "Wellness"
+private const val ReflectionsTabName = "Reflections"
 private const val MinuteMillis = 60_000L
 private val ChartHeight = 120.dp
 
@@ -99,6 +101,7 @@ fun WellnessPresence(store: Store, platform: Platform) {
 @Composable
 fun WellnessScreen(store: Store, platform: Platform) {
     val wellness by store.wellness.state.collectAsState()
+    var tab by remember { mutableStateOf(WellnessTabName) }
 
     LaunchedEffect(Unit) {
         store.wellness.load()
@@ -110,10 +113,17 @@ fun WellnessScreen(store: Store, platform: Platform) {
             BarTitle("Wellness & Learning")
         }
 
+        TabRow(listOf(WellnessTabName, ReflectionsTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
+        Hairline()
+
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
-            WellnessOverview(wellness)
-            PomodoroCard(store, wellness)
-            PuzzlesCard(store, wellness, platform)
+            if (tab == WellnessTabName) {
+                WellnessOverview(wellness)
+                PomodoroCard(store, wellness)
+                PuzzlesCard(store, wellness, platform)
+            } else {
+                ReflectionsTab(store)
+            }
         }
     }
 }

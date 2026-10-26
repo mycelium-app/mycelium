@@ -74,6 +74,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private val experimentsLock = Mutex()
 
     val wellness = WellnessStore(api, scope, platform)
+    val learning = LearningStore(api, scope)
     val composerDrafts = ComposerDrafts()
     val pinDismissals = PinDismissals()
 
@@ -156,6 +157,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         if (message is StreamMessage.WellnessChanged) {
             wellness.reload()
+            learning.reload()
         }
 
         announceFinished(before, message)

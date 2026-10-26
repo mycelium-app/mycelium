@@ -436,6 +436,18 @@ class MyceliumApi(
         call("/wellness/puzzles/$puzzle/today") { if (played) client.put(it) { authorise() } else client.delete(it) { authorise() } }
     }
 
+    suspend fun reflections(): List<Reflection> = call("/reflections") { client.get(it) { authorise() } }.body()
+
+    suspend fun patchReflection(id: String, request: PatchReflectionRequest): Reflection =
+        call("/reflections/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun redraftReflection(id: String): RedraftReflection = call("/reflections/$id/redraft") { client.post(it) { authorise() } }.body()
+
+    suspend fun reflectionSchedule(): ReflectionSchedule? = call("/reflections/schedule") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveReflectionSchedule(request: ReflectionScheduleRequest): ReflectionSchedule =
+        call("/reflections/schedule") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun instructions(): Instructions = call("/instructions") { client.get(it) { authorise() } }.body()
 
     suspend fun saveInstructions(layer: String, text: String): InstructionLayer =
