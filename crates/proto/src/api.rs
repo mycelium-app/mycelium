@@ -2022,3 +2022,20 @@ pub struct WellnessOverview {
     pub quiet_now: bool,
     pub held: i64,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Skill {
+    pub kind: String,
+    pub name: String,
+    pub own_lines: i64,
+    pub agent_lines: i64,
+    pub own_share: Option<f64>,
+    pub weekly_own_lines: Vec<i64>,
+    pub last_practised: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HiddenSkillRequest {
+    pub kind: String,
+    pub name: String,
+}

@@ -56,6 +56,7 @@ mod reflections;
 mod schedules;
 mod search;
 mod sessions;
+mod skills;
 mod snapshots;
 mod ssh_access;
 mod start_proposals;
@@ -318,6 +319,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/reflections/schedule", get(reflections::get_schedule).post(reflections::set_schedule))
         .route("/api/v1/reflections/{id}", patch(reflections::patch))
         .route("/api/v1/reflections/{id}/redraft", post(reflections::redraft))
+        .route("/api/v1/skills", get(skills::list))
+        .route("/api/v1/skills/hidden", put(skills::hide).delete(skills::unhide))
         .route("/api/v1/wellness/settings", get(wellness::get_settings).put(wellness::save_settings))
         .route("/api/v1/wellness/heartbeat", post(wellness::heartbeat))
         .route("/api/v1/wellness/breaks", post(wellness::start_break))

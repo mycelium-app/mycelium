@@ -239,7 +239,19 @@ pub async fn hunk(State(state): State<AppState>, user: AuthUser, Path(id): Path<
 }
 
 pub async fn file(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<FileRequest>) -> ApiResult<Json<Value>> {
-    run(&state, &user, id, GitCommand::File { path: request.path, content: request.content, expected: request.expected }).await
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let saved = request.content.clone();
+    let before = request.expected.clone().unwrap_or_default();
+    let path = request.path.clone();
+    let answer = relay(&state, row.node_id, row.cwd.clone(), GitCommand::File { path: request.path, content: request.content, expected: request.expected }).await?;
+
+    if let Some(saved) = saved {
+        if let Err(cause) = crate::skills::count_own(&state.pool, user.id, &row.cwd, &path, &saved, &before).await {
+            tracing::warn!("counting skill lines for {id} failed: {cause:?}");
+        }
+    }
+
+    Ok(Json(answer))
 }
 
 pub async fn stage_all(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {

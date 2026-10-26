@@ -300,3 +300,82 @@ async fn redrafting_before_the_reflection_is_set_up_says_what_to_do() {
 
     assert_eq!((status, body["error"].clone()), (409, json!("reflection_not_set_up")));
 }
+
+async fn skills(server: &Server) -> Vec<Value> {
+    let (status, body) = server.user.json(server.user.get("/api/v1/skills")).await;
+    assert_eq!(status, 200, "{body}");
+
+    body.as_array().unwrap().clone()
+}
+
+fn skill<'a>(all: &'a [Value], kind: &str, name: &str) -> Option<&'a Value> {
+    all.iter().find(|skill| skill["kind"] == kind && skill["name"] == name)
+}
+
+async fn agent_writes(link: &mut NodeLink, conversation: Uuid, seq: i64, path: &str, new_text: &str) {
+    let update = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": format!("call-{seq}"), "status": "completed", "content": [{"type": "diff", "path": path, "oldText": null, "newText": new_text}]}});
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq, update }).await;
+}
+
+#[tokio::test]
+async fn agent_diff_events_count_lines_per_language_and_area() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+
+    agent_writes(&mut link, id, 1, "/work/app/crates/control/src/a.rs", "fn a() {}\nfn b() {}\nfn c() {}\n").await;
+    agent_writes(&mut link, id, 2, "/work/app/web/src/App.svelte", "<p>hi</p>\n").await;
+
+    let all = common::eventually("agent lines counted", || async { Some(skills(&server).await).filter(|all| skill(all, "language", "Svelte").is_some()) }).await;
+
+    assert_eq!(skill(&all, "language", "Rust").unwrap()["agent_lines"], 3);
+    assert_eq!(skill(&all, "area", "crates/control").unwrap()["agent_lines"], 3);
+    assert_eq!(skill(&all, "area", "web/src").unwrap()["agent_lines"], 1);
+    assert_eq!(skill(&all, "language", "Rust").unwrap()["own_share"], 0.0);
+}
+
+#[tokio::test]
+async fn saving_in_changes_counts_as_written_by_you() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    agent_writes(&mut link, id, 1, "/work/app/src/lib.rs", "fn a() {}\nfn b() {}\n").await;
+    common::eventually("agent lines counted", || async { Some(skills(&server).await).filter(|all| skill(all, "language", "Rust").is_some()) }).await;
+
+    let user = server.user.clone();
+    let saving = tokio::spawn(async move { user.json(user.post(&format!("/api/v1/conversations/{id}/git/file")).json(&json!({"path": "src/lib.rs", "content": "fn a() {}\nfn b() {}\nfn mine() {}\nfn mine_too() {}\n", "expected": "fn a() {}\nfn b() {}\n"}))).await });
+    let request_id = match link.next().await {
+        ControlToNode::Git { request_id, .. } => request_id,
+        other => panic!("expected git, got {other:?}"),
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({}), error: None }).await;
+    assert_eq!(saving.await.unwrap().0, 200);
+
+    let all = skills(&server).await;
+    let rust = skill(&all, "language", "Rust").unwrap();
+
+    assert_eq!((rust["own_lines"].clone(), rust["agent_lines"].clone(), rust["own_share"].clone()), (json!(2), json!(2), json!(0.5)));
+    assert_eq!(rust["weekly_own_lines"].as_array().unwrap().last().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn hidden_skills_are_left_out() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    agent_writes(&mut link, id, 1, "/work/app/src/lib.rs", "fn a() {}\n").await;
+    common::eventually("agent lines counted", || async { Some(skills(&server).await).filter(|all| skill(all, "language", "Rust").is_some()) }).await;
+
+    let hidden = json!({"kind": "language", "name": "Rust"});
+    let (status, _) = server.user.json(server.user.put("/api/v1/skills/hidden").json(&hidden)).await;
+    assert_eq!(status, 204);
+    assert!(skill(&skills(&server).await, "language", "Rust").is_none());
+
+    let (status, _) = server.user.json(server.user.delete("/api/v1/skills/hidden").json(&hidden)).await;
+    assert_eq!(status, 204);
+    assert!(skill(&skills(&server).await, "language", "Rust").is_some());
+
+    let (status, body) = server.user.json(server.user.put("/api/v1/skills/hidden").json(&json!({"kind": "nonsense", "name": "Rust"}))).await;
+    assert_eq!((status, body["error"].clone()), (400, json!("skill_invalid")));
+}

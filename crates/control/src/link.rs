@@ -585,6 +585,12 @@ impl UpdateBatch {
         let active = if stored.iter().any(|(_, update)| is_agent_activity(update)) { note_agent_activity(&mut tx, conversation_id).await? } else { None };
         tx.commit().await?;
 
+        for (_, update) in &stored {
+            if let Err(cause) = crate::skills::count_agent(&state.pool, row.owner, conversation_id, &row.cwd, update, chrono::Utc::now().date_naive()).await {
+                tracing::warn!("counting skill lines for {conversation_id} failed: {cause:?}");
+            }
+        }
+
         if self.last_tool_updates.len() > TOOL_UPDATE_CACHE_LIMIT {
             self.last_tool_updates.clear();
         }

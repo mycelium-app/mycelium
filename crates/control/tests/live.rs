@@ -180,6 +180,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/reflections/schedule",
     "PATCH /api/v1/reflections/{id}",
     "POST /api/v1/reflections/{id}/redraft",
+    "PUT /api/v1/skills/hidden",
+    "DELETE /api/v1/skills/hidden",
     "PUT /api/v1/wellness/settings",
     "POST /api/v1/wellness/heartbeat",
     "POST /api/v1/wellness/breaks",
