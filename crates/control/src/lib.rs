@@ -52,6 +52,7 @@ mod projects;
 mod pricing;
 mod prompts;
 mod rate_limit;
+mod reflections;
 mod schedules;
 mod search;
 mod sessions;
@@ -312,6 +313,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/experiments", get(experiments::get).put(experiments::save))
+        .route("/api/v1/reflections", get(reflections::list))
+        .route("/api/v1/reflections/schedule", get(reflections::get_schedule).post(reflections::set_schedule))
+        .route("/api/v1/reflections/{id}", patch(reflections::patch))
+        .route("/api/v1/reflections/{id}/redraft", post(reflections::redraft))
         .route("/api/v1/wellness/settings", get(wellness::get_settings).put(wellness::save_settings))
         .route("/api/v1/wellness/heartbeat", post(wellness::heartbeat))
         .route("/api/v1/wellness/breaks", post(wellness::start_break))

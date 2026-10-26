@@ -187,3 +187,116 @@ async fn walkthrough_with_a_bad_check_stores_nothing() {
 
     assert_eq!(latest_walkthrough(&server, id).await, Value::Null);
 }
+
+async fn set_up_reflection(server: &Server, link: &NodeLink, enabled: bool) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/reflections/schedule").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "enabled": enabled}))).await
+}
+
+async fn save_reflection(server: &Server, token: &str, conversation: Uuid, arguments: Value) -> Value {
+    let body = server.agent_mcp(token, conversation, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "save_reflection", "arguments": arguments}})).await;
+
+    body["result"].clone()
+}
+
+async fn reflections(server: &Server) -> Vec<Value> {
+    let (_, listed) = server.user.json(server.user.get("/api/v1/reflections")).await;
+
+    listed.as_array().unwrap().clone()
+}
+
+async fn first_drafting_run(server: &Server, link: &mut NodeLink, schedule: &str) -> Uuid {
+    let (status, run) = server.user.json(server.user.post(&format!("/api/v1/schedules/{schedule}/run"))).await;
+    assert!(status < 300, "{run}");
+
+    link.expect_start_session().await
+}
+
+#[tokio::test]
+async fn reflection_schedule_is_created_once() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+
+    let (status, first) = set_up_reflection(&server, &link, true).await;
+    assert_eq!(status, 200, "{first}");
+    let (_, second) = set_up_reflection(&server, &link, true).await;
+    let (_, paused) = set_up_reflection(&server, &link, false).await;
+
+    assert_eq!(first["schedule_id"], second["schedule_id"]);
+    assert_eq!((first["cron"].clone(), paused["enabled"].clone(), paused["schedule_id"].clone()), (json!("0 16 * * 5"), json!(false), first["schedule_id"].clone()));
+    let count = sqlx::query_scalar::<_, i64>("select count(*) from schedules").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(count, 1);
+    let (_, shown) = server.user.json(server.user.get("/api/v1/reflections/schedule")).await;
+    assert_eq!(shown["enabled"], false);
+}
+
+#[tokio::test]
+async fn save_reflection_keeps_edited_sections() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, schedule) = set_up_reflection(&server, &link, true).await;
+    let scheduled = first_drafting_run(&server, &mut link, schedule["schedule_id"].as_str().unwrap()).await;
+    let token = link.token.clone();
+    let saved = save_reflection(&server, &token, scheduled, json!({"week": "2026-10-28", "done": "Shipped A", "learned": "L1", "waiting": "W1", "next_week": "N1"})).await;
+    assert_eq!(saved["isError"], false, "{saved}");
+    let stored = reflections(&server).await;
+    assert_eq!(stored[0]["week"], "2026-10-26");
+    let id = stored[0]["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.patch(&format!("/api/v1/reflections/{id}")).json(&json!({"learned": "Mine"}))).await;
+
+    let (status, redraft) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
+    assert_eq!(status, 202, "{redraft}");
+    let redrafting = link.expect_start_session().await;
+    assert_eq!(redrafting.to_string(), redraft["conversation_id"]);
+    save_reflection(&server, &token, redrafting, json!({"week": "2026-10-26", "done": "Shipped B", "learned": "L2", "waiting": "W2", "next_week": "N2"})).await;
+
+    let after = reflections(&server).await;
+    assert_eq!(after.len(), 1);
+    let (done, learned, waiting, edited) = (after[0]["done"].clone(), after[0]["learned"].clone(), after[0]["waiting"].clone(), after[0]["edited"].clone());
+    assert_eq!((done, learned, waiting, edited), (json!("Shipped B"), json!("Mine"), json!("W2"), json!(["learned"])));
+}
+
+#[tokio::test]
+async fn a_conversation_that_is_not_drafting_cannot_save_a_reflection() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    let token = link.token.clone();
+
+    let refused = save_reflection(&server, &token, id, json!({"done": "Anything"})).await;
+
+    assert_eq!(refused["isError"], true, "{refused}");
+    assert!(reflections(&server).await.is_empty());
+}
+
+#[tokio::test]
+async fn patch_marks_sections_edited() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, schedule) = set_up_reflection(&server, &link, true).await;
+    let scheduled = first_drafting_run(&server, &mut link, schedule["schedule_id"].as_str().unwrap()).await;
+    let token = link.token.clone();
+    save_reflection(&server, &token, scheduled, json!({"done": "A", "learned": "B"})).await;
+    let id = reflections(&server).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, unchanged) = server.user.json(server.user.patch(&format!("/api/v1/reflections/{id}")).json(&json!({"done": "A"}))).await;
+    assert_eq!((status, unchanged["edited"].clone()), (200, json!([])));
+    let (_, edited) = server.user.json(server.user.patch(&format!("/api/v1/reflections/{id}")).json(&json!({"waiting": "Review from Sam", "learned": "B2"}))).await;
+
+    let mut marked: Vec<String> = edited["edited"].as_array().unwrap().iter().map(|name| name.as_str().unwrap().to_string()).collect();
+    marked.sort();
+    assert_eq!(marked, ["learned", "waiting"]);
+    let other = server.second_user("other@example.com").await;
+    let (status, _) = other.json(other.patch(&format!("/api/v1/reflections/{id}")).json(&json!({"done": "Nope"}))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn redrafting_before_the_reflection_is_set_up_says_what_to_do() {
+    let server = Server::start().await;
+    let user = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let id = sqlx::query_scalar::<_, Uuid>("insert into reflections (owner, week) values ($1, '2026-10-26') returning id").bind(user).fetch_one(&server.pool).await.unwrap();
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("reflection_not_set_up")));
+}

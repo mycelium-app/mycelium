@@ -63,7 +63,7 @@ pub fn is_quiet(days: &[QuietDay], at: NaiveDateTime) -> bool {
     in_today || in_yesterdays_overnight
 }
 
-async fn zone_of(state: &AppState, owner: Uuid, saved: Option<&str>) -> ApiResult<Tz> {
+pub async fn zone_of(state: &AppState, owner: Uuid, saved: Option<&str>) -> ApiResult<Tz> {
     if let Some(zone) = saved.and_then(|name| name.parse::<Tz>().ok()) {
         return Ok(zone);
     }

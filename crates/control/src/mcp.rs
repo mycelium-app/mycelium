@@ -16,6 +16,7 @@ use crate::ssh_access;
 use crate::state::AppState;
 use crate::store::CONVERSATION_GROUP_SQL;
 use crate::tasks;
+use crate::reflections;
 use crate::walkthroughs;
 use axum::Json;
 use base64::Engine;
@@ -231,6 +232,20 @@ pub fn tool_definitions() -> Value {
                     },
                 },
                 "required": ["steps"],
+            },
+        },
+        {
+            "name": "save_reflection",
+            "description": "Save the person's weekly reflection. Only the weekly reflection run, or a redraft the person asked for, may call it. Look over the week first with find_conversations and recall, then call it once. Sections the person has edited are kept as they wrote them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "week": {"type": "string", "description": "Any date in the week to save, like 2026-10-26. Defaults to the current week."},
+                    "done": {"type": "string", "description": "What was finished this week, in Markdown."},
+                    "learned": {"type": "string", "description": "What the person found out or got better at, in Markdown."},
+                    "waiting": {"type": "string", "description": "What is blocked or waiting on someone, in Markdown."},
+                    "next_week": {"type": "string", "description": "What to pick up next week, in Markdown."},
+                },
             },
         },
         {
@@ -988,6 +1003,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
+                Some("save_reflection") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was saved. A reflection belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match reflections::save(&state, conversation_id, &arguments).await? {
+                        Ok(reflection) => reply(&id, tool_text(&format!("Reflection saved for the week of {}. Sections the person edited were kept: {}.", reflection.week, if reflection.edited.is_empty() { "none".to_string() } else { reflection.edited.join(", ") }), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
                 Some("get_instructions") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                         let latest = sqlx::query_as::<_, (String, String)>("select id, text from instruction_versions where layer = 'global' order by seq desc limit 1").fetch_optional(&state.pool).await?;
@@ -1370,7 +1395,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     reply(&id, tool_text(&text, is_error))
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

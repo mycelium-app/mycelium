@@ -110,6 +110,12 @@ pub fn preset_cron(preset: &str) -> Option<String> {
         return Some(format!("{minute} {hour} * * 1-5"));
     }
 
+    if let Some(time) = preset.strip_prefix("fridays at ") {
+        let (hour, minute) = parse_time(time)?;
+
+        return Some(format!("{minute} {hour} * * 5"));
+    }
+
     if let Some(time) = preset.strip_prefix("daily at ") {
         let (hour, minute) = parse_time(time)?;
 
@@ -136,6 +142,7 @@ pub fn describe_cron(cron: &str) -> String {
         ["0", hours, "*", "*", "*"] if hours.starts_with("*/") => hours.strip_prefix("*/").map(|count| format!("Every {count} hours")),
         [minute, hour, "*", "*", "*"] => clock(hour, minute).map(|time| format!("Daily at {time}")),
         [minute, hour, "*", "*", "1-5"] => clock(hour, minute).map(|time| format!("Weekdays at {time}")),
+        [minute, hour, "*", "*", "5"] => clock(hour, minute).map(|time| format!("Fridays at {time}")),
         _ => None,
     }
     .unwrap_or_else(|| cron.to_string())
@@ -557,6 +564,7 @@ mod tests {
     fn presets_become_cron_expressions_and_anything_else_is_not_a_preset() {
         assert_eq!(preset_cron("Weekdays at 20:00").as_deref(), Some("0 20 * * 1-5"));
         assert_eq!(preset_cron("daily at 9:05").as_deref(), Some("5 9 * * *"));
+        assert_eq!(preset_cron("Fridays at 16:00").as_deref(), Some("0 16 * * 5"));
         assert_eq!(preset_cron("every 15 minutes").as_deref(), Some("*/15 * * * *"));
         assert_eq!(preset_cron("every 2 hours").as_deref(), Some("0 */2 * * *"));
 
@@ -569,6 +577,7 @@ mod tests {
     fn a_cron_expression_is_described_the_way_a_preset_names_it() {
         assert_eq!(describe_cron("0 8 * * 1-5"), "Weekdays at 08:00");
         assert_eq!(describe_cron("5 9 * * *"), "Daily at 09:05");
+        assert_eq!(describe_cron("0 16 * * 5"), "Fridays at 16:00");
         assert_eq!(describe_cron("*/15 * * * *"), "Every 15 minutes");
         assert_eq!(describe_cron("0 */2 * * *"), "Every 2 hours");
         assert_eq!(describe_cron("0 8 1 * *"), "0 8 1 * *");

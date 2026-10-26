@@ -1557,6 +1557,57 @@ pub struct Walkthrough {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reflection {
+    pub id: Uuid,
+    pub week: String,
+    pub done: String,
+    pub learned: String,
+    pub waiting: String,
+    pub next_week: String,
+    pub edited: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drafted_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PatchReflectionRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_week: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReflectionScheduleRequest {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    #[serde(default)]
+    pub cwd: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReflectionSchedule {
+    pub schedule_id: Uuid,
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    pub cwd: String,
+    pub enabled: bool,
+    pub cron: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RedraftReflection {
+    pub conversation_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WalkthroughCheck {
     pub step: i32,
     pub question: String,
