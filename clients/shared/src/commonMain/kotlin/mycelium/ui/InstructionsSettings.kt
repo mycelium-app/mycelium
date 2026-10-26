@@ -104,53 +104,28 @@ internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel
 @Composable
 fun InstructionsSettings(store: Store) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
     val state by store.state.collectAsState()
     var document by remember { mutableStateOf<Instructions?>(null) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var extensions by remember { mutableStateOf<Extensions?>(null) }
-    var selected by remember { mutableStateOf(GlobalLayer) }
     var failure by remember { mutableStateOf<String?>(null) }
-    var naming by remember { mutableStateOf<String?>(null) }
-    var newName by remember { mutableStateOf("") }
-    var renaming by remember { mutableStateOf(false) }
-    var renamed by remember { mutableStateOf("") }
-    var deleting by remember { mutableStateOf(false) }
     var choosingSource by remember { mutableStateOf(false) }
     var sourceForge by remember { mutableStateOf<String?>(null) }
     var sourceRepository by remember { mutableStateOf("") }
     var sourcePath by remember { mutableStateOf("") }
     var forgeMenu by remember { mutableStateOf(false) }
-    var newFolder by remember { mutableStateOf("") }
-    var folderNode by remember { mutableStateOf<String?>(null) }
-    var folderNodeMenu by remember { mutableStateOf(false) }
 
     val layers = document?.layers.orEmpty()
-    val layer = layers.firstOrNull { it.layer == selected } ?: layers.firstOrNull()
+    val layer = layers.firstOrNull { it.layer == GlobalLayer }
     val source = document?.source
 
-    fun attempt(block: suspend () -> Unit) {
-        scope.launch {
-            try {
-                block()
-                failure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            }
-        }
-    }
+    val attempt = rememberAttempt { failure = it }
 
     LaunchedEffect(Unit) {
         store.act {
             document = store.api.instructions()
             forges = store.api.forges()
             extensions = store.api.extensions()
-            store.refreshProjects()
-            store.refreshGroups()
         }
     }
 
@@ -159,58 +134,9 @@ fun InstructionsSettings(store: Store) {
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            Label("Instruction layers", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("Global instructions apply first. A group's instructions are added for conversations in that group.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-            for ((title, entries) in listOf("Global" to layers.filter { it.layer == GlobalLayer }, "Groups" to layers.filter { it.layer != GlobalLayer })) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Label(title, Modifier.weight(1f).semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
-
-                        if (title == "Groups") {
-                            MyButton({ naming = ""; newName = "" }, text = "New group", icon = MyIcon.Plus, description = "New group", size = ButtonSize.Sm, muted = true)
-                        }
-                    }
-
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                        for (entry in entries) {
-                            MyButton(
-                                { selected = entry.layer; renaming = false; deleting = false },
-                                text = entry.name,
-                                icon = if (entry.layer == GlobalLayer) MyIcon.Layers else null,
-                                variant = ButtonVariant.Outline,
-                                size = ButtonSize.Sm,
-                                muted = entry.layer != layer?.layer,
-                                selected = entry.layer == layer?.layer,
-                                description = if (entry.layer == GlobalLayer) "Global instructions" else "Instructions for the ${entry.name} group",
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (naming != null) {
-            Row(Modifier.widthIn(max = Tokens.Size.FormColumn), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                fun create() {
-                    attempt {
-                        val group = store.api.createGroup(newName)
-                        document = store.api.instructions()
-                        selected = group.id
-                        naming = null
-                    }
-                }
-
-                TextInput(newName, { newName = it }, label = "Group name", placeholder = "slop", modifier = Modifier.weight(1f), onSubmit = ::create)
-                MyButton(::create, text = "Create group", variant = ButtonVariant.Outline)
-                MyButton({ naming = null }, text = "Cancel", muted = true)
-            }
-        }
-
         if (layer != null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Label(if (layer.layer == GlobalLayer) "Global instructions" else "${layer.name} instructions", Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
+                Label("Global instructions", Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
 
                 RowMenu("${layer.name} instructions") { close ->
                     MenuItem(if (source != null) "Change repository" else "Connect a repository", onClick = {
@@ -220,11 +146,6 @@ fun InstructionsSettings(store: Store) {
                         sourceRepository = source?.repository.orEmpty()
                         sourcePath = source?.path.orEmpty()
                     })
-
-                    if (layer.layer != GlobalLayer) {
-                        MenuItem("Rename group", onClick = { close(); renaming = !renaming; renamed = layer.name; deleting = false })
-                        MenuItem("Delete group", onClick = { close(); deleting = !deleting; renaming = false })
-                    }
                 }
             }
 
@@ -287,42 +208,6 @@ fun InstructionsSettings(store: Store) {
                     }
                 }
             }
-
-            if (renaming && layer.layer != GlobalLayer) {
-                Row(Modifier.widthIn(max = Tokens.Size.FormColumn), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                    fun rename() {
-                        attempt {
-                            store.api.renameGroup(layer.layer, renamed)
-                            document = store.api.instructions()
-                            renaming = false
-                        }
-                    }
-
-                    TextInput(renamed, { renamed = it }, label = "New group name", modifier = Modifier.weight(1f), onSubmit = ::rename)
-                    MyButton(::rename, text = "Rename", variant = ButtonVariant.Outline)
-                }
-            }
-
-            if (deleting && layer.layer != GlobalLayer) {
-                Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Delete the ${layer.name} group? Its projects stay, without a group, and its instructions stop reaching new conversations.", Modifier.weight(1f), color = colors.statusFailed)
-                    MyButton(
-                        {
-                            attempt {
-                                store.api.deleteGroup(layer.layer)
-                                selected = GlobalLayer
-                                deleting = false
-                                document = store.api.instructions()
-                                store.refreshProjects()
-                            }
-                        },
-                        text = "Delete ${layer.name}",
-                        variant = ButtonVariant.Danger,
-                        size = ButtonSize.Sm,
-                    )
-                    MyButton({ deleting = false }, text = "Cancel", size = ButtonSize.Sm, muted = true)
-                }
-            }
         }
 
         if (layer != null) {
@@ -340,93 +225,6 @@ fun InstructionsSettings(store: Store) {
         }
 
         InstructionProposals(store)
-
-        if (layer != null && layer.layer != GlobalLayer) {
-            val folders = state.groups[layer.layer]?.folders.orEmpty()
-
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Folders in ${layer.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Conversations without a project, including imported ones, join ${layer.name} when their folder is inside one of these.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-                for (folder in folders) {
-                    val nodeName = folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"
-
-                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label(folder.prefix, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                        Label(nodeName, color = colors.textMuted, maxLines = 1)
-                        RowMenu("folder ${folder.prefix} in ${layer.name}") { close ->
-                            MenuItem("Remove folder", onClick = {
-                                close()
-                                attempt { store.api.removeGroupFolder(layer.layer, folder.id); store.refreshGroups() }
-                            })
-                        }
-                    }
-
-                    Hairline()
-                }
-
-                Row(Modifier.widthIn(max = Tokens.Size.FormColumn).padding(top = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                    fun addFolder() {
-                        attempt {
-                            store.api.addGroupFolder(layer.layer, newFolder, folderNode)
-                            store.refreshGroups()
-                            newFolder = ""
-                        }
-                    }
-
-                    TextInput(newFolder, { newFolder = it }, label = "Folder", placeholder = "/home/sam/code", mono = true, modifier = Modifier.weight(1f), onSubmit = ::addFolder)
-
-                    Box {
-                        val chosen = state.nodes[folderNode]?.name ?: "Any node"
-
-                        MyButton(
-                            { folderNodeMenu = true },
-                            text = chosen,
-                            description = "Node: $chosen",
-                            variant = ButtonVariant.Outline,
-                            trailingIcon = MyIcon.ChevronDown,
-                        )
-
-                        if (folderNodeMenu) {
-                            MenuPopup(onDismiss = { folderNodeMenu = false }) {
-                                MenuLabel("Node")
-                                MenuItem("Any node", onClick = { folderNode = null; folderNodeMenu = false }, checked = folderNode == null)
-
-                                for (node in state.nodes.values.sortedBy { it.name }) {
-                                    MenuItem(node.name, onClick = { folderNode = node.id; folderNodeMenu = false }, checked = node.id == folderNode)
-                                }
-                            }
-                        }
-                    }
-
-                    MyButton(::addFolder, text = "Add folder", variant = ButtonVariant.Outline)
-                }
-            }
-        }
-
-        if (layer != null && layer.layer != GlobalLayer) {
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Projects in ${layer.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Conversations in these projects start with this group's instructions after the global file. Claude Code only.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-                for (project in state.projects.values.sortedBy { it.name }) {
-                    val member = project.groupId == layer.layer
-
-                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label(project.name, Modifier.weight(1f), maxLines = 1)
-                        Label(state.nodes[project.nodeId]?.name.orEmpty(), color = colors.textMuted, maxLines = 1)
-                        RowMenu("project ${project.name} in ${layer.name}") { close ->
-                            MenuItem(if (member) "Remove from ${layer.name}" else "Add to ${layer.name}", onClick = {
-                                close()
-                                store.act { store.setProjectGroup(project.id, if (member) null else layer.layer) }
-                            })
-                        }
-                    }
-
-                    Hairline()
-                }
-            }
-        }
 
         extensions?.let { held ->
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {

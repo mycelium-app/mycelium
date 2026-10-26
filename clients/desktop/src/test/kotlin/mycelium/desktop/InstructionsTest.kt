@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onParent
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -94,26 +95,14 @@ class InstructionsTest {
     }
 
     @Test
-    fun theGlobalFileShowsItsSourceCommitAndTextWithAGroupTabBesideIt() {
+    fun theInstructionsPageShowsOnlyTheGlobalLayer() {
         show()
 
         rule.onNodeWithText("agents-md / AGENTS.md").assertExists()
         rule.onNodeWithText("afad776 · ", substring = true).assertExists()
-        rule.onNodeWithContentDescription("Global instructions").assertExists()
-        rule.onNodeWithContentDescription("Instructions for the slop group").assertExists()
-        rule.onNodeWithContentDescription("Instructions for the work group").assertExists()
         rule.onNodeWithText("## Diffs").assertExists()
-    }
-
-    @Test
-    fun aGroupTabShowsItsOwnLayerFileAndSaysNoVersionYet() {
-        show()
-
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-
-        rule.onNodeWithText("agents-md / AGENTS.slop.md").assertExists()
-        rule.onNodeWithText("No version yet").assertExists()
-        rule.onNodeWithText("Use British English.").assertExists()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Instructions for the slop group").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("New group").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -148,69 +137,10 @@ class InstructionsTest {
     fun savingSendsTheEditedTextForTheLayerThatIsOpen() {
         show()
 
-        rule.onNodeWithContentDescription("Global instructions").performClick()
         rule.onNodeWithText("Save and commit").performScrollTo().performClick()
 
         val saved = requestTo(HttpMethod.Put, "/instructions/global")
         assertEquals("""{"text":"## Diffs"}""", saved.third)
-    }
-
-    @Test
-    fun aProjectIsAddedToTheOpenGroup() {
-        show()
-
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("More for project mycelium in slop").performScrollTo().performClick()
-        rule.onNodeWithText("Add to slop").performClick()
-
-        val patched = requestTo(HttpMethod.Patch, "/projects/p1")
-        assertEquals("""{"group_id":"g1"}""", patched.third)
-    }
-
-    @Test
-    fun aNewGroupIsCreatedFromItsNameAndTheDocumentIsReloaded() {
-        show()
-
-        rule.onNodeWithContentDescription("New group").performClick()
-        rule.onNodeWithContentDescription("Group name").performTextInput("homelab")
-        rule.onNodeWithText("Create group").performClick()
-
-        val created = requestTo(HttpMethod.Post, "/groups")
-        assertEquals("""{"name":"homelab"}""", created.third)
-    }
-
-    @Test
-    fun aGroupListsTheFoldersItClaimsWithTheNodeOrAnyNode() {
-        show()
-
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-
-        rule.onNodeWithText("Folders in slop").assertExists()
-        rule.onNodeWithText("/home/claude/projects").assertExists()
-        assertEquals(2, rule.onAllNodesWithText("Any node").fetchSemanticsNodes().size)
-        rule.onNodeWithText("/srv/slop").assertExists()
-    }
-
-    @Test
-    fun aFolderIsAddedToTheOpenGroupForAnyNode() {
-        show()
-
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("Folder").performScrollTo().performTextInput("/home/claude/other")
-        rule.onNodeWithText("Add folder").performClick()
-
-        assertEquals("""{"prefix":"/home/claude/other"}""", requestTo(HttpMethod.Post, "/groups/g1/folders").third)
-    }
-
-    @Test
-    fun aFolderIsRemovedFromTheOpenGroupByItsName() {
-        show()
-
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
-        rule.onNodeWithContentDescription("More for folder /srv/slop in slop").performScrollTo().performClick()
-        rule.onNodeWithText("Remove folder").performClick()
-
-        requestTo(HttpMethod.Delete, "/groups/g1/folders/f2")
     }
 
     @Test
@@ -234,20 +164,19 @@ class InstructionsTest {
     }
 
     @Test
-    fun theEditorIsCappedAndPrecedesGroupMembershipAndNodeSynchronisation() {
+    fun theEditorIsCappedAndPrecedesNodeSynchronisation() {
         val longText = (1..300).joinToString("\\n") { "line $it" }
         show(DocumentJson.replace("## Diffs", longText).replace("Use British English.", longText))
 
-        rule.onNodeWithContentDescription("Instructions for the slop group").performClick()
         rule.waitForIdle()
 
-        val editor = rule.onNodeWithContentDescription("Edit slop instructions").onParent().getUnclippedBoundsInRoot()
+        val editor = rule.onNodeWithContentDescription("Edit Global instructions").onParent().getUnclippedBoundsInRoot()
 
         val editorHeight = editor.bottom - editor.top
 
         assertTrue(editorHeight in 320.dp..800.dp, "editor is $editorHeight")
 
-        for (after in listOf(rule.onNodeWithText("Folders in slop"), rule.onNodeWithText("Projects in slop"), rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Node synchronisation"))) {
+        for (after in listOf(rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Node synchronisation"))) {
             assertTrue(after.getUnclippedBoundsInRoot().top >= editor.bottom, "operational controls precede the editor")
         }
 

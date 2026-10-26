@@ -38,6 +38,7 @@ import mycelium.state.NotifySoundPreference
 import mycelium.state.Store
 import mycelium.ClientVersion
 import mycelium.Platform
+import mycelium.api.Experiments
 import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
@@ -46,6 +47,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
+    Groups("Groups", MyIcon.Layers, "Instructions, folders and projects for each kind of work"),
     Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
@@ -57,10 +59,16 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Account("Account", MyIcon.Settings, "Sign out and version"),
 }
 
+private fun enabled(section: SettingsSection, experiments: Experiments): Boolean = when (section) {
+    SettingsSection.Groups -> experiments.groups
+    SettingsSection.Instructions -> experiments.instructions
+    else -> true
+}
+
 internal val SettingsGroups = listOf(
     "General" to listOf(SettingsSection.Appearance, SettingsSection.Experiments),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
-    "Knowledge" to listOf(SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
+    "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
     "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
 )
@@ -71,12 +79,12 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
     var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
     val touch = LocalTouch.current
     val state by store.state.collectAsState()
-    val opened = section?.takeUnless { it == SettingsSection.Instructions && !state.experiments.instructions }
+    val opened = section?.takeIf { enabled(it, state.experiments) }
     val waitingProposals = waitingInstructionProposals(state)
-    val groups = SettingsGroups.map { (name, entries) -> name to entries.filter { it != SettingsSection.Instructions || state.experiments.instructions } }
+    val groups = SettingsGroups.map { (name, entries) -> name to entries.filter { enabled(it, state.experiments) } }
 
-    LaunchedEffect(state.experiments.instructions) {
-        if (!state.experiments.instructions && section == SettingsSection.Instructions) {
+    LaunchedEffect(state.experiments) {
+        if (section?.let { enabled(it, state.experiments) } == false) {
             section = null
         }
     }
@@ -195,6 +203,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
+            SettingsSection.Groups -> GroupsSettings(store)
             SettingsSection.Instructions -> InstructionsSettings(store)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)

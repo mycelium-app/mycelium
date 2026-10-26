@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +80,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import mycelium.api.ApiException
 import mycelium.api.ConversationStatus
 
 val ControlShape = RoundedCornerShape(Tokens.Radius.Control)
@@ -505,6 +509,26 @@ fun TabRow(options: List<String>, selected: String, onSelect: (String) -> Unit, 
             ) {
                 Label(option, style = if (on) Tokens.Type.UiStrong else Tokens.Type.Ui, color = if (on) colors.text else colors.textMuted, maxLines = 1)
                 Box(Modifier.width(Tokens.Space.S6).height(Tokens.Size.FocusRing).background(if (on) colors.text else Color.Transparent))
+            }
+        }
+    }
+}
+
+@Composable
+fun rememberAttempt(onFailure: (String?) -> Unit): (suspend () -> Unit) -> Unit {
+    val scope = rememberCoroutineScope()
+
+    return { block ->
+        scope.launch {
+            try {
+                block()
+                onFailure(null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (problem: ApiException) {
+                onFailure(problem.message)
+            } catch (_: Exception) {
+                onFailure("Could not reach the control plane. Check your connection and try again.")
             }
         }
     }

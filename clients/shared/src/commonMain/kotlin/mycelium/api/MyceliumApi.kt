@@ -273,11 +273,17 @@ class MyceliumApi(
 
     suspend fun groups(): List<Group> = call("/groups") { client.get(it) { authorise() } }.body()
 
+    suspend fun groupInstructions(id: String): InstructionLayer =
+        call("/groups/$id/instructions") { client.get(it) { authorise() } }.body()
+
     suspend fun createGroup(name: String): Group =
         call("/groups") { client.post(it) { authorise(); json(GroupRequest(name)) } }.body()
 
     suspend fun renameGroup(id: String, name: String): Group =
         call("/groups/$id") { client.patch(it) { authorise(); json(GroupRequest(name)) } }.body()
+
+    suspend fun saveGroupInstructions(id: String, text: String): InstructionLayer =
+        call("/groups/$id/instructions") { client.put(it) { authorise(); json(SaveInstructionsRequest(text)) } }.body()
 
     suspend fun deleteGroup(id: String) {
         call("/groups/$id") { client.delete(it) { authorise() } }
