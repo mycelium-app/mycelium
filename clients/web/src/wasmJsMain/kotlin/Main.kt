@@ -6,6 +6,8 @@ import androidx.compose.ui.window.ComposeViewport
 import mycelium.App
 import mycelium.Connection
 import mycelium.DeviceInfo
+import mycelium.Dictation
+import mycelium.DictationProblem
 import mycelium.Platform
 import mycelium.state.NotifyFinishedPreference
 import mycelium.state.PickedFile
@@ -120,6 +122,53 @@ private external fun showNotification(title: String, body: String, id: String, o
 }""")
 private external fun playChime()
 
+@JsFun("() => !!(window.SpeechRecognition || window.webkitSpeechRecognition)")
+private external fun speechRecognitionExists(): Boolean
+
+@JsFun("""(onHeard, onEnded) => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new Recognition();
+    let failure = '';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = navigator.language;
+    recognition.onresult = (event) => {
+        for (let index = event.resultIndex; index < event.results.length; index++) {
+            if (event.results[index].isFinal) { onHeard(event.results[index][0].transcript); }
+        }
+    };
+    recognition.onerror = (event) => { failure = event.error || 'failed'; };
+    recognition.onend = () => onEnded(failure);
+    recognition.start();
+    return recognition;
+}""")
+private external fun startSpeechRecognition(onHeard: (JsString) -> Unit, onEnded: (JsString) -> Unit): JsAny
+
+@JsFun("(recognition) => { recognition.stop(); }")
+private external fun stopSpeechRecognition(recognition: JsAny)
+
+private class WebDictation : Dictation {
+    private var recognition: JsAny? = null
+
+    override fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit) {
+        recognition = startSpeechRecognition({ heard -> onHeard(heard.toString()) }) { failure ->
+            recognition = null
+            onStopped(
+                when (failure.toString()) {
+                    "", "no-speech", "aborted" -> null
+                    "not-allowed", "service-not-allowed" -> DictationProblem.Denied
+                    "audio-capture" -> DictationProblem.NoMicrophone
+                    else -> DictationProblem.Failed("Dictation stopped. Try again.")
+                },
+            )
+        }
+    }
+
+    override fun stop() {
+        recognition?.let { stopSpeechRecognition(it) }
+    }
+}
+
 private object WebPlatform : Platform {
     private var notificationOpener: ((String) -> Unit)? = null
 
@@ -135,6 +184,8 @@ private object WebPlatform : Platform {
 
         listener?.invoke(listOf(PickedFile(fileName, mediaTypeOf(fileName, bytes, type.toString()), bytes)))
     }
+
+    override fun dictation(): Dictation? = if (speechRecognitionExists()) WebDictation() else null
 
     override fun pickFiles(onPicked: (List<PickedFile>) -> Unit) {
         chooseFiles { name, type, data -> received(name, type, data, onPicked) }

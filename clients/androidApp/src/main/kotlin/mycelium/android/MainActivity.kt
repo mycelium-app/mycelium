@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
         lateinit var created: AndroidPlatform
         val picker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris -> created.picked(uris) }
         val signInTab = AuthTabIntent.registerActivityResultLauncher(this) { result -> created.signInClosed(result.resultCode == AuthTabIntent.RESULT_OK) }
+        var microphoneAnswer: ((Boolean) -> Unit)? = null
+        val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> microphoneAnswer?.invoke(granted) }
         val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
         created = AndroidPlatform(applicationContext, { picker.launch("*/*") }, { uri ->
             val browser = CustomTabsClient.getPackageName(this, null)
@@ -32,7 +34,10 @@ class MainActivity : ComponentActivity() {
             } else {
                 CustomTabsIntent.Builder().build().launchUrl(this, uri)
             }
-        }, { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) })
+        }, { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }, { answer ->
+            microphoneAnswer = answer
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        })
         platform = created
         openConversationFrom(intent)
 

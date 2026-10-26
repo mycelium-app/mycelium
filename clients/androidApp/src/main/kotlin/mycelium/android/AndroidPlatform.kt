@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.speech.SpeechRecognizer
 import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import mycelium.Connection
 import mycelium.DeviceInfo
+import mycelium.Dictation
 import mycelium.Platform
 import mycelium.state.MaxAttachmentBytes
 import mycelium.state.PickedFile
@@ -29,7 +31,7 @@ private const val QuietConversationsChannel = "conversations-quiet"
 
 const val ConversationExtra = "conversation_id"
 
-class AndroidPlatform(private val context: Context, private val launchPicker: () -> Unit = {}, private val launchSignIn: (Uri) -> Unit = {}, private val launchNotificationPermission: () -> Unit = {}) : Platform {
+class AndroidPlatform(private val context: Context, private val launchPicker: () -> Unit = {}, private val launchSignIn: (Uri) -> Unit = {}, private val launchNotificationPermission: () -> Unit = {}, private val launchMicrophonePermission: ((Boolean) -> Unit) -> Unit = { it(false) }) : Platform {
     private var waitingForPick: ((List<PickedFile>) -> Unit)? = null
 
     private var waitingForSignIn: (() -> Unit)? = null
@@ -74,6 +76,8 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     }
 
     override fun windowFocused(): Boolean = foreground
+
+    override fun dictation(): Dictation? = if (SpeechRecognizer.isRecognitionAvailable(context)) AndroidDictation(context, launchMicrophonePermission) else null
 
     override fun listenForNotificationOpens(listener: ((String) -> Unit)?) {
         notificationOpener = listener
