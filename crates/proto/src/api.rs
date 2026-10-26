@@ -570,6 +570,72 @@ pub struct SetFavouriteModelRequest {
 pub struct ChatToolInfo {
     pub name: String,
     pub description: String,
+    #[serde(default = "write_kind")]
+    pub kind: ToolKind,
+    #[serde(default)]
+    pub asks: bool,
+}
+
+fn write_kind() -> ToolKind {
+    ToolKind::Write
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PolicyLevel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write: Option<bool>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub tools: std::collections::BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct IntegrationPolicy {
+    #[serde(default)]
+    pub ask: PolicyLevel,
+    #[serde(default)]
+    pub review: PolicyLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationStatus {
+    Disabled,
+    NeedsSignIn,
+    Expired,
+    ExpiresSoon,
+    Connected,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IntegrationCall {
+    pub id: Uuid,
+    pub server_id: Option<Uuid>,
+    pub server_name: String,
+    pub tool: String,
+    pub kind: ToolKind,
+    pub conversation_id: Option<Uuid>,
+    pub surface: String,
+    pub provider: Option<String>,
+    pub decision: String,
+    pub review: Option<String>,
+    pub is_error: bool,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetIntegrationGroupsRequest {
+    pub groups: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -590,6 +656,24 @@ pub struct ChatToolServer {
     pub always_allow: bool,
     pub tools: Vec<ChatToolInfo>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default = "connected")]
+    pub status: IntegrationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub policy: IntegrationPolicy,
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub groups: Vec<Uuid>,
+}
+
+fn connected() -> IntegrationStatus {
+    IntegrationStatus::Connected
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -617,6 +701,12 @@ pub struct CreateChatToolServerRequest {
     pub settings: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<IntegrationPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<Uuid>>,
 }
 
 fn mcp_kind() -> String {
@@ -637,6 +727,12 @@ pub struct PatchChatToolServerRequest {
     pub always_allow: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clear_token_expiry: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<IntegrationPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

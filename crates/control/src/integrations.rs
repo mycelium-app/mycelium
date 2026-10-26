@@ -1,4 +1,6 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
+use crate::integration_policy::{self, Effective};
+use mycelium_proto::api::{IntegrationStatus, ToolKind};
 use crate::{email, stoat, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
@@ -23,7 +25,16 @@ pub struct CallOutput {
     pub is_error: bool,
 }
 
+const EXPIRES_SOON_DAYS: i64 = 14;
+
 impl Integration {
+    pub fn tool_kind(self, tool: &str) -> ToolKind {
+        match self.always_asks(tool) {
+            true => ToolKind::Write,
+            false => ToolKind::Read,
+        }
+    }
+
     pub fn parse(kind: &str) -> Option<Integration> {
         match kind {
             "zulip" => Some(Integration::Zulip),
@@ -103,6 +114,52 @@ impl ServerRow {
 
     pub fn credentials(&self) -> Credentials {
         Credentials { address: self.url.clone(), account: self.account.clone().unwrap_or_default(), secret: self.bearer_token.clone().unwrap_or_default(), settings: self.settings.0.clone() }
+    }
+
+    pub fn tool_kind(&self, tool: &str) -> ToolKind {
+        match self.integration() {
+            Some(integration) => integration.tool_kind(tool),
+            None => match self.tools.0.iter().find(|stored| stored.name == tool).and_then(|stored| stored.read_only) {
+                Some(true) => ToolKind::Read,
+                _ => ToolKind::Write,
+            },
+        }
+    }
+
+    pub fn in_group(&self, group: Option<uuid::Uuid>) -> bool {
+        self.groups.is_empty() || group.is_some_and(|group| self.groups.contains(&group))
+    }
+
+    pub fn effective(&self, tool: &str) -> Effective {
+        let integration = self.integration();
+
+        if integration == Some(Integration::Zulip) {
+            return integration_policy::locked();
+        }
+
+        let kind = self.tool_kind(tool);
+        let mut effective = integration_policy::effective(&self.policy.0, tool, kind, !self.always_allow);
+
+        if integration.is_some() && kind == ToolKind::Write {
+            effective.ask = true;
+            effective.ask_source = integration_policy::Source::Locked;
+        }
+
+        effective
+    }
+
+    pub fn status(&self) -> IntegrationStatus {
+        let now = chrono::Utc::now();
+
+        if !self.enabled {
+            return IntegrationStatus::Disabled;
+        }
+
+        match self.token_expires_at {
+            Some(expires_at) if expires_at <= now => IntegrationStatus::Expired,
+            Some(expires_at) if expires_at - now < chrono::Duration::days(EXPIRES_SOON_DAYS) => IntegrationStatus::ExpiresSoon,
+            _ => IntegrationStatus::Connected,
+        }
     }
 
     pub fn tool_list(&self) -> Vec<StoredTool> {

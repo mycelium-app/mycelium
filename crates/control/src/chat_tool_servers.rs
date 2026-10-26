@@ -5,9 +5,9 @@ use crate::integrations::{Credentials, Integration};
 use crate::mcp_client::{McpConnection, McpError, McpTool};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{ChatToolInfo, ChatToolServer, CreateChatToolServerRequest, PatchChatToolServerRequest};
+use mycelium_proto::api::{ChatToolInfo, ChatToolServer, CreateChatToolServerRequest, IntegrationCall, IntegrationPolicy, PatchChatToolServerRequest, SetIntegrationGroupsRequest, ToolKind};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -64,7 +64,7 @@ impl KnownApp {
 pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at";
+pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at, token_expires_at, last_used_at, last_error, policy";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
@@ -82,6 +82,12 @@ pub struct ServerRow {
     pub always_allow: bool,
     pub tools: sqlx::types::Json<Vec<StoredTool>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_error: Option<String>,
+    pub policy: sqlx::types::Json<IntegrationPolicy>,
+    #[sqlx(skip)]
+    pub groups: Vec<Uuid>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -89,6 +95,8 @@ pub struct StoredTool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    #[serde(default)]
+    pub read_only: Option<bool>,
 }
 
 pub fn slug(name: &str) -> String {
@@ -118,14 +126,21 @@ impl ServerRow {
             oauth: self.oauth.is_some(),
             enabled: self.enabled,
             always_allow: self.always_allow,
-            tools: self.tool_list().iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone() }).collect(),
+            tools: self.tool_list().iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone(), kind: self.tool_kind(&tool.name), asks: self.effective(&tool.name).ask }).collect(),
             created_at: self.created_at,
+            status: self.status(),
+            token_expires_at: self.token_expires_at,
+            last_used_at: self.last_used_at,
+            last_error: self.last_error.clone(),
+            policy: self.policy.0.clone(),
+            locked: self.integration() == Some(Integration::Zulip),
+            groups: self.groups.clone(),
         }
     }
 }
 
 fn stored(tools: Vec<McpTool>) -> Vec<StoredTool> {
-    tools.into_iter().map(|tool| StoredTool { name: tool.name, description: tool.description, input_schema: tool.input_schema }).collect()
+    tools.into_iter().map(|tool| StoredTool { name: tool.name, description: tool.description, input_schema: tool.input_schema, read_only: tool.read_only }).collect()
 }
 
 pub async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, key_header: &'static str, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
@@ -182,7 +197,12 @@ async fn reload(state: &AppState, row: &ServerRow) -> ApiResult<ServerRow> {
 }
 
 pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ServerRow>> {
-    let rows = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where owner = $1 order by created_at, id"))).bind(owner).fetch_all(&state.pool).await?;
+    let mut rows = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where owner = $1 order by created_at, id"))).bind(owner).fetch_all(&state.pool).await?;
+    let memberships = sqlx::query_as::<_, (Uuid, Uuid)>("select g.server_id, g.group_id from integration_groups g join chat_tool_servers s on s.id = g.server_id where s.owner = $1 order by g.group_id").bind(owner).fetch_all(&state.pool).await?;
+
+    for row in &mut rows {
+        row.groups = memberships.iter().filter(|(server, _)| *server == row.id).map(|(_, group)| *group).collect();
+    }
 
     Ok(rows)
 }
@@ -205,6 +225,28 @@ pub async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Optio
     Ok(())
 }
 
+fn check_expiry(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> ApiResult<()> {
+    match expires_at {
+        Some(expires_at) if expires_at <= chrono::Utc::now() => Err(ApiError::bad_request("expiry_in_past", "Choose an expiry date in the future.")),
+        _ => Ok(()),
+    }
+}
+
+async fn replace_groups(state: &AppState, owner: Uuid, id: Uuid, groups: &[Uuid]) -> ApiResult<()> {
+    let owned = sqlx::query_scalar::<_, i64>("select count(*) from groups where owner = $1 and id = any($2)").bind(owner).bind(groups).fetch_one(&state.pool).await?;
+
+    if owned != groups.iter().collect::<std::collections::BTreeSet<_>>().len() as i64 {
+        return Err(ApiError::bad_request("group_invalid", "Choose a group you own."));
+    }
+
+    let mut tx = state.pool.begin().await?;
+    sqlx::query("delete from integration_groups where server_id = $1").bind(id).execute(&mut *tx).await?;
+    sqlx::query("insert into integration_groups (server_id, group_id) select $1, unnest($2::uuid[]) on conflict do nothing").bind(id).bind(groups).execute(&mut *tx).await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<ChatToolServer>>> {
     let rows = list_owned(&state, user.id).await?;
 
@@ -217,6 +259,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     let entered = request.url.trim();
 
     check_name(&state, user.id, name, None).await?;
+    check_expiry(request.token_expires_at)?;
 
     let kind = request.kind.as_deref().map(str::trim).filter(|kind| !kind.is_empty()).unwrap_or("mcp");
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
@@ -279,7 +322,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
     };
     let kind = app.map_or(kind, |app| app.stored_kind);
-    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, kind, url, account, bearer_token, tools, settings) values ($1, $2, $3, $4, $5, $6, $7, $8) returning {SERVER_COLUMNS}")))
+    let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, kind, url, account, bearer_token, tools, settings, token_expires_at, policy) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
         .bind(kind)
@@ -288,11 +331,18 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(token)
         .bind(sqlx::types::Json(tools))
         .bind(sqlx::types::Json(settings))
+        .bind(request.token_expires_at)
+        .bind(sqlx::types::Json(request.policy.clone().unwrap_or_default()))
         .fetch_one(&state.pool)
         .await?;
+
+    if let Some(groups) = &request.groups {
+        replace_groups(&state, user.id, row.id, groups).await?;
+    }
+
     state.hub.tools_changed(user.id);
 
-    Ok((StatusCode::CREATED, Json(row.to_proto())))
+    Ok((StatusCode::CREATED, Json(reloaded(&state, user.id, row.id).await?)))
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchChatToolServerRequest>) -> ApiResult<Json<ChatToolServer>> {
@@ -302,20 +352,106 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         check_name(&state, user.id, name, Some(id)).await?;
     }
 
+    check_expiry(request.token_expires_at)?;
+
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-        "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow), name = coalesce($5, name) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
+        "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow), name = coalesce($5, name),
+           token_expires_at = case when $6 then null else coalesce($7, token_expires_at) end, policy = coalesce($8, policy) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
     )))
     .bind(id)
     .bind(user.id)
     .bind(request.enabled)
     .bind(request.always_allow)
     .bind(name)
+    .bind(request.clear_token_expiry)
+    .bind(request.token_expires_at)
+    .bind(request.policy.map(sqlx::types::Json))
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;
     state.hub.tools_changed(user.id);
 
-    Ok(Json(row.to_proto()))
+    Ok(Json(reloaded(&state, user.id, row.id).await?))
+}
+
+pub async fn set_groups(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SetIntegrationGroupsRequest>) -> ApiResult<Json<ChatToolServer>> {
+    reloaded(&state, user.id, id).await?;
+    replace_groups(&state, user.id, id, &request.groups).await?;
+    state.hub.tools_changed(user.id);
+
+    Ok(Json(reloaded(&state, user.id, id).await?))
+}
+
+async fn reloaded(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ChatToolServer> {
+    let rows = list_owned(state, owner).await?;
+
+    rows.iter().find(|row| row.id == id).map(ServerRow::to_proto).ok_or_else(|| ApiError::not_found("That tool server"))
+}
+
+#[derive(serde::Deserialize)]
+pub struct CallsQuery {
+    server: Option<Uuid>,
+    provider: Option<String>,
+    decision: Option<String>,
+    review: Option<String>,
+    surface: Option<String>,
+    before: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CallRow {
+    id: Uuid,
+    server_id: Option<Uuid>,
+    server_name: String,
+    tool: String,
+    kind: String,
+    conversation_id: Option<Uuid>,
+    surface: String,
+    provider: Option<String>,
+    decision: String,
+    review: Option<String>,
+    is_error: bool,
+    at: chrono::DateTime<chrono::Utc>,
+}
+
+const CALLS_PAGE: i64 = 100;
+
+pub async fn calls(State(state): State<AppState>, user: AuthUser, Query(query): Query<CallsQuery>) -> ApiResult<Json<Vec<IntegrationCall>>> {
+    let rows = sqlx::query_as::<_, CallRow>(
+        "select id, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, review, is_error, at from integration_calls
+         where owner = $1 and ($2::uuid is null or server_id = $2) and ($3::text is null or provider = $3) and ($4::text is null or decision = $4)
+           and ($5::text is null or review = $5) and ($6::text is null or surface = $6) and ($7::timestamptz is null or at < $7)
+         order by at desc, id limit $8",
+    )
+    .bind(user.id)
+    .bind(query.server)
+    .bind(query.provider)
+    .bind(query.decision)
+    .bind(query.review)
+    .bind(query.surface)
+    .bind(query.before)
+    .bind(CALLS_PAGE)
+    .fetch_all(&state.pool)
+    .await?;
+    let calls = rows
+        .into_iter()
+        .map(|row| IntegrationCall {
+            id: row.id,
+            server_id: row.server_id,
+            server_name: row.server_name,
+            tool: row.tool,
+            kind: if row.kind == "read" { ToolKind::Read } else { ToolKind::Write },
+            conversation_id: row.conversation_id,
+            surface: row.surface,
+            provider: row.provider,
+            decision: row.decision,
+            review: row.review,
+            is_error: row.is_error,
+            at: row.at,
+        })
+        .collect();
+
+    Ok(Json(calls))
 }
 
 pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<ChatToolServer>> {

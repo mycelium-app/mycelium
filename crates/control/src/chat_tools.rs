@@ -1,11 +1,13 @@
 use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew, slug};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
+use crate::integration_policy::Source as PolicySource;
 use crate::mcp;
 use crate::mcp_client::{McpConnection, McpError};
 use crate::model_providers::{ToolCall, ToolDefinition, ToolResult};
 use crate::state::AppState;
-use crate::store::{append_event, set_status};
+use crate::store::{CONVERSATION_GROUP_SQL, append_event, set_status};
+use mycelium_proto::api::ToolKind;
 use mycelium_proto::conversation::{ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -26,7 +28,7 @@ pub const DECLINED_TEXT: &str = "The person declined this tool call.";
 #[derive(Clone)]
 enum Source {
     Own,
-    Remote { server: Box<ServerRow>, always_allow: bool },
+    Remote { server: Box<ServerRow> },
     BuiltIn { server: Box<ServerRow> },
 }
 
@@ -40,12 +42,22 @@ pub struct Tool {
     source: Source,
 }
 
+impl Tool {
+    fn server_row(&self) -> Option<&ServerRow> {
+        match &self.source {
+            Source::Own => None,
+            Source::Remote { server } | Source::BuiltIn { server } => Some(server),
+        }
+    }
+}
+
 pub struct Toolbox {
     tools: Vec<Tool>,
     loaded: BTreeSet<String>,
     always_allowed: BTreeSet<String>,
     connections: HashMap<Uuid, McpConnection>,
     chat_node: Uuid,
+    provider: Option<String>,
 }
 
 fn model_name(server: &str, tool: &str) -> String {
@@ -80,11 +92,14 @@ impl Toolbox {
             .collect();
         let mut loaded: BTreeSet<String> = tools.iter().map(|tool| tool.name.clone()).collect();
 
-        for server in list_owned(state, owner).await?.into_iter().filter(|server| server.enabled) {
+        let group = sqlx::query_scalar::<_, Option<Uuid>>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_GROUP_SQL} from conversations where id = $1"))).bind(conversation_id).fetch_one(&state.pool).await?;
+        let provider = sqlx::query_scalar::<_, String>("select p.name from conversations c join model_providers p on p.id = c.provider_id where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+        for server in list_owned(state, owner).await?.into_iter().filter(|server| server.enabled && server.in_group(group)) {
             for stored in server.tool_list() {
                 let source = match server.integration() {
                     Some(_) => Source::BuiltIn { server: Box::new(server.clone()) },
-                    None => Source::Remote { always_allow: server.always_allow, server: Box::new(server.clone()) },
+                    None => Source::Remote { server: Box::new(server.clone()) },
                 };
 
                 tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: stored.input_schema, source });
@@ -109,7 +124,7 @@ impl Toolbox {
         .fetch_all(&state.pool)
         .await?;
 
-        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await? })
+        Ok(Toolbox { tools, loaded, always_allowed: always_allowed.into_iter().collect(), connections: HashMap::new(), chat_node: chat_node(state, owner).await?, provider })
     }
 
     pub fn definitions(&self) -> Vec<ToolDefinition> {
@@ -190,15 +205,18 @@ impl Toolbox {
     }
 
     fn needs_approval(&self, tool: &Tool) -> bool {
-        if let Source::BuiltIn { server } = &tool.source {
-            let always_asks = server.integration().is_some_and(|integration| integration.always_asks(&tool.original));
+        let Some(server) = tool.server_row() else {
+            return !self.always_allowed.contains(&tool.name);
+        };
+        let effective = server.effective(&tool.original);
 
-            return always_asks || (!server.always_allow && !self.always_allowed.contains(&tool.name));
+        effective.ask_source == PolicySource::Locked || (effective.ask && !self.always_allowed.contains(&tool.name))
+    }
+
+    async fn record(&self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, decision: &str, is_error: bool) {
+        if let Some(server) = tool.server_row() {
+            record_call(state, owner, server, &tool.original, Some(conversation_id), "chat", self.provider.as_deref(), decision, is_error).await;
         }
-
-        let server_trusted = matches!(tool.source, Source::Remote { always_allow: true, .. });
-
-        !server_trusted && !self.always_allowed.contains(&tool.name)
     }
 
     async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool_call: &str, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
@@ -213,7 +231,7 @@ impl Toolbox {
 
                 Ok((output.text, output.is_error))
             }
-            Source::Remote { server, .. } => {
+            Source::Remote { server } => {
                 let token = match bearer(state, server).await {
                     Ok(token) => token,
                     Err(error) => return Ok((error.message().to_string(), true)),
@@ -281,6 +299,8 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         return Ok((format!("There is no tool called {}. Use {TOOL_SEARCH} to find the tools you can call.", call.name), true, None));
     };
 
+    let mut decision = "auto";
+
     if toolbox.needs_approval(&tool) {
         let answer = ask(state, owner, id, call, &tool).await?;
 
@@ -289,8 +309,12 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
 
         if answer != ALLOW_ONCE && answer != ALLOW_ALWAYS {
+            toolbox.record(state, owner, id, &tool, "declined", false).await;
+
             return Ok((DECLINED_TEXT.to_string(), true, None));
         }
+
+        decision = "approved";
     }
 
     let (text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &call.input).await {
@@ -298,7 +322,43 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };
 
+    toolbox.record(state, owner, id, &tool, decision, is_error).await;
+
     Ok((text, is_error, None))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, conversation_id: Option<Uuid>, surface: &str, provider: Option<&str>, decision: &str, is_error: bool) {
+    let kind = match server.tool_kind(tool) {
+        ToolKind::Read => "read",
+        ToolKind::Write => "write",
+    };
+    let recorded = sqlx::query("insert into integration_calls (owner, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, is_error) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")
+        .bind(owner)
+        .bind(server.id)
+        .bind(&server.name)
+        .bind(tool)
+        .bind(kind)
+        .bind(conversation_id)
+        .bind(surface)
+        .bind(provider)
+        .bind(decision)
+        .bind(is_error)
+        .execute(&state.pool)
+        .await;
+
+    if decision != "declined" {
+        let error = is_error.then_some("The last call failed.");
+        let touched = sqlx::query("update chat_tool_servers set last_used_at = now(), last_error = $2 where id = $1").bind(server.id).bind(error).execute(&state.pool).await;
+
+        if let Err(cause) = touched {
+            tracing::warn!("could not note the use of {}: {cause}", server.name);
+        }
+    }
+
+    if let Err(cause) = recorded {
+        tracing::warn!("could not record a call to {}: {cause}", server.name);
+    }
 }
 
 async fn ask(state: &AppState, owner: Uuid, id: Uuid, call: &ToolCall, tool: &Tool) -> ApiResult<String> {

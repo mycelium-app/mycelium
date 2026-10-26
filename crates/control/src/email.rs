@@ -126,38 +126,32 @@ pub fn tools() -> Vec<StoredTool> {
     let addresses = |description: &str| json!({"type": "array", "items": {"type": "string"}, "description": description});
 
     vec![
-        StoredTool { name: "list_accounts".to_string(), description: "List your enabled Email integrations with their ids, names and usernames. Use an id as destination_account when moving a message between accounts.".to_string(), input_schema: json!({"type": "object", "properties": {}}) },
-        StoredTool { name: "list_folders".to_string(), description: "List the mailbox's folders.".to_string(), input_schema: json!({"type": "object", "properties": {}}) },
+        StoredTool { name: "list_accounts".to_string(), description: "List your enabled Email integrations with their ids, names and usernames. Use an id as destination_account when moving a message between accounts.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
+        StoredTool { name: "list_folders".to_string(), description: "List the mailbox's folders.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool {
             name: "list_messages".to_string(),
             description: "List the most recent messages in a folder with sender, subject, date and id.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"folder": folder, "limit": limit}}),
-        },
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "limit": limit}}), read_only: None },
         StoredTool {
             name: "read_message".to_string(),
             description: "Read one message: its plain text body and the names and encoded sizes of its attachments. Attachments are never fetched.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The message id from list_messages or search_messages."}}, "required": ["id"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The message id from list_messages or search_messages."}}, "required": ["id"]}), read_only: None },
         StoredTool {
             name: "search_messages".to_string(),
             description: "Search a folder. Give at least one of from, subject, text or since. Returns the newest matches.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"folder": folder, "from": {"type": "string", "description": "Part of the sender's name or address."}, "subject": {"type": "string", "description": "Words in the subject."}, "text": {"type": "string", "description": "Words anywhere in the message."}, "since": {"type": "string", "description": "Only messages on or after this date, as YYYY-MM-DD."}, "limit": limit}}),
-        },
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "from": {"type": "string", "description": "Part of the sender's name or address."}, "subject": {"type": "string", "description": "Words in the subject."}, "text": {"type": "string", "description": "Words anywhere in the message."}, "since": {"type": "string", "description": "Only messages on or after this date, as YYYY-MM-DD."}, "limit": limit}}), read_only: None },
         StoredTool {
             name: DELETE_MESSAGE.to_string(),
             description: "Permanently delete one message by UID from its folder. Always needs the person's approval in chats, even when Always allow is on. Requires UIDPLUS; other messages marked for deletion are left alone.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID, from list_messages or search_messages."}}, "required": ["id"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID, from list_messages or search_messages."}}, "required": ["id"]}), read_only: None },
         StoredTool {
             name: MOVE_MESSAGE.to_string(),
             description: "Move one message to destination_folder, optionally into another enabled Email integration identified by destination_account from list_accounts. Keeps full MIME including attachments; cross-account messages over 20 MB are refused. The destination gets a new UID: list its messages afterwards. Always needs the person's approval in chats, even when Always allow is on. Source is deleted only after copying succeeds.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID."}, "destination_account": {"type": "string", "description": "An enabled Email integration id from list_accounts. Omit to move within this account."}, "destination_folder": {"type": "string", "description": "An existing destination folder, as listed by that account's list_folders."}}, "required": ["id", "destination_folder"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID."}, "destination_account": {"type": "string", "description": "An enabled Email integration id from list_accounts. Omit to move within this account."}, "destination_folder": {"type": "string", "description": "An existing destination folder, as listed by that account's list_folders."}}, "required": ["id", "destination_folder"]}), read_only: None },
         StoredTool {
             name: SEND_MESSAGE.to_string(),
             description: "Send an email, or a reply to a message. Always needs the person's approval in chats, even when Always allow is on. Give to, or reply_to_id to answer the sender of that message.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"to": addresses("Recipients' email addresses."), "cc": addresses("Copied recipients' email addresses."), "subject": {"type": "string", "description": "The subject. For a reply it defaults to the original subject with Re: in front."}, "body": {"type": "string", "description": "The message, in plain text."}, "reply_to_id": {"type": "string", "description": "The id of the message being answered. Sets In-Reply-To and References."}, "reply_to_folder": folder}, "required": ["body"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"to": addresses("Recipients' email addresses."), "cc": addresses("Copied recipients' email addresses."), "subject": {"type": "string", "description": "The subject. For a reply it defaults to the original subject with Re: in front."}, "body": {"type": "string", "description": "The message, in plain text."}, "reply_to_id": {"type": "string", "description": "The id of the message being answered. Sets In-Reply-To and References."}, "reply_to_folder": folder}, "required": ["body"]}), read_only: None },
     ]
 }
 

@@ -24,7 +24,11 @@ pub async fn sweep_regularly(state: AppState) {
     }
 }
 
+const CALL_RECORD_DAYS: i32 = 90;
+
 async fn sweep(state: &AppState) -> ApiResult<()> {
+    sqlx::query("delete from integration_calls where at < now() - make_interval(days => $1)").bind(CALL_RECORD_DAYS).execute(&state.pool).await?;
+
     let quiet = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set agent_active = false
          where agent_active and (last_activity_at is null or last_activity_at < now() - make_interval(secs => {AGENT_QUIET_SECONDS})) and {}

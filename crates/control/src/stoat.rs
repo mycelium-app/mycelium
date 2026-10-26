@@ -30,23 +30,19 @@ pub fn tools() -> Vec<StoredTool> {
         StoredTool {
             name: "list_servers".to_string(),
             description: "List the servers the account is in with their channels, and its direct message and group channels, with ids.".to_string(),
-            input_schema: json!({"type": "object", "properties": {}}),
-        },
+            input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool {
             name: "get_messages".to_string(),
             description: "Get the most recent messages in a channel, oldest first.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit}, "required": ["channel"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "limit": limit}, "required": ["channel"]}), read_only: None },
         StoredTool {
             name: "search_messages".to_string(),
             description: "Search one channel's messages by words. Returns the newest matches, oldest first.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "query": {"type": "string", "description": format!("Words to search for, at most {MAX_SEARCH_QUERY} characters.")}, "limit": limit}, "required": ["channel", "query"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "query": {"type": "string", "description": format!("Words to search for, at most {MAX_SEARCH_QUERY} characters.")}, "limit": limit}, "required": ["channel", "query"]}), read_only: None },
         StoredTool {
             name: SEND_MESSAGE.to_string(),
             description: "Send a message to a channel. Always needs the person's approval in chats, even when Always allow is on.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "content": {"type": "string", "description": "The message, in Markdown."}, "reply_to": {"type": "string", "description": "The id of a message in the channel to reply to."}}, "required": ["channel", "content"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "content": {"type": "string", "description": "The message, in Markdown."}, "reply_to": {"type": "string", "description": "The id of a message in the channel to reply to."}}, "required": ["channel", "content"]}), read_only: None },
     ]
 }
 

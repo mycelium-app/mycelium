@@ -31,6 +31,7 @@ mod imports;
 mod instruction_proposals;
 mod instructions;
 mod email;
+mod integration_policy;
 mod integrations;
 mod issues;
 mod link;
@@ -252,6 +253,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chat-tool-servers/oauth", post(mcp_oauth::start))
         .route("/api/v1/chat-tool-servers/{id}", patch(chat_tool_servers::patch).delete(chat_tool_servers::delete))
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
+        .route("/api/v1/chat-tool-servers/{id}/groups", put(chat_tool_servers::set_groups))
+        .route("/api/v1/integration-calls", get(chat_tool_servers::calls))
         .route("/api/v1/chats", post(chats::create))
         .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))
         .route("/api/v1/assistants", get(assistants::list).post(assistants::create))

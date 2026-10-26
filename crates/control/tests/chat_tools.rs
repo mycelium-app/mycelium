@@ -726,7 +726,7 @@ async fn tool_servers_are_added_checked_switched_and_removed_without_returning_t
 
     assert_eq!(status, 201);
     assert_eq!(added["token_hint"], "••••cdef");
-    assert_eq!(added["tools"][0], json!({"name": "get_weather", "description": "Get the weather forecast for a city"}));
+    assert_eq!(added["tools"][0], json!({"name": "get_weather", "description": "Get the weather forecast for a city", "kind": "write", "asks": true}));
     assert_eq!((added["enabled"].clone(), added["always_allow"].clone()), (json!(true), json!(false)));
     assert_eq!(listed.as_array().unwrap().len(), 1);
     assert!(!stored.contains(MCP_TOKEN));
@@ -926,7 +926,7 @@ async fn a_very_long_tool_result_is_cut_before_it_is_stored_or_sent_to_the_model
 }
 
 #[tokio::test]
-async fn sending_a_zulip_message_asks_every_time_even_when_the_integration_is_always_allowed() {
+async fn zulip_reads_and_sends_ask_every_time_and_cannot_be_overridden() {
     let rig = rig(vec![
         Reply::Call("mcp__zulip__list_channels", json!({})),
         Reply::Call("mcp__zulip__send_message", json!({"channel": "general", "topic": "lunch", "content": "Noon works."})),
@@ -938,17 +938,27 @@ async fn sending_a_zulip_message_asks_every_time_even_when_the_integration_is_al
     let (router, zulip) = fake_zulip();
     let base = serve(router).await;
     let (status, added) = rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Zulip", "kind": "zulip", "url": base, "account": ACCOUNT, "bearer_token": API_KEY}))).await;
-    let (patched, _) = rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", added["id"].as_str().unwrap())).json(&json!({"always_allow": true}))).await;
+    let (patched, locked) = rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", added["id"].as_str().unwrap())).json(&json!({"always_allow": true, "policy": {"ask": {"all": false}}}))).await;
     let id = rig.chat("Tell the team noon works.").await;
 
-    let request = rig.request_waiting(&id).await;
-    assert_eq!(request["toolCall"]["title"], "mcp__zulip__send_message");
+    let read = rig.request_waiting(&id).await;
+    assert_eq!(read["toolCall"]["title"], "mcp__zulip__list_channels");
+    rig.decide(&id, &read, "allow_always").await;
+    let request = eventually("the send to ask", || async {
+        let events = rig.events(&id).await;
+        let open = events.iter().find(|event| event["kind"] == "permission_request" && event["payload"]["toolCall"]["title"] == "mcp__zulip__send_message");
+
+        open.map(|event| event["payload"].clone())
+    })
+    .await;
     assert!(zulip.sent().is_empty());
     rig.decide(&id, &request, "allow_always").await;
     let events = rig.turns_ended(&id, 1).await;
 
     assert_eq!((status, patched), (201, 200));
-    assert_eq!(events.iter().filter(|event| event["kind"] == "permission_request").count(), 1);
+    assert_eq!(locked["locked"], true);
+    assert!(locked["tools"].as_array().unwrap().iter().all(|tool| tool["asks"] == true));
+    assert_eq!(events.iter().filter(|event| event["kind"] == "permission_request").count(), 2);
     assert_eq!(zulip.sent().len(), 1);
     assert!(zulip.paths().contains(&"/api/v1/users/me/subscriptions".to_string()));
 
@@ -992,4 +1002,94 @@ async fn email_send_delete_and_move_always_ask_even_for_a_trusted_integration_an
         assert_eq!(mail.sent.lock().unwrap().len(), sent);
         assert_eq!(mail.removed.lock().unwrap().len(), removed);
     }
+}
+
+impl Rig {
+    async fn lab(&self) -> String {
+        let (_, servers) = self.server.user.json(self.server.user.get("/api/v1/chat-tool-servers")).await;
+
+        servers[0]["id"].as_str().unwrap().to_string()
+    }
+
+    async fn patch_lab(&self, body: Value) -> (u16, Value) {
+        self.server.user.json(self.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", self.lab().await)).json(&body)).await
+    }
+
+    async fn calls(&self) -> Vec<Value> {
+        let (_, calls) = self.server.user.json(self.server.user.get("/api/v1/integration-calls")).await;
+
+        calls.as_array().unwrap().clone()
+    }
+}
+
+#[tokio::test]
+async fn tool_override_beats_type_beats_default() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny.")]).await;
+    let (status, patched) = rig.patch_lab(json!({"policy": {"ask": {"all": true, "write": true, "tools": {"get_weather": false}}}})).await;
+    let id = rig.chat("Weather in Paris?").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(status, 200, "{patched}");
+    assert!(events.iter().all(|event| event["kind"] != "permission_request"));
+    assert_eq!(patched["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "get_weather").unwrap()["asks"], false);
+    assert_eq!(patched["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "create_issue").unwrap()["asks"], true);
+}
+
+#[tokio::test]
+async fn call_is_recorded_with_decision_and_provider() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Sunny."), Reply::Call(WEATHER, json!({"city": "Rome"})), Reply::Say("No.")]).await;
+    let first = rig.chat("Weather in Paris?").await;
+    let request = rig.request_waiting(&first).await;
+    rig.decide(&first, &request, "allow_once").await;
+    rig.turns_ended(&first, 1).await;
+    let second = rig.chat("Weather in Rome?").await;
+    let request = rig.request_waiting(&second).await;
+    rig.decide(&second, &request, "reject_once").await;
+    rig.turns_ended(&second, 1).await;
+    let calls = rig.calls().await;
+    let (_, declined) = rig.server.user.json(rig.server.user.get("/api/v1/integration-calls?decision=declined")).await;
+
+    assert_eq!(calls.iter().map(|call| call["decision"].as_str().unwrap()).collect::<Vec<_>>(), ["declined", "approved"]);
+    assert_eq!((calls[1]["server_name"].clone(), calls[1]["tool"].clone(), calls[1]["provider"].clone(), calls[1]["surface"].clone(), calls[1]["conversation_id"].clone()), (json!("Lab"), json!("get_weather"), json!("Ollama"), json!("chat"), json!(first)));
+    assert_eq!(declined.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn ungrouped_conversation_gets_only_all_groups_integrations() {
+    let rig = rig(vec![Reply::Say("Hello."), Reply::Say("Hello.")]).await;
+    let (_, group) = rig.server.user.json(rig.server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
+    let (status, limited) = rig.server.user.json(rig.server.user.put(&format!("/api/v1/chat-tool-servers/{}/groups", rig.lab().await)).json(&json!({"groups": [group["id"]]}))).await;
+    let id = rig.chat("What can you reach?").await;
+    rig.turns_ended(&id, 1).await;
+    let hidden = rig.model.request(0)["messages"][0]["content"].as_str().unwrap().contains("- Lab:");
+    let (restored, _) = rig.server.user.json(rig.server.user.put(&format!("/api/v1/chat-tool-servers/{}/groups", rig.lab().await)).json(&json!({"groups": []}))).await;
+    let other = rig.chat("And now?").await;
+    rig.turns_ended(&other, 1).await;
+    let shown = rig.model.request(1)["messages"][0]["content"].as_str().unwrap().contains("- Lab:");
+
+    assert_eq!((status, restored), (200, 200));
+    assert_eq!(limited["groups"], json!([group["id"]]));
+    assert!(!hidden);
+    assert!(shown);
+}
+
+#[tokio::test]
+async fn a_group_that_is_not_yours_is_refused_and_a_past_expiry_is_refused() {
+    let rig = rig(vec![]).await;
+    let (status, error) = rig.server.user.json(rig.server.user.put(&format!("/api/v1/chat-tool-servers/{}/groups", rig.lab().await)).json(&json!({"groups": [uuid::Uuid::new_v4()]}))).await;
+    let (past, past_error) = rig.patch_lab(json!({"token_expires_at": "2020-01-01T00:00:00Z"})).await;
+
+    assert_eq!((status, error["message"].clone()), (400, json!("Choose a group you own.")));
+    assert_eq!((past, past_error["message"].clone()), (400, json!("Choose an expiry date in the future.")));
+}
+
+#[tokio::test]
+async fn an_expiry_within_two_weeks_shows_expires_soon_and_clears() {
+    let rig = rig(vec![]).await;
+    let soon = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+    let (_, warned) = rig.patch_lab(json!({"token_expires_at": soon})).await;
+    let (_, cleared) = rig.patch_lab(json!({"clear_token_expiry": true})).await;
+
+    assert_eq!(warned["status"], "expires_soon");
+    assert_eq!((cleared["status"].clone(), cleared.get("token_expires_at").cloned()), (json!("connected"), None));
 }

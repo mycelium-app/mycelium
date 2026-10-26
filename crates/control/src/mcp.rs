@@ -513,7 +513,8 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         "ping" => reply(&id, json!({})),
         "tools/list" => {
             let owner = node_owner(&state, node.id).await?;
-            let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled).collect();
+            let group = group_of(&state, &headers, node.id).await?.map(|(id, _)| id);
+            let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled && server.in_group(group)).collect();
             let held = &state;
             let http = &state.http;
             let listed = join_all(servers.iter().filter(|server| server.integration().is_none()).map(|server| async move {
@@ -1199,12 +1200,21 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         return Ok(failure(&id, INVALID_PARAMS, "Unknown tool. Use a tool from tools/list."));
                     };
 
+                    let group = group_of(&state, &headers, node.id).await?.map(|(id, _)| id);
+
+                    if !server.in_group(group) {
+                        return Ok(reply(&id, tool_text(&format!("{} is not available in this group. Change its availability in Settings, Integrations.", server.name), true)));
+                    }
+
                     if !server.enabled {
                         return Ok(reply(&id, tool_text(&format!("{} is switched off in Mycelium. Switch it on in the tool server settings, then try again.", server.name), true)));
                     }
 
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
+                    let mut decision = "auto";
+
                     if let Some(integration) = server.integration() {
-                        if integration.always_asks(tool) {
+                        if server.effective(tool).ask_source == crate::integration_policy::Source::Locked {
                             let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                                 return Ok(reply(&id, tool_text("This tool needs a person's approval, and this call did not come from a conversation. Nothing was done.", true)));
                             };
@@ -1212,11 +1222,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                             let answer = chat_tools::request_approval(&state, owner, conversation_id, &request_id, name, &arguments, &server.name, false).await?;
 
                             if answer != chat_tools::ALLOW_ONCE {
+                                chat_tools::record_call(&state, owner, server, tool, conversation, "workspace", None, "declined", false).await;
+
                                 return Ok(reply(&id, tool_text(chat_tools::DECLINED_TEXT, true)));
                             }
+
+                            decision = "approved";
                         }
 
                         let output = integration.call(&state, owner, server, tool, &arguments).await;
+                        chat_tools::record_call(&state, owner, server, tool, conversation, "workspace", None, decision, output.is_error).await;
 
                         return Ok(reply(&id, tool_text(&output.text, output.is_error)));
                     }
@@ -1238,6 +1253,9 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                             Err(error) => return Ok(reply(&id, tool_text(error.message(), true))),
                         }
                     }
+
+                    let failed = !matches!(&called, Ok(output) if !output.is_error);
+                    chat_tools::record_call(&state, owner, server, tool, conversation, "workspace", None, decision, failed).await;
 
                     match called {
                         Ok(output) => reply(&id, tool_text(&output.text, output.is_error)),

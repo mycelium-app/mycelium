@@ -14,22 +14,19 @@ pub fn tools() -> Vec<StoredTool> {
     let limit = json!({"type": "integer", "description": format!("How many messages to return, newest last. Defaults to {DEFAULT_LIMIT}, at most {MAX_LIMIT}.")});
 
     vec![
-        StoredTool { name: "list_channels".to_string(), description: "List the channels (streams) the person is subscribed to, with their ids and descriptions.".to_string(), input_schema: json!({"type": "object", "properties": {}}) },
+        StoredTool { name: "list_channels".to_string(), description: "List the channels (streams) the person is subscribed to, with their ids and descriptions.".to_string(), input_schema: json!({"type": "object", "properties": {}}), read_only: None },
         StoredTool {
             name: "get_messages".to_string(),
             description: "Get the most recent messages in a channel, optionally narrowed to one topic, or in a direct message conversation. Give either channel or direct_with.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "topic": {"type": "string", "description": "A topic in the channel. Needs channel."}, "direct_with": people, "limit": limit}}),
-        },
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "topic": {"type": "string", "description": "A topic in the channel. Needs channel."}, "direct_with": people, "limit": limit}}), read_only: None },
         StoredTool {
             name: "search_messages".to_string(),
             description: "Search messages by keywords, optionally within one channel. Returns the newest matches.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for."}, "channel": channel, "limit": limit}, "required": ["query"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"query": {"type": "string", "description": "Keywords to search for."}, "channel": channel, "limit": limit}, "required": ["query"]}), read_only: None },
         StoredTool {
             name: SEND_MESSAGE.to_string(),
             description: "Send a message to a channel topic, or directly to one or more people. Always needs the person's approval in chats, even when Always allow is on. Give either channel and topic, or direct_to.".to_string(),
-            input_schema: json!({"type": "object", "properties": {"channel": channel, "topic": {"type": "string", "description": "The topic to post under. Needs channel."}, "direct_to": people, "content": {"type": "string", "description": "The message, in Zulip Markdown."}}, "required": ["content"]}),
-        },
+            input_schema: json!({"type": "object", "properties": {"channel": channel, "topic": {"type": "string", "description": "The topic to post under. Needs channel."}, "direct_to": people, "content": {"type": "string", "description": "The message, in Zulip Markdown."}}, "required": ["content"]}), read_only: None },
     ]
 }
 

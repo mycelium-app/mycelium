@@ -132,6 +132,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/chat-tool-servers/oauth",
     "PATCH /api/v1/chat-tool-servers/{id}",
     "POST /api/v1/chat-tool-servers/{id}/refresh",
+    "PUT /api/v1/chat-tool-servers/{id}/groups",
     "DELETE /api/v1/chat-tool-servers/{id}",
     "POST /api/v1/projects",
     "POST /api/v1/tasks",

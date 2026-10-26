@@ -18,6 +18,7 @@ pub struct McpTool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    pub read_only: Option<bool>,
 }
 
 pub struct ToolOutput {
@@ -83,6 +84,7 @@ impl McpConnection {
                     name: name.to_string(),
                     description: tool["description"].as_str().unwrap_or_default().to_string(),
                     input_schema: tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                    read_only: tool["annotations"]["readOnlyHint"].as_bool(),
                 });
             }
 
