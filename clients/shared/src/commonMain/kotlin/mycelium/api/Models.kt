@@ -517,6 +517,17 @@ data class Extensions(
 )
 
 @Serializable
+data class Experiments(
+    val tasks: Boolean = false,
+    val workflows: Boolean = false,
+    val instructions: Boolean = false,
+    val details: Boolean = false,
+    val subagents: Boolean = false,
+    val walkthrough: Boolean = false,
+    @SerialName("move_chats") val moveChats: Boolean = false,
+)
+
+@Serializable
 data class UsageLimitSetting(@SerialName("on_usage_limit") val onUsageLimit: String)
 
 @Serializable

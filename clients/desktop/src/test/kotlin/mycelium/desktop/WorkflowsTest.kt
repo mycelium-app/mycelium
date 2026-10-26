@@ -42,7 +42,9 @@ class WorkflowsTest {
         val fixture = """{"id":"w1","parent_id":null,"title":"Review","status":"running","round":1,"plan":{"steps":[{"key":"build","title":"Build","agent":"codex","model":"build-model","difficulty":"medium"},{"key":"design","title":"Approve design","prompt":"Review the implementation before starting independent checks.","depends_on":["build"]},{"key":"review","title":"Review accessibility","depends_on":["design"]},{"key":"security","title":"Review security","depends_on":["design"],"workflow":{"title":"Security"}}]},"steps":[{"key":"build","status":"done","conversation_id":"c1","workflow_id":null,"output":"Implementation ready for review."},{"key":"design","status":"gate","conversation_id":null,"workflow_id":null,"output":""},{"key":"review","status":"waiting","conversation_id":null,"workflow_id":null,"output":""},{"key":"security","status":"waiting","conversation_id":null,"workflow_id":null,"output":""}]}"""
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
-            if (request.method == HttpMethod.Post) {
+            if (request.url.encodedPath.endsWith("/experiments")) {
+                respond(EnabledExperiments, HttpStatusCode.OK, json)
+            } else if (request.method == HttpMethod.Post) {
                 calls += String(request.body.toByteArray())
                 respond(fixture, HttpStatusCode.OK, json)
             } else {
@@ -50,6 +52,7 @@ class WorkflowsTest {
             }
         }
         val store = Store(MyceliumApi("https://mycelium.test", "test-token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); WorkflowsScreen(store, state, {}) } }
         rule.waitUntil(5000) { rule.onAllNodesWithText("Review · running · Round 1").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Review · running · Round 1").performClick()
@@ -69,6 +72,7 @@ class WorkflowsTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 request.method == HttpMethod.Post -> {
                     requests += String(request.body.toByteArray())
                     """{"id":"w1"}"""
@@ -80,6 +84,7 @@ class WorkflowsTest {
             respond(body, HttpStatusCode.OK, json)
         }
         val store = Store(MyceliumApi("https://mycelium.test", "test-token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); WorkflowsScreen(store, state, {}) } }
         rule.onNodeWithText("New workflow").performClick()
         rule.onNodeWithContentDescription("Title").performTextInput("Review")

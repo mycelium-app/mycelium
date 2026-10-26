@@ -92,6 +92,7 @@ class WalkthroughRenderTest {
                 path.endsWith("/notes") -> RenderNotes
                 path.endsWith("/uncovered") -> "[]"
                 path.endsWith("/reads") -> "[]"
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/walkthrough") -> RenderWalkthrough
                 path.endsWith("/git/changes-layout") -> """{"files":[{"path":"src/restore/Screen.tsx","staged":false,"unstaged":true,"untracked":false,"added":3,"removed":2,"rows":6,"hunks":[0],"fingerprint":"f1"}]}"""
                 path.endsWith("/git/changes-rows") -> """{"ranges":[{"path":"src/restore/Screen.tsx","from":0,"fingerprint":"f1","rows":[{"k":"h","t":"@@ -1,5 +1,5 @@"},{"k":"d","o":1,"t":"const title = 1"},{"k":"a","n":1,"t":"const title = 2"},{"k":"c","o":2,"n":2,"t":"const retry = useRetry(RESTORE_BACKOFF_MS)"},{"k":"d","o":3,"t":"const failed = 1"},{"k":"a","n":3,"t":"const failed = 2"}]}]}"""

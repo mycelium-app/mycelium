@@ -102,6 +102,7 @@ class TasksTest {
             }
 
             when {
+                path.endsWith("/experiments") -> respond(EnabledExperiments, HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tp/approve") -> respond(task("tp", "Cache cargo in the release jobs", "open"), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tp/decline") -> respond(task("tp", "Cache cargo in the release jobs", "declined"), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post && path.endsWith("/tasks/tq/answer") -> respond(task("tq", "Tag now, or wait?", "done", ""","answer":"Wait""""), HttpStatusCode.OK, json)

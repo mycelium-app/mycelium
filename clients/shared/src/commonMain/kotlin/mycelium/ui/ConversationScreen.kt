@@ -58,6 +58,7 @@ import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.isChat
+import mycelium.api.Experiments
 import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
@@ -94,6 +95,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
     }
+
+    val shownPanel = panel?.takeUnless { (it == SidePanel.Details && !state.experiments.details) || (it == SidePanel.Subagents && !state.experiments.subagents) }
 
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
@@ -227,6 +230,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
+                    moveChats = state.experiments.moveChats,
+                    details = state.experiments.details,
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
@@ -328,18 +333,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
 
-                ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd })
-
                 val parentId = conversation.parentId
 
                 if (conversation.isSubagent && parentId != null) {
                     Row(Modifier.fillMaxWidth().padding(Tokens.Space.S3), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
                         Label("A subagent's conversation is read-only.", Modifier.weight(1f), color = MyTheme.colors.textMuted)
+                        ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd })
                         MyButton({ onOpenConversation(parentId) }, text = "Open the conversation it belongs to", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                     }
                 } else {
                     Composer(
                         conversation = conversation,
+                        usage = { ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd }) },
                         working = agentWorking,
                         queue = queue.filter { it.id != initialQueued?.id },
                         sending = sending.drop(delivering.size),
@@ -388,11 +393,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
 
             if (!compact && !chat && panels) {
-                if (panel != null) {
+                if (shownPanel != null) {
                     ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
 
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
-                        when (panel) {
+                        when (shownPanel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
                             SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
@@ -403,14 +408,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(panel) { chosen -> openPanel(if (panel == chosen) null else chosen) }
+                Rail(shownPanel, state.experiments) { chosen -> openPanel(if (panel == chosen) null else chosen) }
             }
         }
     }
 
-    if (compact && !chat && panels && panel != null) {
+    if (compact && !chat && panels && shownPanel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
-            when (panel) {
+            when (shownPanel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
@@ -424,7 +429,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 
     if (compact && nodeSheetOpen) {
-        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true })
+        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true }.takeIf { state.experiments.moveChats })
     }
 
     if (compact && moveOpen) {
@@ -439,6 +444,8 @@ private fun ConversationHeader(
     chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
+    moveChats: Boolean,
+    details: Boolean,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
@@ -495,7 +502,10 @@ private fun ConversationHeader(
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
             MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
             MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
-            MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
+
+            if (details) {
+                MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
+            }
         } else {
             Label(
                 if (chat) conversation.model.orEmpty() else projectName(conversation.cwd),
@@ -508,7 +518,7 @@ private fun ConversationHeader(
                 Box {
                     MyButton({ nodeMenuOpen = true }, text = node.name, icon = nodeIcon(node), trailingIcon = MyIcon.ChevronDown, description = "Running on ${node.name}, open the node menu", size = ButtonSize.Sm, muted = true)
 
-                    if (nodeMenuOpen) {
+                    if (nodeMenuOpen && moveChats) {
                         MenuPopup(onDismiss = { nodeMenuOpen = false }) {
                             MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
                         }
@@ -586,7 +596,7 @@ private const val WalkthroughTab = "Walkthrough"
 private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts }
 
 @Composable
-private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, experiments: Experiments, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -596,8 +606,15 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
             Modifier.width(Tokens.Size.Rail).fillMaxHeight().background(colors.bgChrome).padding(top = Tokens.Space.S1),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
-            MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
+
+            if (experiments.details) {
+                MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
+            }
+
+            if (experiments.subagents) {
+                MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
+            }
+
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
             MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
@@ -704,7 +721,7 @@ private fun InspectorContent(conversation: Conversation, node: NodeSummary?, gro
 }
 
 @Composable
-private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: () -> Unit, onMove: () -> Unit) {
+private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: () -> Unit, onMove: (() -> Unit)?) {
     BottomSheet(onDismiss) {
         MenuLabel("Running on")
         InspectorSection(
@@ -715,7 +732,11 @@ private fun NodeSheet(node: NodeSummary?, onDismiss: () -> Unit, onOpenNodes: ()
                 "Agents" to node?.agents?.filter { it.available }?.joinToString(", ") { agentName(it.agent) }.orEmpty().ifEmpty { "None available" },
             ),
         )
-        MenuItem("Move", onClick = onMove, leading = MyIcon.Move)
+
+        if (onMove != null) {
+            MenuItem("Move", onClick = onMove, leading = MyIcon.Move)
+        }
+
         MenuItem("All nodes", onClick = onOpenNodes, leading = MyIcon.Server)
     }
 }

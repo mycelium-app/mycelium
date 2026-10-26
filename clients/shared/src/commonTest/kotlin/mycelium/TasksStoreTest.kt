@@ -30,7 +30,7 @@ private const val ScheduleJson = """{"id":"s1","node_id":"n1","agent":"claude","
 "next_run_at":"2099-01-01T06:00:00Z","last_run_at":null,"last_conversation_id":null,"created_at":"2026-10-22T10:00:00Z"}"""
 
 class TasksStoreTest {
-    private fun store(scope: kotlinx.coroutines.CoroutineScope, requests: MutableList<Triple<String, String, String>> = mutableListOf(), answer: (String, HttpMethod) -> Pair<HttpStatusCode, String> = { path, method ->
+    private suspend fun store(scope: kotlinx.coroutines.CoroutineScope, requests: MutableList<Triple<String, String, String>> = mutableListOf(), answer: (String, HttpMethod) -> Pair<HttpStatusCode, String> = { path, method ->
         when {
             method == HttpMethod.Post && path.endsWith("/tasks/t1/approve") -> HttpStatusCode.OK to taskJson("open")
             method == HttpMethod.Post && path.endsWith("/tasks/t1/decline") -> HttpStatusCode.OK to taskJson("declined")
@@ -49,13 +49,19 @@ class TasksStoreTest {
         }
     }): Store {
         val engine = MockEngine { request ->
-            requests += Triple(request.method.value, request.url.encodedPath, String(request.body.toByteArray()))
-            val (status, body) = answer(request.url.encodedPath, request.method)
+            if (request.url.encodedPath.endsWith("/experiments")) {
+                respond("""{"tasks":true}""", HttpStatusCode.OK, Json)
+            } else {
+                requests += Triple(request.method.value, request.url.encodedPath, String(request.body.toByteArray()))
+                val (status, body) = answer(request.url.encodedPath, request.method)
 
-            respond(body, status, Json)
+                respond(body, status, Json)
+            }
         }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scope)
+        store.refreshExperiments()
 
-        return Store(MyceliumApi("https://mycelium.test", "token", engine), scope)
+        return store
     }
 
     @Test

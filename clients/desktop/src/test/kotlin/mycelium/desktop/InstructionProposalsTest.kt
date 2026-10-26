@@ -56,6 +56,7 @@ class InstructionProposalsTest {
             val path = request.url.encodedPath
             requests += Triple(request.method, path, request.body.toByteArray().decodeToString())
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/instruction-proposals") -> "[$listed]"
                 path.contains("/instruction-proposals/") -> proposal("p1", Edited, state = if (path.endsWith("/approve")) "approved" else "declined")
                 else -> "{}"
@@ -64,6 +65,7 @@ class InstructionProposalsTest {
             respond(body, HttpStatusCode.OK, json)
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalOpenConversation provides { opened += it }) { InstructionProposals(store) } } }
 
         return store
@@ -151,8 +153,8 @@ class InstructionProposalsRenderTest {
     @Test
     fun theProposalsListRendersWithAMarkedDiff() {
         val listed = "[${proposal("p1", Edited)},${proposal("p2", Edited, outOfDate = true)},${proposal("p3", Edited, state = "declined", note = "Too broad")}]"
-        val store = Store(fakeApi(extra = mapOf("/instruction-proposals" to listed)), scopes.create())
-        kotlinx.coroutines.runBlocking { store.refreshInstructionProposals() }
+        val store = Store(fakeApi(extra = mapOf("/experiments" to EnabledExperiments, "/instruction-proposals" to listed)), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments(); store.refreshInstructionProposals() }
 
         for (phone in listOf(false, true)) {
             val file = renderAt("instruction-proposals", true, phone) { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(mycelium.ui.MyTheme.colors.bgContent).padding(16.dp)) { InstructionProposals(store) } }

@@ -31,8 +31,9 @@ class SettingsPhoneTest {
     val scopes = TestScopes()
 
     private fun show(touch: Boolean = true) {
-        val engine = MockEngine { respond("[]", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+        val engine = MockEngine { request -> respond(if (request.url.encodedPath.endsWith("/experiments")) EnabledExperiments else "[]", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
 
         rule.setContent {
             MyceliumTheme(true) {

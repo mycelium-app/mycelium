@@ -13,8 +13,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import mycelium.DefaultEventPageSize
 import mycelium.Platform
+import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
@@ -63,6 +66,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private val typed = Channel<Pair<String, String>>(Channel.UNLIMITED)
     private val attachmentCache = mutableMapOf<String, ByteArray>()
     private val previewCache = LinkedHashMap<String, ByteArray>()
+    private val experimentsLock = Mutex()
 
     val composerDrafts = ComposerDrafts()
     val pinDismissals = PinDismissals()
@@ -199,10 +203,37 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refresh() {
+        refreshExperiments()
         val conversations = api.conversations(archived = false)
         val nodes = api.nodes()
 
         mutableState.update { it.copy(conversations = conversations.associateBy { c -> c.id }, nodes = nodes.associateBy { n -> n.id }) }
+    }
+
+    suspend fun refreshExperiments() {
+        val experiments = orNull { api.experiments() } ?: Experiments()
+
+        mutableState.update { it.copy(experiments = experiments) }
+    }
+
+    fun updateExperiments(change: (Experiments) -> Experiments) {
+        act {
+            experimentsLock.withLock {
+                val before = state.value.experiments
+                val changed = change(before)
+
+                mutableState.update { it.copy(experiments = changed) }
+
+                try {
+                    val saved = api.saveExperiments(changed)
+
+                    mutableState.update { it.copy(experiments = saved) }
+                } catch (failure: Exception) {
+                    mutableState.update { it.copy(experiments = before) }
+                    throw failure
+                }
+            }
+        }
     }
 
     suspend fun watchNode(id: String) {
@@ -286,6 +317,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshBoard() {
+        if (!state.value.experiments.tasks) {
+            return
+        }
+
         val projects = api.projects()
         val worktrees = api.worktrees()
         val tasks = api.tasks()
@@ -328,6 +363,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshInstructionProposals() {
+        if (!state.value.experiments.instructions) {
+            return
+        }
+
         val proposals = api.instructionProposals()
 
         mutableState.update { it.copy(instructionProposals = proposals.associateBy { proposal -> proposal.id }) }
@@ -458,6 +497,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshWorkflows() {
+        if (!state.value.experiments.workflows) {
+            return
+        }
+
         val workflows = api.workflows()
         mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.string("id").orEmpty() }) }
     }
@@ -585,10 +628,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val goal = orNull { api.goal(conversationId) }
         mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
 
-        val walkthrough = orNull { api.walkthrough(conversationId) }
-        mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
+        if (state.value.experiments.walkthrough) {
+            val walkthrough = orNull { api.walkthrough(conversationId) }
+            mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
 
-        walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
+            walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
+        }
 
         val conversation = state.value.conversations[conversationId]
 
@@ -640,6 +685,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     fun withWalkthroughNotes(conversationId: String, message: String): String {
+        if (!state.value.experiments.walkthrough) {
+            return message
+        }
+
         val walkthrough = state.value.walkthroughs[conversationId] ?: return message
         val block = walkthroughNotesBlock(walkthrough, mutableWalkthroughNotes.value[conversationId].orEmpty()) ?: return message
 

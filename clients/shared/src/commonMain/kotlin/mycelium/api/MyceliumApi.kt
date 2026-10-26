@@ -310,6 +310,11 @@ class MyceliumApi(
     suspend fun saveExtensions(extensions: Extensions): Extensions =
         call("/extensions") { client.put(it) { authorise(); json(extensions) } }.body()
 
+    suspend fun experiments(): Experiments = call("/experiments") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveExperiments(experiments: Experiments): Experiments =
+        call("/experiments") { client.put(it) { authorise(); json(experiments) } }.body()
+
     suspend fun usageLimitSetting(): UsageLimitSetting = call("/usage-limit") { client.get(it) { authorise() } }.body()
 
     suspend fun saveUsageLimitSetting(setting: UsageLimitSetting): UsageLimitSetting =

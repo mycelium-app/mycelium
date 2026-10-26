@@ -39,6 +39,7 @@ data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyL
 }
 
 data class AppState(
+    val experiments: mycelium.api.Experiments = mycelium.api.Experiments(),
     val conversations: Map<String, Conversation> = emptyMap(),
     val nodes: Map<String, NodeSummary> = emptyMap(),
     val resources: Map<String, NodeResources> = emptyMap(),

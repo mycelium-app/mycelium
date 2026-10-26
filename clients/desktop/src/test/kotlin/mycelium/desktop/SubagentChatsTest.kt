@@ -55,6 +55,7 @@ class SubagentChatsTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/conversations") && request.url.parameters["archived"] != "true" -> "[$Parent,$Subagent]"
                 path.endsWith("/conversations/c1") -> Parent
                 path.endsWith("/conversations/c2") -> Subagent

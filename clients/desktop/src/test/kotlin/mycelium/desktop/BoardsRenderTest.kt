@@ -174,6 +174,7 @@ private val BoardProviders = list(
 private fun boardApi(extra: Map<String, String> = emptyMap()) = fakeApi(
     BoardNodes,
     linkedMapOf(
+        "/experiments" to EnabledExperiments,
         "/conversations/$BackupsId/events" to list(
             userMessage(BackupsId, 1, "Bump the restore tool's dependencies."),
             agentText(BackupsId, 2, "Updated 14 packages; tests pass."),

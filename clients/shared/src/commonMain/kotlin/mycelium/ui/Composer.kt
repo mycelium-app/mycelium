@@ -149,6 +149,7 @@ fun Composer(
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
+    usage: @Composable () -> Unit = {},
 ) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
@@ -381,10 +382,14 @@ fun Composer(
                     SendButtons(working, onStop, ::submit)
                 }
 
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                    attach()
-                    goal?.let { GoalButton(it) }
-                    pickers()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        attach()
+                        goal?.let { GoalButton(it) }
+                        pickers()
+                    }
+
+                    usage()
                 }
             }
         }
@@ -446,6 +451,7 @@ fun Composer(
                     pickers()
                 }
 
+                usage()
                 SendButtons(working, onStop, ::submit)
             }
         }

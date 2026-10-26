@@ -33,6 +33,7 @@ class SettingsRenderTest {
 
     private val long = (1..120).joinToString("\\n") { "Rule $it: keep the diff small." }
     private val extra = mapOf(
+        "/experiments" to EnabledExperiments,
         "/instructions" to """{"source":null,"revision":"a","layers":[{"layer":"global","name":"Global","path":"AGENTS.md","text":"$long","version":null}]}""",
         "/extensions" to """{"generated_ui":true,"rich_markdown":true,"mycelium_tools":true}""",
         "/model-providers" to """[{"id":"p1","kind":"openai_compatible","name":"Lab models","base_url":"https://models.example.test/v1","models":["small-model","large-model"],"created_at":"2026-10-22T10:00:00Z"}]""",

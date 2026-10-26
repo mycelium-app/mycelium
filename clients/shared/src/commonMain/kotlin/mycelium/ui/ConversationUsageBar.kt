@@ -1,15 +1,12 @@
 package mycelium.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import mycelium.api.ConversationUsage
 import mycelium.api.MyceliumApi
 import mycelium.state.formatCost
@@ -42,25 +39,35 @@ fun ConversationUsageBar(api: MyceliumApi, id: String, refreshOn: Any?) {
         return
     }
 
-    val colors = MyTheme.colors
+    var open by remember(id) { mutableStateOf(false) }
+    val compactContext = current.contextUsed?.let { used ->
+        val size = current.contextSize
 
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (context != null) {
-            Label(context, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            val size = current.contextSize
-            val used = current.contextUsed
-
-            if (size != null && used != null) {
-                DeterminateProgress(context, used.toFloat() / size, Modifier.width(Tokens.Size.ContextMeter))
-            }
+        if (size != null && size > 0) {
+            "${percentOf(used, size)}%"
+        } else {
+            formatTokens(used)
         }
+    }
+    val summary = listOfNotNull(compactContext, current.costUsd?.let { formatCost(it) }).joinToString("  ").ifEmpty { "Usage" }
 
-        if (spend != null) {
-            Label(spend, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+    Box {
+        MyButton(
+            { open = !open },
+            text = summary,
+            icon = MyIcon.Gauge,
+            description = "Conversation usage",
+            size = ButtonSize.Sm,
+            muted = true,
+            selected = open,
+            tooltip = listOfNotNull(context, spend).joinToString("; "),
+        )
+
+        if (open) {
+            MenuPopup(onDismiss = { open = false }) {
+                context?.let { MenuLabel(it) }
+                spend?.let { MenuLabel(it) }
+            }
         }
     }
 }

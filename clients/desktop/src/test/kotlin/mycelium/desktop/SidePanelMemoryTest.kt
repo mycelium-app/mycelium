@@ -72,6 +72,7 @@ class SidePanelMemoryTest {
             val path = request.url.encodedPath
             val id = Conversations.keys.firstOrNull { path.endsWith("/conversations/$it") }
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/conversations") -> Conversations.entries.joinToString(",", "[", "]") { conversation(it.key, it.value) }
                 id != null -> conversation(id, Conversations.getValue(id))
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"

@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
@@ -33,14 +35,13 @@ class ConversationUsageTest {
     @get:Rule
     val scopes = TestScopes()
 
-    @Test
-    fun aNarrowConversationShowsHowFullItsContextIsAndWhatItHasSpentSeparately() {
+    private fun showUsage(spend: String) {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
                 path.endsWith("/conversations") -> "[$UsedConversation]"
                 path.endsWith("/conversations/c1") -> UsedConversation
-                path.endsWith("/conversations/c1/usage") -> ConversationSpend
+                path.endsWith("/conversations/c1/usage") -> spend
                 path.endsWith("/events") || path.endsWith("/nodes") || path.endsWith("/artifacts") || path.endsWith("/queue") -> "[]"
                 else -> "{}"
             }
@@ -57,9 +58,46 @@ class ConversationUsageTest {
                 }
             }
         }
+    }
 
-        rule.waitUntil { rule.onAllNodesWithText("Spent", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    @Test
+    fun aNarrowConversationShowsHowFullItsContextIsAndWhatItHasSpentSeparately() {
+        showUsage(ConversationSpend)
+
+        rule.waitUntil { rule.onAllNodesWithText("26%  ~$0.25").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Conversation usage").assertIsDisplayed()
+        rule.onNodeWithText("Context 52k of 200k (26%)").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Conversation usage").performClick()
         rule.onNodeWithText("Context 52k of 200k (26%)").assertIsDisplayed()
         rule.onNodeWithText("Spent ~$0.25").assertIsDisplayed()
+    }
+
+    @Test
+    fun withoutAContextSizeTheSummaryShowsTheTokensUsed() {
+        showUsage("""{"context_used":52000,"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0}""")
+
+        rule.waitUntil { rule.onAllNodesWithText("52k").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun withOnlyACostTheSummaryShowsJustTheCost() {
+        showUsage("""{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0,"cost_usd":0.25,"cost_estimated":false}""")
+
+        rule.waitUntil { rule.onAllNodesWithText("~$0.25").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun withOnlyBilledTokensTheSummaryFallsBackToUsage() {
+        showUsage("""{"input_tokens":100,"output_tokens":50,"cache_read_tokens":0,"cache_write_tokens":0}""")
+
+        rule.waitUntil { rule.onAllNodesWithText("Usage").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun withNoUsageDataThereIsNoUsageControl() {
+        showUsage("""{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0}""")
+        rule.waitForIdle()
+
+        rule.onNodeWithContentDescription("Conversation usage").assertDoesNotExist()
     }
 }

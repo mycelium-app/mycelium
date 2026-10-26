@@ -74,6 +74,7 @@ class MoveTest {
             val path = request.url.encodedPath
             val body = String(request.body.toByteArray())
             val reply = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/move-plan") -> plan
                 path.endsWith("/move") && request.method == HttpMethod.Post -> answer
                 path.endsWith("/move") -> "{}"

@@ -471,8 +471,15 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
-                SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
-                SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
+
+                if (state.experiments.tasks) {
+                    SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+                }
+
+                if (state.experiments.workflows) {
+                    SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
+                }
+
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }
         }

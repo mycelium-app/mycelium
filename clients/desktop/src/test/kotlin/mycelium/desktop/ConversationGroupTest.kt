@@ -36,6 +36,7 @@ class ConversationGroupTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/groups") -> GroupsJson
                 path.endsWith("/conversations") -> "[${conversation(groupField)}]"
                 path.endsWith("/nodes") -> "[]"

@@ -67,6 +67,7 @@ class WalkthroughTest {
             val path = request.url.encodedPath
             requests += "${request.method.value} $path" to String(request.body.toByteArray())
             val reply = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/reads") -> reads
                 path.endsWith("/uncovered") -> uncovered
                 path.endsWith("/notes") && request.method == HttpMethod.Get -> notes

@@ -42,6 +42,7 @@ import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
+    Experiments("Experiments", MyIcon.Sliders),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
@@ -57,7 +58,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 }
 
 internal val SettingsGroups = listOf(
-    "General" to listOf(SettingsSection.Appearance),
+    "General" to listOf(SettingsSection.Appearance, SettingsSection.Experiments),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
@@ -69,10 +70,22 @@ internal val SettingsGroups = listOf(
 fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, onSignOut: () -> Unit) {
     var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
     val touch = LocalTouch.current
-    val opened = section
-    val waitingProposals = waitingInstructionProposals(store.state.collectAsState().value)
+    val state by store.state.collectAsState()
+    val opened = section?.takeUnless { it == SettingsSection.Instructions && !state.experiments.instructions }
+    val waitingProposals = waitingInstructionProposals(state)
+    val groups = SettingsGroups.map { (name, entries) -> name to entries.filter { it != SettingsSection.Instructions || state.experiments.instructions } }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(state.experiments.instructions) {
+        if (!state.experiments.instructions && section == SettingsSection.Instructions) {
+            section = null
+        }
+    }
+
+    LaunchedEffect(state.experiments.instructions) {
+        if (!state.experiments.instructions) {
+            return@LaunchedEffect
+        }
+
         try {
             store.refreshInstructionProposals()
         } catch (cancelled: CancellationException) {
@@ -96,7 +109,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         if (touch) {
             if (opened == null) {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-                    for ((group, entries) in SettingsGroups) {
+                    for ((group, entries) in groups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {
@@ -135,7 +148,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    for ((group, entries) in SettingsGroups) {
+                    for ((group, entries) in groups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {
@@ -143,8 +156,8 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                                 Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = rowHeight())
-                                    .pressable({ section = entry }, role = Role.Tab, selected = entry == (section ?: SettingsSection.Appearance), shape = BlockShape)
-                                    .semantics { selected = entry == (section ?: SettingsSection.Appearance) }
+                                    .pressable({ section = entry }, role = Role.Tab, selected = entry == (opened ?: SettingsSection.Appearance), shape = BlockShape)
+                                    .semantics { selected = entry == (opened ?: SettingsSection.Appearance) }
                                     .padding(horizontal = Tokens.Space.S2),
                                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -161,7 +174,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
 
                 VerticalHairline()
-                SettingsContent(section ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, Modifier.weight(1f))
+                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, Modifier.weight(1f))
             }
         }
     }
@@ -175,6 +188,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
     ) {
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
+            SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Accounts, SettingsSection.ChatModels -> {
                 AccountsSettings(store)
                 ModelProvidersSettings(store)

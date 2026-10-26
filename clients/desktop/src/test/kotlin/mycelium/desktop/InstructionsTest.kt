@@ -70,6 +70,7 @@ class InstructionsTest {
             val path = request.url.encodedPath
             requests += Triple(request.method, path, request.body.toByteArray().decodeToString())
             val body = when {
+                path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/conversations") -> "[]"
                 path.endsWith("/nodes") -> NodesJson
                 path.endsWith("/instructions") -> document

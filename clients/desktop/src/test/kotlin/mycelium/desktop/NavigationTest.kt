@@ -43,8 +43,9 @@ class NavigationTest {
     @Test
     fun tasksAndSchedulesSitUnderNodesInTheSidebarAndOpenTheirPages() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { respond("[]", HttpStatusCode.OK, json) }
+        val engine = MockEngine { request -> respond(if (request.url.encodedPath.endsWith("/experiments")) EnabledExperiments else "[]", HttpStatusCode.OK, json) }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent { MyceliumTheme(true) { Shell(store, NavigationPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
 
         rule.onNodeWithText("Tasks").performClick()
