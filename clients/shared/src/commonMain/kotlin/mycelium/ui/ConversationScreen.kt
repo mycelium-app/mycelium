@@ -61,6 +61,7 @@ import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
 import mycelium.state.continueChoices
+import mycelium.state.currentContinueId
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
@@ -393,10 +394,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                         accountLocked = conversation.acpSessionId != null,
                         continueOn = run {
-                            val events = state.events[id].orEmpty()
-                            val choices = remember(conversation, node, providers, events) { continueChoices(conversation, node, providers, events) }
+                            val choices = remember(conversation, state.nodes, providers) { continueChoices(conversation, state.nodes.values, providers) }
 
-                            ContinueControls(choices) { choice -> store.act { store.continueOn(id, choice) } }
+                            ContinueControls(choices, currentContinueId(conversation)) { choice -> store.act { store.continueOn(id, choice) } }
                         },
                         onSetAccount = { account ->
                             store.act {

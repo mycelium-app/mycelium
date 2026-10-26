@@ -899,6 +899,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val request = when {
             choice.startsWith(ContinueAccountPrefix) -> accountRequest(conversation.agent, choice.removePrefix(ContinueAccountPrefix))
             choice.startsWith(ContinueAgentPrefix) -> choice.removePrefix(ContinueAgentPrefix).let { accountRequest(it.substringBefore(':'), it.substringAfter(':')) }
+            choice.startsWith(ContinueNodePrefix) -> choice.removePrefix(ContinueNodePrefix).split(':', limit = 3).let { accountRequest(it[1], it[2]).copy(nodeId = it[0]) }
             choice.startsWith(ContinueChatPrefix) -> choice.removePrefix(ContinueChatPrefix).let { ContinueRequest("chat", providerId = it.substringBefore(':'), model = it.substringAfter(':')) }
             else -> return
         }

@@ -84,7 +84,7 @@ fun runsOutBeforeReset(window: UsageWindow): Boolean {
 
 fun accountsOn(node: NodeSummary, agent: String): List<LoginInfo> = node.logins.filter { it.agent == agent }
 
-fun switchableAccounts(node: NodeSummary?, agent: String): List<LoginInfo> = node?.let { accountsOn(it, agent) }.orEmpty().takeIf { it.size >= 2 }.orEmpty()
+fun switchableAccounts(node: NodeSummary?, agent: String): List<LoginInfo> = node?.let { accountsOn(it, agent) }.orEmpty().filter { it.state == LoginState.SignedIn }.takeIf { it.size >= 2 }.orEmpty()
 
 const val DefaultAccountId = "(default)"
 
@@ -97,13 +97,13 @@ fun accountsElsewhere(nodes: Collection<NodeSummary>, node: NodeSummary, agent: 
         return emptyList()
     }
 
-    val here = accountsOn(node, agent).mapNotNull { it.account }.toSet()
+    val here = accountsOn(node, agent).filter { it.state == LoginState.SignedIn }.mapNotNull { it.account }.toSet()
 
-    return nodes.filter { it.id != node.id }.flatMap { accountsOn(it, agent) }.mapNotNull { it.account }.distinct().filter { it !in here }.sorted()
+    return nodes.filter { it.id != node.id }.flatMap { accountsOn(it, agent) }.filter { it.state == LoginState.SignedIn }.mapNotNull { it.account }.distinct().filter { it !in here }.sorted()
 }
 
 fun accountChoices(logins: List<LoginInfo>, elsewhere: List<String>, nodeName: String): List<Choice> =
-    logins.map { login ->
+    logins.filter { it.state == LoginState.SignedIn }.map { login ->
         val nearest = login.windows.maxByOrNull { it.usedPercent }
         val left = nearest?.let { 100 - it.usedPercent.roundToInt().coerceIn(0, 100) } ?: login.usageLeft
 
@@ -121,34 +121,41 @@ const val ContinueAgentPrefix = "agent:"
 
 const val ContinueChatPrefix = "chat:"
 
+const val ContinueNodePrefix = "on:"
+
 private const val LowUsageLeft = 10
+
+private const val ChatGroup = "Chat"
 
 private fun lowUsageHint(login: LoginInfo): String? = login.usageLeft?.takeIf { it < LowUsageLeft }?.let { "$it% left" }
 
-fun continueChoices(conversation: Conversation, node: NodeSummary?, providers: List<ModelProvider>, events: List<Event>): List<Choice> {
-    if (conversation.agent == "chat") {
-        val from = events.lastOrNull { event ->
-            val origin = ((event.payload as? JsonObject)?.get("from") as? JsonObject)?.string("agent")
+fun currentContinueId(conversation: Conversation): String? = when {
+    conversation.agent == "chat" -> conversation.providerId?.let { provider -> conversation.model?.let { "$ContinueChatPrefix$provider:$it" } }
+    else -> "$ContinueAccountPrefix${conversation.account ?: DefaultAccountId}"
+}
 
-            event.kind == EventKinds.Continued && (origin == "claude" || origin == "codex")
-        }?.let { (it.payload as? JsonObject)?.get("from") as? JsonObject } ?: return emptyList()
-        val agent = from.string("agent").orEmpty()
-        val account = from.string("account")
-
-        return listOf(Choice("$ContinueAgentPrefix$agent:${account ?: DefaultAccountId}", "${agentName(agent)} · ${account ?: "Default account"}"))
+fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, providers: List<ModelProvider>): List<Choice> {
+    val reachable = nodes.filter { it.online }.sortedBy { if (it.id == conversation.nodeId) 0 else 1 }
+    val accounts = reachable.flatMap { node ->
+        node.logins.filter { login -> login.state == LoginState.SignedIn && node.agents.any { it.agent == login.agent && it.available } }.map { node to it }
     }
+    val harnesses = (listOf("claude", "codex") + accounts.map { it.second.agent }).distinct()
+    val perHarness = harnesses.flatMap { agent ->
+        accounts.filter { it.second.agent == agent }.map { (node, login) ->
+            val here = node.id == conversation.nodeId
+            val id = when {
+                here && agent == conversation.agent -> "$ContinueAccountPrefix${accountChoiceId(login)}"
+                here -> "$ContinueAgentPrefix$agent:${accountChoiceId(login)}"
+                else -> "$ContinueNodePrefix${node.id}:$agent:${accountChoiceId(login)}"
+            }
+            val hint = listOfNotNull(lowUsageHint(login), if (here) null else "on ${node.name}").joinToString(", ").ifEmpty { null }
 
-    val current = conversation.account ?: DefaultAccountId
-    val signedIn = node?.logins.orEmpty().filter { it.state == LoginState.SignedIn }
-    val sameHarness = signedIn.filter { it.agent == conversation.agent && accountChoiceId(it) != current }.map { login ->
-        Choice("$ContinueAccountPrefix${accountChoiceId(login)}", "${agentName(login.agent)} · ${login.account ?: "Default account"}", lowUsageHint(login))
+            Choice(id, "${agentName(agent)} · ${login.account ?: "Default account"}", hint, group = agentName(agent))
+        }
     }
-    val otherHarness = signedIn.filter { login -> login.agent != conversation.agent && node?.agents.orEmpty().any { it.agent == login.agent && it.available } }.map { login ->
-        Choice("$ContinueAgentPrefix${login.agent}:${accountChoiceId(login)}", "${agentName(login.agent)} · ${login.account ?: "Default account"}", lowUsageHint(login))
-    }
-    val models = providers.mapNotNull { provider -> provider.defaultModel?.let { Choice("$ContinueChatPrefix${provider.id}:$it", "${provider.name} · $it") } }
+    val models = providers.mapNotNull { provider -> provider.defaultModel?.let { Choice("$ContinueChatPrefix${provider.id}:$it", "${provider.name} · $it", group = ChatGroup) } }
 
-    return sameHarness + otherHarness + models
+    return perHarness + models
 }
 
 fun windowName(name: String): String = when (name) {

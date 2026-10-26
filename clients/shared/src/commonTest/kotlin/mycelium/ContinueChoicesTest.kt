@@ -1,18 +1,16 @@
 package mycelium
 
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import mycelium.api.AgentInfo
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
-import mycelium.api.Event
-import mycelium.api.EventKinds
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.ModelProvider
 import mycelium.api.NodeSummary
+import mycelium.state.accountChoices
+import mycelium.state.accountsElsewhere
 import mycelium.state.continueChoices
+import mycelium.state.currentContinueId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -29,52 +27,84 @@ private val Providers = listOf(ModelProvider("p1", "openai_compatible", "Ollama"
 private fun conversation(agent: String, account: String? = null) =
     Conversation("c1", "u", "n1", agent, "/work/app", "Title", ConversationStatus.Done, createdAt = "2026-10-23T10:00:00Z", updatedAt = "2026-10-23T10:00:00Z", account = account)
 
-private fun continued(from: JsonObject) = Event("c1", 5, EventKinds.Continued, buildJsonObject { put("kind", "handoff"); put("agent", "chat"); put("from", from) })
+private val Elsewhere = Node.copy(
+    id = "n2", name = "atlas", agents = listOf(AgentInfo("codex", available = true)),
+    logins = listOf(login("codex", "atlas@example.com"), login("claude", "unusable@example.com")),
+)
 
 class ContinueChoicesTest {
     @Test
-    fun aHarnessConversationListsOtherAccountsThenTheOtherHarnessThenChatModels() {
-        val choices = continueChoices(conversation("claude", "sam@example.com"), Node, Providers, emptyList())
+    fun everySignedInAccountIsListedByHarnessThenTheChatModels() {
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node), Providers)
 
-        assertEquals(listOf("account:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
-        assertEquals(listOf("Claude Code · work@example.org", "Codex · codex@example.com", "Ollama · llama3.2"), choices.map { it.name })
+        assertEquals(listOf("account:sam@example.com", "account:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
+        assertEquals(listOf("Claude Code", "Claude Code", "Codex", "Chat"), choices.map { it.group })
+        assertEquals("Claude Code · work@example.org", choices[1].name)
+    }
+
+    @Test
+    fun theCurrentAccountIsTheCheckedOne() {
+        assertEquals("account:sam@example.com", currentContinueId(conversation("claude", "sam@example.com")))
+        assertEquals("account:(default)", currentContinueId(conversation("codex")))
     }
 
     @Test
     fun anAccountNearlyOutOfUsageSaysSo() {
-        val choices = continueChoices(conversation("claude", "sam@example.com"), Node, Providers, emptyList())
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node), Providers)
 
-        assertEquals("4% left", choices.first().description)
+        assertEquals("4% left", choices.first { it.id == "account:work@example.org" }.description)
     }
 
     @Test
     fun signedOutAccountsAreLeftOut() {
-        val choices = continueChoices(conversation("claude", "sam@example.com"), Node, Providers, emptyList())
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node), Providers)
 
         assertEquals(false, choices.any { it.id.contains("old@example.org") })
     }
 
     @Test
-    fun theOtherHarnessIsLeftOutWhenItIsNotInstalledOnTheNode() {
+    fun aHarnessNotInstalledOnANodeIsLeftOut() {
         val withoutCodex = Node.copy(agents = listOf(AgentInfo("claude", available = true)))
 
-        val choices = continueChoices(conversation("claude", "sam@example.com"), withoutCodex, emptyList(), emptyList())
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(withoutCodex), emptyList())
 
-        assertEquals(listOf("account:work@example.org"), choices.map { it.id })
+        assertEquals(listOf("account:sam@example.com", "account:work@example.org"), choices.map { it.id })
     }
 
     @Test
-    fun aChatListsTheHarnessItCameFrom() {
-        val from = buildJsonObject { put("agent", "claude"); put("account", "sam@example.com") }
+    fun accountsOnOtherOnlineNodesAreListedAndSayWhichNode() {
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node, Elsewhere), emptyList())
+        val remote = choices.single { it.id == "on:n2:codex:atlas@example.com" }
 
-        val choices = continueChoices(conversation("chat"), null, Providers, listOf(continued(from)))
-
-        assertEquals(listOf("agent:claude:sam@example.com"), choices.map { it.id })
-        assertEquals("Claude Code · sam@example.com", choices.single().name)
+        assertEquals("on atlas", remote.description)
+        assertEquals("Codex", remote.group)
+        assertEquals(false, choices.any { it.id.contains("unusable") })
     }
 
     @Test
-    fun aChatThatNeverRanOnAHarnessHasNothingToContinueOn() {
-        assertEquals(emptyList(), continueChoices(conversation("chat"), null, Providers, emptyList()))
+    fun anOfflineNodeIsNotReachable() {
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node, Elsewhere.copy(online = false)), emptyList())
+
+        assertEquals(false, choices.any { it.id.startsWith("on:") })
+    }
+
+    @Test
+    fun aChatListsEveryAccountRegardlessOfWhichProviderItUses() {
+        val choices = continueChoices(conversation("chat"), listOf(Node), Providers)
+
+        assertEquals(listOf("agent:claude:sam@example.com", "agent:claude:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
+    }
+
+    @Test
+    fun thePickerNeverOffersSignedOutAccounts() {
+        assertEquals(listOf("sam@example.com", "work@example.org"), accountChoices(Node.logins.filter { it.agent == "claude" }, emptyList(), "willow").map { it.id })
+    }
+
+    @Test
+    fun anAccountSignedOutHereButSignedInElsewhereIsOfferedForSignIn() {
+        val signedOutHere = Node.copy(logins = listOf(login("claude", "atlas@example.com", LoginState.SignedOut)))
+        val signedInThere = Elsewhere.copy(logins = listOf(login("claude", "atlas@example.com")))
+
+        assertEquals(listOf("atlas@example.com"), accountsElsewhere(listOf(signedOutHere, signedInThere), signedOutHere, "claude"))
     }
 }

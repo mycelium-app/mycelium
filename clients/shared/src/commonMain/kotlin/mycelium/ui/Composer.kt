@@ -123,7 +123,7 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
     else -> emptyList()
 }
 
-data class ContinueControls(val choices: List<Choice>, val onPick: (String) -> Unit)
+data class ContinueControls(val choices: List<Choice>, val current: String?, val onPick: (String) -> Unit)
 
 @Composable
 fun Composer(
@@ -400,7 +400,7 @@ fun Composer(
 
     val pickers: @Composable () -> Unit = {
         if (accountLocked && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, conversation.account ?: "Default account", continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
+            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
         } else if (accounts.isNotEmpty() && accountLocked) {
             Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
         } else if (accounts.isNotEmpty()) {
@@ -424,7 +424,7 @@ fun Composer(
         }
 
         if (modelPicker != null && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, null, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
+            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
         }
     }
 
@@ -760,7 +760,11 @@ fun OptionMenu(
                 }
 
                 Column(Modifier.heightIn(max = Tokens.Size.MenuList).verticalScrollWithBar()) {
-                    for (choice in shown) {
+                    for ((index, choice) in shown.withIndex()) {
+                        if (choice.group != null && choice.group != shown.getOrNull(index - 1)?.group) {
+                            MenuLabel(choice.group)
+                        }
+
                         MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description, meter = choice.usedPercent)
                     }
                 }
