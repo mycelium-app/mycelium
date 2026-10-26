@@ -25,6 +25,7 @@ import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val GitHubJson = """{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"wxyz",
 "organisations":["samexample","acme-org"],"created_at":"2026-10-22T10:00:00Z"}"""
@@ -88,7 +89,7 @@ class ForgesSettingsTest {
         rule.onNodeWithText("Connect").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("sam, slop").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("""{"kind":"gitlab","base_url":"https://gitlab.example.com","token":"glpat-secret"}""", bodies.last { it.isNotEmpty() })
+        assertEquals("""{"kind":"gitlab","base_url":"https://gitlab.example.com","token":"glpat-secret","add_mcp":true}""", bodies.last { it.isNotEmpty() })
         rule.onNodeWithText("Connect a forge").assertExists()
     }
 
@@ -159,5 +160,66 @@ class ForgesSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/forges/f1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
+    }
+
+    @Test
+    fun theGitLabMcpOptionIsOnByDefaultAndIsSentWithTheConnection() {
+        val store = store()
+        showSettings(store)
+
+        rule.onNodeWithText("Connect a forge").performClick()
+        rule.onNodeWithText("GitLab").performClick()
+        rule.onNodeWithContentDescription("Also add GitLab's MCP server").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On"))
+        rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
+        rule.onNodeWithText("Connect").performClick()
+
+        rule.waitUntil(5_000) { bodies.any { it.contains("glpat-secret") } }
+        assertEquals("""{"kind":"gitlab","token":"glpat-secret","add_mcp":true}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
+    fun turningTheMcpOptionOffSendsAddMcpFalse() {
+        val store = store()
+        showSettings(store)
+
+        rule.onNodeWithText("Connect a forge").performClick()
+        rule.onNodeWithText("GitLab").performClick()
+        rule.onNodeWithContentDescription("Also add GitLab's MCP server").performClick()
+        rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
+        rule.onNodeWithText("Connect").performClick()
+
+        rule.waitUntil(5_000) { bodies.any { it.contains("glpat-secret") } }
+        assertEquals("""{"kind":"gitlab","token":"glpat-secret","add_mcp":false}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
+    fun aRefusedMcpTokenShowsTheReasonWithASignInButton() {
+        connectAnswer = HttpStatusCode.Created to GitLabJson.replace("\"created_at\"", "\"mcp_error\":\"GitLab's MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead.\",\"created_at\"")
+        val store = store()
+        showSettings(store)
+
+        rule.onNodeWithText("Connect a forge").performClick()
+        rule.onNodeWithText("GitLab").performClick()
+        rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
+        rule.onNodeWithText("Connect").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to GitLab's MCP server").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("GitLab's MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead.").assertExists()
+    }
+
+    @Test
+    fun disconnectingAForgeWithAnMcpServerWarnsThatItIsRemovedToo() {
+        val store = store("[${GitLabJson.replace("\"created_at\"", "\"mcp_server_id\":\"s1\",\"created_at\"")}]")
+        rule.setContent { MyceliumTheme(true) { ForgesSettings(store) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("sam").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("More for GitLab account sam on gitlab.example.com").performClick()
+        rule.onNodeWithText("Disconnect").performClick()
+
+        rule.onNodeWithText("This also removes the GitLab MCP integration.").assertExists()
+        assertTrue(requests.none { it.method == HttpMethod.Delete })
+        rule.onNodeWithText("Disconnect").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Delete } }
     }
 }

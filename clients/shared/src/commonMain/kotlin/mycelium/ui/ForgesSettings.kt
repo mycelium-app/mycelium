@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.ConnectForgeRequest
 import mycelium.api.Forge
+import mycelium.api.StartChatToolServerOAuthRequest
 import mycelium.state.Store
 
 private val ForgeKinds = mapOf("GitHub" to "github", "GitLab" to "gitlab")
@@ -34,6 +35,12 @@ private val ForgeTokenHints = mapOf(
     "gitlab" to "Use a token with the api scope. read_api is enough to browse only.",
 )
 private val ForgeDefaultHosts = mapOf("github" to "https://github.com", "gitlab" to "https://gitlab.com")
+
+private fun forgeName(forge: Forge): String = if (forge.kind == "gitlab") "GitLab" else "GitHub"
+
+private fun mcpAddress(forge: Forge): String = if (forge.kind == "gitlab") "${forge.baseUrl.trimEnd('/')}/api/v4/mcp" else "https://api.githubcopilot.com/mcp/"
+
+private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind == "gitlab" || baseUrl.isBlank() || baseUrl.trim().trimEnd('/') == "https://github.com"
 
 @Composable
 fun ForgesSettings(store: Store) {
@@ -45,6 +52,10 @@ fun ForgesSettings(store: Store) {
     var baseUrl by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
+    var addMcp by remember { mutableStateOf(true) }
+    var refusedMcp by remember { mutableStateOf<Forge?>(null) }
+    var disconnecting by remember { mutableStateOf<Forge?>(null) }
+    val platform = LocalPlatform.current
 
     LaunchedEffect(Unit) {
         store.act { forges = store.api.forges() }
@@ -53,12 +64,31 @@ fun ForgesSettings(store: Store) {
     fun connect() {
         scope.launch {
             try {
-                val connected = store.api.connectForge(ConnectForgeRequest(kind, baseUrl.trim().ifEmpty { null }, token.trim()))
+                val offered = mcpOffered(kind, baseUrl)
+                val connected = store.api.connectForge(ConnectForgeRequest(kind, baseUrl.trim().ifEmpty { null }, token.trim(), addMcp = if (offered) addMcp else null))
                 forges = forges.filter { it.id != connected.id } + connected
+                refusedMcp = connected.takeIf { it.mcpError != null }
                 connecting = false
                 baseUrl = ""
                 token = ""
                 failure = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (problem: ApiException) {
+                failure = problem.message
+            } catch (_: Exception) {
+                failure = "Could not reach the control plane. Check your connection and try again."
+            }
+        }
+    }
+
+    fun signInToMcp(forge: Forge) {
+        scope.launch {
+            try {
+                val product = forgeName(forge)
+                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(product, mcpAddress(forge), forgeId = forge.id))
+                platform?.openUrl(started.authorizeUrl)
+                refusedMcp = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (problem: ApiException) {
@@ -77,6 +107,13 @@ fun ForgesSettings(store: Store) {
             }
 
 
+            refusedMcp?.let { forge ->
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    ErrorBanner(forge.mcpError.orEmpty(), onDismiss = { refusedMcp = null })
+                    MyButton({ signInToMcp(forge) }, text = "Sign in to ${forgeName(forge)}'s MCP server", variant = ButtonVariant.Outline)
+                }
+            }
+
             Table(
                 listOf(
                     Col("Forge", 160.dp, weight = 1f),
@@ -87,13 +124,13 @@ fun ForgesSettings(store: Store) {
                 forges.size,
                 { row, column ->
                     val forge = forges[row]
-                    val name = if (forge.kind == "gitlab") "GitLab" else "GitHub"
+                    val name = forgeName(forge)
                     val host = forge.baseUrl.substringAfter("://").trimEnd('/')
 
                     when (column) {
                         0 -> TableCell.Slot("$name $host", Tokens.Size.IconSm + Tokens.Space.S1_5 * 2) {
                             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
+                                BrandLogo(if (forge.kind == "gitlab") "gitlab" else "github")
                                 Label(name, maxLines = 1)
                                 Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
                             }
@@ -105,9 +142,14 @@ fun ForgesSettings(store: Store) {
                             RowMenu("$name account ${forge.account} on $host") { close ->
                                 MenuItem("Disconnect", {
                                     close()
-                                    store.act {
-                                        store.api.disconnectForge(forge.id)
-                                        forges = forges.filter { it.id != forge.id }
+
+                                    if (forge.mcpServerId != null) {
+                                        disconnecting = forge
+                                    } else {
+                                        store.act {
+                                            store.api.disconnectForge(forge.id)
+                                            forges = forges.filter { it.id != forge.id }
+                                        }
                                     }
                                 })
                             }
@@ -115,6 +157,28 @@ fun ForgesSettings(store: Store) {
                     }
                 },
             )
+        }
+
+        disconnecting?.let { forge ->
+            Dialog(onDismiss = { disconnecting = null }) {
+                Label("Disconnect ${forgeName(forge)} account ${forge.account}?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("This also removes the ${forgeName(forge)} MCP integration.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    MyButton(
+                        {
+                            disconnecting = null
+                            store.act {
+                                store.api.disconnectForge(forge.id)
+                                forges = forges.filter { it.id != forge.id }
+                            }
+                        },
+                        text = "Disconnect",
+                        variant = ButtonVariant.Outline,
+                    )
+                    MyButton({ disconnecting = null }, text = "Cancel", muted = true)
+                }
+            }
         }
 
         if (connecting) {
@@ -133,6 +197,19 @@ fun ForgesSettings(store: Store) {
                 TextInput(baseUrl, { baseUrl = it }, label = "Base URL for a self-hosted forge", placeholder = ForgeDefaultHosts.getValue(kind), mono = true)
                 TextInput(token, { token = it }, label = "Personal access token", mono = true, masked = true, onSubmit = ::connect)
                 Label(ForgeTokenHints.getValue(kind), style = Tokens.Type.Meta, color = colors.textMuted)
+
+                if (mcpOffered(kind, baseUrl)) {
+                    val product = ForgeKinds.entries.first { it.value == kind }.key
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(addMcp, "Also add $product's MCP server", { addMcp = !addMcp }, checkedState = "On", uncheckedState = "Off")
+                        Label("Also add $product's MCP server", maxLines = 1)
+                    }
+
+                    if (addMcp && kind == "gitlab") {
+                        Label("GitLab's MCP server needs a fine-grained token with the MCP permission. With any other token, sign in afterwards.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    }
+                }
 
                 failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 

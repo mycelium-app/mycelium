@@ -46,6 +46,8 @@ private const val EmailJson = """{"id":"s4","name":"Email","kind":"email","url":
 
 private const val StoatJson = """{"id":"s5","name":"Stoat","kind":"stoat","url":"https://api.stoat.chat","settings":{"token_kind":"bot"},"token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"list_servers","description":"List servers"}],"created_at":"2026-10-22T14:00:00Z"}"""
 
+private const val LastFmJson = """{"id":"s8","name":"Last.fm","kind":"lastfm","url":"https://ws.audioscrobbler.com/2.0/","account":"ada","settings":{"api_key":"key-1"},"token_hint":"••••5678","enabled":true,"always_allow":false,"tools":[{"name":"get_recent_tracks","description":"Recent"}],"created_at":"2026-10-22T16:00:00Z"}"""
+
 private const val GitHubJson = """{"id":"s2","name":"GitHub","url":"https://gh.test/mcp","enabled":true,"always_allow":false,"tools":[],"created_at":"2026-10-22T11:00:00Z"}"""
 
 class ChatToolsSettingsTest {
@@ -400,5 +402,58 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { bodies.any { it.contains("stoat-secret") } }
         assertTrue(bodies.last { it.isNotEmpty() }.contains("\"url\":\"https://stoat.chat/api\""), bodies.last())
+    }
+
+    @Test
+    fun lastFmNeedsAKeyASecretAndAUsernameAndSendsThemWithoutAnAddress() {
+        postAnswer = HttpStatusCode.Created to LastFmJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Last.fm").performClick()
+        rule.onNodeWithContentDescription("Last.fm username").performTextInput("ada")
+        rule.onNodeWithContentDescription("Last.fm API key").performTextInput("key-1")
+        rule.onNodeWithContentDescription("Last.fm shared secret").performTextInput("secret-5678")
+        rule.onNodeWithContentDescription("Last.fm shared secret").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { bodies.any { it.contains("secret-5678") } }
+        assertEquals("""{"name":"Last.fm","url":"","bearer_token":"secret-5678","kind":"lastfm","account":"ada","settings":{"api_key":"key-1"}}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("secret-5678").assertCountEquals(0)
+    }
+
+    @Test
+    fun signInToLastFmOpensTheAuthoriseUrlAndTheRowShowsItWhenSignedIn() {
+        val opened = CopyOnWriteArrayList<String>()
+        val platform = object : Platform {
+            override val originUrl: String? = null
+            override val signsInThroughTheBrowser = false
+            override fun loadConnection(): Connection? = null
+            override fun saveConnection(connection: Connection?) = Unit
+            override fun device() = DeviceInfo("Desktop", "host", "linux", "x86_64")
+            override fun approveCode(): String? = null
+            override fun currentPath() = "/"
+            override fun navigate(url: String) = Unit
+            override fun openUrl(url: String) { opened += url }
+            override fun copyToClipboard(text: String) = Unit
+        }
+        listed = LastFmJson
+        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://www.last.fm/api/auth/?api_key=key-1"}"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalPlatform provides platform) { ChatToolsSettings(store) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Not signed in: needed to love tracks and scrobble").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for Last.fm").performClick()
+        rule.onNodeWithText("Sign in to Last.fm").performClick()
+
+        rule.waitUntil(5_000) { opened.isNotEmpty() }
+        assertEquals(listOf("https://www.last.fm/api/auth/?api_key=key-1"), opened.toList())
+        assertTrue(requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/s8/lastfm-sign-in") })
+
+        listed = LastFmJson.replace("\"enabled\":true", "\"signed_in\":true,\"enabled\":true")
+        store.receive(StreamMessage.IntegrationsChanged)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Signed in to Last.fm").fetchSemanticsNodes().isNotEmpty() }
     }
 }

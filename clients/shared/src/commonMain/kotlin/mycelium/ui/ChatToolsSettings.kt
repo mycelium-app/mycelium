@@ -39,6 +39,7 @@ private const val OutlineType = "Outline"
 private const val ZulipType = "Zulip"
 private const val EmailType = "Email"
 private const val StoatType = "Stoat"
+private const val LastFmType = "Last.fm"
 
 private const val StoatAddress = "https://stoat.chat/api"
 private const val Tls = "TLS"
@@ -50,6 +51,7 @@ private fun serverType(server: ChatToolServer): String = when {
     server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> OutlineType
     server.kind == "mcp" -> McpType
     server.kind == "litellm" -> LiteLlmType
+    server.kind == "lastfm" -> LastFmType
     else -> "Built-in"
 }
 
@@ -72,6 +74,7 @@ fun ChatToolsSettings(store: Store) {
     var smtpSecurity by remember { mutableStateOf(Tls) }
     var sender by remember { mutableStateOf("") }
     var tokenType by remember { mutableStateOf(UserSession) }
+    var apiKey by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<ChatToolServer?>(null) }
     var renamed by remember { mutableStateOf("") }
@@ -99,6 +102,7 @@ fun ChatToolsSettings(store: Store) {
         smtpSecurity = Tls
         sender = ""
         tokenType = UserSession
+        apiKey = ""
         signingIn = false
         failure = null
     }
@@ -151,6 +155,7 @@ fun ChatToolsSettings(store: Store) {
                     ZulipType -> CreateChatToolServerRequest(name.trim().ifEmpty { ZulipType }, url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
                     EmailType -> CreateChatToolServerRequest(name.trim().ifEmpty { EmailType }, "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
                     StoatType -> CreateChatToolServerRequest(name.trim().ifEmpty { StoatType }, url.trim().ifEmpty { StoatAddress }, token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
+                    LastFmType -> CreateChatToolServerRequest(name.trim().ifEmpty { LastFmType }, "", token.trim().ifEmpty { null }, kind = "lastfm", account = account.trim().ifEmpty { null }, settings = JsonObject(mapOf("api_key" to JsonPrimitive(apiKey.trim()))))
                     else -> CreateChatToolServerRequest(name.trim(), url.trim(), token.trim().ifEmpty { null })
                 }
                 val added = store.api.createChatToolServer(request)
@@ -183,6 +188,13 @@ fun ChatToolsSettings(store: Store) {
         }
     }
 
+    fun signInToLastFm(target: ChatToolServer) {
+        store.act {
+            val started = store.api.startLastFmSignIn(target.id)
+            platform?.openUrl(started.authorizeUrl)
+        }
+    }
+
     fun rename(target: ChatToolServer) {
         scope.launch {
             try {
@@ -211,7 +223,7 @@ fun ChatToolsSettings(store: Store) {
             if (adding) {
                 Column(Modifier.widthIn(max = Tokens.Size.FormColumn), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                     Label("Add an integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                    Segmented(listOf(McpType, LiteLlmType, OutlineType, ZulipType, EmailType, StoatType), kind, { kind = it; failure = null }, "Integration type")
+                    Segmented(listOf(McpType, LiteLlmType, OutlineType, ZulipType, EmailType, StoatType, LastFmType), kind, { kind = it; failure = null }, "Integration type")
 
                     if (kind == LiteLlmType) {
                         Label("Chats and agents can use the MCP servers your LiteLLM proxy exposes to this key. Enter the proxy's address, or its /mcp/ address for an access group.", style = Tokens.Type.Meta, color = colors.textMuted)
@@ -247,6 +259,12 @@ fun ChatToolsSettings(store: Store) {
                         TextInput(url, { url = it }, label = "Stoat API address", placeholder = StoatAddress, mono = true)
                         Segmented(listOf(UserSession, Bot), tokenType, { tokenType = it }, "Stoat token type")
                         TextInput(token, { token = it }, label = "Stoat token", mono = true, masked = true, onSubmit = ::add)
+                    } else if (kind == LastFmType) {
+                        Label("Chats and agents can read what you listen to. To love tracks and scrobble, sign in to Last.fm after connecting. Create an API account at last.fm/api/account/create.", style = Tokens.Type.Meta, color = colors.textMuted)
+                        TextInput(name, { name = it }, label = "Name", placeholder = LastFmType)
+                        TextInput(account, { account = it }, label = "Last.fm username", mono = true)
+                        TextInput(apiKey, { apiKey = it }, label = "Last.fm API key", mono = true)
+                        TextInput(token, { token = it }, label = "Last.fm shared secret", mono = true, masked = true, onSubmit = ::add)
                     } else {
                         Label("Use a direct MCP server or a gateway such as LiteLLM. Enter its Streamable HTTP endpoint and bearer token, if required.", style = Tokens.Type.Meta, color = colors.textMuted)
                         TextInput(name, { name = it }, label = "Name", placeholder = "GitHub")
@@ -290,13 +308,21 @@ fun ChatToolsSettings(store: Store) {
                 for (server in servers) {
                     ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
                         Column {
-                            Label(server.name, maxLines = 1)
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                IntegrationLogo(server)
+                                Label(server.name, maxLines = 1)
+                            }
+
                             if (server.url.isNotBlank()) {
                                 Label(server.url, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                             }
 
                             server.account?.let { Label(it, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                             Label(if (server.oauth) "Signed in with OAuth" else server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+
+                            if (server.kind == "lastfm") {
+                                Label(if (server.signedIn) "Signed in to Last.fm" else "Not signed in: needed to love tracks and scrobble", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                            }
                         }
 
                         Label(serverType(server), color = colors.textMuted, maxLines = 1)
@@ -320,6 +346,23 @@ fun ChatToolsSettings(store: Store) {
                                     close()
                                     store.act { replace(store.api.refreshChatToolServer(server.id)) }
                                 })
+                            }
+
+                            if (server.kind == "lastfm") {
+                                if (server.signedIn) {
+                                    MenuItem("Sign out of Last.fm", onClick = {
+                                        close()
+                                        store.act {
+                                            store.api.signOutOfLastFm(server.id)
+                                            replace(server.copy(signedIn = false))
+                                        }
+                                    })
+                                } else {
+                                    MenuItem("Sign in to Last.fm", onClick = {
+                                        close()
+                                        signInToLastFm(server)
+                                    })
+                                }
                             }
 
                             MenuItem("Rename", onClick = {

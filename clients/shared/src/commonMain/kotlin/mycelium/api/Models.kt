@@ -522,10 +522,12 @@ data class Forge(
     @SerialName("token_hint") val tokenHint: String,
     val organisations: List<String> = emptyList(),
     @SerialName("created_at") val createdAt: String,
+    @SerialName("mcp_server_id") val mcpServerId: String? = null,
+    @SerialName("mcp_error") val mcpError: String? = null,
 )
 
 @Serializable
-data class ConnectForgeRequest(val kind: String, @SerialName("base_url") val baseUrl: String? = null, val token: String)
+data class ConnectForgeRequest(val kind: String, @SerialName("base_url") val baseUrl: String? = null, val token: String, @SerialName("add_mcp") val addMcp: Boolean? = null)
 
 @Serializable
 data class ModelProvider(
@@ -595,13 +597,15 @@ data class ChatToolServer(
     @SerialName("always_allow") val alwaysAllow: Boolean = false,
     val tools: List<ChatToolInfo> = emptyList(),
     @SerialName("created_at") val createdAt: String,
+    @SerialName("signed_in") val signedIn: Boolean = false,
+    @SerialName("forge_id") val forgeId: String? = null,
 )
 
 @Serializable
 data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null)
 
 @Serializable
-data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null)
+data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null)
 
 @Serializable
 data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
