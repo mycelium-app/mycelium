@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ import mycelium.state.Store
 @Composable
 fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSettings: () -> Unit = {}) {
     val colors = MyTheme.colors
+    val state by store.state.collectAsState()
     var providers by remember { mutableStateOf<List<ModelProvider>?>(null) }
     var providerId by remember { mutableStateOf<String?>(null) }
     var model by remember { mutableStateOf<String?>(null) }
@@ -103,7 +105,15 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                     attachments = attached.controls(),
                     error = messageError,
                     trailing = {
-                        ModelPicker(ModelPickerControls(loaded, provider.id, chosenModel) { picked, chosenPick -> providerId = picked.id; model = chosenPick })
+                        ModelPicker(
+                            ModelPickerControls(
+                                loaded,
+                                provider.id,
+                                chosenModel,
+                                recent = recentModels(state.conversations.values, loaded),
+                                onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel(loaded, { providers = it }, picked, favouriteModel, on) },
+                            ) { picked, chosenPick -> providerId = picked.id; model = chosenPick },
+                        )
                     },
                 )
             }

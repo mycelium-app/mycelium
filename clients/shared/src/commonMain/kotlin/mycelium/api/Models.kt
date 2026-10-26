@@ -436,6 +436,7 @@ data class ModelProvider(
     val models: List<String> = emptyList(),
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("created_at") val createdAt: String,
+    val favourites: List<String> = emptyList(),
 )
 
 @Serializable
@@ -467,6 +468,9 @@ data class CreateModelProviderRequest(
 
 @Serializable
 data class UpdateModelProviderRequest(val name: String)
+
+@Serializable
+data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
 
 @Serializable
 data class ChatToolInfo(val name: String, val description: String = "")

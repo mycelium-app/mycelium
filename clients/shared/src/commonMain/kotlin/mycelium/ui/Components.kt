@@ -695,7 +695,7 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null) {
     val colors = MyTheme.colors
 
     Row(
@@ -731,6 +731,8 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
         if (checked) {
             Icon(MyIcon.Check, colors.text)
         }
+
+        trailing?.invoke()
     }
 }
 

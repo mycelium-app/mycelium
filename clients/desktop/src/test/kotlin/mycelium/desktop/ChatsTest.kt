@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -61,6 +62,8 @@ private const val Anthropic = """{"id":"p2","kind":"anthropic","name":"Anthropic
 
 private const val Provider = """{"id":"p1","kind":"openai_compatible","name":"Ollama","base_url":"http://box:11434/v1","models":["llama3.2","qwen3"],"default_model":"llama3.2","created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val OpenRouter = """{"id":"p3","kind":"openai_compatible","name":"OpenRouter","base_url":"https://openrouter.ai/api/v1","models":["anthropic/claude-sonnet-5-5","anthropic/claude-haiku-5-5","openai/gpt-5"],"default_model":"openai/gpt-5","created_at":"2026-10-22T10:00:00Z"}"""
+
 class ChatsTest {
     @get:Rule
     val rule = createComposeRule()
@@ -91,6 +94,7 @@ class ChatsTest {
             val body = when {
                 request.method == HttpMethod.Post && path.endsWith("/chats") -> conversation("c9", "Plan a trip", "chat", now.toString())
                 request.method == HttpMethod.Post && path.endsWith("/attachments") -> """{"sha256":"abc","name":"notes.txt","media_type":"text/plain","size":5}"""
+                request.method == HttpMethod.Put && path.endsWith("/favourites") -> Provider.replace(""""default_model"""", """"favourites":["qwen3"],"default_model"""")
                 request.method == HttpMethod.Patch -> conversation("c1", "Trip to Lisbon", "chat", now.toString(), "p2")
                 path.endsWith("/prompt") -> ""
                 path.endsWith("/conversations/c1/events") -> chatEvents
@@ -228,7 +232,7 @@ class ChatsTest {
 
         rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
 
-        rule.onNodeWithText("Ollama").assertIsDisplayed()
+        rule.onAllNodesWithText("Ollama").onFirst().assertIsDisplayed()
         rule.onNodeWithText("Anthropic").assertIsDisplayed()
 
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
@@ -238,6 +242,75 @@ class ChatsTest {
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/chats") } }
         assertEquals("""{"provider_id":"p2","model":"claude-sonnet-5-5","prompt":"Hello"}""", bodies.last { it.contains("provider_id") })
+    }
+
+    @Test
+    fun searchingTheModelMenuNarrowsItToMatchingModelsAndEnterPicksTheFirst() {
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search models").performTextInput("qwen")
+
+        assertEquals(0, rule.onAllNodesWithText("claude-sonnet-5-5").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Search models").performImeAction()
+
+        rule.onNodeWithContentDescription("Model: Ollama · qwen3").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchTermsMatchTheProviderAndTheModelTogether() {
+        providers = "[$Provider,$OpenRouter]"
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search models").performTextInput("router sonnet")
+
+        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("anthropic/claude-haiku-5-5").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("qwen3").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aSearchWithNoMatchSaysSo() {
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search models").performTextInput("zzz")
+
+        rule.onNodeWithText("No matching models").assertIsDisplayed()
+    }
+
+    @Test
+    fun modelsWithAVendorPrefixAreGroupedUnderIt() {
+        providers = "[$Provider,$OpenRouter]"
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+
+        rule.onNodeWithText("OpenRouter · anthropic").assertIsDisplayed()
+        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
+    }
+
+    @Test
+    fun starringAModelPutsItUnderFavouritesAndSavesIt() {
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Add qwen3 to favourites").performClick()
+
+        rule.onNodeWithText("Favourites").assertIsDisplayed()
+        rule.onAllNodesWithContentDescription("Remove qwen3 from favourites").onFirst().assertIsDisplayed()
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Put && it.url.encodedPath.endsWith("/model-providers/p1/favourites") } }
+        assertEquals("""{"model":"qwen3","favourite":true}""", bodies.last { it.contains("favourite") })
+    }
+
+    @Test
+    fun aModelUsedInAnEarlierChatIsListedUnderRecent() {
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+
+        rule.onNodeWithText("Recent").assertIsDisplayed()
     }
 
     @Test
