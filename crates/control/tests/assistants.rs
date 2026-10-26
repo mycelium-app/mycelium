@@ -806,3 +806,41 @@ async fn pull_replaces_storage_with_the_repository_and_keeps_ignored_files() {
     assert_eq!(paths, vec![".gitignore", "AGENTS.md", "README.md", "secret/x.md"]);
     assert_eq!(fetched["instructions"], json!("Remote rules"));
 }
+
+#[tokio::test]
+async fn a_schedule_on_an_assistant_prompts_its_current_session() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let calls = vec![("mcp__mycelium__propose_schedule", json!({"prompt": "Post the stand-up", "preset": "weekdays at 08:00"}))];
+    let (provider, fake) = scripted_provider(&server, calls).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let chat = prompt(&server.user, id, "Post the stand-up every weekday").await["id"].as_str().unwrap().to_string();
+
+    allow_calls(&server, &chat, 1).await;
+    finished_turns(&server, &chat, 1).await;
+
+    let (_, schedules) = server.user.json(server.user.get("/api/v1/schedules")).await;
+    let schedule_id = schedules[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(schedules[0]["assistant_id"], json!(id));
+
+    let (_, before) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+    assert!(before.get("wakes").is_none());
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/schedules/{schedule_id}/confirm")).json(&json!({}))).await;
+    assert_eq!(status, 200);
+    common::eventually("the assistant to show when it wakes", || async {
+        let (_, after) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+
+        (after["wakes"] == json!("Weekdays at 08:00")).then_some(())
+    })
+    .await;
+
+    let (status, run) = server.user.json(server.user.post(&format!("/api/v1/schedules/{schedule_id}/run"))).await;
+    assert_eq!((status, run["conversation_id"].clone()), (201, json!(chat)));
+    finished_turns(&server, &chat, 2).await;
+
+    let events = server.events(chat.parse().unwrap()).await;
+    let said: Vec<&str> = events.iter().filter(|event| event["kind"] == "user_message").map(|event| event["payload"]["text"].as_str().unwrap()).collect();
+    assert_eq!(said, vec!["Post the stand-up every weekday", "Post the stand-up"]);
+    assert_eq!(fake.requests.lock().unwrap().len(), 3);
+}

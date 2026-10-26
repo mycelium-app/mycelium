@@ -136,11 +136,12 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
             for (section in sections) {
                 section.title?.let { Label(it, Modifier.semantics { heading() }, Tokens.Type.UiStrong, colors.textMuted) }
 
-                ContentTable(listOf(ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 140.dp), ColumnSpec(max = 120.dp), ColumnSpec(min = 0.dp, max = 28.dp), ColumnSpec())) {
+                ContentTable(listOf(ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 140.dp), ColumnSpec(max = 160.dp), ColumnSpec(max = 120.dp), ColumnSpec(min = 0.dp, max = 28.dp), ColumnSpec())) {
                     ContentRow(header = true) {
                         Label("Name", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("Description", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("State", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                        Label("Wakes", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Label("Last active", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                         Box(Modifier)
                         Box(Modifier)
@@ -174,6 +175,7 @@ private fun AssistantRow(assistant: Assistant, store: Store, onOpen: (Assistant)
 
         Label(assistant.description.orEmpty(), color = colors.textMuted, maxLines = 1)
         AssistantStateMark(assistant.state)
+        Label(assistant.wakes ?: "Never", color = colors.textMuted, maxLines = 1)
         Label(assistant.lastActiveAt?.let { ago(it) } ?: "Never", color = colors.textMuted, maxLines = 1)
 
         if (assistant.pinnedAt != null) {

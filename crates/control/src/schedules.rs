@@ -1,3 +1,4 @@
+use crate::assistants;
 use crate::auth::AuthUser;
 use crate::boot::is_ready;
 use crate::conversations;
@@ -19,7 +20,7 @@ use mycelium_proto::stream::StreamMessage;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at";
+const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id";
 const RUN_COLUMNS: &str = "id, schedule_id, ran_at, outcome, reason, conversation_id";
 const DUE_BATCH: i64 = 20;
 const RECENT_RUNS: i64 = 50;
@@ -43,6 +44,7 @@ struct ScheduleRow {
     last_run_at: Option<chrono::DateTime<chrono::Utc>>,
     last_conversation_id: Option<Uuid>,
     created_at: chrono::DateTime<chrono::Utc>,
+    assistant_id: Option<Uuid>,
 }
 
 impl ScheduleRow {
@@ -63,6 +65,7 @@ impl ScheduleRow {
             next_run_at: self.next_run_at,
             last_run_at: self.last_run_at,
             last_conversation_id: self.last_conversation_id,
+            assistant_id: self.assistant_id,
             created_at: self.created_at,
         })
     }
@@ -124,6 +127,20 @@ pub fn preset_cron(preset: &str) -> Option<String> {
     }
 }
 
+pub fn describe_cron(cron: &str) -> String {
+    let fields: Vec<&str> = cron.split_whitespace().collect();
+    let clock = |hour: &str, minute: &str| Some(format!("{:02}:{:02}", hour.parse::<u32>().ok()?, minute.parse::<u32>().ok()?));
+
+    match fields.as_slice() {
+        [minutes, "*", "*", "*", "*"] => minutes.strip_prefix("*/").map(|count| format!("Every {count} minutes")),
+        ["0", hours, "*", "*", "*"] if hours.starts_with("*/") => hours.strip_prefix("*/").map(|count| format!("Every {count} hours")),
+        [minute, hour, "*", "*", "*"] => clock(hour, minute).map(|time| format!("Daily at {time}")),
+        [minute, hour, "*", "*", "1-5"] => clock(hour, minute).map(|time| format!("Weekdays at {time}")),
+        _ => None,
+    }
+    .unwrap_or_else(|| cron.to_string())
+}
+
 fn parse_time(text: &str) -> Option<(u32, u32)> {
     let (hour, minute) = text.trim().split_once(':')?;
     let hour: u32 = hour.parse().ok()?;
@@ -152,9 +169,18 @@ async fn zone_of(state: &AppState, owner: Uuid) -> ApiResult<Tz> {
 
 fn publish(state: &AppState, row: ScheduleRow) -> ApiResult<Schedule> {
     let owner = row.owner;
+    let assistant_id = row.assistant_id;
     let schedule = row.to_proto()?;
 
     state.publish(Some(owner), StreamMessage::Schedule(schedule.clone()));
+
+    if let Some(assistant_id) = assistant_id {
+        let state = state.clone();
+
+        tokio::spawn(async move {
+            let _ = assistants::publish(&state, owner, assistant_id).await;
+        });
+    }
 
     Ok(schedule)
 }
@@ -318,8 +344,9 @@ pub struct ProposedSchedule<'a> {
 }
 
 pub async fn propose(state: &AppState, conversation_id: Uuid, proposal: ProposedSchedule<'_>) -> ApiResult<Result<Schedule, String>> {
-    let (owner, node_id, agent, cwd, project_id) =
-        sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let (owner, node_id, agent, cwd, project_id, assistant_id) =
+        sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id, assistant_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let agent = if assistant_id.is_some() { "claude".to_string() } else { agent };
     let zone = match proposal.time_zone {
         Some(name) => match name.trim().parse::<Tz>() {
             Ok(zone) => zone,
@@ -333,8 +360,8 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, proposal: Proposed
     };
     let same = proposal.each_run == EachRun::Same;
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, proposed, conversation_id, last_conversation_id)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, case when $12 then $11 end) returning {SCHEDULE_COLUMNS}",
+        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, proposed, conversation_id, last_conversation_id, assistant_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, case when $12 then $11 end, $13) returning {SCHEDULE_COLUMNS}",
     )))
     .bind(owner)
     .bind(node_id)
@@ -348,6 +375,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, proposal: Proposed
     .bind(zone.name())
     .bind(conversation_id)
     .bind(same)
+    .bind(assistant_id)
     .fetch_one(&state.pool)
     .await?;
 
@@ -462,6 +490,12 @@ async fn fire(state: &AppState, connection: &mut PgConnection, row: &ScheduleRow
 }
 
 async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiResult<Uuid> {
+    if let Some(assistant_id) = row.assistant_id {
+        let woken = assistants::prompt(State(state.clone()), user.clone(), Path(assistant_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await?;
+
+        return Ok(woken.0.id);
+    }
+
     if !state.hub.is_online(row.node_id) {
         return Err(node_offline());
     }
@@ -509,6 +543,15 @@ mod tests {
         for text in ["weekdays at 25:00", "daily at noon", "every 0 minutes", "every 60 minutes", "every day", "fortnightly"] {
             assert_eq!(preset_cron(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn a_cron_expression_is_described_the_way_a_preset_names_it() {
+        assert_eq!(describe_cron("0 8 * * 1-5"), "Weekdays at 08:00");
+        assert_eq!(describe_cron("5 9 * * *"), "Daily at 09:05");
+        assert_eq!(describe_cron("*/15 * * * *"), "Every 15 minutes");
+        assert_eq!(describe_cron("0 */2 * * *"), "Every 2 hours");
+        assert_eq!(describe_cron("0 8 1 * *"), "0 8 1 * *");
     }
 
     #[test]

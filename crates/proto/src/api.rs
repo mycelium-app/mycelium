@@ -1011,6 +1011,8 @@ pub struct Schedule {
     pub next_run_at: chrono::DateTime<chrono::Utc>,
     pub last_run_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1541,6 +1543,8 @@ pub struct Assistant {
     pub secrets: Vec<AssistantSecret>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<AssistantBackup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wakes: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

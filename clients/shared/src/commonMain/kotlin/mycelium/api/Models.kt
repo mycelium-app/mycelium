@@ -575,6 +575,7 @@ data class Assistant(
     @SerialName("next_choice") val nextChoice: String? = null,
     val secrets: List<AssistantSecret> = emptyList(),
     val backup: AssistantBackup? = null,
+    val wakes: String? = null,
     @SerialName("created_at") val createdAt: String,
 )
 
@@ -773,6 +774,7 @@ data class Schedule(
     @SerialName("next_run_at") val nextRunAt: String,
     @SerialName("last_run_at") val lastRunAt: String? = null,
     @SerialName("last_conversation_id") val lastConversationId: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
     @SerialName("created_at") val createdAt: String,
 )
 

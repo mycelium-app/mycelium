@@ -31,7 +31,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 private fun assistantJson(name: String, pinned: Boolean = false, description: String? = "Daily summary") =
-    """{"id":"a-$name","name":"$name",${description?.let { "\"description\":\"$it\"," }.orEmpty()}"preferences":{},"state":"idle","session_count":0,${if (pinned) "\"pinned_at\":\"2026-10-22T10:00:00Z\"," else ""}"created_at":"2026-10-22T10:00:00Z"}"""
+    """{"id":"a-$name","name":"$name",${description?.let { "\"description\":\"$it\"," }.orEmpty()}"preferences":{},"state":"idle","session_count":0,"wakes":"Weekdays at 08:00",${if (pinned) "\"pinned_at\":\"2026-10-22T10:00:00Z\"," else ""}"created_at":"2026-10-22T10:00:00Z"}"""
 
 private object AssistantsPlatform : Platform {
     override val originUrl: String? = null
@@ -93,6 +93,7 @@ class AssistantsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open War room").fetchSemanticsNodes().isNotEmpty() }
         assertTrue(present("Daily summary") >= 1)
+        assertTrue(present("Weekdays at 08:00") >= 1)
     }
 
     @Test

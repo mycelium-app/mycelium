@@ -39,6 +39,7 @@ const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.pref
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
     (select count(*) from conversations where assistant_id = a.id) as session_count,
+    (select s.cron from schedules s where s.assistant_id = a.id and not s.proposed and not s.paused order by s.next_run_at limit 1) as wake_cron,
     (select substring(content from 1 for $3) from assistant_files f where f.assistant_id = a.id and f.path = 'AGENTS.md') as instructions_preview";
 
 #[derive(sqlx::FromRow)]
@@ -56,6 +57,7 @@ struct AssistantRow {
     current_status: Option<String>,
     last_active_at: Option<chrono::DateTime<chrono::Utc>>,
     session_count: i64,
+    wake_cron: Option<String>,
     instructions_preview: Option<Vec<u8>>,
 }
 
@@ -90,6 +92,7 @@ impl AssistantRow {
             next_choice: None,
             secrets: Vec::new(),
             backup: self.backup.map(|backup| backup.0),
+            wakes: self.wake_cron.as_deref().map(crate::schedules::describe_cron),
             created_at: self.created_at,
         }
     }

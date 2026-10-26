@@ -124,7 +124,7 @@ private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
 
     ContentRow {
         Label(schedule.prompt, maxLines = 1)
-        Label(state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), color = colors.textMuted, maxLines = 1)
+        Label(state.assistants[schedule.assistantId]?.name ?: state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), color = colors.textMuted, maxLines = 1)
         Column {
             Label(describeCron(schedule.cron), style = Tokens.Type.Code, maxLines = 1)
             Label(schedule.timeZone, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
