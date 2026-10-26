@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
 use mycelium_proto::link::GitCommand;
-use mycelium_proto::api::{Walkthrough, WalkthroughFile, WalkthroughNote, WalkthroughStep};
+use mycelium_proto::api::{Walkthrough, WalkthroughAnswer, WalkthroughAnswerRequest, WalkthroughCheck, WalkthroughFile, WalkthroughNote, WalkthroughStep};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::Value;
 use uuid::Uuid;
@@ -26,6 +26,7 @@ struct WalkthroughRow {
     dismissed_at: Option<chrono::DateTime<chrono::Utc>>,
     scope: String,
     note: Option<String>,
+    checks: Option<Value>,
 }
 
 struct GivenFile {
@@ -37,8 +38,54 @@ impl WalkthroughRow {
     fn to_proto(self) -> ApiResult<Walkthrough> {
         let steps = serde_json::from_value(self.steps).map_err(ApiError::internal)?;
 
-        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at, dismissed: self.dismissed_at.is_some(), scope: self.scope, note: self.note })
+        let checks = self.checks.and_then(|checks| checks.as_array().cloned()).unwrap_or_default().iter().filter_map(shown_check).collect();
+
+        Ok(Walkthrough { id: self.id, conversation_id: self.conversation_id, steps, created_at: self.created_at, dismissed: self.dismissed_at.is_some(), scope: self.scope, note: self.note, checks })
     }
+}
+
+fn shown_check(check: &Value) -> Option<WalkthroughCheck> {
+    let choices = check.get("choices")?.as_array()?.iter().filter_map(Value::as_str).map(str::to_string).collect();
+
+    Some(WalkthroughCheck { step: check.get("step")?.as_i64()? as i32, question: text_of(check, "question"), choices })
+}
+
+fn checks_of(arguments: &Value, step_count: usize) -> Result<Option<Value>, String> {
+    let Some(given) = arguments.get("checks").and_then(Value::as_array).filter(|checks| !checks.is_empty()) else {
+        return Ok(None);
+    };
+    let mut seen = Vec::new();
+
+    for (index, check) in given.iter().enumerate() {
+        let number = index + 1;
+        let step = check.get("step").and_then(Value::as_i64).unwrap_or(0);
+        let choices = check.get("choices").and_then(Value::as_array).map_or(0, Vec::len);
+        let answer = check.get("answer").and_then(Value::as_i64).unwrap_or(-1);
+
+        if step < 1 || step as usize > step_count {
+            return Err(format!("Nothing was stored. Check {number} is about step {step}, and this walkthrough has {step_count} steps. Number the step from 1 to {step_count}."));
+        }
+
+        if seen.contains(&step) {
+            return Err(format!("Nothing was stored. Check {number} is a second check for step {step}. Give each step at most one check."));
+        }
+
+        seen.push(step);
+
+        if text_of(check, "question").trim().is_empty() {
+            return Err(format!("Nothing was stored. Check {number} has no question. Give every check a question."));
+        }
+
+        if !(2..=4).contains(&choices) {
+            return Err(format!("Nothing was stored. Check {number} has {choices} choices. Give it 2 to 4 choices."));
+        }
+
+        if answer < 0 || answer as usize >= choices {
+            return Err(format!("Nothing was stored. Check {number} has its answer at {answer}, and its choices are numbered from 0 to {}. Give the number of the correct choice.", choices - 1));
+        }
+    }
+
+    Ok(Some(Value::Array(given.clone())))
 }
 
 fn text_of(value: &Value, field: &str) -> String {
@@ -102,6 +149,10 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
         given_files.push(files);
     }
 
+    let checks = match checks_of(arguments, steps.len()) {
+        Ok(checks) => checks,
+        Err(message) => return Ok(Err(message)),
+    };
     let changes = scope_changes(state, conversation_id, &scope).await;
 
     if changes.as_ref().is_some_and(Vec::is_empty) {
@@ -138,11 +189,12 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 
     let note = changes.is_none().then(|| "The changes in this scope could not be read from the node, so the diffs are as the agent wrote them.".to_string());
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps, scope, note) values ($1, $2, $3, $4) returning id, conversation_id, steps, created_at, dismissed_at, scope, note")
+    let row = sqlx::query_as::<_, WalkthroughRow>("insert into walkthroughs (conversation_id, steps, scope, note, checks) values ($1, $2, $3, $4, $5) returning id, conversation_id, steps, created_at, dismissed_at, scope, note, checks")
         .bind(conversation_id)
         .bind(serde_json::to_value(&steps).map_err(ApiError::internal)?)
         .bind(&scope)
         .bind(&note)
+        .bind(&checks)
         .fetch_one(&state.pool)
         .await?;
     let walkthrough = row.to_proto()?;
@@ -154,13 +206,13 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Walkthrough>>> {
     find_owned(&state.pool, id, user.id).await?;
 
-    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
+    let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note, checks from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
 
     Ok(Json(row.map(WalkthroughRow::to_proto).transpose()?))
 }
 
 pub async fn uncovered(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughFile>>> {
-    let row = sqlx::query_as::<_, WalkthroughRow>("select w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2")
+    let row = sqlx::query_as::<_, WalkthroughRow>("select w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2")
         .bind(id)
         .bind(user.id)
         .fetch_optional(&state.pool)
@@ -203,9 +255,48 @@ pub async fn mark_read(State(state): State<AppState>, user: AuthUser, Path((id, 
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn answers(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughAnswer>>> {
+    find_owned_walkthrough(&state, id, user.id).await?;
+
+    let rows = sqlx::query_as::<_, (i32, i32, bool)>("select step, choice, correct from walkthrough_answers where walkthrough_id = $1 and owner = $2 order by step").bind(id).bind(user.id).fetch_all(&state.pool).await?;
+
+    Ok(Json(rows.into_iter().map(|(step, choice, correct)| WalkthroughAnswer { step, choice, correct, explanation: String::new() }).collect()))
+}
+
+pub async fn answer(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>, Json(request): Json<WalkthroughAnswerRequest>) -> ApiResult<Json<WalkthroughAnswer>> {
+    find_owned_walkthrough(&state, id, user.id).await?;
+
+    let checks = sqlx::query_scalar::<_, Option<Value>>("select checks from walkthroughs where id = $1").bind(id).fetch_one(&state.pool).await?;
+    let check = checks.and_then(|checks| checks.as_array().cloned()).unwrap_or_default().into_iter().find(|check| check.get("step").and_then(Value::as_i64) == Some(i64::from(step)));
+    let Some(check) = check else {
+        return Err(ApiError::bad_request("no_such_check", "This walkthrough has no check for that step. Choose a step that has a question."));
+    };
+    let choices = check.get("choices").and_then(Value::as_array).map_or(0, Vec::len);
+
+    if request.choice < 0 || request.choice as usize >= choices {
+        return Err(ApiError::bad_request("no_such_choice", format!("This question has {choices} choices. Choose one from 0 to {}.", choices - 1)));
+    }
+
+    let correct = check.get("answer").and_then(Value::as_i64) == Some(i64::from(request.choice));
+
+    sqlx::query(
+        "insert into walkthrough_answers (walkthrough_id, owner, step, choice, correct) values ($1, $2, $3, $4, $5)
+         on conflict (walkthrough_id, owner, step) do update set choice = excluded.choice, correct = excluded.correct, answered_at = now()",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(step)
+    .bind(request.choice)
+    .bind(correct)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(Json(WalkthroughAnswer { step, choice: request.choice, correct, explanation: text_of(&check, "explanation") }))
+}
+
 async fn set_dismissed(state: &AppState, user: &AuthUser, id: Uuid, dismissed: bool) -> ApiResult<StatusCode> {
     let row = sqlx::query_as::<_, WalkthroughRow>(
-        "update walkthroughs w set dismissed_at = case when $3 then now() else null end from conversations c where c.id = w.conversation_id and w.id = $1 and c.owner = $2 returning w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note",
+        "update walkthroughs w set dismissed_at = case when $3 then now() else null end from conversations c where c.id = w.conversation_id and w.id = $1 and c.owner = $2 returning w.id, w.conversation_id, w.steps, w.created_at, w.dismissed_at, w.scope, w.note, w.checks",
     )
     .bind(id)
     .bind(user.id)

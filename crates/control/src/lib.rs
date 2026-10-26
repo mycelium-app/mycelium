@@ -167,6 +167,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/walkthroughs/{id}/notes/{note_id}", delete(walkthroughs::remove_note))
         .route("/api/v1/walkthroughs/{id}/reads", get(walkthroughs::reads))
         .route("/api/v1/walkthroughs/{id}/reads/{step}", put(walkthroughs::mark_read))
+        .route("/api/v1/walkthroughs/{id}/answers", get(walkthroughs::answers))
+        .route("/api/v1/walkthroughs/{id}/answers/{step}", put(walkthroughs::answer))
         .route("/api/v1/walkthroughs/{id}/dismissal", put(walkthroughs::dismiss).delete(walkthroughs::reopen))
         .route("/api/v1/conversations/{id}/continue", post(continuation::request))
         .route("/api/v1/conversations/{id}/move-plan", get(moves::plan))

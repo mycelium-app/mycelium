@@ -214,6 +214,21 @@ pub fn tool_definitions() -> Value {
                             "required": ["title"],
                         },
                     },
+                    "checks": {
+                        "type": "array",
+                        "description": "Optional. Questions that check the person's understanding, shown after the last step; they can skip them. Give one for the steps that are easiest to misread, not for every step.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "step": {"type": "integer", "description": "The step this question is about, numbered from 1. At most one check per step."},
+                                "question": {"type": "string", "description": "The question."},
+                                "choices": {"type": "array", "items": {"type": "string"}, "description": "2 to 4 answers."},
+                                "answer": {"type": "integer", "description": "The number of the correct choice, from 0."},
+                                "explanation": {"type": "string", "description": "Why that answer is right. Shown after the person answers."},
+                            },
+                            "required": ["step", "question", "choices", "answer"],
+                        },
+                    },
                 },
                 "required": ["steps"],
             },

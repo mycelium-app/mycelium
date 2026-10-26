@@ -1552,6 +1552,29 @@ pub struct Walkthrough {
     pub scope: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<WalkthroughCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughCheck {
+    pub step: i32,
+    pub question: String,
+    pub choices: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughAnswerRequest {
+    pub choice: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WalkthroughAnswer {
+    pub step: i32,
+    pub choice: i32,
+    pub correct: bool,
+    #[serde(default)]
+    pub explanation: String,
 }
 
 fn default_walkthrough_scope() -> String {

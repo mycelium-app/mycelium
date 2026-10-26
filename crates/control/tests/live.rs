@@ -84,6 +84,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/walkthroughs/{id}/notes",
     "DELETE /api/v1/walkthroughs/{id}/notes/{note_id}",
     "POST /api/v1/walkthroughs/{id}/notes/sent",
+    "PUT /api/v1/walkthroughs/{id}/answers/{step}",
     "POST /api/v1/artifacts/{id}/links",
     "DELETE /api/v1/artifacts/{id}/links/{link_id}",
     "POST /api/v1/artifact-access-requests/{id}/approve",

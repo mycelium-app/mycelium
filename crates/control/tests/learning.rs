@@ -1,7 +1,7 @@
 mod common;
 
 use common::{NodeLink, Server};
-use mycelium_proto::link::ControlToNode;
+use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -83,4 +83,107 @@ async fn another_persons_conversation_cannot_be_toggled() {
 
     assert_eq!(status, 404);
     assert_eq!(server.conversation(id).await["teach_me"], Value::Null);
+}
+
+async fn walkthrough(server: &Server, link: &mut NodeLink, conversation: Uuid, extra: Value) -> Value {
+    let token = link.token.clone();
+
+    walkthrough_reading(server, Some(link), token, conversation, extra).await
+}
+
+async fn walkthrough_reading(server: &Server, link: Option<&mut NodeLink>, token: String, conversation: Uuid, extra: Value) -> Value {
+    let mut arguments = json!({"steps": [
+        {"title": "Add the strings file", "files": [{"path": "src/strings.ts", "diff": "+export const strings = {}"}]},
+        {"title": "Read the title from strings", "files": [{"path": "src/Screen.tsx", "diff": "+const title = strings.title"}]},
+    ]});
+    arguments.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    let diff = "diff --git a/src/strings.ts b/src/strings.ts\n--- a/src/strings.ts\n+++ b/src/strings.ts\n@@ -1 +1 @@\n+export const strings = {}\ndiff --git a/src/Screen.tsx b/src/Screen.tsx\n--- a/src/Screen.tsx\n+++ b/src/Screen.tsx\n@@ -1 +1 @@\n+const title = strings.title\n";
+    let anonymous = server.anonymous();
+    let asking = tokio::spawn(async move {
+        let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).header("x-mycelium-conversation", conversation.to_string()).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "walkthrough", "arguments": arguments}}));
+        let (_, body) = anonymous.json(request).await;
+
+        body["result"].clone()
+    });
+
+    if let Some(link) = link {
+        loop {
+            if let ControlToNode::Git { request_id, .. } = link.next().await {
+                link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"diff": diff, "truncated": false}), error: None }).await;
+
+                break;
+            }
+        }
+    }
+
+    asking.await.unwrap()
+}
+
+fn question() -> Value {
+    json!({"checks": [{"step": 2, "question": "Where does the title come from?", "choices": ["A literal", "The strings file"], "answer": 1, "explanation": "Step 2 reads it from strings."}]})
+}
+
+async fn latest_walkthrough(server: &Server, conversation: Uuid) -> Value {
+    server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/walkthrough"))).await.1
+}
+
+async fn answer(server: &Server, walkthrough: &str, step: i32, choice: i32) -> (u16, Value) {
+    server.user.json(server.user.put(&format!("/api/v1/walkthroughs/{walkthrough}/answers/{step}")).json(&json!({"choice": choice}))).await
+}
+
+#[tokio::test]
+async fn a_check_answer_says_correct_or_not_quite() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    let stored = walkthrough(&server, &mut link, id, question()).await;
+    assert_eq!(stored["isError"], false, "{stored}");
+    let shown = latest_walkthrough(&server, id).await;
+    let walkthrough_id = shown["id"].as_str().unwrap().to_string();
+    assert_eq!(shown["checks"][0]["choices"], json!(["A literal", "The strings file"]));
+    assert!(shown["checks"][0].get("answer").is_none());
+
+    let (status, wrong) = answer(&server, &walkthrough_id, 2, 0).await;
+    assert_eq!((status, wrong["correct"].clone()), (200, json!(false)));
+    let (_, right) = answer(&server, &walkthrough_id, 2, 1).await;
+    assert_eq!((right["correct"].clone(), right["explanation"].clone()), (json!(true), json!("Step 2 reads it from strings.")));
+
+    let (_, recorded) = server.user.json(server.user.get(&format!("/api/v1/walkthroughs/{walkthrough_id}/answers"))).await;
+    assert_eq!(recorded, json!([{"step": 2, "choice": 1, "correct": true, "explanation": ""}]));
+}
+
+#[tokio::test]
+async fn answering_a_step_without_a_check_is_refused_and_records_nothing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    walkthrough(&server, &mut link, id, question()).await;
+    let walkthrough_id = latest_walkthrough(&server, id).await["id"].as_str().unwrap().to_string();
+
+    let (status, body) = answer(&server, &walkthrough_id, 1, 0).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("no_such_check")));
+    let other = server.second_user("other@example.com").await;
+    let (status, _) = other.json(other.put(&format!("/api/v1/walkthroughs/{walkthrough_id}/answers/2")).json(&json!({"choice": 1}))).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn walkthrough_with_a_bad_check_stores_nothing() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+
+    for checks in [
+        json!([{"step": 3, "question": "q", "choices": ["a", "b"], "answer": 0}]),
+        json!([{"step": 1, "question": "q", "choices": ["a"], "answer": 0}]),
+        json!([{"step": 1, "question": "q", "choices": ["a", "b"], "answer": 2}]),
+    ] {
+        let result = walkthrough_reading(&server, None, link.token.clone(), id, json!({"checks": checks})).await;
+
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(result["content"][0]["text"].as_str().unwrap().starts_with("Nothing was stored."));
+    }
+
+    assert_eq!(latest_walkthrough(&server, id).await, Value::Null);
 }
