@@ -825,7 +825,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                             Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
                         }
 
-                        Label(place, style = Tokens.Type.Meta, color = colors.textMuted)
+                        Label(place, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                     }
                 }
             }
