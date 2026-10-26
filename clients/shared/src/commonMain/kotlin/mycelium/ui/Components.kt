@@ -215,6 +215,7 @@ fun MyButton(
     trailingIcon: MyIcon? = null,
     tooltip: String? = if (text == null) description else null,
     fill: Boolean = false,
+    stateDescription: String? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -257,6 +258,7 @@ fun MyButton(
                     shape = ControlShape,
                     base = if (variant == ButtonVariant.Primary) colors.accent else Color.Transparent,
                     selected = selected,
+                    stateDescription = stateDescription,
                     source = source,
                 )
                 .padding(horizontal = if (text == null) 0.dp else padding),

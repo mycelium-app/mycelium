@@ -147,6 +147,8 @@ sealed interface ThreadItem {
     data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
 
     data class Continued(override val key: String, val text: String) : ThreadItem
+
+    data class TeachMode(override val key: String, val on: Boolean) : ThreadItem
 }
 
 data class UsageLimitNote(val window: String, val resetsAt: String?)
@@ -240,6 +242,7 @@ class ThreadBuilder {
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += ThreadItem.Continued(key, continuedText(payload))
+            EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
         }
     }
 }
@@ -701,5 +704,7 @@ private fun continuedText(payload: JsonObject): String {
 internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
 private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
+
+private fun JsonObject.boolean(key: String): Boolean? = string(key)?.toBooleanStrictOrNull()
 
 private fun JsonObject.contentText(): String = (this["content"] as? JsonObject)?.string("text") ?: ""

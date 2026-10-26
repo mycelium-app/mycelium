@@ -69,6 +69,7 @@ object EventKinds {
     const val Workflow = "workflow"
     const val ModelChanged = "model_changed"
     const val Continued = "continued"
+    const val TeachMode = "teach_mode"
 }
 
 @Serializable
@@ -1173,6 +1174,7 @@ data class PatchConversationRequest(
     val model: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("clear_project") val clearProject: Boolean? = null,
+    @SerialName("teach_me") val teachMe: Boolean? = null,
 )
 
 @Serializable
@@ -1272,6 +1274,7 @@ data class Conversation(
     @SerialName("group_id") val groupId: String? = null,
     @SerialName("assistant_id") val assistantId: String? = null,
     @SerialName("agent_active") val agentActive: Boolean = false,
+    @SerialName("teach_me") val teachMe: Boolean = false,
 )
 
 @Serializable

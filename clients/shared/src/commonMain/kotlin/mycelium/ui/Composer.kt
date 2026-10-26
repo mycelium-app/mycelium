@@ -157,6 +157,7 @@ fun Composer(
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
+    onTeachMe: ((Boolean) -> Unit)? = null,
     usage: @Composable () -> Unit = {},
 ) {
     val colors = MyTheme.colors
@@ -349,6 +350,7 @@ fun Composer(
                     badges = display.badgeRanges().values.toList(),
                     previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
                     onTextChange = ::changeText,
+                    onToggleTeachMe = onTeachMe?.let { change -> { change(!conversation.teachMe) } },
                     onUndo = { history.undone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     onRedo = { history.redone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     source = source,
@@ -389,6 +391,20 @@ fun Composer(
     val attach: @Composable () -> Unit = {
         if (attachments != null && platform != null) {
             MyButton({ platform.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
+        }
+    }
+
+    val teachMe: @Composable () -> Unit = {
+        if (onTeachMe != null) {
+            MyButton(
+                { onTeachMe(!conversation.teachMe) },
+                icon = MyIcon.GraduationCap,
+                description = "Teach me",
+                stateDescription = if (conversation.teachMe) "On" else "Off",
+                tooltip = if (conversation.teachMe) "Teach me is on: hints and explanations, no code or file edits ($TeachMeShortcut)" else "Teach me: ask for hints and explanations instead of code ($TeachMeShortcut)",
+                selected = conversation.teachMe,
+                muted = !conversation.teachMe,
+            )
         }
     }
 
@@ -458,6 +474,7 @@ fun Composer(
                     Row(Modifier.weight(1f).horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                         attach()
                         dictate()
+                        teachMe()
                         goal?.let { GoalButton(it) }
                         pickers()
                     }
@@ -512,6 +529,7 @@ fun Composer(
             ) {
                 attach()
                 dictate()
+                teachMe()
                 goal?.let { GoalButton(it) }
                 Row(
                     Modifier.weight(1f).horizontalScrollFaded(),
@@ -532,6 +550,8 @@ fun Composer(
     }
 }
 
+private const val TeachMeShortcut = "Ctrl or Cmd+Shift+T"
+
 private fun dictationProblemText(problem: DictationProblem) = when (problem) {
     DictationProblem.Denied -> "Allow microphone access for Mycelium to dictate."
     DictationProblem.NoMicrophone -> "No microphone found. Connect one and try again."
@@ -539,7 +559,7 @@ private fun dictationProblemText(problem: DictationProblem) = when (problem) {
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onToggleTeachMe: (() -> Unit)? = null, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
     val colors = MyTheme.colors
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -561,6 +581,11 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                 }
 
                 if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && onPaste()) {
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type == KeyEventType.KeyDown && event.key == Key.T && (event.isCtrlPressed || event.isMetaPressed) && event.isShiftPressed && onToggleTeachMe != null) {
+                    onToggleTeachMe()
                     return@onPreviewKeyEvent true
                 }
 
