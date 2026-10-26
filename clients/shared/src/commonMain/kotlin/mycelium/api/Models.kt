@@ -497,6 +497,9 @@ data class ModelProvider(
 )
 
 @Serializable
+data class Transcription(val text: String)
+
+@Serializable
 data class ModelProviderUsage(
     @SerialName("provider_id") val providerId: String,
     val name: String,

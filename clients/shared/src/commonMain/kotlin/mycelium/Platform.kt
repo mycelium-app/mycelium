@@ -83,6 +83,10 @@ interface Platform {
 
     fun requestNotificationPermission() = Unit
 
+    fun dictation(): Dictation? = null
+
+    fun audioRecorder(): AudioRecorder? = null
+
     fun notify(title: String, body: String, conversationId: String, sound: Boolean = true) = Unit
 
     fun chime() = Unit

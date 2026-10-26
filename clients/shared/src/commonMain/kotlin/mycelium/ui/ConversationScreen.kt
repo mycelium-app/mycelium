@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.text.TextRange
@@ -32,6 +33,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
+import mycelium.ProviderDictation
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Project
@@ -169,9 +171,18 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val chat = conversation.isChat
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
-    LaunchedEffect(chat, state.experiments.continueElsewhere) {
-        if (chat || state.experiments.continueElsewhere) {
+    LaunchedEffect(chat, state.experiments.continueElsewhere, state.experiments.voice) {
+        if (chat || state.experiments.continueElsewhere || state.experiments.voice) {
             store.act { providers = api.modelProviders() }
+        }
+    }
+
+    val scope = rememberCoroutineScope()
+    val speechProvided = providers.any { it.speechModel != null }
+    val dictation = remember(platform, state.experiments.voice, speechProvided) {
+        when {
+            !state.experiments.voice -> null
+            else -> platform?.dictation() ?: platform?.audioRecorder()?.takeIf { speechProvided }?.let { ProviderDictation(it, api::transcribe, scope) }
         }
     }
 
@@ -361,6 +372,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         annotations = annotations,
                         onRemoveAnnotation = { removed -> annotations = annotations - removed },
                         attachments = attached.controls(),
+                        dictation = dictation,
                         initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
                         onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
                         modelPicker = if (chat) ModelPickerControls(

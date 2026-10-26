@@ -23,6 +23,7 @@ import androidx.compose.ui.window.rememberWindowState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import mycelium.App
+import mycelium.AudioRecorder
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Platform
@@ -115,6 +116,8 @@ private object DesktopPlatform : Platform {
     override fun copyToClipboard(text: String) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
+
+    override fun audioRecorder(): AudioRecorder = JavaSoundRecorder()
 
     override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
 

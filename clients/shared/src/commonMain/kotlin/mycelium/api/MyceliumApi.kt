@@ -783,6 +783,15 @@ class MyceliumApi(
             }
         }.body()
 
+    suspend fun transcribe(audio: ByteArray): String =
+        call("/transcriptions") {
+            client.post(it) {
+                authorise()
+                contentType(ContentType("audio", "wav"))
+                setBody(audio)
+            }
+        }.body<Transcription>().text
+
     suspend fun attachmentBytes(sha256: String): ByteArray =
         call("/attachments/$sha256") { client.get(it) { authorise() } }.body()
 

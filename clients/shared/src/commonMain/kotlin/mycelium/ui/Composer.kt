@@ -48,7 +48,9 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.width
@@ -66,6 +68,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import mycelium.Dictation
+import mycelium.DictationProblem
 import mycelium.state.Choice
 import mycelium.state.DefaultAccountId
 import mycelium.state.accountMenuTitle
@@ -149,6 +153,7 @@ fun Composer(
     goal: GoalControls? = null,
     attachments: AttachmentControls? = null,
     modelPicker: ModelPickerControls? = null,
+    dictation: Dictation? = null,
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
@@ -269,6 +274,65 @@ fun Composer(
     }
     val unmarked = attachments?.let { held -> AttachmentControls(held.drafts.filter { it.id !in images.values }, held.problem, held.onAdd, held.onRemove) }
 
+    var listening by remember(conversation.id) { mutableStateOf(false) }
+    var dictationProblem by remember(conversation.id) { mutableStateOf<DictationProblem?>(null) }
+
+    fun changeText(changed: TextFieldValue) {
+        val before = ComposerEdit(text, pastes, images)
+        val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
+        sent = null
+
+        val next = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
+        val range = pasteInsertion(text.text, next.text)
+        val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+
+        if (range == null || marker == null) {
+            text = next
+        } else {
+            pastes = pastes + (marker to next.text.substring(range.first, range.last + 1).filterNot(::isPasteMarker))
+            text = TextFieldValue(next.text.replaceRange(range, marker.toString()), TextRange(range.first + 1))
+        }
+
+        if (text.text != before.text.text) {
+            val typedOne = text.text.length == before.text.text.length + 1 && pastes == before.pastes
+            val typedSpace = typedOne && text.text.getOrNull(text.selection.end - 1)?.isWhitespace() == true
+            history = history.recorded(before, typedOne, typedSpace)
+        }
+    }
+
+    fun toggleDictation() {
+        dictationProblem = null
+
+        if (listening) {
+            dictation?.stop()
+            return
+        }
+
+        listening = true
+        dictation?.start(
+            onHeard = { heard ->
+                val cursor = text.selection.end
+                val separator = if (cursor > 0 && !text.text[cursor - 1].isWhitespace()) " " else ""
+                val inserted = separator + heard
+                val updated = text.text.substring(0, cursor) + inserted + text.text.substring(text.selection.end)
+
+                changeText(TextFieldValue(updated, TextRange(cursor + inserted.length)))
+            },
+            onStopped = { problem ->
+                listening = false
+                dictationProblem = problem
+            },
+        )
+    }
+
+    DisposableEffect(conversation.id, dictation) {
+        onDispose {
+            if (listening) {
+                dictation?.stop()
+            }
+        }
+    }
+
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         Column(fieldModifier) {
             Box {
@@ -277,28 +341,7 @@ fun Composer(
                     visualTransformation = remember(display, colors.textMuted) { PasteMarkerTransformation(display, colors.textMuted) },
                     badges = display.badgeRanges().values.toList(),
                     previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
-                    onTextChange = { changed ->
-                        val before = ComposerEdit(text, pastes, images)
-                        val stale = sent?.takeIf { it.isNotEmpty() && changed.text.startsWith(it) }
-                        sent = null
-
-                        val next = if (stale == null) changed else TextFieldValue(changed.text.removePrefix(stale), TextRange(changed.selection.end - stale.length))
-                        val range = pasteInsertion(text.text, next.text)
-                        val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
-
-                        if (range == null || marker == null) {
-                            text = next
-                        } else {
-                            pastes = pastes + (marker to next.text.substring(range.first, range.last + 1).filterNot(::isPasteMarker))
-                            text = TextFieldValue(next.text.replaceRange(range, marker.toString()), TextRange(range.first + 1))
-                        }
-
-                        if (text.text != before.text.text) {
-                            val typedOne = text.text.length == before.text.text.length + 1 && pastes == before.pastes
-                            val typedSpace = typedOne && text.text.getOrNull(text.selection.end - 1)?.isWhitespace() == true
-                            history = history.recorded(before, typedOne, typedSpace)
-                        }
-                    },
+                    onTextChange = ::changeText,
                     onUndo = { history.undone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     onRedo = { history.redone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     source = source,
@@ -326,12 +369,25 @@ fun Composer(
                     CompletionPopup(if (query != null) "Commands" else "Files", matches, highlighted.coerceIn(matches.indices))
                 }
             }
+
+            dictationProblem?.let { problem ->
+                Row(Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
+                    Label(dictationProblemText(problem), style = Tokens.Type.Meta, color = colors.statusFailed)
+                }
+            }
         }
     }
 
     val attach: @Composable () -> Unit = {
         if (attachments != null && platform != null) {
             MyButton({ platform.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
+        }
+    }
+
+    val dictate: @Composable () -> Unit = {
+        if (dictation != null) {
+            MyButton(::toggleDictation, icon = MyIcon.Microphone, description = if (listening) "Stop dictating" else "Dictate", selected = listening, muted = !listening)
         }
     }
 
@@ -394,6 +450,7 @@ fun Composer(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                         attach()
+                        dictate()
                         goal?.let { GoalButton(it) }
                         pickers()
                     }
@@ -447,6 +504,7 @@ fun Composer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 attach()
+                dictate()
                 goal?.let { GoalButton(it) }
                 Row(
                     Modifier.weight(1f).horizontalScroll(rememberScrollState()),
@@ -465,6 +523,12 @@ fun Composer(
             }
         }
     }
+}
+
+private fun dictationProblemText(problem: DictationProblem) = when (problem) {
+    DictationProblem.Denied -> "Allow microphone access for Mycelium to dictate."
+    DictationProblem.NoMicrophone -> "No microphone found. Connect one and try again."
+    is DictationProblem.Failed -> problem.message
 }
 
 @Composable
