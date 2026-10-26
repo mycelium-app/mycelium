@@ -383,6 +383,21 @@ class WalkthroughTest {
     }
 
     @Test
+    fun regenerateSendsTheNotesAndAsksForARevision() {
+        show(Walkthrough)
+        openWalkthrough()
+        rule.onNodeWithContentDescription("Note on this step").performTextInput("Split this step in two")
+        rule.onNodeWithText("Add note").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file': Split this step in two").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Regenerate").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
+        val prompt = requests.first { it.first == "POST /api/v1/conversations/c1/prompt" }.second
+        assertTrue(prompt.contains("Split this step in two") && prompt.contains("Revise the current walkthrough"), prompt)
+    }
+
+    @Test
     fun addingAnEmptyNoteSaysWhatToDo() {
         show(Walkthrough)
         openWalkthrough()

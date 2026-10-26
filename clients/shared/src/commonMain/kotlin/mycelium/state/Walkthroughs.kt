@@ -23,8 +23,12 @@ enum class WalkthroughScope(val label: String, val subject: String, val key: Str
     LastCommit("Last commit", "the last commit", "last_commit"),
 }
 
-fun regenerateWalkthroughPrompt(scope: WalkthroughScope): String =
-    "Write a new walkthrough of ${scope.subject} with the walkthrough tool, passing scope \"${scope.key}\". Group the steps into named sections in reading order, and mark exactly one step as the key change."
+fun regenerateWalkthroughPrompt(scope: WalkthroughScope, revising: Boolean): String =
+    if (revising) {
+        "Revise the current walkthrough of ${scope.subject} using the notes above, with the walkthrough tool, passing scope \"${scope.key}\". Keep the steps the notes do not touch, group the steps into named sections in reading order, and mark exactly one step as the key change."
+    } else {
+        "Write a new walkthrough of ${scope.subject} with the walkthrough tool, passing scope \"${scope.key}\". Group the steps into named sections in reading order, and mark exactly one step as the key change."
+    }
 
 data class WalkthroughSection(val name: String?, val icon: String?, val steps: List<IndexedValue<WalkthroughStep>>)
 
