@@ -313,10 +313,30 @@ data class Memory(
     val scopes: List<String> = emptyList(),
     @SerialName("created_by") val createdBy: String,
     @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("bank_id") val bankId: String? = null,
     val source: MemorySource = MemorySource(),
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
 )
+
+@Serializable
+data class MemoryBank(
+    val id: String,
+    val name: String,
+    @SerialName("model_class") val modelClass: String,
+    @SerialName("group_ids") val groupIds: List<String> = emptyList(),
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class SaveMemoryBankRequest(
+    val name: String,
+    @SerialName("model_class") val modelClass: String,
+    @SerialName("group_ids") val groupIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class MoveMemoryRequest(@SerialName("bank_id") val bankId: String?)
 
 @Serializable
 data class MemorySource(
@@ -453,6 +473,7 @@ data class ModelProvider(
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("created_at") val createdAt: String,
     val favourites: List<String> = emptyList(),
+    @SerialName("model_class") val modelClass: String = "cloud",
 )
 
 @Serializable
@@ -483,7 +504,7 @@ data class CreateModelProviderRequest(
 )
 
 @Serializable
-data class UpdateModelProviderRequest(val name: String)
+data class UpdateModelProviderRequest(val name: String? = null, @SerialName("model_class") val modelClass: String? = null)
 
 @Serializable
 data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
@@ -665,6 +686,7 @@ data class Experiments(
     val groups: Boolean = false,
     @SerialName("continue_elsewhere") val continueElsewhere: Boolean = false,
     val assistants: Boolean = false,
+    @SerialName("memory_banks") val memoryBanks: Boolean = false,
 )
 
 @Serializable
@@ -1341,6 +1363,10 @@ sealed interface StreamMessage {
 
     data class MemoryRemoved(val memoryId: String) : StreamMessage
 
+    data class MemoryBankChanged(val bank: MemoryBank) : StreamMessage
+
+    data class MemoryBankRemoved(val bankId: String) : StreamMessage
+
     data class NodeChanged(val node: NodeSummary) : StreamMessage
 
     data class NodeRemoved(val nodeId: String) : StreamMessage
@@ -1401,6 +1427,8 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "ssh_access_request" -> StreamMessage.SshAccessRequestChanged(MyceliumJson.decodeFromJsonElement(SshAccessRequest.serializer(), element))
         "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))
         "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
+        "memory_bank" -> StreamMessage.MemoryBankChanged(MyceliumJson.decodeFromJsonElement(MemoryBank.serializer(), element))
+        "memory_bank_removed" -> StreamMessage.MemoryBankRemoved(element.requireString("bank_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "integrations_changed" -> StreamMessage.IntegrationsChanged

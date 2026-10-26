@@ -49,13 +49,14 @@ class ModelProvidersSettingsTest {
     private var listed = OllamaJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to AnthropicJson
 
-    private fun show(inSettings: Boolean = false) {
+    private fun show(inSettings: Boolean = false, experiments: String = "{}") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             requests += request
             bodies += String(request.body.toByteArray())
 
             when {
+                request.url.encodedPath.endsWith("/experiments") -> respond(experiments, HttpStatusCode.OK, json)
                 request.method == HttpMethod.Post -> respond(postAnswer.second, postAnswer.first, json)
                 request.method == HttpMethod.Patch -> respond(OllamaJson.replace("\"Ollama\"", "\"Workstation\""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Delete -> respond("", HttpStatusCode.NoContent)
@@ -64,6 +65,7 @@ class ModelProvidersSettingsTest {
         }
 
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent {
             MyceliumTheme(true) {
                 if (inSettings) {
@@ -74,6 +76,22 @@ class ModelProvidersSettingsTest {
             }
         }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aProvidersDataHandlingIsSaved() {
+        show(experiments = EnabledExperiments)
+        rule.onNodeWithContentDescription("Data handling: Cloud").performClick()
+        rule.onNodeWithText("Private or on-device only").performClick()
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
+
+        assertEquals(true, bodies.any { it.contains("\"model_class\":\"private\"") })
+    }
+
+    @Test
+    fun dataHandlingIsHiddenWhileTheMemoryBanksExperimentIsOff() {
+        show()
+        rule.onNodeWithContentDescription("Data handling: Cloud").assertDoesNotExist()
     }
 
     @Test

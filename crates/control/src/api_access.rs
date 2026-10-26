@@ -78,7 +78,7 @@ fn need(method: &Method, route: &str) -> Need {
     match route {
         "/api/v1/attachments/{sha256}" | "/api/v1/search" | "/api/v1/activity/conversations" => Need::Scope("conversations:read"),
         "/api/v1/nodes" | "/api/v1/worktrees" => Need::Scope("nodes:read"),
-        "/api/v1/usage-limit" | "/api/v1/instructions" | "/api/v1/extensions" | "/api/v1/projects" | "/api/v1/groups" | "/api/v1/memories" => Need::Scope("settings:read"),
+        "/api/v1/usage-limit" | "/api/v1/instructions" | "/api/v1/extensions" | "/api/v1/projects" | "/api/v1/groups" | "/api/v1/memories" | "/api/v1/memory-banks" => Need::Scope("settings:read"),
         _ => Need::Full,
     }
 }

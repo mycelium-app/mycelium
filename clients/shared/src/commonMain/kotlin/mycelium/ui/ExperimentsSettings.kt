@@ -27,6 +27,7 @@ fun ExperimentsSettings(store: Store) {
         Triple("Move chats between machines", held.moveChats) { value -> store.updateExperiments { it.copy(moveChats = value) } },
         Triple("Continue elsewhere", held.continueElsewhere) { value -> store.updateExperiments { it.copy(continueElsewhere = value) } },
         Triple("Assistants", held.assistants) { value -> store.updateExperiments { it.copy(assistants = value) } },
+        Triple("Memory banks", held.memoryBanks) { value -> store.updateExperiments { it.copy(memoryBanks = value) } },
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

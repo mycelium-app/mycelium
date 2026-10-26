@@ -20,6 +20,7 @@ import mycelium.api.ApiException
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.Memory
+import mycelium.state.Choice
 import mycelium.state.Store
 
 @Composable
@@ -33,6 +34,8 @@ fun MemoriesSettings(store: Store) {
     var editing by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<Memory?>(null) }
+    var moving by remember { mutableStateOf<Memory?>(null) }
+    var destination by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableStateOf(0) }
 
@@ -69,6 +72,10 @@ fun MemoriesSettings(store: Store) {
 
             TextInput(query, { query = it }, label = "Search memories", placeholder = "Search memories", showLabel = false,
                 modifier = if (touch) Modifier.fillMaxWidth() else Modifier.widthIn(max = Tokens.Size.FormColumn))
+        }
+
+        if (live.experiments.memoryBanks) {
+            MemoryBanksBlock(store)
         }
 
         failure?.let { message ->
@@ -112,6 +119,13 @@ fun MemoriesSettings(store: Store) {
                                     draft = memory.text
                                     deleting = null
                                 })
+                                if (live.experiments.memoryBanks) {
+                                    MenuItem("Move to bank", {
+                                        close()
+                                        moving = memory
+                                        destination = memory.bankId
+                                    })
+                                }
                                 MenuItem("Delete", {
                                     close()
                                     deleting = memory
@@ -122,8 +136,14 @@ fun MemoriesSettings(store: Store) {
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                        for (scope in memory.scopes) {
-                            Tag(scope)
+                        val bank = memory.bankId?.let { live.memoryBanks[it] }
+
+                        if (bank != null) {
+                            Tag(bank.name)
+                        } else {
+                            for (scope in memory.scopes) {
+                                Tag(scope)
+                            }
                         }
 
                         val origin = memory.source.summary.ifEmpty { memory.createdBy }
@@ -156,6 +176,26 @@ fun MemoriesSettings(store: Store) {
                     }
                 }, text = "Delete memory", variant = ButtonVariant.Danger)
                 MyButton({ deleting = null }, text = "Cancel", muted = true)
+            }
+        }
+    }
+
+    moving?.let { memory ->
+        Dialog(onDismiss = { moving = null }) {
+            val noBank = "none"
+            val choices = listOf(Choice(noBank, "No bank")) + live.memoryBanks.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }
+
+            Label("Move to bank", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            OptionMenu("Bank", choices, destination ?: noBank, { destination = it.takeIf { id -> id != noBank } })
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                MyButton({
+                    store.act {
+                        val moved = store.api.moveMemory(memory.id, destination)
+                        memories = memories.map { if (it.id == moved.id) moved else it }
+                        moving = null
+                    }
+                }, text = "Move memory", variant = ButtonVariant.Outline)
+                MyButton({ moving = null }, text = "Cancel", muted = true)
             }
         }
     }

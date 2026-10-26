@@ -7,7 +7,7 @@ use crate::experiments::{self, Experiment};
 use crate::chat_tool_servers::{bearer, list_owned, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
-use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
+use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search, usable_banks};
 use crate::mcp_client::McpConnection;
 use crate::message_proposals;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
@@ -23,7 +23,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::future::join_all;
-use mycelium_proto::api::{EachRun, TaskStatus};
+use mycelium_proto::api::{EachRun, ModelClass, TaskStatus};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -91,6 +91,7 @@ pub fn tool_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "What to remember."},
+                    "bank": {"type": "string", "description": "The name of a memory bank to keep this in. Only the models and groups the bank allows can recall it. recall lists the banks open to this conversation."},
                     "scope": {"type": "string", "enum": ["global", "group"], "description": "group (default when the conversation is in a group) is recalled only by conversations in the same group. global is recalled in every conversation: use it for what is true of the tools, the host or the agents themselves."},
                 },
                 "required": ["text"],
@@ -447,6 +448,18 @@ async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uu
     }
 }
 
+async fn model_class_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<ModelClass> {
+    let Some((conversation_id, _)) = claimed_conversation(state, headers, node_id).await? else {
+        return Ok(ModelClass::Cloud);
+    };
+    let stored = sqlx::query_scalar::<_, String>("select p.model_class from conversations c join model_providers p on p.id = c.provider_id where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    match stored {
+        Some(class) => crate::store::parse_enum(&class),
+        None => Ok(ModelClass::Cloud),
+    }
+}
+
 async fn group_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {
     let Some((conversation_id, _)) = claimed_conversation(state, headers, node_id).await? else {
         return Ok(None);
@@ -569,6 +582,10 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_RECALL_LIMIT).clamp(1, MAX_RECALL_LIMIT);
                     let group = group_of(&state, &headers, node.id).await?;
+                    let owner = node_owner(&state, node.id).await?;
+                    let model_class = model_class_of(&state, &headers, node.id).await?;
+                    let open_banks = usable_banks(&state.pool, owner, model_class, group.as_ref().map(|(group_id, _)| *group_id)).await?;
+                    let open_bank_ids: Vec<Uuid> = open_banks.iter().map(|(bank_id, _)| *bank_id).collect();
                     let mut visible: Vec<String> = ["global".to_string()].into_iter().chain(group.map(|(group_id, _)| format!("group:{group_id}"))).collect();
                     let everywhere = match arguments.get("groups") {
                         Some(Value::String(text)) if text == "all" => true,
@@ -592,7 +609,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         }
                         _ => false,
                     };
-                    let rows = search(&state.pool, Some(query), (!everywhere).then_some(visible.as_slice()), limit).await?;
+                    let rows = search(&state.pool, Some(query), (!everywhere).then_some(visible.as_slice()), Some(open_bank_ids.as_slice()), limit).await?;
                     let omitted = if everywhere { Vec::new() } else { omitted_groups(&state.pool, query, &visible).await? };
                     let note = if omitted.is_empty() {
                         String::new()
@@ -603,8 +620,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         format!("\n{count} more {} in other groups ({}) left out. Search them with groups: [\"name\"], or every group with groups: \"all\".", if count == 1 { "match" } else { "matches" }, names.join(", "))
                     };
 
+                    let banks_open = if open_banks.is_empty() || !experiments::of(&state, owner).await?.memory_banks {
+                        String::new()
+                    } else {
+                        let names: Vec<&str> = open_banks.iter().map(|(_, name)| name.as_str()).collect();
+
+                        format!("\nBanks open here: {}. Remember into one with bank: \"name\".", names.join(", "))
+                    };
+
                     if rows.is_empty() {
-                        reply(&id, tool_text(&format!("No memories match that query.{note}"), false))
+                        reply(&id, tool_text(&format!("No memories match that query.{note}{banks_open}"), false))
                     } else {
                         let group_ids: Vec<Uuid> = rows.iter().flat_map(|row| row.scopes.iter()).filter_map(|scope| scope.strip_prefix("group:")).filter_map(|group_id| group_id.parse().ok()).collect();
                         let group_names: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("select id, name from groups where id = any($1)").bind(&group_ids).fetch_all(&state.pool).await?.into_iter().collect();
@@ -638,7 +663,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                             })
                             .collect();
 
-                        reply(&id, tool_text(&format!("{RECALL_PREFACE}\n{}{note}", blocks.join("\n")), false))
+                        reply(&id, tool_text(&format!("{RECALL_PREFACE}\n{}{note}{banks_open}", blocks.join("\n")), false))
                     }
                 }
                 Some("remember") => {
@@ -659,7 +684,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         None => "unknown conversation".to_string(),
                     };
                     let group = group_of(&state, &headers, node.id).await?;
-                    let (scopes, shared_with) = match (arguments.get("scope").and_then(Value::as_str), group) {
+                    let (scopes, shared_with) = match (arguments.get("scope").and_then(Value::as_str), group.clone()) {
                         (Some("group"), None) => return Ok(reply(&id, tool_text("Nothing was stored. This conversation is not in a group, so remember it without a scope, or with scope global, to share it with every conversation.", true))),
                         (Some("global"), _) | (_, None) => (vec!["global".to_string()], "every conversation".to_string()),
                         (_, Some((group_id, name))) => (vec![format!("group:{group_id}")], format!("the {name} group")),
@@ -680,9 +705,27 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let facts = facts.unwrap_or_default();
                     let tool_call_id = params["_meta"]["claudecode/toolUseId"].as_str().map(String::from).or_else(|| headers.get("x-mycelium-tool-call").and_then(|value| value.to_str().ok()).map(String::from));
+                    let (bank_id, shared_with) = match arguments.get("bank").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty()) {
+                        Some(bank_name) => {
+                            let owner = node_owner(&state, node.id).await?;
+
+                            if !experiments::of(&state, owner).await?.memory_banks {
+                                return Ok(reply(&id, tool_text(experiments::disabled_message(Experiment::MemoryBanks), true)));
+                            }
+
+                            let model_class = model_class_of(&state, &headers, node.id).await?;
+                            let open_banks = usable_banks(&state.pool, owner, model_class, group.as_ref().map(|(group_id, _)| *group_id)).await?;
+                            let Some((bank_id, name)) = open_banks.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(bank_name)) else {
+                                return Ok(reply(&id, tool_text(&format!("Nothing was stored. No bank called {bank_name} is open to this conversation."), true)));
+                            };
+
+                            (Some(bank_id), format!("the {name} bank"))
+                        }
+                        None => (None, shared_with),
+                    };
                     let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!(
-                        "insert into memories (text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id)
-                         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning {MEMORY_COLUMNS}"
+                        "insert into memories (text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id, bank_id)
+                         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning {MEMORY_COLUMNS}"
                     )))
                         .bind(crate::store::text_without_nul(&text))
                         .bind(&scopes)
@@ -697,6 +740,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         .bind(facts.project_name)
                         .bind(facts.message_seq)
                         .bind(tool_call_id)
+                        .bind(bank_id)
                         .fetch_one(&state.pool)
                         .await?
                         .to_proto();

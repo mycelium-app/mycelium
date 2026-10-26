@@ -226,6 +226,21 @@ class MyceliumApi(
         call("/memories/$id") { client.delete(it) { authorise() } }
     }
 
+    suspend fun memoryBanks(): List<MemoryBank> = call("/memory-banks") { client.get(it) { authorise() } }.body()
+
+    suspend fun createMemoryBank(request: SaveMemoryBankRequest): MemoryBank =
+        call("/memory-banks") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun updateMemoryBank(id: String, request: SaveMemoryBankRequest): MemoryBank =
+        call("/memory-banks/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteMemoryBank(id: String) {
+        call("/memory-banks/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun moveMemory(id: String, bankId: String?): Memory =
+        call("/memories/$id/bank") { client.put(it) { authorise(); json(MoveMemoryRequest(bankId)) } }.body()
+
     suspend fun forges(): List<Forge> = call("/forges") { client.get(it) { authorise() } }.body()
 
     suspend fun connectForge(request: ConnectForgeRequest): Forge =

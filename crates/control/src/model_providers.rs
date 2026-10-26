@@ -18,7 +18,7 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 8192;
 const ANTHROPIC_PREFERRED: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
-const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, favourite_models";
+const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, favourite_models, model_class";
 
 #[derive(sqlx::FromRow)]
 pub struct ProviderRow {
@@ -31,6 +31,7 @@ pub struct ProviderRow {
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub favourite_models: Vec<String>,
+    pub model_class: String,
 }
 
 pub enum ProviderError {
@@ -247,6 +248,7 @@ impl ProviderRow {
             default_model: self.default_model.clone(),
             created_at: self.created_at,
             favourites: self.favourite_models.clone(),
+            model_class: parse_enum(&self.model_class)?,
         })
     }
 
@@ -540,7 +542,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
         None => None,
     };
-    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(str::to_string), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![] };
+    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(str::to_string), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![], model_class: "cloud".into() };
     let mut models = draft.list_models(&state.http).await?.map_err(|error| error.into_api(name, &draft.address().unwrap_or_default()))?;
 
     if models.is_empty() && request.kind == ModelProviderKind::Anthropic {
@@ -581,16 +583,17 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 }
 
 pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateModelProviderRequest>) -> ApiResult<Json<ModelProvider>> {
-    let name = request.name.trim();
+    let name = request.name.as_deref().map(str::trim);
 
-    if name.is_empty() {
+    if name.is_some_and(str::is_empty) {
         return Err(ApiError::bad_request("name_required", "Enter a name for this provider."));
     }
 
-    let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set name = $3 where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
+    let row = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set name = coalesce($3, name), model_class = coalesce($4, model_class) where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
         .bind(id)
         .bind(user.id)
         .bind(name)
+        .bind(request.model_class.map(|class| enum_text(&class)))
         .fetch_optional(&state.pool)
         .await?;
     let Some(row) = row else {
@@ -634,7 +637,7 @@ mod tests {
     use super::*;
 
     fn provider(kind: ModelProviderKind, base_url: &str) -> ProviderRow {
-        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![] }
+        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![], model_class: "cloud".into() }
     }
 
     fn user(text: &str) -> ChatMessage {

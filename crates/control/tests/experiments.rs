@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 fn flags(enabled: bool) -> Value {
-    json!({"tasks": enabled, "workflows": enabled, "instructions": enabled, "details": enabled, "subagents": enabled, "walkthrough": enabled, "move_chats": enabled, "groups": enabled, "continue_elsewhere": enabled, "assistants": enabled})
+    json!({"tasks": enabled, "workflows": enabled, "instructions": enabled, "details": enabled, "subagents": enabled, "walkthrough": enabled, "move_chats": enabled, "groups": enabled, "continue_elsewhere": enabled, "assistants": enabled, "memory_banks": enabled})
 }
 
 async fn fresh() -> Server {

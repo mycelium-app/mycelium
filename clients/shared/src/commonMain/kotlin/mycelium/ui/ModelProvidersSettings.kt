@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,9 +29,12 @@ import mycelium.api.ApiException
 import mycelium.api.CreateModelProviderRequest
 import mycelium.api.ModelProvider
 import mycelium.api.UpdateModelProviderRequest
+import mycelium.state.Choice
 import mycelium.state.Store
 
 private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic", "OpenRouter" to "openrouter", "LiteLLM" to "litellm")
+
+private val DataHandling = listOf(Choice("cloud", "Cloud"), Choice("zdr", "Zero data retention"), Choice("private", "Private or on-device only"))
 
 private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 
@@ -49,6 +53,8 @@ fun ModelProvidersSettings(store: Store) {
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
+    val live by store.state.collectAsState()
+    val handling = live.experiments.memoryBanks
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -92,11 +98,18 @@ fun ModelProvidersSettings(store: Store) {
                 MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
 
-            ContentTable(listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 64.dp))) {
+            val columns = listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true)) + (if (handling) listOf(ColumnSpec()) else emptyList()) + ColumnSpec(max = 64.dp)
+
+            ContentTable(columns) {
                 ContentRow(header = true) {
                     Label("Provider", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Key", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Models", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+
+                    if (handling) {
+                        Label("Data handling", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    }
+
                     Box(Modifier)
                 }
 
@@ -120,6 +133,15 @@ fun ModelProvidersSettings(store: Store) {
                             muted = true,
                             size = ButtonSize.Sm,
                         )
+
+                        if (handling) {
+                            OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
+                                store.act {
+                                    val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
+                                    providers = providers.map { if (it.id == updated.id) updated else it }
+                                }
+                            }, size = ButtonSize.Sm)
+                        }
 
                         RowMenu(provider.name) { close ->
                             MenuItem("Refresh models", onClick = {
@@ -150,7 +172,7 @@ fun ModelProvidersSettings(store: Store) {
             val save = {
                 renaming = null
                 store.act {
-                    val updated = store.api.updateModelProvider(target.id, UpdateModelProviderRequest(renamed.trim()))
+                    val updated = store.api.updateModelProvider(target.id, UpdateModelProviderRequest(name = renamed.trim()))
                     providers = providers.map { if (it.id == updated.id) updated else it }
                 }
             }

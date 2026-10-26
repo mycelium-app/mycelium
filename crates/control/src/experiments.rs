@@ -19,6 +19,7 @@ pub enum Experiment {
     Groups,
     ContinueElsewhere,
     Assistants,
+    MemoryBanks,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Copy, sqlx::FromRow)]
@@ -36,6 +37,8 @@ pub struct Experiments {
     pub continue_elsewhere: bool,
     #[serde(default)]
     pub assistants: bool,
+    #[serde(default)]
+    pub memory_banks: bool,
 }
 
 impl Experiments {
@@ -49,6 +52,7 @@ impl Experiments {
             Experiment::Groups => self.groups,
             Experiment::ContinueElsewhere => self.continue_elsewhere,
             Experiment::Assistants => self.assistants,
+            Experiment::MemoryBanks => self.memory_banks,
         }
     }
 }
@@ -63,6 +67,7 @@ pub fn disabled_message(experiment: Experiment) -> &'static str {
         Experiment::Groups => "Enable the Groups experiment in Settings, Experiments to use this.",
         Experiment::ContinueElsewhere => "Enable the Continue elsewhere experiment in Settings, Experiments to use this.",
         Experiment::Assistants => "Enable the Assistants experiment in Settings, Experiments to use this.",
+        Experiment::MemoryBanks => "Enable the Memory banks experiment in Settings, Experiments to use this.",
     }
 }
 
@@ -73,7 +78,7 @@ pub fn refusal(experiment: Experiment) -> ApiError {
 pub async fn of(state: &AppState, owner: Uuid) -> ApiResult<Experiments> {
     let stored = sqlx::query_as::<_, Experiments>(
         "select experiment_tasks as tasks, experiment_workflows as workflows, experiment_instructions as instructions, experiment_details as details,
-                experiment_subagents as subagents, experiment_walkthrough as walkthrough, experiment_move_chats as move_chats, experiment_groups as groups, experiment_continue_elsewhere as continue_elsewhere, experiment_assistants as assistants
+                experiment_subagents as subagents, experiment_walkthrough as walkthrough, experiment_move_chats as move_chats, experiment_groups as groups, experiment_continue_elsewhere as continue_elsewhere, experiment_assistants as assistants, experiment_memory_banks as memory_banks
          from user_settings where owner = $1",
     )
     .bind(owner)
@@ -90,12 +95,12 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<Experiments>) -> ApiResult<Json<Experiments>> {
     user.require_full_access()?;
     sqlx::query(
-        "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats, experiment_groups, experiment_continue_elsewhere, experiment_assistants)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats, experiment_groups, experiment_continue_elsewhere, experiment_assistants, experiment_memory_banks)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          on conflict (owner) do update set experiment_tasks = excluded.experiment_tasks, experiment_workflows = excluded.experiment_workflows,
              experiment_instructions = excluded.experiment_instructions, experiment_details = excluded.experiment_details, experiment_subagents = excluded.experiment_subagents,
              experiment_walkthrough = excluded.experiment_walkthrough, experiment_move_chats = excluded.experiment_move_chats, experiment_groups = excluded.experiment_groups,
-             experiment_continue_elsewhere = excluded.experiment_continue_elsewhere, experiment_assistants = excluded.experiment_assistants",
+             experiment_continue_elsewhere = excluded.experiment_continue_elsewhere, experiment_assistants = excluded.experiment_assistants, experiment_memory_banks = excluded.experiment_memory_banks",
     )
     .bind(user.id)
     .bind(request.tasks)
@@ -108,6 +113,7 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     .bind(request.groups)
     .bind(request.continue_elsewhere)
     .bind(request.assistants)
+    .bind(request.memory_banks)
     .execute(&state.pool)
     .await?;
 
@@ -124,6 +130,8 @@ fn gated_by(route: &str) -> Option<Experiment> {
         "instructions" | "instruction-proposals" | "instruction-source" => Some(Experiment::Instructions),
         "groups" if route.ends_with("/instructions") => Some(Experiment::Groups),
         "assistants" => Some(Experiment::Assistants),
+        "memory-banks" => Some(Experiment::MemoryBanks),
+        "memories" if route.ends_with("/bank") => Some(Experiment::MemoryBanks),
         "walkthroughs" => Some(Experiment::Walkthrough),
         "conversations" if route.ends_with("/walkthrough") => Some(Experiment::Walkthrough),
         "conversations" if route.ends_with("/move") || route.ends_with("/move-plan") => Some(Experiment::MoveChats),

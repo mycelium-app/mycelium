@@ -61,6 +61,7 @@ data class AppState(
     val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
     val sshAccessRequests: Map<String, SshAccessRequest> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
+    val memoryBanks: Map<String, mycelium.api.MemoryBank> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
     val integrationsRevision: Int = 0,
@@ -176,6 +177,10 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
         removedMemories = state.removedMemories - message.memory.id,
         memoryRevision = state.memoryRevision + 1,
     )
+
+    is StreamMessage.MemoryBankChanged -> state.copy(memoryBanks = state.memoryBanks + (message.bank.id to message.bank))
+
+    is StreamMessage.MemoryBankRemoved -> state.copy(memoryBanks = state.memoryBanks - message.bankId)
 
     is StreamMessage.MemoryRemoved -> state.copy(
         memories = state.memories - message.memoryId,

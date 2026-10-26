@@ -316,9 +316,53 @@ pub struct Memory {
     pub created_by: String,
     pub conversation_id: Option<Uuid>,
     #[serde(default)]
+    pub bank_id: Option<Uuid>,
+    #[serde(default)]
     pub source: MemorySource,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelClass {
+    Private,
+    Zdr,
+    #[default]
+    Cloud,
+}
+
+impl ModelClass {
+    pub fn rank(self) -> u8 {
+        match self {
+            ModelClass::Private => 0,
+            ModelClass::Zdr => 1,
+            ModelClass::Cloud => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryBank {
+    pub id: Uuid,
+    pub name: String,
+    pub model_class: ModelClass,
+    #[serde(default)]
+    pub group_ids: Vec<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveMemoryBankRequest {
+    pub name: String,
+    pub model_class: ModelClass,
+    #[serde(default)]
+    pub group_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MoveMemoryRequest {
+    pub bank_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -486,6 +530,8 @@ pub struct ModelProvider {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
     pub favourites: Vec<String>,
+    #[serde(default)]
+    pub model_class: ModelClass,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -506,7 +552,10 @@ impl std::fmt::Debug for CreateModelProviderRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateModelProviderRequest {
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub model_class: Option<ModelClass>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

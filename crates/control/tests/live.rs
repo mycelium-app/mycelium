@@ -68,6 +68,10 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/mcp",
     "PATCH /api/v1/memories/{id}",
     "DELETE /api/v1/memories/{id}",
+    "PUT /api/v1/memories/{id}/bank",
+    "POST /api/v1/memory-banks",
+    "PATCH /api/v1/memory-banks/{id}",
+    "DELETE /api/v1/memory-banks/{id}",
     "PUT /api/v1/walkthroughs/{id}/dismissal",
     "DELETE /api/v1/walkthroughs/{id}/dismissal",
     "POST /api/v1/walkthroughs/{id}/notes",
@@ -1205,6 +1209,41 @@ async fn a_remembered_memory_and_its_edit_and_deletion_reach_every_stream_client
     })
     .await;
     assert_eq!((status, removed), (204, remembered.id));
+}
+
+#[tokio::test]
+async fn memory_banks_and_moving_a_memory_into_one_reach_the_stream() {
+    let server = Server::start().await;
+    sqlx::query("insert into user_settings (owner, experiment_memory_banks) select id, true from users on conflict (owner) do update set experiment_memory_banks = true").execute(&server.pool).await.unwrap();
+    let (_, token) = server.join("node", "laptop").await;
+    let mut stream = server.user.stream().await;
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {token}"))
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "remember", "arguments": {"text": "Staging listens on 5433"}}}));
+    anonymous.json(request).await;
+    let remembered = stream.until(|message| match message {
+        StreamMessage::Memory(memory) => Some(memory),
+        _ => None,
+    })
+    .await;
+
+    let (status, bank) = server.user.json(server.user.post("/api/v1/memory-banks").json(&json!({"name": "Health", "model_class": "private"}))).await;
+    let created = stream.until(|message| match message {
+        StreamMessage::MemoryBank(bank) => Some(bank),
+        _ => None,
+    })
+    .await;
+    assert_eq!((status, created.name.as_str()), (201, "Health"));
+
+    let (status, _) = server.user.json(server.user.put(&format!("/api/v1/memories/{}/bank", remembered.id)).json(&json!({"bank_id": bank["id"]}))).await;
+    let moved = stream.until(|message| match message {
+        StreamMessage::Memory(memory) => Some(memory),
+        _ => None,
+    })
+    .await;
+    assert_eq!((status, moved.id, moved.bank_id), (200, remembered.id, Some(created.id)));
 }
 
 #[tokio::test]

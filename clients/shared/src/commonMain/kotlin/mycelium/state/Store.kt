@@ -273,6 +273,16 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(groups = groups.associateBy { group -> group.id }) }
     }
 
+    suspend fun refreshMemoryBanks() {
+        if (!state.value.experiments.memoryBanks) {
+            return
+        }
+
+        val banks = orNull { api.memoryBanks() } ?: return
+
+        mutableState.update { it.copy(memoryBanks = banks.associateBy { bank -> bank.id }) }
+    }
+
     suspend fun refreshAssistants() {
         if (!state.value.experiments.assistants) {
             return
