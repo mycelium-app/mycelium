@@ -1248,6 +1248,7 @@ pub enum EachRun {
 pub enum RunOutcome {
     Started,
     Skipped,
+    Held,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1866,4 +1867,65 @@ pub struct SetAssistantBackupRequest {
     pub repository: String,
     #[serde(default)]
     pub branch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuietDay {
+    pub weekday: u8,
+    pub enabled: bool,
+    pub all_day: bool,
+    pub starts: String,
+    pub ends: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WellnessSettings {
+    pub break_reminders: bool,
+    pub break_after_minutes: i32,
+    pub snooze_minutes: i32,
+    pub break_minutes: i32,
+    pub pomodoro: bool,
+    pub quiet_hours: bool,
+    pub quiet_hold_notifications: bool,
+    pub quiet_hold_schedules: bool,
+    pub quiet_hold_pings: bool,
+    pub time_zone: Option<String>,
+    pub quiet_days: Vec<QuietDay>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WellnessHeartbeat {
+    pub seconds: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartBreakRequest {
+    #[serde(default)]
+    pub minutes: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Break {
+    pub id: Uuid,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub ends_at: chrono::DateTime<chrono::Utc>,
+    pub ended_early_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WellnessDay {
+    pub day: String,
+    pub viewing_minutes: i64,
+    pub agent_minutes: i64,
+    pub breaks: i64,
+    pub puzzles: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WellnessOverview {
+    pub days: Vec<WellnessDay>,
+    pub last_break_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub current_break: Option<Break>,
+    pub quiet_now: bool,
+    pub held: i64,
 }

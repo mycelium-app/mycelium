@@ -77,6 +77,7 @@ pub enum StreamMessage {
         terminal_id: Uuid,
     },
     IntegrationsChanged,
+    WellnessChanged,
     Device {
         user_code: String,
         kind: DeviceKind,

@@ -456,6 +456,14 @@ async fn run_due(state: &AppState) -> ApiResult<()> {
     .await?;
 
     for row in due {
+        let held = crate::wellness::quiet_settings(state, row.owner).await?.is_some_and(|settings| settings.quiet_hold_schedules);
+
+        if held {
+            record_held(&mut tx, row.id).await?;
+
+            continue;
+        }
+
         let next_run_at = next_run_after(&row.cron, parse_zone(&row.time_zone)?, chrono::Utc::now())?;
 
         sqlx::query("update schedules set next_run_at = $2 where id = $1").bind(row.id).bind(next_run_at).execute(&mut *tx).await?;
@@ -463,6 +471,18 @@ async fn run_due(state: &AppState) -> ApiResult<()> {
     }
 
     tx.commit().await?;
+
+    Ok(())
+}
+
+async fn record_held(connection: &mut PgConnection, schedule_id: Uuid) -> ApiResult<()> {
+    sqlx::query(
+        "insert into schedule_runs (schedule_id, outcome, reason) select $1, 'held', 'Held until quiet hours end.'
+         where not exists (select 1 from (select outcome from schedule_runs where schedule_id = $1 order by ran_at desc limit 1) latest where latest.outcome = 'held')",
+    )
+    .bind(schedule_id)
+    .execute(&mut *connection)
+    .await?;
 
     Ok(())
 }

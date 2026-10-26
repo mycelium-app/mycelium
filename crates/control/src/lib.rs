@@ -69,6 +69,7 @@ mod usage_limits;
 mod versions;
 mod walkthrough_diff;
 mod walkthroughs;
+mod wellness;
 mod web;
 mod worktrees;
 mod workflows;
@@ -306,6 +307,12 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/experiments", get(experiments::get).put(experiments::save))
+        .route("/api/v1/wellness/settings", get(wellness::get_settings).put(wellness::save_settings))
+        .route("/api/v1/wellness/heartbeat", post(wellness::heartbeat))
+        .route("/api/v1/wellness/breaks", post(wellness::start_break))
+        .route("/api/v1/wellness/breaks/current", delete(wellness::end_break))
+        .route("/api/v1/wellness/overview", get(wellness::overview))
+        .route("/api/v1/wellness/puzzles/{puzzle}/today", put(wellness::mark_puzzle).delete(wellness::unmark_puzzle))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
