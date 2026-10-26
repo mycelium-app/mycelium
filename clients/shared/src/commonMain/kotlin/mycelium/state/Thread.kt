@@ -125,6 +125,17 @@ sealed interface ThreadItem {
         val callId: String? = null,
     ) : ThreadItem
 
+    data class Review(
+        override val key: String,
+        val requestId: String,
+        val server: String,
+        val tool: String,
+        val count: Int,
+        val resolved: Boolean = false,
+        val decision: String? = null,
+        val removedCount: Int = 0,
+    ) : ThreadItem
+
     data class Note(override val key: String, val text: String) : ThreadItem
 
     data class TurnEnd(override val key: String, val stopReason: String) : ThreadItem
@@ -222,6 +233,8 @@ class ThreadBuilder {
             EventKinds.AcpUpdate -> applyUpdate(items, key, payload)
             EventKinds.PermissionRequest -> requestPermission(items, permissionFrom(key, payload))
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
+            EventKinds.ReviewRequest -> items += ThreadItem.Review(key, payload.string("request_id") ?: key, payload.string("server").orEmpty(), payload.string("tool").orEmpty(), payload.int("count") ?: 0)
+            EventKinds.ReviewResolved -> resolveReview(items, payload)
             EventKinds.TurnEnd -> items += ThreadItem.TurnEnd(key, payload.string("stop_reason") ?: "end_turn")
             EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", usageLimitFrom(payload))
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
@@ -556,6 +569,14 @@ private fun resolvePermission(items: MutableList<ThreadItem>, requestId: String?
     }
 }
 
+private fun resolveReview(items: MutableList<ThreadItem>, payload: JsonObject) {
+    val index = items.indexOfLast { it is ThreadItem.Review && it.requestId == payload.string("request_id") }
+
+    if (index >= 0) {
+        items[index] = (items[index] as ThreadItem.Review).copy(resolved = true, decision = payload.string("decision"), removedCount = payload.int("removed_count") ?: 0)
+    }
+}
+
 private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, payload: JsonObject) {
     val runId = payload.string("run_id") ?: return
     val line = payload["line"] as? JsonObject ?: return
@@ -678,5 +699,7 @@ private fun continuedText(payload: JsonObject): String {
 }
 
 internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
 
 private fun JsonObject.contentText(): String = (this["content"] as? JsonObject)?.string("text") ?: ""

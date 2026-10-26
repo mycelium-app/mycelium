@@ -62,6 +62,8 @@ object EventKinds {
     const val AcpUpdate = "acp_update"
     const val PermissionRequest = "permission_request"
     const val PermissionResolved = "permission_resolved"
+    const val ReviewRequest = "review_request"
+    const val ReviewResolved = "review_resolved"
     const val TurnEnd = "turn_end"
     const val Error = "error"
     const val Workflow = "workflow"
@@ -1174,6 +1176,16 @@ data class PromptAccepted(val queued: Boolean, val message: String)
 
 @Serializable
 data class PatchQueueRequest(val text: String)
+
+@Serializable
+data class ReviewAnswer(
+    @SerialName("request_id") val requestId: String,
+    val decision: String,
+    val removed: List<Int> = emptyList(),
+)
+
+@Serializable
+data class ReviewItems(val items: List<JsonElement>)
 
 @Serializable
 data class PermissionAnswer(

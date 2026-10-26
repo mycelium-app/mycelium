@@ -326,29 +326,38 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                ThreadView(
-                    items = thread + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
-                    hasOlder = state.hasOlderEvents(id),
-                    loadingOlder = id in state.loadingOlderEvents,
-                    onLoadOlder = { store.act { store.loadOlder(id) } },
-                    onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
-                    onStopWorkflow = { store.act { api.cancel(id) } },
-                    modifier = Modifier.weight(1f),
-                    onSuggest = ::send,
-                    onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
-                    limitActions = if (conversation.status == ConversationStatus.Failed) LimitActions(
-                        resumeAt = conversation.resumeAt,
-                        onResume = { store.act { api.scheduleResume(id) } },
-                        onRetryNow = { store.act { api.retryConversation(id) } },
-                        onCancelResume = { store.act { api.cancelResume(id) } },
-                    ) else null,
-                    agent = conversation.agent,
-                    dismissedPins = dismissedPins,
-                    onUnpin = { key ->
-                        store.pinDismissals.dismiss(id, key)
-                        dismissedPins = store.pinDismissals[id]
-                    },
-                )
+                val reviews = remember(id) {
+                    ReviewActions(
+                        load = { requestId -> api.reviewItems(id, requestId) },
+                        answer = { requestId, decision, removed -> store.act { api.answerReview(id, mycelium.api.ReviewAnswer(requestId, decision, removed)) } },
+                    )
+                }
+
+                CompositionLocalProvider(LocalReviewActions provides reviews) {
+                    ThreadView(
+                        items = thread + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
+                        hasOlder = state.hasOlderEvents(id),
+                        loadingOlder = id in state.loadingOlderEvents,
+                        onLoadOlder = { store.act { store.loadOlder(id) } },
+                        onAnswer = { requestId, optionId -> store.act { api.answerPermission(id, requestId, optionId) } },
+                        onStopWorkflow = { store.act { api.cancel(id) } },
+                        modifier = Modifier.weight(1f),
+                        onSuggest = ::send,
+                        onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
+                        limitActions = if (conversation.status == ConversationStatus.Failed) LimitActions(
+                            resumeAt = conversation.resumeAt,
+                            onResume = { store.act { api.scheduleResume(id) } },
+                            onRetryNow = { store.act { api.retryConversation(id) } },
+                            onCancelResume = { store.act { api.cancelResume(id) } },
+                        ) else null,
+                        agent = conversation.agent,
+                        dismissedPins = dismissedPins,
+                        onUnpin = { key ->
+                            store.pinDismissals.dismiss(id, key)
+                            dismissedPins = store.pinDismissals[id]
+                        },
+                    )
+                }
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
 

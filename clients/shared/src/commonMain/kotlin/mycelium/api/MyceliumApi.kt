@@ -845,6 +845,17 @@ class MyceliumApi(
         }
     }
 
+    suspend fun reviewItems(id: String, requestId: String): List<JsonElement>? =
+        try {
+            call("/conversations/$id/reviews/$requestId") { client.get(it) { authorise() } }.body<ReviewItems>().items
+        } catch (gone: ApiException) {
+            if (gone.status == 404) null else throw gone
+        }
+
+    suspend fun answerReview(id: String, answer: ReviewAnswer) {
+        call("/conversations/$id/review") { client.post(it) { authorise(); json(answer) } }
+    }
+
     suspend fun setConfig(id: String, request: ConfigRequest) {
         call("/conversations/$id/config") { client.post(it) { authorise(); json(request) } }
     }

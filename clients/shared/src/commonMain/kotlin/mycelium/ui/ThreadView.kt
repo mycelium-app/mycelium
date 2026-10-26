@@ -277,6 +277,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         }
         is ThreadItem.Plan -> PlanCard(item)
         is ThreadItem.Permission -> PermissionCard(item, onAnswer)
+        is ThreadItem.Review -> ReviewCard(item)
         is ThreadItem.TurnEnd -> Unit
         is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
