@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +20,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.Assistant
+import mycelium.api.AssistantFile
 import mycelium.api.AssistantPreferences
 import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
@@ -29,6 +31,8 @@ import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.NoGroup
 import mycelium.state.Store
+import mycelium.state.ago
+import mycelium.state.formatSize
 
 @Composable
 fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?, onDone: () -> Unit) {
@@ -143,6 +147,8 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                             actions = { MyButton(onDone, text = "Cancel", muted = true) },
                         )
                     }
+
+                    loaded?.let { StorageSection(store, it.id) }
                 }
             }
         }
@@ -151,3 +157,86 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
 
 private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String =
     "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
+
+private const val InstructionsFile = "AGENTS.md"
+
+@Composable
+private fun StorageSection(store: Store, assistantId: String) {
+    val colors = MyTheme.colors
+    var files by remember(assistantId) { mutableStateOf(emptyList<AssistantFile>()) }
+    var failure by remember(assistantId) { mutableStateOf<String?>(null) }
+    var editing by remember(assistantId) { mutableStateOf<Pair<String, String>?>(null) }
+    var newPath by remember(assistantId) { mutableStateOf("") }
+    val attempt = rememberAttempt { failure = it }
+
+    suspend fun reload() {
+        files = store.api.assistantFiles(assistantId).filter { it.path != InstructionsFile }
+    }
+
+    LaunchedEffect(assistantId) {
+        attempt { reload() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label("Storage", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        Label("Files this assistant keeps between sessions. It reads and writes them itself.", style = Tokens.Type.Meta, color = colors.textMuted)
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        if (files.isNotEmpty()) {
+            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 120.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
+                ContentRow(header = true) {
+                    Label("Path", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Size", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Updated", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
+                }
+
+                Hairline()
+
+                for (file in files) {
+                    ContentRow {
+                        Label(file.path, style = Tokens.Type.Code, maxLines = 1)
+                        Label(formatSize(file.size), color = colors.textMuted, maxLines = 1)
+                        Label(ago(file.updatedAt), color = colors.textMuted, maxLines = 1)
+
+                        RowMenu(file.path) { close ->
+                            MenuItem("Edit", onClick = { close(); attempt { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
+                            MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantFile(assistantId, file.path); reload() } }, leading = MyIcon.Close)
+                        }
+                    }
+
+                    Hairline()
+                }
+            }
+        }
+
+        editing?.let { (path, text) ->
+            InstructionsEditor(
+                layer = InstructionLayer(path, path, text = text),
+                file = path,
+                saveLabel = "Save file",
+                onSave = { updated -> attempt { store.api.saveAssistantFile(assistantId, path, updated); editing = null; reload() } },
+                actions = { MyButton({ editing = null }, text = "Cancel", muted = true) },
+                editLabel = "Edit $path",
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
+            TextInput(newPath, { newPath = it }, label = "New file path", placeholder = "notes/today.md", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+            MyButton(
+                {
+                    if (newPath.isBlank()) {
+                        failure = "Enter the path of the new file, for example notes/today.md."
+                    } else {
+                        failure = null
+                        editing = newPath.trim() to ""
+                        newPath = ""
+                    }
+                },
+                text = "New file",
+                icon = MyIcon.Plus,
+                variant = ButtonVariant.Outline,
+            )
+        }
+    }
+}

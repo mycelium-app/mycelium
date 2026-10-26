@@ -1,5 +1,6 @@
 use crate::api_access;
 use crate::artifacts;
+use crate::assistants;
 use crate::chat_tools;
 use crate::auth::AuthNode;
 use crate::experiments::{self, Experiment};
@@ -57,6 +58,7 @@ fn experiment_of_tool(name: &str) -> Option<Experiment> {
         "get_instructions" | "propose_instructions_edit" => Some(Experiment::Instructions),
         "walkthrough" => Some(Experiment::Walkthrough),
         "read_earlier_turns" => Some(Experiment::ContinueElsewhere),
+        "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" => Some(Experiment::Assistants),
         _ => None,
     }
 }
@@ -143,6 +145,26 @@ pub fn tool_definitions() -> Value {
                     "limit": {"type": "number", "description": "How many messages to return. Defaults to 10, at most 50."},
                 },
             },
+        },
+        {
+            "name": "assistant_list_files",
+            "description": "List the files in this assistant's storage, optionally only those whose path starts with a prefix. Only an assistant's own conversation can use it.",
+            "inputSchema": {"type": "object", "properties": {"prefix": {"type": "string", "description": "Only list paths starting with this."}}},
+        },
+        {
+            "name": "assistant_read_file",
+            "description": "Read a file from this assistant's storage. AGENTS.md holds the assistant's own instructions.",
+            "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file, for example notes/standup.md."}}, "required": ["path"]},
+        },
+        {
+            "name": "assistant_write_file",
+            "description": "Create or replace a file in this assistant's storage. Storage is kept between sessions, so write down what a later session needs to know. Files are at most 1 MiB.",
+            "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file, for example notes/standup.md."}, "content": {"type": "string", "description": "The whole new content of the file."}}, "required": ["path", "content"]},
+        },
+        {
+            "name": "assistant_delete_file",
+            "description": "Delete a file from this assistant's storage.",
+            "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file."}}, "required": ["path"]},
         },
         {
             "name": "walkthrough",
@@ -660,6 +682,12 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Ok(schedule) => reply(&id, tool_text(&format!("Schedule {} proposed ({}, {}). It waits for the person to confirm and will not run until they do.", schedule.id, schedule.cron, schedule.time_zone), false)),
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
+                }
+                Some(tool @ ("assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file")) => {
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
+                    let (text, is_error) = assistants::file_tool(&state, conversation, tool, &arguments).await?;
+
+                    reply(&id, tool_text(&text, is_error))
                 }
                 Some("read_earlier_turns") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {

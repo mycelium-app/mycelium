@@ -10,39 +10,85 @@ use common::{Client, Server, serve};
 use futures_util::stream;
 use serde_json::{Value, json};
 use std::convert::Infallible;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-type Requests = Arc<Mutex<Vec<Value>>>;
+#[derive(Default)]
+struct Fake {
+    requests: Mutex<Vec<Value>>,
+    calls: Mutex<VecDeque<(&'static str, Value)>>,
+    issued: AtomicUsize,
+}
 
-fn fake_openai() -> (Router, Requests) {
+type Requests = Arc<Fake>;
+
+fn fake_openai(calls: Vec<(&'static str, Value)>) -> (Router, Requests) {
     async fn models() -> Json<Value> {
         Json(json!({"object": "list", "data": [{"id": "llama3.2"}]}))
     }
 
-    async fn completions(State(requests): State<Requests>, Json(request): Json<Value>) -> Response {
-        requests.lock().unwrap().push(request);
+    async fn completions(State(fake): State<Requests>, Json(request): Json<Value>) -> Response {
+        fake.requests.lock().unwrap().push(request);
 
-        let chunk = |content: &str| format!("data: {}\n\n", json!({"choices": [{"delta": {"content": content}}]}));
-        let lines = vec![chunk("Hello"), chunk(" there"), "data: [DONE]\n\n".to_string()];
+        let chunk = |delta: Value| format!("data: {}\n\n", json!({"choices": [{"delta": delta}]}));
+        let mut lines = Vec::new();
+
+        match fake.calls.lock().unwrap().pop_front() {
+            Some((name, input)) => {
+                let arguments = input.to_string();
+                let (first, second) = arguments.split_at(arguments.len() / 2);
+
+                lines.push(chunk(json!({"tool_calls": [{"index": 0, "id": format!("call_{}", fake.issued.fetch_add(1, Ordering::SeqCst)), "type": "function", "function": {"name": name, "arguments": first}}]})));
+                lines.push(chunk(json!({"tool_calls": [{"index": 0, "function": {"arguments": second}}]})));
+            }
+            None => {
+                lines.push(chunk(json!({"content": "Hello"})));
+                lines.push(chunk(json!({"content": " there"})));
+            }
+        }
+
+        lines.push("data: [DONE]\n\n".to_string());
+
         let body = stream::iter(lines.into_iter().map(|line| Ok::<Bytes, Infallible>(Bytes::from(line))));
 
         Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(body)).unwrap()
     }
 
-    let requests = Requests::default();
-    let router = Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions)).with_state(requests.clone());
+    let fake = Requests::new(Fake { calls: Mutex::new(calls.into()), ..Fake::default() });
+    let router = Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions)).with_state(fake.clone());
 
-    (router, requests)
+    (router, fake)
 }
 
-async fn chat_provider(server: &Server) -> (Value, Requests) {
-    let (router, requests) = fake_openai();
+async fn scripted_provider(server: &Server, calls: Vec<(&'static str, Value)>) -> (Value, Requests) {
+    let (router, fake) = fake_openai(calls);
     let base = serve(router).await;
     let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "Ollama", "base_url": format!("{base}/v1")}))).await;
     assert_eq!(status, 201, "{provider}");
 
-    (provider, requests)
+    (provider, fake)
+}
+
+async fn chat_provider(server: &Server) -> (Value, Requests) {
+    scripted_provider(server, Vec::new()).await
+}
+
+async fn allow_calls(server: &Server, id: &str, count: usize) {
+    for _ in 0..count {
+        let request = common::eventually("a permission request", || async {
+            let events = server.events(id.parse().unwrap()).await;
+            let open = events.iter().find(|event| event["kind"] == "permission_request" && !events.iter().any(|other| other["kind"] == "permission_resolved" && other["payload"]["request_id"] == event["payload"]["request_id"]));
+
+            open.map(|event| event["payload"].clone())
+        })
+        .await;
+        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": "allow_once"}))).await;
+        assert_eq!(status, 204, "{body}");
+
+        common::eventually("the call to be allowed", || async { server.events(id.parse().unwrap()).await.iter().any(|event| event["kind"] == "permission_resolved" && event["payload"]["request_id"] == request["request_id"]).then_some(()) }).await;
+    }
 }
 
 async fn finished_turns(server: &Server, id: &str, turns: usize) {
@@ -145,7 +191,7 @@ async fn preferences_naming_an_unknown_node_or_a_model_less_choice_are_refused()
 async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
     let server = Server::start().await;
     enable(&server.user).await;
-    let (provider, requests) = chat_provider(&server).await;
+    let (provider, fake) = chat_provider(&server).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
     let id = assistant["id"].as_str().unwrap();
 
@@ -158,7 +204,7 @@ async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
     assert_eq!((first["agent"].clone(), first["assistant_id"].clone()), (json!("chat"), json!(id)));
     let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
     assert_eq!((fetched["conversation_id"].clone(), fetched["session_count"].clone()), (first["id"].clone(), json!(1)));
-    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(fake.requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -198,7 +244,7 @@ async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
 async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instructions() {
     let server = Server::start().await;
     enable(&server.user).await;
-    let (provider, requests) = chat_provider(&server).await;
+    let (provider, fake) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
     server.user.json(server.user.put("/api/v1/instructions/global").json(&json!({"text": "Global rule."}))).await;
     let (status, _) = server.user.json(server.user.put(&format!("/api/v1/groups/{}/instructions", group["id"].as_str().unwrap())).json(&json!({"text": "Group rule."}))).await;
@@ -208,7 +254,7 @@ async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instr
     let conversation = prompt(&server.user, assistant["id"].as_str().unwrap(), "Hello").await;
     finished_turns(&server, conversation["id"].as_str().unwrap(), 1).await;
 
-    let system = requests.lock().unwrap()[0]["messages"][0]["content"].as_str().unwrap().to_string();
+    let system = fake.requests.lock().unwrap()[0]["messages"][0]["content"].as_str().unwrap().to_string();
     let (global, group_rule, assistant_rule) = (system.find("Global rule.").unwrap(), system.find("Group rule.").unwrap(), system.find("Assistant rule.").unwrap());
     assert!(global < group_rule && group_rule < assistant_rule, "{system}");
 }
@@ -229,4 +275,110 @@ async fn assistant_sessions_carry_their_assistant_id_in_the_conversation_api() {
     let listed = listed.as_array().unwrap().iter().find(|row| row["id"] == json!(id)).unwrap().clone();
     assert_eq!((listed["assistant_id"].clone(), listed["group_id"].clone()), (assistant["id"].clone(), group["id"].clone()));
     assert_eq!(fetched["assistant_id"], assistant["id"]);
+}
+
+fn tool_results(events: &[Value]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|event| event["kind"] == "acp_update" && event["payload"]["update"]["sessionUpdate"] == "tool_call_update")
+        .map(|event| event["payload"]["update"]["content"][0]["content"]["text"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn file_tools_read_and_write_storage_from_a_chat_and_refuse_outside_an_assistant() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let calls = vec![
+        ("mcp__mycelium__assistant_write_file", json!({"path": "notes/today.md", "content": "Shipped v1"})),
+        ("mcp__mycelium__assistant_read_file", json!({"path": "notes/today.md"})),
+        ("mcp__mycelium__assistant_list_files", json!({})),
+        ("mcp__mycelium__assistant_delete_file", json!({"path": "notes/today.md"})),
+        ("mcp__mycelium__assistant_list_files", json!({})),
+    ];
+    let (provider, _) = scripted_provider(&server, calls).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let conversation = prompt(&server.user, id, "Keep a note").await;
+    let chat = conversation["id"].as_str().unwrap();
+
+    allow_calls(&server, chat, 5).await;
+    finished_turns(&server, chat, 1).await;
+
+    let results = tool_results(&server.events(chat.parse().unwrap()).await);
+    assert_eq!(results[0], "Wrote notes/today.md.");
+    assert_eq!(results[1], "Shipped v1");
+    assert!(results[2].contains("AGENTS.md") && results[2].contains("notes/today.md (10 bytes)"), "{}", results[2]);
+    assert_eq!(results[3], "Deleted notes/today.md.");
+    assert!(!results[4].contains("notes/today.md"));
+}
+
+#[tokio::test]
+async fn the_file_tools_refuse_a_chat_that_does_not_belong_to_an_assistant() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let (provider, _) = scripted_provider(&server, vec![("mcp__mycelium__assistant_list_files", json!({}))]).await;
+    let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"], "prompt": "List my files"}))).await;
+    assert_eq!(status, 201, "{chat}");
+    let id = chat["id"].as_str().unwrap();
+
+    allow_calls(&server, id, 1).await;
+    finished_turns(&server, id, 1).await;
+
+    assert_eq!(tool_results(&server.events(id.parse().unwrap()).await), ["This conversation does not belong to an assistant."]);
+}
+
+#[tokio::test]
+async fn files_are_stored_listed_read_and_deleted_over_http_per_assistant() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "# Stand-up"})).await;
+    let id = assistant["id"].as_str().unwrap();
+
+    let (status, written) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/today.md")).body("Shipped v1")).await;
+    assert_eq!((status, written["path"].clone(), written["size"].clone()), (200, json!("notes/today.md"), json!(10)));
+
+    let read = server.user.get(&format!("/api/v1/assistants/{id}/files/notes/today.md")).send().await.unwrap();
+    assert_eq!((read.status().as_u16(), read.text().await.unwrap()), (200, "Shipped v1".to_string()));
+
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/files"))).await;
+    let paths: Vec<&str> = listed.as_array().unwrap().iter().map(|file| file["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, ["AGENTS.md", "notes/today.md"]);
+
+    let other = server.second_user("other@example.com").await;
+    enable(&other).await;
+    let (status, _) = other.json(other.get(&format!("/api/v1/assistants/{id}/files"))).await;
+    assert_eq!(status, 404);
+
+    let (status, _) = server.user.json(server.user.delete(&format!("/api/v1/assistants/{id}/files/notes/today.md"))).await;
+    let (missing, _) = server.user.json(server.user.delete(&format!("/api/v1/assistants/{id}/files/notes/today.md"))).await;
+    assert_eq!((status, missing), (204, 404));
+}
+
+#[tokio::test]
+async fn writing_agents_md_changes_the_instructions_and_the_description() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "# Old"})).await;
+    let id = assistant["id"].as_str().unwrap();
+
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/AGENTS.md")).body("# New focus\nBe brief.")).await;
+
+    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+    assert_eq!((fetched["instructions"].clone(), fetched["description"].clone()), (json!("# New focus\nBe brief."), json!("New focus")));
+}
+
+#[tokio::test]
+async fn paths_outside_the_storage_and_files_over_a_mebibyte_are_refused_with_a_way_forward() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
+    let id = assistant["id"].as_str().unwrap();
+
+    let (status, escaped) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/..%2Fsecret")).body("x")).await;
+    assert_eq!((status, escaped["error"].clone()), (400, json!("path_invalid")));
+
+    let (status, large) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/big.bin")).body(vec![b'a'; 1024 * 1024 + 1])).await;
+    assert_eq!((status, large["error"].clone()), (413, json!("file_too_large")));
+    assert!(large["message"].as_str().unwrap().contains("split"));
 }

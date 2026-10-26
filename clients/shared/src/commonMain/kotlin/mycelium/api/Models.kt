@@ -576,6 +576,9 @@ data class Assistant(
 )
 
 @Serializable
+data class AssistantFile(val path: String, val size: Long, @SerialName("updated_at") val updatedAt: String)
+
+@Serializable
 data class CreateAssistantRequest(
     val name: String,
     val description: String? = null,

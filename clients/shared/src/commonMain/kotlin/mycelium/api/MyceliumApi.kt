@@ -15,6 +15,7 @@ import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.http.encodeURLPathPart
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -292,6 +293,19 @@ class MyceliumApi(
 
     suspend fun patchAssistant(id: String, request: PatchAssistantRequest): Assistant =
         call("/assistants/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun assistantFiles(id: String): List<AssistantFile> = call("/assistants/$id/files") { client.get(it) { authorise() } }.body()
+
+    suspend fun assistantFile(id: String, path: String): String = call("/assistants/$id/files/${filePath(path)}") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveAssistantFile(id: String, path: String, text: String): AssistantFile =
+        call("/assistants/$id/files/${filePath(path)}") { client.put(it) { authorise(); contentType(ContentType.Text.Plain); setBody(text) } }.body()
+
+    suspend fun deleteAssistantFile(id: String, path: String) {
+        call("/assistants/$id/files/${filePath(path)}") { client.delete(it) { authorise() } }
+    }
+
+    private fun filePath(path: String): String = path.split('/').joinToString("/") { it.encodeURLPathPart() }
 
     suspend fun promptAssistant(id: String, text: String): Conversation =
         call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text)) } }.body()

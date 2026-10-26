@@ -6,6 +6,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -30,6 +32,8 @@ import kotlin.test.assertEquals
 private const val Providers = """[{"id":"p1","kind":"openai_compatible","name":"Ollama","models":["llama3.2","qwen"],"default_model":"llama3.2","key_hint":"","created_at":"2026-10-22T10:00:00Z"}]"""
 
 private const val Saved = """{"id":"a1","name":"Stand-up","description":"Daily summary","preferences":{"models":[{"provider_id":"p1","model":"llama3.2"},{"provider_id":"p1","model":"qwen"}]},"state":"idle","session_count":0,"instructions":"Be brief.","created_at":"2026-10-22T10:00:00Z"}"""
+
+private const val Files = """[{"path":"AGENTS.md","size":9,"updated_at":"2026-10-22T10:00:00Z"},{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}]"""
 
 private object SettingsPlatform : Platform {
     override val originUrl: String? = null
@@ -62,6 +66,9 @@ class AssistantSettingsTest {
 
             val reply = when {
                 path.endsWith("/experiments") -> EnabledExperiments
+                path.endsWith("/assistants/a1/files") -> Files
+                path.endsWith("/files/notes/today.md") && request.method == HttpMethod.Get -> "Shipped v1"
+                path.endsWith("/files/notes/today.md") && request.method == HttpMethod.Put -> """{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}"""
                 path.endsWith("/assistants/a1") && request.method == HttpMethod.Patch -> Saved
                 path.endsWith("/assistants/a1") -> Saved
                 path.endsWith("/assistants") -> "[$Saved]"
@@ -91,5 +98,22 @@ class AssistantSettingsTest {
         val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
 
         assertEquals(true, sent.indexOf("qwen") in 0 until sent.indexOf("llama3.2"), sent)
+    }
+
+    @Test
+    fun theStorageTableListsFilesApartFromTheInstructionsAndSavesAnEdit() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for notes/today.md").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("More for AGENTS.md").fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("More for notes/today.md").performScrollTo().performClick()
+        rule.onNodeWithText("Edit").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Edit notes/today.md").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Edit notes/today.md").performScrollTo().performTextInput(" and v2")
+        rule.onNodeWithText("Save file").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/files/notes/today.md" } }
+        assertEquals(true, requests.last { it.first.startsWith("PUT") }.second.contains("and v2"))
     }
 }

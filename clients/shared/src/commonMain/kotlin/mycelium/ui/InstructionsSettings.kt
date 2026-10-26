@@ -60,7 +60,7 @@ private fun ExtensionSwitch(name: String, hint: String, on: Boolean, onToggle: (
 }
 
 @Composable
-internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel: String, onSave: (String) -> Unit, actions: @Composable () -> Unit = {}) {
+internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel: String, onSave: (String) -> Unit, actions: @Composable () -> Unit = {}, editLabel: String = "Edit ${layer.name} instructions") {
     val colors = MyTheme.colors
     var draft by remember { mutableStateOf(layer.text) }
     val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -90,7 +90,7 @@ internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel
                     .fillMaxWidth()
                     .heightIn(min = Tokens.Size.InstructionsEditor)
                     .padding(Tokens.Space.S3)
-                    .semantics { contentDescription = "Edit ${layer.name} instructions" },
+                    .semantics { contentDescription = editLabel },
             )
         }
     }

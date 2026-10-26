@@ -1545,3 +1545,10 @@ pub struct PatchAssistantRequest {
     #[serde(default)]
     pub preferences: Option<AssistantPreferences>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantFile {
+    pub path: String,
+    pub size: i64,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}

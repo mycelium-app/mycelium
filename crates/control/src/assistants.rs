@@ -7,16 +7,22 @@ use crate::state::AppState;
 use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use mycelium_proto::api::{Assistant, AssistantPreferences, AssistantState, CreateAssistantRequest, CreateChatRequest, PatchAssistantRequest, PromptRequest};
+use axum::body::Bytes;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use mycelium_proto::api::{Assistant, AssistantFile, AssistantPreferences, AssistantState, CreateAssistantRequest, CreateChatRequest, PatchAssistantRequest, PromptRequest};
 use mycelium_proto::conversation::Conversation;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::types::Json as Jsonb;
 use uuid::Uuid;
 
 pub const INSTRUCTIONS_PATH: &str = "AGENTS.md";
 const NAME_LIMIT: usize = 60;
+const PATH_LIMIT: usize = 200;
+pub const FILE_LIMIT: usize = 1024 * 1024;
+const STORAGE_LIMIT: i64 = 25 * 1024 * 1024;
 const DESCRIPTION_PREVIEW_BYTES: i32 = 400;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
 const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.pinned_at, a.archived_at, a.created_at,
@@ -109,6 +115,16 @@ pub async fn instructions_of(state: &AppState, id: Uuid) -> ApiResult<String> {
 }
 
 pub async fn store_file(state: &AppState, id: Uuid, path: &str, content: &[u8]) -> ApiResult<()> {
+    if content.len() > FILE_LIMIT {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "file_too_large", format!("{path} is over 1 MiB. Shorten it or split it into smaller files.")));
+    }
+
+    let others = sqlx::query_scalar::<_, i64>("select coalesce(sum(length(content)), 0)::bigint from assistant_files where assistant_id = $1 and path <> $2").bind(id).bind(path).fetch_one(&state.pool).await?;
+
+    if others + content.len() as i64 > STORAGE_LIMIT {
+        return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "storage_full", "This assistant's storage is full at 25 MiB. Delete a file before adding more."));
+    }
+
     sqlx::query(
         "insert into assistant_files (assistant_id, path, content, sha256) values ($1, $2, $3, $4)
          on conflict (assistant_id, path) do update set content = excluded.content, sha256 = excluded.sha256, updated_at = now()",
@@ -121,6 +137,27 @@ pub async fn store_file(state: &AppState, id: Uuid, path: &str, content: &[u8]) 
     .await?;
 
     Ok(())
+}
+
+pub fn valid_path(path: &str) -> ApiResult<String> {
+    let path = path.trim();
+    let wrong = path.is_empty() || path.len() > PATH_LIMIT || path.starts_with('/') || path.ends_with('/') || path.contains("..") || path.contains('\\') || path.contains('\0') || path.split('/').any(str::is_empty);
+
+    if wrong {
+        return Err(ApiError::bad_request("path_invalid", "Enter the path of the file inside the assistant's storage, for example notes/standup.md, with no leading slash and no \"..\"."));
+    }
+
+    Ok(path.to_string())
+}
+
+async fn files_of(state: &AppState, id: Uuid, prefix: &str) -> ApiResult<Vec<AssistantFile>> {
+    let rows = sqlx::query_as::<_, (String, i64, chrono::DateTime<chrono::Utc>)>("select path, length(content)::bigint, updated_at from assistant_files where assistant_id = $1 and starts_with(path, $2) order by path")
+        .bind(id)
+        .bind(prefix)
+        .fetch_all(&state.pool)
+        .await?;
+
+    Ok(rows.into_iter().map(|(path, size, updated_at)| AssistantFile { path, size, updated_at }).collect())
 }
 
 fn valid_name(name: &str) -> ApiResult<String> {
@@ -331,4 +368,120 @@ pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path
     sqlx::query("update assistants set conversation_id = null, updated_at = now() where id = $1").bind(id).execute(&state.pool).await?;
 
     Ok(Json(publish(&state, user.id, id).await?))
+}
+
+pub async fn list_files(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<AssistantFile>>> {
+    load(&state, user.id, id).await?;
+
+    Ok(Json(files_of(&state, id, "").await?))
+}
+
+pub async fn read_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>) -> ApiResult<Response> {
+    load(&state, user.id, id).await?;
+
+    let content = sqlx::query_scalar::<_, Vec<u8>>("select content from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).fetch_optional(&state.pool).await?;
+    let Some(content) = content else {
+        return Err(ApiError::not_found("That file"));
+    };
+    let kind = match std::str::from_utf8(&content) {
+        Ok(_) => "text/plain; charset=utf-8",
+        Err(_) => "application/octet-stream",
+    };
+
+    Ok(([(header::CONTENT_TYPE, kind)], content).into_response())
+}
+
+pub async fn write_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>, body: Bytes) -> ApiResult<Json<AssistantFile>> {
+    load(&state, user.id, id).await?;
+
+    let path = valid_path(&path)?;
+
+    store_file(&state, id, &path, &body).await?;
+    publish(&state, user.id, id).await?;
+
+    let written = files_of(&state, id, &path).await?.into_iter().find(|file| file.path == path);
+
+    written.map(Json).ok_or_else(|| ApiError::not_found("That file"))
+}
+
+pub async fn delete_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>) -> ApiResult<StatusCode> {
+    load(&state, user.id, id).await?;
+
+    let deleted = sqlx::query("delete from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).execute(&state.pool).await?;
+
+    if deleted.rows_affected() == 0 {
+        return Err(ApiError::not_found("That file"));
+    }
+
+    publish(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn file_tool(state: &AppState, conversation_id: Option<Uuid>, tool: &str, arguments: &Value) -> ApiResult<(String, bool)> {
+    let session = match conversation_id {
+        Some(conversation_id) => sqlx::query_as::<_, (Option<Uuid>, String, Uuid)>("select assistant_id, agent, owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?,
+        None => None,
+    };
+    let Some((Some(id), agent, owner)) = session else {
+        return Ok(("This conversation does not belong to an assistant.".to_string(), true));
+    };
+
+    if agent != chats::CHAT_AGENT {
+        return Ok(("Use the files in your working folder; they are copied back after this turn.".to_string(), true));
+    }
+
+    let text_of = |name: &str| arguments.get(name).and_then(Value::as_str).map(str::to_string);
+    let path = match tool {
+        "assistant_list_files" => String::new(),
+        _ => match text_of("path").map(|path| valid_path(&path)) {
+            Some(Ok(path)) => path,
+            Some(Err(error)) => return Ok((error.message().to_string(), true)),
+            None => return Ok(("Give the path of the file.".to_string(), true)),
+        },
+    };
+
+    match tool {
+        "assistant_list_files" => {
+            let files = files_of(state, id, text_of("prefix").unwrap_or_default().trim()).await?;
+
+            match files.is_empty() {
+                true => Ok(("No files.".to_string(), false)),
+                false => Ok((files.iter().map(|file| format!("{} ({} bytes)", file.path, file.size)).collect::<Vec<_>>().join("\n"), false)),
+            }
+        }
+        "assistant_read_file" => {
+            let content = sqlx::query_scalar::<_, Vec<u8>>("select content from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).fetch_optional(&state.pool).await?;
+
+            match content.map(String::from_utf8) {
+                Some(Ok(text)) => Ok((text, false)),
+                Some(Err(_)) => Ok((format!("{path} is not text, so it cannot be read."), true)),
+                None => Ok((format!("There is no file called {path}."), true)),
+            }
+        }
+        "assistant_write_file" => {
+            let Some(content) = text_of("content") else {
+                return Ok(("Give the content of the file.".to_string(), true));
+            };
+
+            match store_file(state, id, &path, content.as_bytes()).await {
+                Ok(()) => {
+                    publish(state, owner, id).await?;
+
+                    Ok((format!("Wrote {path}."), false))
+                }
+                Err(error) => Ok((error.message().to_string(), true)),
+            }
+        }
+        _ => {
+            let deleted = sqlx::query("delete from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).execute(&state.pool).await?;
+
+            publish(state, owner, id).await?;
+
+            match deleted.rows_affected() {
+                0 => Ok((format!("There is no file called {path}."), true)),
+                _ => Ok((format!("Deleted {path}."), false)),
+            }
+        }
+    }
 }
