@@ -1140,6 +1140,9 @@ data class Attachment(
 data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList())
 
 @Serializable
+data class PromptAccepted(val queued: Boolean, val message: String)
+
+@Serializable
 data class PatchQueueRequest(val text: String)
 
 @Serializable

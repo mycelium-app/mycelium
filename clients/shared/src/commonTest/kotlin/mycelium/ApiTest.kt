@@ -169,6 +169,20 @@ class ApiTest {
     }
 
     @Test
+    fun promptAnsweredAcceptedReturnsTheMessageToShow() = runTest {
+        val (api, _) = apiWith { respond("""{"queued":true,"message":"The node is not connected."}""", HttpStatusCode.Accepted, headersOf(HttpHeaders.ContentType, "application/json")) }
+
+        assertEquals("The node is not connected.", api.sendPrompt("c1", "Also run the linter"))
+    }
+
+    @Test
+    fun promptAnsweredNoContentHasNothingToShow() = runTest {
+        val (api, _) = apiWith { respond("", HttpStatusCode.NoContent) }
+
+        assertEquals(null, api.sendPrompt("c1", "Also run the linter"))
+    }
+
+    @Test
     fun permissionAnswerUsesTheWireFieldNames() = runTest {
         val (api, seen) = apiWith { respond("", HttpStatusCode.NoContent) }
 

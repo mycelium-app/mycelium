@@ -748,7 +748,11 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         act {
             try {
                 val attachments = files.map { file -> api.uploadAttachment(conversationId, file.name, file.mediaType, file.bytes) }
-                api.sendPrompt(conversationId, prompt, attachments)
+                val queuedNotice = api.sendPrompt(conversationId, prompt, attachments)
+
+                if (queuedNotice != null) {
+                    mutableProblem.value = queuedNotice
+                }
             } catch (failure: Exception) {
                 if (shownWhileSending) {
                     mutableState.update { it.copy(sending = it.sending.withoutFirst(conversationId, prompt)) }
