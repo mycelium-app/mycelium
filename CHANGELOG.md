@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.11.0
+
+Experiments are now just Voice input: everything else that was an experiment is on for everyone.
+
+- **Wellness & Learning**, a new sidebar page:
+  - Time with agents and time looking at sessions.
+  - Break reminders that never take focus, quiet hours per weekday, an optional 25/5 Pomodoro, and daily puzzles for breaks.
+  - Teach me mode, where the agent gives hints instead of code.
+  - A short check of understanding at the end of a walkthrough.
+  - Weekly reflections drafted for you to edit.
+  - Skills drawn from your work, and practice exercises on their own branch that an agent reviews without editing.
+- **Integrations, redesigned:**
+  - Cards by status, with search and filters.
+  - A catalogue to add integrations from.
+  - A page per integration with its accounts.
+  - Per-account approval and result-review settings at three levels: integration, read or write, and tool.
+  - Token expiry, with a warning before a token lapses.
+  - Availability by group.
+  - A usage tab and an activity log of every call.
+- **New integrations:**
+  - **Last.fm:** reads with an API key; love and scrobble after signing in.
+  - **GitLab and GitHub MCP servers,** added with their forge.
+- **Zulip asks before every call,** and you review results before the agent sees them: share, remove items or withhold.
+- **New and re-enabled integrations work in open chats** without a reload.
+- **Subagents and workflows need your approval:** Create, Create and connect, or Don't create. Agents can list nodes, accounts and folders to choose from.
+- **Assistant secrets reload as soon as they change.**
+- **Archived assistants** are listed under Archived and can be restored.
+- **Idle assistants** stay in the sidebar.
+- **Assistants and workflows get row menus,** with Close session, Retry and Stop where they apply.
+- **A failed conversation can be dismissed** so it settles.
+- **Continue on** lists every signed-in account of every harness, and the account picker no longer offers signed-out accounts.
+- **Fixed: an assistant stuck after Continue on,** and messages that were held silently when a node was away.
+- **Tables:** one table component everywhere. Columns no longer wrap or get squeezed; tables scroll sideways when they need to.
+- **Walkthroughs:**
+  - Regenerate is now **Iterate**, with an optional comment, and it sends your notes.
+  - An empty scope no longer replaces the current walkthrough.
+  - Notes no longer appear twice.
+- **Layout:**
+  - The side panel widens until the chat reaches its minimum.
+  - The group selector fills the sidebar width.
+  - Sidebar branch names stay on one line.
+  - Assistant settings have a back button.
+  - The worktree row under the composer is gone, and lives in the Git tab.
+  - "Scroll to the newest message" stays clear of pinned cards.
+- **Stoat** defaults to https://stoat.chat/api.
+
+Folder browsing, account switching, banked resets, steering, live secrets and running exercise tests need nodes on v0.11.0.
+
 ## v0.10.1
 
 - Experiments can be switched on again. Ticking a box no longer fails with a server error.
