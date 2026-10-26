@@ -249,7 +249,15 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                         crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
                         switched = true;
                     }
-                    Err(error) => tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message()),
+                    Err(error) => {
+                        tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message());
+
+                        if resume_at.is_none()
+                            && let Err(error) = crate::goals::session_failed(state, conversation_id).await
+                        {
+                            tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
+                        }
+                    }
                 }
             }
 

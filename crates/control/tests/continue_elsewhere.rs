@@ -448,6 +448,20 @@ async fn a_full_window_switches_to_the_account_with_most_usage_left() {
 }
 
 #[tokio::test]
+async fn a_goal_still_stops_when_the_switch_fails_and_no_reset_is_known() {
+    let server = Server::start().await;
+    enable(&server).await;
+    switch_on_usage_limit(&server).await;
+    let mut link = node_with_accounts(&server, "v0.9.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
+    let id = working_on(&server, &mut link, "sam@example.com").await;
+    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000}))).await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "You've hit your usage limit. Try again later.".into() }).await;
+    let user = server.user.clone();
+    common::eventually("the goal to stop", || async { (user.json(user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1["state"] == "stuck").then_some(()) }).await;
+}
+
+#[tokio::test]
 async fn a_full_window_with_no_other_account_waits_for_the_reset() {
     let server = Server::start().await;
     enable(&server).await;
