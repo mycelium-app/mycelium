@@ -73,10 +73,14 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     let backup = AssistantBackup { forge_id: request.forge_id, repository, branch: request.branch.map(|branch| branch.trim().to_string()).filter(|branch| !branch.is_empty()), last_at: None, last_commit: None, error: None };
     let api = api_of(&state, user.id, &backup).await?;
     let branch = branch_of(&state, &api, &backup).await.map_err(|error| explain_as_api(&api, error))?;
+    let remote = api.tree(&state.http, &backup.repository, &branch).await.map_err(|error| explain_as_api(&api, error))?;
 
-    api.tree(&state.http, &backup.repository, &branch).await.map_err(|error| explain_as_api(&api, error))?;
     save_backup(&state, id, Some(&backup)).await?;
-    trigger(&state, user.id, id);
+    sqlx::query("update assistants set backup_paths = '{}' where id = $1").bind(id).execute(&state.pool).await?;
+
+    if remote.is_empty() {
+        trigger(&state, user.id, id);
+    }
 
     Ok(Json(assistants::publish(&state, user.id, id).await?))
 }
@@ -89,6 +93,7 @@ pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path
     stored_backup(&state, user.id, id).await?;
     save_backup(&state, id, None).await?;
     sqlx::query("update assistant_files set backed_up_sha256 = null where assistant_id = $1").bind(id).execute(&state.pool).await?;
+    sqlx::query("update assistants set backup_paths = '{}' where id = $1").bind(id).execute(&state.pool).await?;
     assistants::publish(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -105,32 +110,43 @@ pub fn trigger(state: &AppState, owner: Uuid, id: Uuid) {
 }
 
 async fn back_up(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
-    let Some(mut backup) = stored_backup(state, owner, id).await? else {
+    if stored_backup(state, owner, id).await?.is_none() {
         return Ok(());
-    };
+    }
 
     if !state.hub.begin_backup(id) {
         return Ok(());
     }
 
-    let outcome = push(state, owner, id, &backup).await;
+    let mut pushed = None;
+    let mut failure = None;
+
+    loop {
+        let Some(backup) = stored_backup(state, owner, id).await? else {
+            break;
+        };
+
+        match push(state, owner, id, &backup).await {
+            Ok(Some(commit)) => pushed = Some(commit),
+            Ok(None) => break,
+            Err(message) => {
+                failure = Some(message);
+                break;
+            }
+        }
+    }
 
     state.hub.end_backup(id);
 
-    match outcome {
-        Ok(Some(commit)) => {
-            backup.last_at = Some(chrono::Utc::now());
-            backup.last_commit = Some(commit);
-            backup.error = None;
-        }
-        Ok(None) => backup.error = None,
-        Err(message) => backup.error = Some(message),
+    let mut patch = serde_json::json!({"error": failure});
+
+    if let Some(commit) = pushed {
+        patch["last_at"] = serde_json::json!(chrono::Utc::now());
+        patch["last_commit"] = serde_json::json!(commit);
     }
 
-    if stored_backup(state, owner, id).await?.is_some() {
-        save_backup(state, id, Some(&backup)).await?;
-        assistants::publish(state, owner, id).await?;
-    }
+    sqlx::query("update assistants set backup = jsonb_strip_nulls(backup || $2), updated_at = now() where id = $1 and backup is not null").bind(id).bind(Jsonb(patch)).execute(&state.pool).await?;
+    assistants::publish(state, owner, id).await?;
 
     Ok(())
 }
@@ -143,6 +159,7 @@ async fn push(state: &AppState, owner: Uuid, id: Uuid, backup: &AssistantBackup)
     let ignored = ignored_by(state, id).await.map_err(|error| error.message().to_string())?;
     let database = |error: sqlx::Error| error.to_string();
     let files = sqlx::query_as::<_, (String, Vec<u8>, String, Option<String>)>("select path, content, sha256, backed_up_sha256 from assistant_files where assistant_id = $1 order by path").bind(id).fetch_all(&state.pool).await.map_err(database)?;
+    let mut owned = sqlx::query_scalar::<_, Vec<String>>("select backup_paths from assistants where id = $1").bind(id).fetch_one(&state.pool).await.map_err(database)?;
     let mut last = None;
 
     for (path, content, digest, done) in &files {
@@ -154,11 +171,14 @@ async fn push(state: &AppState, owner: Uuid, id: Uuid, backup: &AssistantBackup)
         let commit = api.commit_blob(&state.http, &backup.repository, &branch, path, content, &format!("chore: update {path}"), existing).await.map_err(failed)?;
 
         sqlx::query("update assistant_files set backed_up_sha256 = $3 where assistant_id = $1 and path = $2").bind(id).bind(path).bind(digest).execute(&state.pool).await.map_err(database)?;
+        sqlx::query("update assistants set backup_paths = array_append(array_remove(backup_paths, $2), $2) where id = $1").bind(id).bind(path).execute(&state.pool).await.map_err(database)?;
+        owned.push(path.clone());
         last = Some(commit);
     }
 
-    for entry in remote.iter().filter(|entry| backed_up(&ignored, &entry.path) && !files.iter().any(|(path, ..)| *path == entry.path)) {
+    for entry in remote.iter().filter(|entry| owned.contains(&entry.path) && backed_up(&ignored, &entry.path) && !files.iter().any(|(path, ..)| *path == entry.path)) {
         api.remove_blob(&state.http, &backup.repository, &branch, &entry.path, &format!("chore: remove {}", entry.path), &entry.blob).await.map_err(failed)?;
+        sqlx::query("update assistants set backup_paths = array_remove(backup_paths, $2) where id = $1").bind(id).bind(&entry.path).execute(&state.pool).await.map_err(database)?;
         last = Some(branch.clone());
     }
 
@@ -178,6 +198,7 @@ pub async fn pull(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         let content = api.blob(&state.http, &backup.repository, &branch, &entry.path).await.map_err(|error| explain_as_api(&api, error))?;
 
         assistants::store_file(&state, id, &entry.path, &content).await?;
+        sqlx::query("update assistants set backup_paths = array_append(array_remove(backup_paths, $2), $2) where id = $1").bind(id).bind(&entry.path).execute(&state.pool).await?;
         sqlx::query("update assistant_files set backed_up_sha256 = $3 where assistant_id = $1 and path = $2").bind(id).bind(&entry.path).bind(hex_digest(&content)).execute(&state.pool).await?;
     }
 

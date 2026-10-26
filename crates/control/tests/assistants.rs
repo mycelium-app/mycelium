@@ -785,6 +785,26 @@ async fn backup_commits_changed_files_skips_gitignored_ones_and_follows_deletion
 }
 
 #[tokio::test]
+async fn connecting_a_repository_that_already_has_files_never_removes_them() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let repository = Repository::default();
+    repository.lock().unwrap().insert("README.md".to_string(), b"Hello".to_vec());
+    let (id, forge) = backed_up_assistant(&server, &repository).await;
+    let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/backup")).json(&json!({"forge_id": forge["id"], "repository": "samexample/standup"}))).await;
+    assert_eq!(status, 200, "{saved}");
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/a.md")).body("note")).await;
+
+    common::eventually("the backup to finish", || async {
+        let (_, assistant) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+        assistant["backup"]["last_at"].is_string().then_some(())
+    })
+    .await;
+
+    assert!(remote_paths(&repository).contains(&"README.md".to_string()));
+}
+
+#[tokio::test]
 async fn pull_replaces_storage_with_the_repository_and_keeps_ignored_files() {
     let server = Server::start().await;
     enable(&server.user).await;
