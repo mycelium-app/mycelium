@@ -1,12 +1,15 @@
 use crate::attachments::hex_digest;
 use crate::auth::AuthUser;
+use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::state::AppState;
+use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{Assistant, AssistantPreferences, AssistantState, CreateAssistantRequest, PatchAssistantRequest};
+use mycelium_proto::api::{Assistant, AssistantPreferences, AssistantState, CreateAssistantRequest, CreateChatRequest, PatchAssistantRequest, PromptRequest};
+use mycelium_proto::conversation::Conversation;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use sqlx::types::Json as Jsonb;
@@ -279,4 +282,53 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     Ok(Json(assistant))
+}
+
+pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Json<Conversation>> {
+    let assistant = load(&state, user.id, id).await?;
+    let text = request.text.trim();
+
+    if text.is_empty() && request.attachments.is_empty() {
+        return Err(ApiError::bad_request("text_required", "Enter a message for the assistant."));
+    }
+
+    let current = match assistant.conversation_id {
+        Some(conversation_id) => Some(find_owned(&state.pool, conversation_id, user.id).await?),
+        None => None,
+    };
+    let conversation = match current {
+        Some(row) if request.attachments.is_empty() => {
+            chats::send_or_queue(&state, user.id, row.id, text).await?;
+
+            find_owned(&state.pool, row.id, user.id).await?.to_proto()?
+        }
+        Some(row) => chats::send(&state, user.id, row.id, text, request.attachments).await?,
+        None => {
+            let Some(choice) = assistant.preferences.models.iter().find(|choice| choice.provider_id.is_some()) else {
+                return Err(ApiError::bad_request("model_required", "Choose a model for this assistant in its settings, then send your message again."));
+            };
+            let provider_id = choice.provider_id.unwrap_or_default();
+            let started = chats::start(&state, &user, CreateChatRequest { provider_id, model: choice.model.clone(), prompt: None, parent_id: None }, None, Some(id)).await?;
+
+            sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
+
+            chats::send(&state, user.id, started.id, text, request.attachments).await?
+        }
+    };
+
+    publish(&state, user.id, id).await?;
+
+    Ok(Json(conversation))
+}
+
+pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
+    let assistant = load(&state, user.id, id).await?;
+
+    if let Some(conversation_id) = assistant.conversation_id {
+        chats::stop(&state, user.id, conversation_id).await?;
+    }
+
+    sqlx::query("update assistants set conversation_id = null, updated_at = now() where id = $1").bind(id).execute(&state.pool).await?;
+
+    Ok(Json(publish(&state, user.id, id).await?))
 }

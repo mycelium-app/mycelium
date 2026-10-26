@@ -5,7 +5,7 @@ use crate::activity::record_turn;
 use crate::chat_tools::{self, Toolbox};
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
-use crate::instructions::extensions_of;
+use crate::instructions::{assistant_chat_layers, extensions_of};
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
@@ -83,12 +83,12 @@ pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
     let side_kind = request.parent_id.map(|_| SideKind::Side);
-    let conversation = start(&state, &user, request, side_kind).await?;
+    let conversation = start(&state, &user, request, side_kind, None).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
 
-pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest, side_kind: Option<SideKind>) -> ApiResult<Conversation> {
+pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest, side_kind: Option<SideKind>, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
     let provider = model_providers::find_owned(state, request.provider_id, user.id).await?;
     let model = request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()).map(str::to_string).or_else(|| provider.default_model.clone());
     let Some(model) = model else {
@@ -106,7 +106,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let node_id = chat_node(state, user.id).await?;
     let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, model, provider_id, parent_id, side_kind) values ($1, $2, $3, '', 'New chat', 'done', $4, $5, $6, $7)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, model, provider_id, parent_id, side_kind, assistant_id) values ($1, $2, $3, '', 'New chat', 'done', $4, $5, $6, $7, $8)
          returning {CONVERSATION_COLUMNS}"
     )))
     .bind(user.id)
@@ -116,6 +116,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
     .bind(provider.id)
     .bind(request.parent_id)
     .bind(side_kind.as_ref().map(enum_text))
+    .bind(assistant_id)
     .fetch_one(&state.pool)
     .await?;
 
@@ -385,10 +386,15 @@ fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model
 async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, model: &str, messages: Vec<ChatMessage>, usage: &mut ReportedUsage) -> ApiResult<()> {
     let address = provider.address().unwrap_or_default();
     let extensions = extensions_of(state, owner).await?;
-    let base_instructions = match extensions.rich_markdown {
+    let mut base_instructions = match extensions.rich_markdown {
         true => format!("{CHAT_INSTRUCTIONS}\n{RICH_MARKDOWN_INSTRUCTIONS}"),
         false => CHAT_INSTRUCTIONS.to_string(),
     };
+
+    if let Some(layers) = assistant_chat_layers(state, id).await? {
+        base_instructions = format!("{base_instructions}\n\n{layers}");
+    }
+
     let mut toolbox = Toolbox::open(state, owner, id).await?;
     let mut messages = messages;
     let mut tools_on = true;

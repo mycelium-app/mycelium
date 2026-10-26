@@ -19,13 +19,15 @@ data class ChatSection(val name: String, val rows: List<Conversation>)
 
 val Conversation.isChat: Boolean get() = agent == ChatAgent
 
+val Conversation.isAssistantSession: Boolean get() = assistantId != null
+
 val Conversation.isSubagent: Boolean get() = sideKind == SubagentKind
 
 fun pinnedChats(conversations: Collection<Conversation>): List<Conversation> =
-    conversations.filter { it.isChat && it.archivedAt == null && it.pinnedAt != null && it.parentId == null }.sortedBy { it.pinnedAt }
+    conversations.filter { it.isChat && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt != null && it.parentId == null }.sortedBy { it.pinnedAt }
 
 fun chatSections(conversations: Collection<Conversation>, now: Instant = Clock.System.now()): List<ChatSection> {
-    val active = conversations.filter { it.isChat && it.archivedAt == null && it.pinnedAt == null }
+    val active = conversations.filter { it.isChat && !it.isAssistantSession && it.archivedAt == null && it.pinnedAt == null }
     val activeIds = active.map { it.id }.toSet()
     val today = (now.epochSeconds).floorDiv(SecondsPerDay)
 

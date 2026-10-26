@@ -74,7 +74,7 @@ internal fun LazyListScope.sidebarAssistantItems(assistants: List<Assistant>, ro
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = rowHeight())
-                .pressable({ onRoute(Route.AssistantSettings(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.AssistantSettings(assistant.id), shape = BlockShape)
+                .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id), shape = BlockShape)
                 .padding(horizontal = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
@@ -92,7 +92,7 @@ internal fun LazyListScope.sidebarAssistantItems(assistants: List<Assistant>, ro
 }
 
 @Composable
-fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit, onNew: () -> Unit) {
+fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit, onSettings: (Assistant) -> Unit, onNew: () -> Unit) {
     val colors = MyTheme.colors
     val sidebarGroup = LocalGroupFilter.current
     var query by remember { mutableStateOf("") }
@@ -149,7 +149,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                     Hairline()
 
                     for (assistant in section.rows) {
-                        AssistantRow(assistant, store, onOpen)
+                        AssistantRow(assistant, store, onOpen, onSettings)
                         Hairline()
                     }
                 }
@@ -159,7 +159,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
 }
 
 @Composable
-private fun AssistantRow(assistant: Assistant, store: Store, onOpen: (Assistant) -> Unit) {
+private fun AssistantRow(assistant: Assistant, store: Store, onOpen: (Assistant) -> Unit, onSettings: (Assistant) -> Unit) {
     val colors = MyTheme.colors
 
     ContentRow {
@@ -184,7 +184,7 @@ private fun AssistantRow(assistant: Assistant, store: Store, onOpen: (Assistant)
 
         RowMenu(assistant.name) { close ->
             MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
-            MenuItem("Settings", onClick = { close(); onOpen(assistant) }, leading = MyIcon.Sliders)
+            MenuItem("Settings", onClick = { close(); onSettings(assistant) }, leading = MyIcon.Sliders)
             MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
         }
     }

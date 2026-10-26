@@ -70,6 +70,7 @@ fn conversation() -> Conversation {
         branch: None,
         pull_request_label: None,
         pull_request_url: None,
+        assistant_id: None,
     }
 }
 

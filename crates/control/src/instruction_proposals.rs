@@ -3,6 +3,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::instructions::{self, find_layer};
 use crate::prompts;
 use crate::state::AppState;
+use crate::store::CONVERSATION_GROUP_SQL;
 use axum::Json;
 use axum::extract::{Path, State};
 use mycelium_proto::api::{DeclineInstructionProposalRequest, InstructionProposal, InstructionProposalState, PromptRequest};
@@ -113,7 +114,7 @@ pub async fn layer_text(state: &AppState, conversation_id: Uuid, requested: Opti
             }
         }
         None => {
-            let group = sqlx::query_as::<_, (Uuid, String)>("select g.id, g.name from conversations c join groups g on g.id = conversation_group(c.cwd, c.node_id, c.project_id) where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+            let group = sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from conversations c join groups g on g.id = {CONVERSATION_GROUP_SQL} where c.id = $1"))).bind(conversation_id).fetch_optional(&state.pool).await?;
 
             match group {
                 Some((id, name)) => (id.to_string(), name),

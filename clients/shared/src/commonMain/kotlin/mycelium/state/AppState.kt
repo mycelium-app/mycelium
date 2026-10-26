@@ -81,11 +81,22 @@ data class AppState(
     val connected: Boolean = false,
 )
 
+private fun followAssistant(state: AppState, conversation: Conversation): AppState {
+    val assistant = conversation.assistantId?.let { state.assistants[it] }?.takeIf { it.conversationId == conversation.id } ?: return state
+    val busy = when (conversation.status) {
+        ConversationStatus.Working -> "working"
+        ConversationStatus.Input -> "input"
+        else -> "idle"
+    }
+
+    return state.copy(assistants = state.assistants + (assistant.id to assistant.copy(state = busy, lastActiveAt = conversation.updatedAt)))
+}
+
 data class SidebarSection(val status: ConversationStatus, val name: String, val rows: List<Conversation>)
 
 fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ConversationChanged ->
-        if (message.conversation.sideKind == GoalCheckKind) state else state.copy(conversations = state.conversations + (message.conversation.id to message.conversation))
+        if (message.conversation.sideKind == GoalCheckKind) state else followAssistant(state.copy(conversations = state.conversations + (message.conversation.id to message.conversation)), message.conversation)
 
     is StreamMessage.ConversationRemoved -> {
         val id = message.conversationId
@@ -270,7 +281,7 @@ fun inProjectFilter(conversation: Conversation, filter: String): Boolean = when 
 fun isWorktree(conversation: Conversation, project: Project?): Boolean = project != null && conversation.cwd.startsWith(project.path.trimEnd('/') + "-worktrees/")
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String, projectFilter: String = AllProjects): List<Conversation> {
-    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isSubagent && inGroupFilter(it, filter) && inProjectFilter(it, projectFilter) }
+    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) && inProjectFilter(it, projectFilter) }
     val activeIds = active.map { it.id }.toSet()
 
     return active.filter { it.parentId == null || it.parentId !in activeIds }

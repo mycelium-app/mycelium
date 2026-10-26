@@ -293,6 +293,11 @@ class MyceliumApi(
     suspend fun patchAssistant(id: String, request: PatchAssistantRequest): Assistant =
         call("/assistants/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
+    suspend fun promptAssistant(id: String, text: String): Conversation =
+        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text)) } }.body()
+
+    suspend fun clearAssistant(id: String): Assistant = call("/assistants/$id/clear") { client.post(it) { authorise() } }.body()
+
     suspend fun groups(): List<Group> = call("/groups") { client.get(it) { authorise() } }.body()
 
     suspend fun groupInstructions(id: String): InstructionLayer =

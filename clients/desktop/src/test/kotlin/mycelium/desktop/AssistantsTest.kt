@@ -52,7 +52,7 @@ class AssistantsTest {
     @get:Rule
     val scopes = TestScopes()
 
-    private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
     private fun shell(assistants: MutableList<String>, route: Route = Route.Empty, experiments: String = EnabledExperiments) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

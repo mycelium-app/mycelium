@@ -1,3 +1,4 @@
+use crate::assistants::INSTRUCTIONS_PATH;
 use crate::auth::AuthUser;
 use crate::chats::{RICH_MARKDOWN_INSTRUCTIONS, generated_ui_instructions};
 use crate::mcp::tools_instructions;
@@ -7,7 +8,7 @@ use crate::instruction_proposals;
 use crate::groups::{self, GroupRow};
 use crate::projects::valid_repository;
 use crate::state::AppState;
-use crate::store::publish_node;
+use crate::store::{CONVERSATION_GROUP_SQL, publish_node};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -187,28 +188,57 @@ async fn push_to_every_node(state: &AppState) -> ApiResult<()> {
     Ok(())
 }
 
+async fn conversation_layers(state: &AppState, conversation_id: Uuid, with_global: bool) -> ApiResult<Vec<String>> {
+    let global = match with_global {
+        true => latest(state, GLOBAL).await?.map(|version| version.text),
+        false => None,
+    };
+    let group = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "select v.text from conversations c
+         join instruction_versions v on v.layer = ({CONVERSATION_GROUP_SQL})::text
+         where c.id = $1 order by v.seq desc limit 1"
+    )))
+    .bind(conversation_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let assistant = sqlx::query_scalar::<_, Vec<u8>>(
+        "select f.content from conversations c join assistant_files f on f.assistant_id = c.assistant_id and f.path = $2 where c.id = $1",
+    )
+    .bind(conversation_id)
+    .bind(INSTRUCTIONS_PATH)
+    .fetch_optional(&state.pool)
+    .await?
+    .map(|content| String::from_utf8_lossy(&content).into_owned());
+
+    Ok(global.into_iter().chain(group).chain(assistant).filter(|text| !text.trim().is_empty()).collect())
+}
+
 pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
     let revision = current_revision(state).await?;
 
     sqlx::query("update conversations set instructions_revision = $2 where id = $1").bind(conversation_id).bind(revision).execute(&state.pool).await?;
 
-    let group = sqlx::query_scalar::<_, String>(
-        "select v.text from conversations c
-         join instruction_versions v on v.layer = conversation_group(c.cwd, c.node_id, c.project_id)::text
-         where c.id = $1 order by v.seq desc limit 1",
-    )
-    .bind(conversation_id)
-    .fetch_optional(&state.pool)
-    .await?;
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let extensions = extensions_of(state, owner).await?;
-    let layers: Vec<String> = group
+    let layers: Vec<String> = conversation_layers(state, conversation_id, false)
+        .await?
         .into_iter()
-        .filter(|text| !text.trim().is_empty())
         .chain(extensions.generated_ui.then(generated_ui_instructions))
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
         .chain(extensions.mycelium_tools.then(tools_instructions))
         .collect();
+
+    Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
+}
+
+pub async fn assistant_chat_layers(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
+    let assistant_id = sqlx::query_scalar::<_, Option<Uuid>>("select assistant_id from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.flatten();
+
+    if assistant_id.is_none() {
+        return Ok(None);
+    }
+
+    let layers = conversation_layers(state, conversation_id, true).await?;
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
 }

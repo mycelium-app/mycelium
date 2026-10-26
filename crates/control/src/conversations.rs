@@ -215,7 +215,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
             return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
         let started = CreateChatRequest { provider_id, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
-        let conversation = chats::start(&state, &user, started, Some(request.kind)).await?;
+        let conversation = chats::start(&state, &user, started, Some(request.kind), None).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
     }

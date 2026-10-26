@@ -686,6 +686,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             parent_id: None,
                         },
                         None,
+                        None,
                     )
                     .await?;
                     dispatched(state, id, row.round, &spec.key, "start", conversation.id).await?;

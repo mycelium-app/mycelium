@@ -249,6 +249,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))
         .route("/api/v1/assistants", get(assistants::list).post(assistants::create))
         .route("/api/v1/assistants/{id}", get(assistants::get).patch(assistants::patch))
+        .route("/api/v1/assistants/{id}/prompt", post(assistants::prompt))
+        .route("/api/v1/assistants/{id}/clear", post(assistants::clear))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
         .route("/api/v1/groups/{id}/instructions", get(instructions::layer).put(instructions::save))

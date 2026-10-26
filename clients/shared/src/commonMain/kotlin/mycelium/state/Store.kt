@@ -299,6 +299,29 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         return changed
     }
 
+    fun promptAssistant(assistant: mycelium.api.Assistant, text: String) {
+        val prompt = text.trim()
+
+        mutableState.update { it.copy(sending = it.sending + (assistant.id to it.sending[assistant.id].orEmpty() + prompt)) }
+
+        act {
+            try {
+                api.promptAssistant(assistant.id, prompt)
+                refreshAssistants()
+            } finally {
+                mutableState.update { it.copy(sending = it.sending.withoutFirst(assistant.id, prompt)) }
+            }
+        }
+    }
+
+    fun clearAssistant(assistant: mycelium.api.Assistant) {
+        act {
+            val cleared = api.clearAssistant(assistant.id)
+
+            mutableState.update { it.copy(assistants = it.assistants + (cleared.id to cleared)) }
+        }
+    }
+
     suspend fun createProject(request: CreateProjectRequest): Project {
         val project = api.createProject(request)
 

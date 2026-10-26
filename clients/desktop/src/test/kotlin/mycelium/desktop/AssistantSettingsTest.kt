@@ -1,0 +1,95 @@
+package mycelium.desktop
+
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
+import kotlinx.coroutines.runBlocking
+import mycelium.Connection
+import mycelium.DeviceInfo
+import mycelium.Platform
+import mycelium.api.Me
+import mycelium.api.MyceliumApi
+import mycelium.state.Store
+import mycelium.ui.MyceliumTheme
+import mycelium.ui.Route
+import mycelium.ui.Shell
+import org.junit.Rule
+import kotlin.test.Test
+import kotlin.test.assertEquals
+
+private const val Providers = """[{"id":"p1","kind":"openai_compatible","name":"Ollama","models":["llama3.2","qwen"],"default_model":"llama3.2","key_hint":"","created_at":"2026-10-22T10:00:00Z"}]"""
+
+private const val Saved = """{"id":"a1","name":"Stand-up","description":"Daily summary","preferences":{"models":[{"provider_id":"p1","model":"llama3.2"},{"provider_id":"p1","model":"qwen"}]},"state":"idle","session_count":0,"instructions":"Be brief.","created_at":"2026-10-22T10:00:00Z"}"""
+
+private object SettingsPlatform : Platform {
+    override val originUrl: String? = null
+    override val signsInThroughTheBrowser = false
+    override fun loadConnection(): Connection? = null
+    override fun saveConnection(connection: Connection?) = Unit
+    override fun device() = DeviceInfo("Desktop", "host", "linux", "x86_64")
+    override fun approveCode(): String? = null
+    override fun currentPath() = "/"
+    override fun navigate(url: String) = Unit
+    override fun openUrl(url: String) = Unit
+    override fun copyToClipboard(text: String) = Unit
+}
+
+class AssistantSettingsTest {
+    @get:Rule
+    val rule = createComposeRule()
+
+    @get:Rule
+    val scopes = TestScopes()
+
+    private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+
+    private fun shell() {
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val engine = MockEngine { request ->
+            val path = request.url.encodedPath
+
+            requests += "${request.method.value} $path" to String(request.body.toByteArray())
+
+            val reply = when {
+                path.endsWith("/experiments") -> EnabledExperiments
+                path.endsWith("/assistants/a1") && request.method == HttpMethod.Patch -> Saved
+                path.endsWith("/assistants/a1") -> Saved
+                path.endsWith("/assistants") -> "[$Saved]"
+                path.endsWith("/model-providers") -> Providers
+                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
+                else -> "{}"
+            }
+
+            respond(reply, HttpStatusCode.OK, json)
+        }
+        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+        runBlocking { store.refresh() }
+
+        rule.setContent { MyceliumTheme(true) { Shell(store, SettingsPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.AssistantSettings("a1")) } }
+    }
+
+    @Test
+    fun modelPreferencesReorderWithMoveUpAndAreSavedInThatOrder() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Ollama · qwen").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for Ollama · qwen").performClick()
+        rule.onNodeWithText("Move up").performClick()
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
+        val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
+
+        assertEquals(true, sent.indexOf("qwen") in 0 until sent.indexOf("llama3.2"), sent)
+    }
+}

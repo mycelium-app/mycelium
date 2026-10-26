@@ -154,6 +154,8 @@ sealed interface Route {
 
     data object Assistants : Route
 
+    data class Assistant(val id: String) : Route
+
     data object NewAssistant : Route
 
     data class AssistantSettings(val id: String) : Route
@@ -183,7 +185,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     }
 
     SideEffect {
-        store.viewing = (route as? Route.Chat)?.id
+        store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
     }
     val colors = MyTheme.colors
     var sidebarWidth by remember { mutableStateOf(platform.loadPreference(SidebarWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.Sidebar) }
@@ -236,7 +238,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     }
 
     SideEffect {
-        store.viewing = (route as? Route.Chat)?.id
+        store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
     }
     var drawerOpen by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
@@ -391,7 +393,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
             Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
             is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
+            Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
+            is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
             Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) })
             is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) })
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -474,7 +477,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         Route.NewChat -> ChatsMode
         is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
         Route.Settings, Route.Activity, Route.Empty -> null
-        Route.Assistants, Route.NewAssistant, is Route.AssistantSettings -> null
+        Route.Assistants, is Route.Assistant, Route.NewAssistant, is Route.AssistantSettings -> null
         else -> WorkspacesMode
     }
 

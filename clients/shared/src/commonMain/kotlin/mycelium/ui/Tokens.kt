@@ -143,6 +143,8 @@ object Tokens {
         val IconSm: Dp = 14.dp
         val IconMd: Dp = 16.dp
         val Avatar: Dp = 20.dp
+        val EarlierSessions: Dp = 320.dp
+        val EarlierThread: Dp = 240.dp
         val Dot: Dp = 6.dp
         val Sidebar: Dp = 280.dp
         const val DrawerFlingVelocity = 400f

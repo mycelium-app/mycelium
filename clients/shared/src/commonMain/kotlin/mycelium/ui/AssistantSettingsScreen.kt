@@ -17,7 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import mycelium.api.Assistant
+import mycelium.api.AssistantPreferences
+import mycelium.api.ModelChoice
+import mycelium.api.ModelProvider
 import mycelium.api.CreateAssistantRequest
 import mycelium.api.InstructionLayer
 import mycelium.api.PatchAssistantRequest
@@ -34,12 +38,15 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
     var name by remember(assistantId) { mutableStateOf("") }
     var description by remember(assistantId) { mutableStateOf("") }
     var group by remember(assistantId) { mutableStateOf(NoGroup) }
+    var models by remember(assistantId) { mutableStateOf(emptyList<ModelChoice>()) }
+    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     val attempt = rememberAttempt { failure = it }
     val creating = assistantId == null
     val ready = creating || loaded != null
 
     LaunchedEffect(assistantId) {
         store.act { store.refreshGroups() }
+        store.act { providers = store.api.modelProviders() }
 
         if (assistantId != null) {
             attempt {
@@ -48,6 +55,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                 name = held.name
                 description = held.description.orEmpty()
                 group = held.groupId ?: NoGroup
+                models = held.preferences.models
                 loaded = held
             }
         }
@@ -75,6 +83,41 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                     TextInput(description, { description = it }, label = "Description", placeholder = "Leave empty to use the first line of the instructions", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
 
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                        Label("A new session starts on the first model.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                        if (models.isNotEmpty()) {
+                            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(min = 0.dp, max = 28.dp))) {
+                                models.forEachIndexed { index, choice ->
+                                    val name = modelName(choice, providers)
+
+                                    ContentRow {
+                                        Label(name, maxLines = 1)
+
+                                        RowMenu(name) { close ->
+                                            if (index > 0) {
+                                                MenuItem("Move up", onClick = { close(); models = models.toMutableList().also { it.add(index - 1, it.removeAt(index)) } }, leading = MyIcon.ArrowUp)
+                                            }
+
+                                            if (index < models.lastIndex) {
+                                                MenuItem("Move down", onClick = { close(); models = models.toMutableList().also { it.add(index + 1, it.removeAt(index)) } }, leading = MyIcon.ArrowDown)
+                                            }
+
+                                            MenuItem("Remove", onClick = { close(); models = models.filterIndexed { position, _ -> position != index } }, leading = MyIcon.Close)
+                                        }
+                                    }
+
+                                    Hairline()
+                                }
+                            }
+                        }
+
+                        Row {
+                            ModelPicker(ModelPickerControls(providers, null, null) { provider, model -> models = models + ModelChoice(providerId = provider.id, model = model) })
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                         Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                         Label("Kept in the assistant's storage as AGENTS.md and added after the global and group instructions.", style = Tokens.Type.Meta, color = colors.textMuted)
 
@@ -86,10 +129,12 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                                 attempt {
                                     val chosen = group.takeUnless { it == NoGroup }
 
-                                    if (loaded == null) {
-                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text))
+                                    val held = loaded
+
+                                    if (held == null) {
+                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models).takeIf { models.isNotEmpty() }))
                                     } else {
-                                        store.patchAssistant(loaded!!, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text))
+                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models)))
                                     }
 
                                     onDone()
@@ -103,3 +148,6 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
         }
     }
 }
+
+private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String =
+    "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"

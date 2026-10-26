@@ -75,7 +75,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: (@Composable () -> Unit)? = null) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
@@ -228,6 +228,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 ConversationHeader(
+                    custom = header,
                     conversation = conversation,
                     node = node,
                     chat = chat,
@@ -478,6 +479,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
 @Composable
 private fun ConversationHeader(
+    custom: (@Composable () -> Unit)?,
     conversation: Conversation,
     node: NodeSummary?,
     chat: Boolean,
@@ -512,6 +514,12 @@ private fun ConversationHeader(
     var moveOpen by remember { mutableStateOf(false) }
     var projectMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
+
+    if (custom != null) {
+        custom()
+
+        return
+    }
 
     Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
         LocalOpenList.current?.let { openList ->

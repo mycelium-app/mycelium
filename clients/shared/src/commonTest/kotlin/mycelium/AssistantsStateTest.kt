@@ -2,11 +2,19 @@ package mycelium
 
 import mycelium.api.Assistant
 import mycelium.api.Group
+import mycelium.api.StreamMessage
+import mycelium.state.AppState
+import mycelium.state.reduce
 import mycelium.state.AllGroups
 import mycelium.state.AllStates
 import mycelium.state.GroupByGroup
 import mycelium.state.GroupByNone
+import mycelium.api.Conversation
+import mycelium.api.ConversationStatus
 import mycelium.state.assistantRows
+import mycelium.state.chatSections
+import mycelium.state.pinnedChats
+import mycelium.state.sidebarSections
 import mycelium.state.sidebarAssistants
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -55,5 +63,27 @@ class AssistantsStateTest {
         val sections = assistantRows(all, groups, "", AllGroups, AllStates, GroupByGroup)
 
         assertEquals(listOf("No group" to listOf("b"), "acme" to listOf("a")), sections.map { it.title to it.rows.map { row -> row.name } })
+    }
+
+    @Test
+    fun assistantSessionsStayOutOfTheConversationSections() {
+        val session = Conversation("s1", "u", "n", "chat", "", "Stand-up", ConversationStatus.Review, createdAt = "2026-10-23T10:00:00Z", updatedAt = "2026-10-23T10:00:00Z", assistantId = "a", pinnedAt = "2026-10-23T10:00:00Z")
+        val chat = session.copy(id = "c1", assistantId = null)
+
+        assertEquals(emptyList(), sidebarSections(listOf(session), AllGroups))
+        assertEquals(listOf("c1"), pinnedChats(listOf(session, chat)).map { it.id })
+        assertEquals(listOf("c1"), chatSections(listOf(session.copy(pinnedAt = null), chat.copy(pinnedAt = null))).flatMap { it.rows }.map { it.id })
+    }
+
+    @Test
+    fun anAssistantFollowsItsCurrentSessionsStatus() {
+        val working = Conversation("s1", "u", "n", "chat", "", "Stand-up", ConversationStatus.Working, createdAt = "2026-10-23T10:00:00Z", updatedAt = "2026-10-23T11:00:00Z", assistantId = "a")
+        val before = AppState(assistants = mapOf("a" to assistant("a").copy(conversationId = "s1")))
+
+        val after = reduce(before, StreamMessage.ConversationChanged(working))
+        val finished = reduce(after, StreamMessage.ConversationChanged(working.copy(status = ConversationStatus.Review)))
+
+        assertEquals("working", after.assistants.getValue("a").state)
+        assertEquals("idle", finished.assistants.getValue("a").state)
     }
 }

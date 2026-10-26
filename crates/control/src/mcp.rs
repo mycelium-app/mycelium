@@ -12,6 +12,7 @@ use crate::message_proposals;
 use crate::schedules::{self, ProposedSchedule, preset_cron};
 use crate::ssh_access;
 use crate::state::AppState;
+use crate::store::CONVERSATION_GROUP_SQL;
 use crate::tasks;
 use crate::walkthroughs;
 use axum::Json;
@@ -401,7 +402,7 @@ async fn group_of(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiRe
         return Ok(None);
     };
 
-    Ok(sqlx::query_as::<_, (Uuid, String)>("select g.id, g.name from conversations c join groups g on g.id = conversation_group(c.cwd, c.node_id, c.project_id) where c.id = $1").bind(conversation_id).fetch_optional(&state.pool).await?)
+    Ok(sqlx::query_as::<_, (Uuid, String)>(sqlx::AssertSqlSafe(format!("select g.id, g.name from conversations c join groups g on g.id = {CONVERSATION_GROUP_SQL} where c.id = $1"))).bind(conversation_id).fetch_optional(&state.pool).await?)
 }
 
 async fn scopes_named(state: &AppState, node_id: Uuid, names: &[String]) -> ApiResult<Result<Vec<String>, String>> {
