@@ -77,9 +77,11 @@ internal val SettingsGroups = listOf(
 @Composable
 fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, onSignOut: () -> Unit) {
     var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
+    var openGroup by remember { mutableStateOf<String?>(null) }
     val touch = LocalTouch.current
     val state by store.state.collectAsState()
     val opened = section?.takeIf { enabled(it, state.experiments) }
+    val showGroup: ((String) -> Unit)? = if (state.experiments.groups) { id -> openGroup = id; section = SettingsSection.Groups } else null
     val waitingProposals = waitingInstructionProposals(state)
     val groups = SettingsGroups.map { (name, entries) -> name to entries.filter { enabled(it, state.experiments) } }
 
@@ -150,7 +152,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
             } else {
                 CompositionLocalProvider(LocalOpenList provides null) {
-                    SettingsContent(opened, store, me, controlPlane, onSignOut, Modifier.weight(1f))
+                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, Modifier.weight(1f))
                 }
             }
         } else {
@@ -182,14 +184,14 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
 
                 VerticalHairline()
-                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, Modifier.weight(1f))
+                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, modifier: Modifier) {
+private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, modifier: Modifier) {
     Column(
         modifier.fillMaxHeight().verticalScrollWithBar().padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
@@ -203,8 +205,8 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
-            SettingsSection.Groups -> GroupsSettings(store)
-            SettingsSection.Instructions -> InstructionsSettings(store)
+            SettingsSection.Groups -> GroupsSettings(store, openGroup, onOpenGroup)
+            SettingsSection.Instructions -> InstructionsSettings(store, showGroup)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)
             SettingsSection.Connections -> ConversationConnectionsSettings(store)

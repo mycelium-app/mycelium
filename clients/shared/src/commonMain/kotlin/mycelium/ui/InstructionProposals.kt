@@ -57,7 +57,7 @@ fun CountBadge(count: Int, description: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun InstructionProposals(store: Store) {
+fun InstructionProposals(store: Store, onOpenGroup: ((String) -> Unit)? = null) {
     val state by store.state.collectAsState()
     val waiting = waitingProposals(state.instructionProposals.values)
     val decided = decidedProposals(state.instructionProposals.values)
@@ -75,7 +75,7 @@ fun InstructionProposals(store: Store) {
         Label("Proposed edits", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
         for (proposal in waiting) {
-            ProposalCard(store, proposal)
+            ProposalCard(store, proposal, onOpenGroup)
         }
 
         if (decided.isNotEmpty()) {
@@ -102,7 +102,7 @@ fun InstructionProposals(store: Store) {
 private const val DecidedShown = 5
 
 @Composable
-private fun ProposalCard(store: Store, proposal: InstructionProposal) {
+private fun ProposalCard(store: Store, proposal: InstructionProposal, onOpenGroup: ((String) -> Unit)?) {
     val colors = MyTheme.colors
     val openConversation = LocalOpenConversation.current
     var declining by remember(proposal.id) { mutableStateOf(false) }
@@ -112,6 +112,10 @@ private fun ProposalCard(store: Store, proposal: InstructionProposal) {
     Card(Modifier.semantics { contentDescription = "Proposed edit to the ${proposal.layerName} instructions" }) {
         CardHead {
             Label("${proposal.layerName} instructions", Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+
+            if (onOpenGroup != null && proposal.layer != "global") {
+                MyButton({ onOpenGroup(proposal.layer) }, text = "Open group", variant = ButtonVariant.Outline, size = ButtonSize.Sm, muted = true, description = "Open the ${proposal.layerName} group")
+            }
 
             if (proposal.outOfDate) {
                 StatusMark("Out of date", Tone.Attention, MyIcon.Alert)

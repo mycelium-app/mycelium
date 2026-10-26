@@ -102,7 +102,7 @@ internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel
 }
 
 @Composable
-fun InstructionsSettings(store: Store) {
+fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var document by remember { mutableStateOf<Instructions?>(null) }
@@ -224,7 +224,7 @@ fun InstructionsSettings(store: Store) {
             )
         }
 
-        InstructionProposals(store)
+        InstructionProposals(store, onOpenGroup)
 
         extensions?.let { held ->
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {

@@ -30,10 +30,9 @@ private fun folderSummary(group: Group, state: AppState): List<String> =
     group.folders.map { folder -> "${folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"} ${folder.prefix}" }
 
 @Composable
-fun GroupsSettings(store: Store) {
+fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
-    var openGroup by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var naming by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
@@ -74,7 +73,7 @@ fun GroupsSettings(store: Store) {
                 MyButton({ naming = true; newName = "" }, text = "New group", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
             }
         } else {
-            MyButton({ openGroup = null }, text = "Groups", icon = MyIcon.Back, muted = true, description = "Back to groups")
+            MyButton({ onOpenGroup(null) }, text = "Groups", icon = MyIcon.Back, muted = true, description = "Back to groups")
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Label(open.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
@@ -92,7 +91,7 @@ fun GroupsSettings(store: Store) {
                     attempt {
                         val group = store.api.createGroup(newName)
                         store.refreshGroups()
-                        openGroup = group.id
+                        onOpenGroup(group.id)
                         naming = false
                     }
                 }
@@ -127,7 +126,7 @@ fun GroupsSettings(store: Store) {
                         attempt {
                             store.api.deleteGroup(doomed.id)
                             deleting = null
-                            openGroup = null
+                            onOpenGroup(null)
                             store.refreshGroups()
                             store.refreshProjects()
                         }
@@ -158,7 +157,7 @@ fun GroupsSettings(store: Store) {
                         val folders = folderSummary(group, state)
 
                         ContentRow {
-                            Label(group.name, Modifier.pressable({ openGroup = group.id }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), maxLines = 1)
+                            Label(group.name, Modifier.pressable({ onOpenGroup(group.id) }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), maxLines = 1)
 
                             if (folders.isEmpty()) {
                                 Label("None", color = colors.textFaint)

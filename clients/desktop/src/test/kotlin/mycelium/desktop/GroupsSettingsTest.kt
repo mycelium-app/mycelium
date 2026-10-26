@@ -2,6 +2,10 @@ package mycelium.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -27,6 +31,7 @@ import mycelium.state.Store
 import mycelium.ui.GroupsSettings
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.SettingsScreen
+import mycelium.ui.SettingsSection
 import mycelium.ui.verticalScrollWithBar
 import org.junit.Rule
 import kotlin.test.Test
@@ -45,6 +50,10 @@ private const val GroupProjects = """[{"id":"p1","node_id":"n1","name":"mycelium
 
 private const val GroupLayer = """{"layer":"g1","name":"slop","path":null,"text":"Use British English.","version":null}"""
 
+private const val GroupProposal = """[{"id":"p1","conversation_id":null,"conversation_title":null,"layer":"g1","layer_name":"slop","base_revision":"abc","base_text":"a","text":"b","reason":"You said: use British English.","state":"proposed","note":null,"out_of_date":false,"created_at":"2026-10-23T10:00:00Z"}]"""
+
+private const val InstructionsDocument = """{"source":null,"revision":"abc","layers":[{"layer":"global","name":"Global","path":null,"text":"## Diffs","version":null}]}"""
+
 private const val GroupsOff = """{"tasks":true,"workflows":true,"instructions":true,"details":true,"subagents":true,"walkthrough":true,"move_chats":true,"groups":false}"""
 
 class GroupsSettingsTest {
@@ -62,7 +71,7 @@ class GroupsSettingsTest {
         return requests.toList().first { it.first == method && it.second.endsWith(pathEnd) }
     }
 
-    private fun store(groups: String, experiments: String = EnabledExperiments): Store {
+    private fun store(groups: String, experiments: String = EnabledExperiments, proposals: String = "[]"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         var created = false
         val engine = MockEngine { request ->
@@ -74,10 +83,13 @@ class GroupsSettingsTest {
                 path.endsWith("/conversations") -> "[]"
                 path.endsWith("/nodes") -> GroupNodes
                 path.endsWith("/groups/g1/instructions") -> GroupLayer
+                path.endsWith("/instructions") -> InstructionsDocument
+                path.endsWith("/extensions") -> """{"generated_ui":true,"rich_markdown":true,"mycelium_tools":true}"""
+                path.endsWith("/forges") -> "[]"
                 path.endsWith("/groups") && request.method == HttpMethod.Post -> HomelabGroup
                 path.endsWith("/groups") -> listOfNotNull(groups.ifBlank { null }, HomelabGroup.takeIf { created }).joinToString(",", "[", "]")
                 path.endsWith("/projects") -> GroupProjects
-                path.endsWith("/instruction-proposals") -> "[]"
+                path.endsWith("/instruction-proposals") -> proposals
                 path.contains("/groups/") && request.method == HttpMethod.Patch -> """{"id":"g1","name":"homelab","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
                 else -> "{}"
             }
@@ -92,7 +104,7 @@ class GroupsSettingsTest {
 
     private fun show(groups: String = "$SlopGroup,$WorkGroup") {
         val store = store(groups)
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.verticalScrollWithBar()) { GroupsSettings(store) } } }
+        rule.setContent { MyceliumTheme(true) { var open by remember { mutableStateOf<String?>(null) }; Box(Modifier.verticalScrollWithBar()) { GroupsSettings(store, open) { open = it } } } }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Groups").fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -221,5 +233,16 @@ class GroupsSettingsTest {
         rule.onNodeWithText("mycelium").assertExists()
         assertEquals(0, rule.onAllNodesWithText("Remove from slop").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("More for project mycelium in slop").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aProposalForAGroupLayerOpensThatGroup() {
+        val store = store(SlopGroup, proposals = GroupProposal)
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.height(900.dp)) { SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test", startOn = SettingsSection.Instructions, onSignOut = {}) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the slop group").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Open the slop group").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Folders in slop").fetchSemanticsNodes().isNotEmpty() }
     }
 }
