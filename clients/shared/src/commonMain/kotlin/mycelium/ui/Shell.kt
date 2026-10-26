@@ -163,6 +163,13 @@ sealed interface Route {
 
 @Composable
 fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
+    CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
+        ShellFor(store, platform, me, onSignOut, initialRoute)
+    }
+}
+
+@Composable
+private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route) {
     LaunchedEffect(Unit) {
         platform.timeZone()?.let { zone -> store.act { store.setTimeZone(zone) } }
     }
