@@ -452,6 +452,21 @@ async fn the_scope_is_sent_to_the_node_and_kept_with_the_walkthrough() {
 }
 
 #[tokio::test]
+async fn a_walkthrough_of_a_scope_with_no_changes_is_refused_and_keeps_the_one_before() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    call(&server, &mut link, Some(conversation.id), json!({"steps": [{"title": "Earlier", "files": [{"path": "src/a.ts", "diff": "+a"}]}]})).await;
+
+    let result = call_with_diff(&server, &mut link, Some(conversation.id), json!({"scope": "branch", "steps": [{"title": "Stub", "files": [{"path": "src/a.ts", "diff": "+a"}]}]}), "").await;
+
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("Nothing was stored.") && text.contains("no changes"), "{text}");
+    assert_eq!(latest(&server, conversation.id).await["steps"][0]["title"], "Earlier");
+}
+
+#[tokio::test]
 async fn a_walkthrough_that_leaves_changes_out_is_refused_with_the_uncovered_files_and_hunks() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

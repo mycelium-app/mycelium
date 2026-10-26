@@ -103,6 +103,11 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
     }
 
     let changes = scope_changes(state, conversation_id, &scope).await;
+
+    if changes.as_ref().is_some_and(Vec::is_empty) {
+        return Ok(Err(format!("Nothing was stored. There are no changes in the {scope} scope, so there is nothing to walk through and the current walkthrough stays. Choose a scope that has changes (uncommitted, last_commit or branch).")));
+    }
+
     let mut covered = Covered::new();
 
     for (index, (step, files)) in steps.iter_mut().zip(given_files).enumerate() {
