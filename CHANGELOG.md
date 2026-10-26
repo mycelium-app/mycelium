@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.10.0
+
+Several features are new experiments, off until you turn them on in Settings, Experiments.
+
+- Claude sign-in saves the login to the account it was started for, so several Claude accounts work on one node. The sign-in link is no longer cut short, and a pasted code completes the sign-in.
+- Experiments in Settings turn Tasks, Workflows, Instructions editing, the Details and Subagents sidebars, walkthroughs and moving chats on or off for you. Turning one off keeps its data.
+- Groups (experiment): Settings, Groups creates, renames and deletes groups and edits each group's instructions and folders. The group filter sits at the top of the sidebar, says when a hidden group needs you, and also scopes History, Artefacts, Tasks, Workflows and Schedules.
+- Assistants (experiment): persistent assistants with their own instructions, group, storage and secrets, one thread that moves between chat and a node, ordered model and node fallback, optional Git backup, and schedules that wake them.
+- Continue a conversation on another account, harness or chat model from "Continue on…" in the composer, and optionally switch automatically when a usage window is full.
+- Projects: browse folders on a node instead of typing a path, put a conversation in a project from its breadcrumb, filter the sidebar by project, see branch and pull request on each row, and fold finished conversations into Settled. The Projects tab shows its last listing straight away.
+- The model menu searches, groups OpenRouter models by vendor and lists favourite and recent models.
+- Memory records which model, agent, node, account, project and conversation wrote each memory, and recall shows the source. Memory banks (experiment) limit recall by model class and group.
+- Conversations in connected groups can message each other and start conversations in each other's projects (experiment).
+- Voice input (experiment): dictate into the composer. Android and the web use the device's speech recognition, which may send audio to Google; the desktop uses your speech-to-text provider.
+- Integrations: Outline by address and API key, MCP sign-in with OAuth, and LiteLLM as a gateway and as a chat-model provider.
+- Codex banked resets show on the usage card, and Use reset spends one after asking.
+- Email can delete and move messages, including between accounts. Deleting, moving and sending always ask you first, from agents as well as chats.
+- The composer shows context use in a compact control, and the desktop browser shows its context menu inside the app.
+- A running workflow stays pinned beside the chat after the turn that started it ends.
+
+Folder browsing, account switching and banked resets need nodes on v0.10.0.
+
 ## v0.9.1
 
 - Email, Stoat and Zulip connect directly from Integrations. Agents can read and search them, and sending from a chat always asks for approval. Email requires TLS or STARTTLS.
