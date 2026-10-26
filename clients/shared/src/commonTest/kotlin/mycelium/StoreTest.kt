@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import mycelium.api.MyceliumApi
+import mycelium.api.WalkthroughNoteRequest
 import mycelium.api.parseStreamMessage
 import mycelium.state.Store
 import mycelium.state.hasOlderEvents
@@ -37,6 +38,24 @@ class StoreTest {
         store.receive(parseStreamMessage("""{"type":"walkthrough_notes","conversation_id":"c1","walkthrough_id":"w1","notes":[]}""")!!)
 
         assertEquals(emptyList(), store.walkthroughNotes.value.getValue("c1"))
+    }
+
+    @Test
+    fun aNoteTheStreamDeliversBeforeItsReplyIsListedOnce() = runTest {
+        val note = """{"id":"n1","step":0,"comment":"Stage this","sent":false,"created_at":"2026-10-23T10:00:00Z"}"""
+        lateinit var store: Store
+        val engine = MockEngine {
+            store.receive(parseStreamMessage("""{"type":"walkthrough_notes","conversation_id":"c1","walkthrough_id":"w1","notes":[$note]}""")!!)
+
+            respond(note, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        store = Store(MyceliumApi("https://mycelium.test", null, engine), backgroundScope)
+
+        store.addWalkthroughNote("c1", "w1", WalkthroughNoteRequest(step = 0, comment = "Stage this"))
+
+        withTimeout(5_000) { while (store.walkthroughNotes.value["c1"].isNullOrEmpty()) delay(10) }
+        withContext(Dispatchers.Default) { delay(100) }
+        assertEquals(listOf("n1"), store.walkthroughNotes.value.getValue("c1").map { it.id })
     }
 
     @Test

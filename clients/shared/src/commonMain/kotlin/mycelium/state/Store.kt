@@ -770,7 +770,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     fun addWalkthroughNote(conversationId: String, walkthroughId: String, request: WalkthroughNoteRequest) {
         act {
             val note = api.addWalkthroughNote(walkthroughId, request)
-            mutableWalkthroughNotes.update { it + (conversationId to it[conversationId].orEmpty() + note) }
+            mutableWalkthroughNotes.update { it + (conversationId to it[conversationId].orEmpty().filter { held -> held.id != note.id } + note) }
         }
     }
 
