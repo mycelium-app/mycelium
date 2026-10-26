@@ -405,6 +405,10 @@ impl Server {
     }
 
     pub async fn online_node_as(&self, name: &str, version: &str) -> NodeLink {
+        self.online_node_with_token(name, version).await.0
+    }
+
+    pub async fn online_node_with_token(&self, name: &str, version: &str) -> (NodeLink, String) {
         let (id, token) = self.join("node", name).await;
         let mut link = self.connect_node(id, &token).await;
 
@@ -418,7 +422,7 @@ impl Server {
         })
         .await;
 
-        link
+        (link, token)
     }
 
     pub async fn create_conversation(&self, node_id: Uuid, prompt: Option<&str>) -> Conversation {

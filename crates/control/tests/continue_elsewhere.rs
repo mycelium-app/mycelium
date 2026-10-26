@@ -304,3 +304,72 @@ async fn continuing_on_a_chat_model_sends_the_handoff_then_only_new_turns_and_ca
     assert_eq!(status, 200, "{back}");
     assert_eq!((back["node_id"].clone(), back["cwd"].clone(), back["agent"].clone()), (json!(link.id), json!("/work/app"), json!("claude")));
 }
+
+async fn said(server: &Server, link: &mut NodeLink, id: Uuid, user_text: &str, answer: &str, seq: i64) {
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": user_text}))).await;
+    expect_prompt(link).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": answer}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: seq + 1, stop_reason: "end_turn".into(), usage: None }).await;
+    let user = server.user.clone();
+    common::eventually("the turn to end", || async { (user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["status"] == "review").then_some(()) }).await;
+}
+
+fn earlier_turns(arguments: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read_earlier_turns", "arguments": arguments}})
+}
+
+fn answer_text(reply: &Value) -> String {
+    reply["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string()
+}
+
+#[tokio::test]
+async fn read_earlier_turns_pages_back_and_searches_this_conversation_only() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let (mut link, token) = server.online_node_with_token("laptop", "v0.11.0").await;
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app"}))).await;
+    let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
+    let (_, other) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/other"}))).await;
+    let other_id: Uuid = serde_json::from_value(other["id"].clone()).unwrap();
+
+    for conversation in [id, other_id] {
+        match next_command(&mut link).await {
+            ControlToNode::StartSession { conversation_id, .. } => assert_eq!(conversation_id, conversation),
+            other => panic!("expected start_session, got {other:?}"),
+        }
+        link.start_session(conversation, &format!("s-{conversation}")).await;
+    }
+
+    said(&server, &mut link, id, "Plan the zeppelin hangar", "Understood.", 3).await;
+    said(&server, &mut link, other_id, "Secret kumquat budget", "Understood.", 3).await;
+
+    for (n, text) in ["Second", "Third", "Fourth"].iter().enumerate() {
+        said(&server, &mut link, id, text, &format!("Reply {text}"), 10 + n as i64 * 2).await;
+    }
+
+    let first_page = answer_text(&server.agent_mcp(&token, id, earlier_turns(json!({"limit": 2}))).await);
+    assert!(first_page.contains("Agent: Reply Fourth") && first_page.contains("User: Fourth"), "{first_page}");
+    assert!(!first_page.contains("zeppelin") && first_page.contains("Call again with before="), "{first_page}");
+
+    let before: i64 = first_page.rsplit("before=").next().unwrap().split(' ').next().unwrap().parse().unwrap();
+    let older = answer_text(&server.agent_mcp(&token, id, earlier_turns(json!({"limit": 2, "before": before}))).await);
+    assert!(older.contains("Reply Third") && !older.contains("Fourth"), "{older}");
+
+    let found = answer_text(&server.agent_mcp(&token, id, earlier_turns(json!({"query": "zeppelin"}))).await);
+    assert!(found.contains("Plan the zeppelin hangar"), "{found}");
+
+    let elsewhere = answer_text(&server.agent_mcp(&token, id, earlier_turns(json!({"query": "kumquat"}))).await);
+    assert_eq!(elsewhere, "No earlier messages match.");
+}
+
+#[tokio::test]
+async fn read_earlier_turns_is_refused_while_the_experiment_is_off() {
+    let server = Server::start().await;
+    let (_link, token) = server.online_node_with_token("laptop", "v0.11.0").await;
+    let id = server.node_conversation(&token).await;
+
+    let reply = server.agent_mcp(&token, id, earlier_turns(json!({}))).await;
+
+    assert_eq!(reply["result"]["isError"], true);
+    assert!(answer_text(&reply).contains("Continue elsewhere"));
+}
