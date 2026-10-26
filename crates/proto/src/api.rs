@@ -1539,6 +1539,8 @@ pub struct Assistant {
     pub next_choice: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<AssistantSecret>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<AssistantBackup>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1580,4 +1582,28 @@ pub struct AssistantFile {
     pub path: String,
     pub size: i64,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backed_up: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantBackup {
+    pub forge_id: Uuid,
+    pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetAssistantBackupRequest {
+    pub forge_id: Uuid,
+    pub repository: String,
+    #[serde(default)]
+    pub branch: Option<String>,
 }

@@ -19,6 +19,7 @@ mod conversations;
 mod git;
 mod goals;
 mod live_usage;
+mod assistant_backup;
 mod assistants;
 mod groups;
 mod device;
@@ -252,6 +253,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/assistants/{id}/prompt", post(assistants::prompt))
         .route("/api/v1/assistants/{id}/clear", post(assistants::clear))
         .route("/api/v1/assistants/{id}/files", get(assistants::list_files))
+        .route("/api/v1/assistants/{id}/backup", put(assistant_backup::set).delete(assistant_backup::clear))
+        .route("/api/v1/assistants/{id}/backup/pull", post(assistant_backup::pull))
         .route("/api/v1/assistants/{id}/secrets", get(assistants::list_secrets))
         .route("/api/v1/assistants/{id}/secrets/{name}", put(assistants::put_secret).delete(assistants::delete_secret))
         .route("/api/v1/assistants/{id}/files/{*path}", get(assistants::read_file).put(assistants::write_file).delete(assistants::delete_file))

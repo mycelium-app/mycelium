@@ -27,6 +27,7 @@ import mycelium.api.ModelProvider
 import mycelium.api.CreateAssistantRequest
 import mycelium.api.InstructionLayer
 import mycelium.api.AssistantSecret
+import mycelium.api.SetAssistantBackupRequest
 import mycelium.api.PatchAssistantRequest
 import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
@@ -186,6 +187,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
 
                     loaded?.let { StorageSection(store, it.id) }
                     loaded?.let { SecretsSection(store, it.id) }
+                    loaded?.let { BackupSection(store, state, it) }
                 }
             }
         }
@@ -263,11 +265,12 @@ private fun StorageSection(store: Store, assistantId: String) {
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
         if (files.isNotEmpty()) {
-            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 120.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
+            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 120.dp), ColumnSpec(max = 100.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
                 ContentRow(header = true) {
                     Label("Path", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Size", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Updated", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Backed up", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Box(Modifier)
                 }
 
@@ -278,6 +281,7 @@ private fun StorageSection(store: Store, assistantId: String) {
                         Label(file.path, style = Tokens.Type.Code, maxLines = 1)
                         Label(formatSize(file.size), color = colors.textMuted, maxLines = 1)
                         Label(ago(file.updatedAt), color = colors.textMuted, maxLines = 1)
+                        Label(if (file.backedUp) "Yes" else "No", color = colors.textMuted, maxLines = 1)
 
                         RowMenu(file.path) { close ->
                             MenuItem("Edit", onClick = { close(); attempt { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
@@ -395,6 +399,56 @@ private fun SecretsSection(store: Store, assistantId: String) {
                 icon = MyIcon.Plus,
                 variant = ButtonVariant.Outline,
             )
+        }
+    }
+}
+
+@Composable
+private fun BackupSection(store: Store, state: AppState, assistant: Assistant) {
+    val colors = MyTheme.colors
+    val backup = state.assistants[assistant.id]?.backup ?: assistant.backup
+    var forge by remember(assistant.id) { mutableStateOf<String?>(null) }
+    var repository by remember(assistant.id) { mutableStateOf("") }
+    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
+    val attempt = rememberAttempt { failure = it }
+
+    var forges by remember(assistant.id) { mutableStateOf(emptyList<mycelium.api.Forge>()) }
+
+    LaunchedEffect(assistant.id) {
+        attempt { forges = store.api.forges() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label("Backup", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        Label("Commits changes to a repository after each turn. Files matched by the .gitignore in storage stay out.", style = Tokens.Type.Meta, color = colors.textMuted)
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        if (backup != null) {
+            Label(backup.repository, style = Tokens.Type.Code)
+            Label(backup.error ?: backup.lastAt?.let { "Last backed up ${ago(it)}" } ?: "Not backed up yet", color = if (backup.error != null) colors.statusFailed else colors.textMuted)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                MyButton({ attempt { store.api.pullAssistantBackup(assistant.id) } }, text = "Pull from repository", variant = ButtonVariant.Outline)
+                MyButton({ attempt { store.api.clearAssistantBackup(assistant.id) } }, text = "Stop backing up", variant = ButtonVariant.Outline)
+            }
+        } else {
+            if (forges.isEmpty()) {
+                Label("Connect a forge in Settings, Forges to choose a repository.", color = colors.textMuted)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
+                    OptionMenu("Forge", forges.map { Choice(it.id, "${it.account} on ${it.baseUrl}") }, forge, { forge = it }, title = "Forge")
+                    TextInput(repository, { repository = it }, label = "Repository", placeholder = "owner/name", mono = true, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+                    MyButton(
+                        {
+                            val chosen = forge ?: forges.first().id
+
+                            attempt { store.api.setAssistantBackup(assistant.id, SetAssistantBackupRequest(chosen, repository.trim())) }
+                        },
+                        text = "Back up to this repository",
+                        variant = ButtonVariant.Outline,
+                    )
+                }
+            }
         }
     }
 }

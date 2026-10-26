@@ -14,7 +14,7 @@ use axum::body::Bytes;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
-use mycelium_proto::api::{Assistant, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
+use mycelium_proto::api::{Assistant, AssistantBackup, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
 use mycelium_proto::conversation::{AgentId, Conversation};
 use mycelium_proto::link::{ControlToNode, FolderFile};
 use mycelium_proto::stream::StreamMessage;
@@ -35,7 +35,7 @@ const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const SECRET_NAME_LIMIT: usize = 100;
 const MODEL_ERROR_MINUTES: i64 = 10;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
-const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.pinned_at, a.archived_at, a.created_at,
+const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.created_at,
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
     (select count(*) from conversations where assistant_id = a.id) as session_count,
@@ -49,6 +49,7 @@ struct AssistantRow {
     group_id: Option<Uuid>,
     preferences: Jsonb<AssistantPreferences>,
     conversation_id: Option<Uuid>,
+    backup: Option<Jsonb<AssistantBackup>>,
     pinned_at: Option<chrono::DateTime<chrono::Utc>>,
     archived_at: Option<chrono::DateTime<chrono::Utc>>,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -88,6 +89,7 @@ impl AssistantRow {
             instructions: None,
             next_choice: None,
             secrets: Vec::new(),
+            backup: self.backup.map(|backup| backup.0),
             created_at: self.created_at,
         }
     }
@@ -167,13 +169,13 @@ pub fn valid_path(path: &str) -> ApiResult<String> {
 }
 
 async fn files_of(state: &AppState, id: Uuid, prefix: &str) -> ApiResult<Vec<AssistantFile>> {
-    let rows = sqlx::query_as::<_, (String, i64, chrono::DateTime<chrono::Utc>)>("select path, length(content)::bigint, updated_at from assistant_files where assistant_id = $1 and starts_with(path, $2) order by path")
+    let rows = sqlx::query_as::<_, (String, i64, chrono::DateTime<chrono::Utc>, bool)>("select path, length(content)::bigint, updated_at, coalesce(backed_up_sha256 = sha256, false) from assistant_files where assistant_id = $1 and starts_with(path, $2) order by path")
         .bind(id)
         .bind(prefix)
         .fetch_all(&state.pool)
         .await?;
 
-    Ok(rows.into_iter().map(|(path, size, updated_at)| AssistantFile { path, size, updated_at }).collect())
+    Ok(rows.into_iter().map(|(path, size, updated_at, backed_up)| AssistantFile { path, size, updated_at, backed_up }).collect())
 }
 
 fn valid_name(name: &str) -> ApiResult<String> {
@@ -454,6 +456,7 @@ pub async fn write_file(State(state): State<AppState>, user: AuthUser, Path((id,
 
     store_file(&state, id, &path, &body).await?;
     publish(&state, user.id, id).await?;
+    crate::assistant_backup::trigger(&state, user.id, id);
 
     let written = files_of(&state, id, &path).await?.into_iter().find(|file| file.path == path);
 
@@ -470,6 +473,7 @@ pub async fn delete_file(State(state): State<AppState>, user: AuthUser, Path((id
     }
 
     publish(&state, user.id, id).await?;
+    crate::assistant_backup::trigger(&state, user.id, id);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -580,6 +584,7 @@ pub async fn file_tool(state: &AppState, conversation_id: Option<Uuid>, tool: &s
             match store_file(state, id, &path, content.as_bytes()).await {
                 Ok(()) => {
                     publish(state, owner, id).await?;
+                    crate::assistant_backup::trigger(state, owner, id);
 
                     Ok((format!("Wrote {path}."), false))
                 }
@@ -590,6 +595,7 @@ pub async fn file_tool(state: &AppState, conversation_id: Option<Uuid>, tool: &s
             let deleted = sqlx::query("delete from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).execute(&state.pool).await?;
 
             publish(state, owner, id).await?;
+            crate::assistant_backup::trigger(state, owner, id);
 
             match deleted.rows_affected() {
                 0 => Ok((format!("There is no file called {path}."), true)),
@@ -761,6 +767,7 @@ pub async fn copy_up(state: &AppState, owner: Uuid, node_id: Uuid, assistant_id:
     }
 
     publish(state, owner, assistant_id).await?;
+    crate::assistant_backup::trigger(state, owner, assistant_id);
 
     Ok(())
 }

@@ -51,6 +51,11 @@ pub enum ForgeError {
     Failed(u16),
 }
 
+pub struct TreeEntry {
+    pub path: String,
+    pub blob: String,
+}
+
 pub struct ForgeFile {
     pub text: String,
     pub commit: String,
@@ -392,6 +397,107 @@ impl ForgeApi {
             }
             ForgeKind::Gitlab => self.file(http, repository, path).await?.map(|file| file.commit).ok_or(ForgeError::Failed(status.as_u16())),
         }
+    }
+
+    pub async fn default_branch(&self, http: &reqwest::Client, repository: &str) -> Result<String, ForgeError> {
+        let project = match self.kind {
+            ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}")).await?,
+            ForgeKind::Gitlab => self.fetch(http, &format!("/projects/{}", encode_path(repository))).await?,
+        };
+
+        Ok(project["default_branch"].as_str().unwrap_or("main").to_string())
+    }
+
+    pub async fn tree(&self, http: &reqwest::Client, repository: &str, branch: &str) -> Result<Vec<TreeEntry>, ForgeError> {
+        let found = match self.kind {
+            ForgeKind::Github => match self.fetch(http, &format!("/repos/{repository}/git/trees/{}?recursive=1", encode_path(branch))).await {
+                Ok(body) => body["tree"].as_array().cloned().unwrap_or_default().into_iter().filter(|entry| entry["type"] == "blob").filter_map(|entry| Some(TreeEntry { path: entry["path"].as_str()?.to_string(), blob: entry["sha"].as_str()?.to_string() })).collect(),
+                Err(ForgeError::Failed(404 | 409)) => Vec::new(),
+                Err(error) => return Err(error),
+            },
+            ForgeKind::Gitlab => match self.pages(http, &format!("/projects/{}/repository/tree?recursive=true&ref={}", encode_path(repository), encode_path(branch))).await {
+                Ok(entries) => entries.into_iter().filter(|entry| entry["type"] == "blob").filter_map(|entry| Some(TreeEntry { path: entry["path"].as_str()?.to_string(), blob: entry["id"].as_str()?.to_string() })).collect(),
+                Err(ForgeError::Failed(404)) => Vec::new(),
+                Err(error) => return Err(error),
+            },
+        };
+
+        Ok(found)
+    }
+
+    pub async fn blob(&self, http: &reqwest::Client, repository: &str, branch: &str, path: &str) -> Result<Vec<u8>, ForgeError> {
+        let body = match self.kind {
+            ForgeKind::Github => self.fetch(http, &format!("/repos/{repository}/contents/{}?ref={}", encode_segments(path), encode_path(branch))).await?,
+            ForgeKind::Gitlab => self.fetch(http, &format!("/projects/{}/repository/files/{}?ref={}", encode_path(repository), encode_path(path), encode_path(branch))).await?,
+        };
+        let encoded: String = body["content"].as_str().unwrap_or_default().chars().filter(|character| !character.is_whitespace()).collect();
+
+        base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| ForgeError::Failed(200))
+    }
+
+    async fn send_change(&self, http: &reqwest::Client, method: reqwest::Method, url: String, body: Value) -> Result<Value, ForgeError> {
+        let sent = self.authorised(http.request(method, format!("{}{url}", self.api_url()))).json(&body).send().await;
+
+        self.invalidate();
+
+        let response = sent.map_err(|_| ForgeError::Unreachable)?;
+        let response = self.refused(response).await?;
+        let status = response.status();
+
+        if matches!(status.as_u16(), 400 | 409 | 422) {
+            return Err(ForgeError::Conflict);
+        }
+
+        if !status.is_success() {
+            return Err(ForgeError::Failed(status.as_u16()));
+        }
+
+        Ok(response.json().await.unwrap_or(Value::Null))
+    }
+
+    pub async fn commit_blob(&self, http: &reqwest::Client, repository: &str, branch: &str, path: &str, content: &[u8], message: &str, existing_blob: Option<&str>) -> Result<String, ForgeError> {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(content);
+
+        match self.kind {
+            ForgeKind::Github => {
+                let mut body = serde_json::json!({"message": message, "content": encoded, "branch": branch});
+
+                if let Some(blob) = existing_blob {
+                    body["sha"] = Value::String(blob.to_string());
+                }
+
+                let answer = self.send_change(http, reqwest::Method::PUT, format!("/repos/{repository}/contents/{}", encode_segments(path)), body).await?;
+
+                answer["commit"]["sha"].as_str().map(str::to_string).ok_or(ForgeError::Failed(200))
+            }
+            ForgeKind::Gitlab => {
+                let method = if existing_blob.is_some() { reqwest::Method::PUT } else { reqwest::Method::POST };
+                let body = serde_json::json!({"branch": branch, "content": encoded, "encoding": "base64", "commit_message": message});
+
+                self.send_change(http, method, format!("/projects/{}/repository/files/{}", encode_path(repository), encode_path(path)), body).await?;
+
+                let head = self.fetch(http, &format!("/projects/{}/repository/branches/{}", encode_path(repository), encode_path(branch))).await?;
+
+                head["commit"]["id"].as_str().map(str::to_string).ok_or(ForgeError::Failed(200))
+            }
+        }
+    }
+
+    pub async fn remove_blob(&self, http: &reqwest::Client, repository: &str, branch: &str, path: &str, message: &str, existing_blob: &str) -> Result<(), ForgeError> {
+        match self.kind {
+            ForgeKind::Github => {
+                let body = serde_json::json!({"message": message, "sha": existing_blob, "branch": branch});
+
+                self.send_change(http, reqwest::Method::DELETE, format!("/repos/{repository}/contents/{}", encode_segments(path)), body).await?;
+            }
+            ForgeKind::Gitlab => {
+                let body = serde_json::json!({"branch": branch, "commit_message": message});
+
+                self.send_change(http, reqwest::Method::DELETE, format!("/projects/{}/repository/files/{}", encode_path(repository), encode_path(path)), body).await?;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn issues(&self, http: &reqwest::Client, repository: &str, query: &str) -> Result<Vec<Issue>, ForgeError> {

@@ -574,6 +574,7 @@ data class Assistant(
     val instructions: String? = null,
     @SerialName("next_choice") val nextChoice: String? = null,
     val secrets: List<AssistantSecret> = emptyList(),
+    val backup: AssistantBackup? = null,
     @SerialName("created_at") val createdAt: String,
 )
 
@@ -584,7 +585,20 @@ data class AssistantSecret(val name: String, val description: String? = null, va
 data class PutAssistantSecretRequest(val value: String? = null, val description: String? = null)
 
 @Serializable
-data class AssistantFile(val path: String, val size: Long, @SerialName("updated_at") val updatedAt: String)
+data class AssistantFile(val path: String, val size: Long, @SerialName("updated_at") val updatedAt: String, @SerialName("backed_up") val backedUp: Boolean = false)
+
+@Serializable
+data class AssistantBackup(
+    @SerialName("forge_id") val forgeId: String,
+    val repository: String,
+    val branch: String? = null,
+    @SerialName("last_at") val lastAt: String? = null,
+    @SerialName("last_commit") val lastCommit: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class SetAssistantBackupRequest(@SerialName("forge_id") val forgeId: String, val repository: String, val branch: String? = null)
 
 @Serializable
 data class CreateAssistantRequest(

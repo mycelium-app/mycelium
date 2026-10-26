@@ -704,3 +704,105 @@ async fn a_secret_name_that_is_not_an_environment_variable_is_refused_with_an_ex
     assert_eq!((status, refused["error"].clone()), (400, json!("secret_name_invalid")));
     assert!(refused["message"].as_str().unwrap().contains("GITHUB_TOKEN"));
 }
+
+type Repository = Arc<Mutex<std::collections::BTreeMap<String, Vec<u8>>>>;
+
+fn fake_forge(repository: Repository) -> Router {
+    use axum::extract::Path as UrlPath;
+    use axum::http::StatusCode;
+
+    async fn read(State(repository): State<Repository>, UrlPath((_, _, path)): UrlPath<(String, String, String)>) -> Result<Json<Value>, StatusCode> {
+        let files = repository.lock().unwrap();
+        let content = files.get(&path).ok_or(StatusCode::NOT_FOUND)?;
+
+        Ok(Json(json!({"content": base64::engine::general_purpose::STANDARD.encode(content)})))
+    }
+
+    async fn write(State(repository): State<Repository>, UrlPath((_, _, path)): UrlPath<(String, String, String)>, Json(body): Json<Value>) -> Json<Value> {
+        let content = base64::engine::general_purpose::STANDARD.decode(body["content"].as_str().unwrap()).unwrap();
+        repository.lock().unwrap().insert(path, content);
+
+        Json(json!({"commit": {"sha": "commit-1"}}))
+    }
+
+    async fn remove(State(repository): State<Repository>, UrlPath((_, _, path)): UrlPath<(String, String, String)>) -> Json<Value> {
+        repository.lock().unwrap().remove(&path);
+
+        Json(json!({"commit": {"sha": "commit-2"}}))
+    }
+
+    async fn tree(State(repository): State<Repository>) -> Json<Value> {
+        let files = repository.lock().unwrap();
+
+        Json(json!({"tree": files.keys().map(|path| json!({"path": path, "type": "blob", "sha": format!("blob-{path}")})).collect::<Vec<_>>()}))
+    }
+
+    Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}", get(|| async { Json(json!({"default_branch": "main"})) }))
+        .route("/api/v3/repos/{owner}/{name}/git/trees/{branch}", get(tree))
+        .route("/api/v3/repos/{owner}/{name}/contents/{*path}", get(read).put(write).delete(remove))
+        .with_state(repository)
+}
+
+async fn backed_up_assistant(server: &Server, repository: &Repository) -> (String, Value) {
+    let base = serve(fake_forge(repository.clone())).await;
+    let (status, forge) = server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": "github", "base_url": base, "token": "ghp_0123456789abcdefghijklmnopqrstuvwxyz"}))).await;
+    assert_eq!(status, 201, "{forge}");
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief."})).await;
+    let id = assistant["id"].as_str().unwrap().to_string();
+
+    (id, forge)
+}
+
+fn remote_paths(repository: &Repository) -> Vec<String> {
+    repository.lock().unwrap().keys().cloned().collect()
+}
+
+#[tokio::test]
+async fn backup_commits_changed_files_skips_gitignored_ones_and_follows_deletions() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let repository = Repository::default();
+    let (id, forge) = backed_up_assistant(&server, &repository).await;
+    for (path, text) in [(".gitignore", "secret/\n*.tmp\n"), ("notes/a.md", "Shipped"), ("secret/x.md", "hidden"), ("cache.tmp", "temporary")] {
+        server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/{path}")).body(text)).await;
+    }
+
+    let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/backup")).json(&json!({"forge_id": forge["id"], "repository": "samexample/standup"}))).await;
+    assert_eq!(status, 200, "{saved}");
+
+    common::eventually("the files to reach the repository", || async { (remote_paths(&repository) == [".gitignore", "AGENTS.md", "notes/a.md"]).then_some(()) }).await;
+    let (_, files) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/files"))).await;
+    let flags: Vec<(String, bool)> = files.as_array().unwrap().iter().map(|file| (file["path"].as_str().unwrap().to_string(), file["backed_up"] == json!(true))).collect();
+    assert!(flags.contains(&("notes/a.md".to_string(), true)) && flags.contains(&("secret/x.md".to_string(), false)), "{flags:?}");
+
+    server.user.json(server.user.delete(&format!("/api/v1/assistants/{id}/files/notes/a.md"))).await;
+    common::eventually("the deletion to reach the repository", || async { (remote_paths(&repository) == [".gitignore", "AGENTS.md"]).then_some(()) }).await;
+    let (_, assistant) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+    assert!(assistant["backup"]["last_at"].is_string() && assistant["backup"].get("error").is_none(), "{assistant}");
+}
+
+#[tokio::test]
+async fn pull_replaces_storage_with_the_repository_and_keeps_ignored_files() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let repository = Repository::default();
+    repository.lock().unwrap().extend([("AGENTS.md".to_string(), b"Remote rules".to_vec()), ("README.md".to_string(), b"Hello".to_vec()), (".gitignore".to_string(), b"secret/\n".to_vec())]);
+    let (id, forge) = backed_up_assistant(&server, &repository).await;
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/.gitignore")).body("secret/\n")).await;
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/secret/x.md")).body("hidden")).await;
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/old.md")).body("old")).await;
+    let (status, _) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/backup")).json(&json!({"forge_id": forge["id"], "repository": "samexample/standup"}))).await;
+    assert_eq!(status, 200);
+
+    let (status, pulled) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/backup/pull"))).await;
+    assert_eq!(status, 200, "{pulled}");
+
+    let (_, files) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/files"))).await;
+    let paths: Vec<&str> = files.as_array().unwrap().iter().map(|file| file["path"].as_str().unwrap()).collect();
+    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+    assert_eq!(paths, vec![".gitignore", "AGENTS.md", "README.md", "secret/x.md"]);
+    assert_eq!(fetched["instructions"], json!("Remote rules"));
+}

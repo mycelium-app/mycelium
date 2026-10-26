@@ -106,6 +106,7 @@ pub struct Hub {
     stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
     folder_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<FolderAnswer>)>>,
     workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
+    backups: Mutex<std::collections::HashSet<Uuid>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
@@ -345,6 +346,16 @@ impl Hub {
     pub fn forget_folder_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.folder_requests.lock() {
             requests.remove(&request_id);
+        }
+    }
+
+    pub fn begin_backup(&self, assistant_id: Uuid) -> bool {
+        self.backups.lock().is_ok_and(|mut running| running.insert(assistant_id))
+    }
+
+    pub fn end_backup(&self, assistant_id: Uuid) {
+        if let Ok(mut running) = self.backups.lock() {
+            running.remove(&assistant_id);
         }
     }
 

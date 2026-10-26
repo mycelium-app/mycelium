@@ -305,6 +305,15 @@ class MyceliumApi(
         call("/assistants/$id/files/${filePath(path)}") { client.delete(it) { authorise() } }
     }
 
+    suspend fun setAssistantBackup(id: String, request: SetAssistantBackupRequest): Assistant =
+        call("/assistants/$id/backup") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun clearAssistantBackup(id: String) {
+        call("/assistants/$id/backup") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun pullAssistantBackup(id: String): Assistant = call("/assistants/$id/backup/pull") { client.post(it) { authorise() } }.body()
+
     suspend fun assistantSecrets(id: String): List<AssistantSecret> = call("/assistants/$id/secrets") { client.get(it) { authorise() } }.body()
 
     suspend fun putAssistantSecret(id: String, name: String, request: PutAssistantSecretRequest): AssistantSecret =

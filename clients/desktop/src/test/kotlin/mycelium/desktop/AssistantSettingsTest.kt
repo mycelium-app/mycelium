@@ -35,6 +35,8 @@ private const val Saved = """{"id":"a1","name":"Stand-up","description":"Daily s
 
 private const val Nodes = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.11.0","address":"10.0.0.5","online":true,"draining":false,"sessions":[],"agents":[{"agent":"claude","available":true}],"logins":[]}]"""
 
+private const val Forges = """[{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"ghp_…","organisations":[],"created_at":"2026-10-22T10:00:00Z"}]"""
+
 private const val Secrets = """[{"name":"GITHUB_TOKEN","description":"Pushes","state":"waiting"}]"""
 
 private const val Files = """[{"path":"AGENTS.md","size":9,"updated_at":"2026-10-22T10:00:00Z"},{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}]"""
@@ -70,6 +72,8 @@ class AssistantSettingsTest {
 
             val reply = when {
                 path.endsWith("/experiments") -> EnabledExperiments
+                path.endsWith("/forges") -> Forges
+                path.endsWith("/assistants/a1/backup") && request.method == HttpMethod.Put -> Saved
                 path.endsWith("/assistants/a1/secrets") -> Secrets
                 path.endsWith("/secrets/GITHUB_TOKEN") && request.method == HttpMethod.Put -> """{"name":"GITHUB_TOKEN","state":"set","set_by":"person"}"""
                 path.endsWith("/assistants/a1/files") -> Files
@@ -154,5 +158,17 @@ class AssistantSettingsTest {
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/GITHUB_TOKEN" } }
         assertEquals("""{"value":"ghp_abcdef"}""", requests.last { it.first.startsWith("PUT") }.second)
         assertEquals(0, rule.onAllNodesWithText("ghp_abcdef").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aRepositoryIsChosenForTheBackup() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Repository").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Repository").performScrollTo().performTextInput("samexample/standup")
+        rule.onNodeWithText("Back up to this repository").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/backup" } }
+        assertEquals("""{"forge_id":"f1","repository":"samexample/standup"}""", requests.last { it.first == "PUT /api/v1/assistants/a1/backup" }.second)
     }
 }
