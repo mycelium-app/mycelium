@@ -381,7 +381,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })

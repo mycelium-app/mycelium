@@ -36,6 +36,8 @@ import mycelium.api.CreateTaskRequest
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
+import mycelium.api.StartProposal
+import mycelium.api.StartProposalChoice
 import mycelium.api.MoveProgress
 import mycelium.api.MoveRequest
 import mycelium.api.MoveState
@@ -497,6 +499,31 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val declined = api.declineMessageProposal(proposal.id)
 
         mutableState.update { it.copy(messageProposals = it.messageProposals + (declined.id to declined)) }
+    }
+
+    suspend fun refreshStartProposals() {
+        val proposals = api.startProposals()
+
+        mutableState.update { it.copy(startProposals = proposals.associateBy { proposal -> proposal.id }) }
+    }
+
+    suspend fun approveStartProposal(proposal: StartProposal, choices: Map<String, StartProposalChoice>) {
+        val started = api.approveStartProposal(proposal.id, choices)
+
+        mutableState.update { it.copy(startProposals = it.startProposals + (started.id to started)) }
+    }
+
+    suspend fun connectStartProposal(proposal: StartProposal, choices: Map<String, StartProposalChoice>) {
+        val started = api.approveAndConnectStartProposal(proposal.id, choices)
+
+        mutableState.update { it.copy(startProposals = it.startProposals + (started.id to started)) }
+        refreshConversationConnections()
+    }
+
+    suspend fun declineStartProposal(proposal: StartProposal) {
+        val declined = api.declineStartProposal(proposal.id)
+
+        mutableState.update { it.copy(startProposals = it.startProposals + (declined.id to declined)) }
     }
 
     suspend fun refreshArtifactAccessRequests() {

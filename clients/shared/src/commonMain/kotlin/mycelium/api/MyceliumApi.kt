@@ -446,6 +446,17 @@ class MyceliumApi(
     suspend fun declineMessageProposal(id: String): MessageProposal =
         call("/message-proposals/$id/decline") { client.post(it) { authorise() } }.body()
 
+    suspend fun startProposals(): List<StartProposal> = call("/start-proposals") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveStartProposal(id: String, choices: Map<String, StartProposalChoice>): StartProposal =
+        call("/start-proposals/$id/approve") { client.post(it) { authorise(); json(ApproveStartProposalRequest(choices)) } }.body()
+
+    suspend fun approveAndConnectStartProposal(id: String, choices: Map<String, StartProposalChoice>): StartProposal =
+        call("/start-proposals/$id/connect") { client.post(it) { authorise(); json(ApproveStartProposalRequest(choices)) } }.body()
+
+    suspend fun declineStartProposal(id: String): StartProposal =
+        call("/start-proposals/$id/decline") { client.post(it) { authorise() } }.body()
+
     suspend fun apiAccessRequests(): List<ApiAccessRequest> = call("/api-access-requests") { client.get(it) { authorise() } }.body()
 
     suspend fun approveApiAccessRequest(id: String, scopes: List<String>): ApiAccessRequest =

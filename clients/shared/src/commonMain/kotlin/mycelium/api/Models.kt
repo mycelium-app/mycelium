@@ -429,6 +429,50 @@ data class MessageProposal(
 }
 
 @Serializable
+data class StartProposalNode(val id: String, val name: String, val online: Boolean)
+
+@Serializable
+data class StartProposalStep(
+    val key: String,
+    val title: String,
+    @SerialName("depends_on") val dependsOn: List<String> = emptyList(),
+    val gate: Boolean = false,
+    val node: StartProposalNode? = null,
+    val folder: String? = null,
+    val agent: String? = null,
+    val account: String? = null,
+    val model: String? = null,
+    @SerialName("first_message") val firstMessage: String = "",
+    @SerialName("node_choices") val nodeChoices: List<StartProposalNode> = emptyList(),
+    @SerialName("account_choices") val accountChoices: List<String> = emptyList(),
+)
+
+@Serializable
+data class StartProposal(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val kind: String,
+    val title: String,
+    val steps: List<StartProposalStep>,
+    val state: String,
+    val connect: Boolean = false,
+    @SerialName("workflow_id") val workflowId: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("decided_at") val decidedAt: String? = null,
+) {
+    val waiting: Boolean get() = state == "proposed"
+}
+
+@Serializable
+data class StartProposalChoice(
+    @SerialName("node_id") val nodeId: String? = null,
+    val account: String? = null,
+)
+
+@Serializable
+data class ApproveStartProposalRequest(val choices: Map<String, StartProposalChoice> = emptyMap())
+
+@Serializable
 data class ApiAccessRequest(
     val id: String,
     @SerialName("conversation_id") val conversationId: String,
@@ -1367,6 +1411,8 @@ sealed interface StreamMessage {
 
     data class MessageProposalChanged(val proposal: MessageProposal) : StreamMessage
 
+    data class StartProposalChanged(val proposal: StartProposal) : StreamMessage
+
     data class ConversationConnectionChanged(val connection: ConversationConnection) : StreamMessage
 
     data class GroupConnectionChanged(val connection: GroupConnection) : StreamMessage
@@ -1440,6 +1486,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "conversation_connection" -> StreamMessage.ConversationConnectionChanged(MyceliumJson.decodeFromJsonElement(ConversationConnection.serializer(), element))
         "group_connection" -> StreamMessage.GroupConnectionChanged(MyceliumJson.decodeFromJsonElement(GroupConnection.serializer(), element))
         "message_proposal" -> StreamMessage.MessageProposalChanged(MyceliumJson.decodeFromJsonElement(MessageProposal.serializer(), element))
+        "start_proposal" -> StreamMessage.StartProposalChanged(MyceliumJson.decodeFromJsonElement(StartProposal.serializer(), element))
         "api_access_request" -> StreamMessage.ApiAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ApiAccessRequest.serializer(), element))
         "ssh_access_request" -> StreamMessage.SshAccessRequestChanged(MyceliumJson.decodeFromJsonElement(SshAccessRequest.serializer(), element))
         "memory" -> StreamMessage.MemoryChanged(MyceliumJson.decodeFromJsonElement(Memory.serializer(), element))

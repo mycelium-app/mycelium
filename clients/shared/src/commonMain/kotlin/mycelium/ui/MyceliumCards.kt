@@ -26,10 +26,13 @@ import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
 import mycelium.api.MessageProposal
+import mycelium.api.StartProposal
+import mycelium.api.StartProposalChoice
 import mycelium.api.Task
 import mycelium.api.TaskStatuses
 import mycelium.state.AppState
 import mycelium.state.MyceliumCall
+import mycelium.state.MyceliumTool
 import mycelium.state.Store
 import mycelium.state.apiAccessDuration
 import mycelium.state.apiScopeLabel
@@ -53,6 +56,12 @@ class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh:
 val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
 fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) })
+
+class StartProposals(val proposals: Map<String, StartProposal>, val refresh: suspend () -> Unit, val approve: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val connect: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit, val decline: suspend (StartProposal) -> Unit)
+
+val LocalStartProposals = compositionLocalOf<StartProposals?> { null }
+
+fun startProposals(store: Store, state: AppState) = StartProposals(state.startProposals, { store.refreshStartProposals() }, { proposal, choices -> store.approveStartProposal(proposal, choices) }, { proposal, choices -> store.connectStartProposal(proposal, choices) }, { proposal -> store.declineStartProposal(proposal) })
 
 class ApiAccessRequests(val requests: Map<String, ApiAccessRequest>, val refresh: suspend () -> Unit, val approve: suspend (ApiAccessRequest, List<String>) -> Unit, val decline: suspend (ApiAccessRequest) -> Unit)
 
@@ -94,6 +103,15 @@ private fun proposedMessage(parsed: MyceliumCall): MessageProposal? {
     val proposals = LocalMessageProposals.current?.proposals ?: return null
 
     return sending.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.message == sending.message && it.reason == sending.reason }.maxByOrNull { it.createdAt }
+}
+
+@Composable
+private fun proposedStart(parsed: MyceliumCall): StartProposal? {
+    val starting = parsed as? MyceliumCall.StartProposed ?: return null
+
+    val proposals = LocalStartProposals.current?.proposals ?: return null
+
+    return starting.proposalId?.let { proposals[it] } ?: proposals.values.filter { it.title == starting.title }.maxByOrNull { it.createdAt }
 }
 
 @Composable
@@ -142,11 +160,13 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.SetProjectIcon -> MyIcon.Image
         is MyceliumCall.FindConversations -> MyIcon.Search
         is MyceliumCall.SendToConversation -> MyIcon.Send
+        is MyceliumCall.StartProposed -> MyIcon.Layers
         is MyceliumCall.RequestApiAccess, is MyceliumCall.RequestArtifactAccess -> MyIcon.Key
         is MyceliumCall.RequestSshAccess -> MyIcon.Terminal
         is MyceliumCall.CreateArtifact, is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
     val proposal = proposedMessage(parsed)
+    val start = proposedStart(parsed)
     val artifactAccess = LocalArtifactAccessControls.current?.state?.artifactAccessRequests?.values?.firstOrNull { it.id == (parsed as? MyceliumCall.RequestArtifactAccess)?.requestId }
     val access = requestedAccess(parsed)
     val sshAccess = requestedSshAccess(parsed)
@@ -157,6 +177,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.ProposeSchedule -> "Waiting for confirmation"
         is MyceliumCall.ProposeInstructionsEdit -> "Waiting for approval"
         is MyceliumCall.SendToConversation -> "Waiting for approval"
+        is MyceliumCall.StartProposed -> "Waiting for approval"
         is MyceliumCall.RequestArtifactAccess -> "Waiting for approval"
         is MyceliumCall.RequestApiAccess -> "Waiting for approval"
         is MyceliumCall.RequestSshAccess -> "Waiting for approval"
@@ -175,6 +196,8 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
                 finished && answered -> StatusMark("Answered", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "sent" -> StatusMark("Sent", Tone.Muted, MyIcon.Check)
                 finished && proposal?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
+                finished && start?.state == "started" -> StatusMark("Started", Tone.Muted, MyIcon.Check)
+                finished && start?.state == "declined" -> StatusMark("Not created", Tone.Muted, MyIcon.Close)
                 finished && artifactAccess?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
                 finished && artifactAccess?.state == "declined" -> StatusMark("Declined", Tone.Muted, MyIcon.Close)
                 finished && access?.state == "approved" -> StatusMark("Approved", Tone.Muted, MyIcon.Check)
@@ -213,6 +236,7 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.ProposeInstructionsEdit -> "Proposed an edit to the ${parsed.layer ?: "agent"} instructions"
     is MyceliumCall.FindConversations -> if (parsed.query != null) "Searched conversations for “${parsed.query}”" else "Listed recent conversations"
     is MyceliumCall.SendToConversation -> if (parsed.target.isNotEmpty()) "Proposed a message to ${parsed.target}" else "Proposed a message"
+    is MyceliumCall.StartProposed -> "Proposed ${if (parsed.tool == MyceliumTool.StartWorkflow) "a workflow" else "a subagent"}: ${parsed.title}"
     is MyceliumCall.RequestArtifactAccess -> "Asked for artefact access"
     is MyceliumCall.RequestApiAccess -> "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
@@ -305,6 +329,8 @@ private fun MyceliumBody(parsed: MyceliumCall) {
         }
 
         is MyceliumCall.SendToConversation -> SendToConversationBody(parsed)
+
+        is MyceliumCall.StartProposed -> StartProposedBody(parsed)
 
         is MyceliumCall.RequestArtifactAccess -> {
             val controls = LocalArtifactAccessControls.current
@@ -426,6 +452,89 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
             }
 
             MyButton({ decide(proposals.decline) }, text = "Don't send", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        }
+    }
+}
+
+@Composable
+private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
+    val colors = MyTheme.colors
+    val proposals = LocalStartProposals.current
+    val proposal = proposedStart(parsed)
+    val deciding = rememberDeciding()
+    var chosen by remember(proposal?.id) { mutableStateOf<Map<String, StartProposalChoice>>(emptyMap()) }
+
+    LaunchedEffect(proposal == null) {
+        if (proposals != null && proposal == null) {
+            proposals.refresh()
+        }
+    }
+
+    for (step in proposal?.steps.orEmpty()) {
+        val waiting = proposal != null && proposal.waiting
+        val choice = chosen[step.key]
+        val node = step.nodeChoices.firstOrNull { it.id == choice?.nodeId } ?: step.node
+
+        Label(step.title, style = Tokens.Type.UiStrong, maxLines = 1)
+
+        if (step.gate) {
+            Label("Waits for your decision", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (step.nodeChoices.isEmpty() && node != null) {
+            Label("Node ${node.name}, ${if (node.online) "online" else "offline"}", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (waiting && step.nodeChoices.isNotEmpty()) {
+            val labels = step.nodeChoices.associateBy { "${it.name}, ${if (it.online) "online" else "offline"}" }
+
+            Segmented(labels.keys.toList(), labels.entries.firstOrNull { it.value.id == choice?.nodeId }?.key.orEmpty(), { label -> labels[label]?.let { picked -> chosen = chosen + (step.key to (chosen[step.key] ?: StartProposalChoice()).copy(nodeId = picked.id)) } }, "Node for ${step.title}")
+        }
+
+        step.folder?.let { Label("Folder $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+
+        val using = listOfNotNull(step.agent, step.account?.takeIf { step.accountChoices.isEmpty() }, step.model).joinToString(" · ")
+
+        if (using.isNotEmpty()) {
+            Label(using, style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (waiting && step.accountChoices.isNotEmpty()) {
+            Segmented(step.accountChoices, choice?.account.orEmpty(), { picked -> chosen = chosen + (step.key to (chosen[step.key] ?: StartProposalChoice()).copy(account = picked)) }, "Account for ${step.title}")
+        }
+
+        if (step.dependsOn.isNotEmpty()) {
+            Label("After ${step.dependsOn.joinToString(", ")}", style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
+        if (step.firstMessage.isNotEmpty()) {
+            Label(step.firstMessage, style = Tokens.Type.Ui, maxLines = ExcerptLines)
+        }
+    }
+
+    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
+
+    if (proposals != null && proposal != null && proposal.waiting) {
+        val missing = proposal.steps.firstNotNullOfOrNull { step ->
+            when {
+                step.nodeChoices.isNotEmpty() && chosen[step.key]?.nodeId == null -> "Choose a node for ${step.title}"
+                step.accountChoices.isNotEmpty() && chosen[step.key]?.account == null -> "Choose an account for ${step.title}"
+                else -> null
+            }
+        }
+
+        fun decide(decision: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit) {
+            if (missing != null) {
+                deciding.failure = missing
+            } else {
+                deciding.decide(proposal) { decision(it, chosen) }
+            }
+        }
+
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
+            MyButton({ decide(proposals.approve) }, text = "Create", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+            MyButton({ decide(proposals.connect) }, text = "Create and connect", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ deciding.decide(proposal, proposals.decline) }, text = "Don't create", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 }

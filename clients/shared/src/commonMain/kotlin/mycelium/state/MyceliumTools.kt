@@ -15,6 +15,8 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     SetProjectIcon("set_project_icon", "Set project icon", "Setting project icon"),
     FindConversations("find_conversations", "Find conversations", "Finding conversations"),
     SendToConversation("send_to_conversation", "Send to conversation", "Proposing a message"),
+    StartSubagent("start_subagent", "Start subagent", "Proposing a subagent"),
+    StartWorkflow("start_workflow", "Start workflow", "Proposing a workflow"),
     RequestArtifactAccess("request_artifact_access", "Request artefact access", "Requesting artefact access"),
     RequestApiAccess("request_api_access", "Request API access", "Requesting API access"),
     RequestSshAccess("request_ssh_access", "Request SSH access", "Requesting SSH access"),
@@ -63,6 +65,8 @@ sealed interface MyceliumCall {
         override val tool = MyceliumTool.SendToConversation
     }
 
+    data class StartProposed(override val tool: MyceliumTool, val title: String, val proposalId: String? = null) : MyceliumCall
+
     data class RequestArtifactAccess(val artifactId: String, val permission: String, val reason: String, val requestId: String?) : MyceliumCall {
         override val tool = MyceliumTool.RequestArtifactAccess
     }
@@ -106,6 +110,7 @@ private val proposedLayer = Regex("made for the (.+) instructions\\.")
 private val askedQuestion = Regex("^Question (\\S+) asked")
 private val foundConversation = Regex("^[0-9a-fA-F-]{36}: (.*)$")
 private val waitingToSend = Regex("^Waiting for the person to approve sending this to (.+?)(?: \\(proposal ([0-9a-fA-F-]{36})\\))?\\.$")
+private val waitingToStart = Regex("^Waiting for the person to approve starting .+ \\(proposal ([0-9a-fA-F-]{36})\\)\\.")
 private val waitingForApiAccess = Regex("^Waiting for the person to approve API access \\(request ([0-9a-fA-F-]{36})\\)\\.$")
 private val waitingForSshAccess = Regex("^Waiting for the person to approve SSH access to (.+?) \\(request ([0-9a-fA-F-]{36})\\)\\.$")
 private val createdArtifact = Regex("^Created (\\S+) \"(.*)\" \\(artifact ([^,)\\s]+), version (\\d+)\\)\\.$")
@@ -208,6 +213,13 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val target = waiting?.groupValues?.get(1) ?: fields.string("conversation")?.trim().orEmpty()
 
             MyceliumCall.SendToConversation(target, message, fields.string("reason")?.trim().orEmpty(), waiting?.groupValues?.get(2)?.ifEmpty { null })
+        }
+
+        MyceliumTool.StartSubagent, MyceliumTool.StartWorkflow -> {
+            val plan = if (tool == MyceliumTool.StartSubagent) fields["step"] else fields["plan"]
+            val title = (plan as? JsonObject)?.string("title")?.trim()?.ifEmpty { null } ?: return null
+
+            MyceliumCall.StartProposed(tool, title, waitingToStart.find(output.trim())?.groupValues?.get(1))
         }
 
         MyceliumTool.RequestArtifactAccess -> {

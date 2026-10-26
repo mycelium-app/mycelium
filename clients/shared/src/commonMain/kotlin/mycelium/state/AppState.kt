@@ -14,6 +14,7 @@ import mycelium.api.Memory
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
+import mycelium.api.StartProposal
 import mycelium.api.MoveProgress
 import mycelium.api.Walkthrough
 import mycelium.api.EventKinds
@@ -59,6 +60,7 @@ data class AppState(
     val conversationConnections: Map<String, mycelium.api.ConversationConnection> = emptyMap(),
     val groupConnections: Map<String, mycelium.api.GroupConnection> = emptyMap(),
     val messageProposals: Map<String, MessageProposal> = emptyMap(),
+    val startProposals: Map<String, StartProposal> = emptyMap(),
     val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
     val sshAccessRequests: Map<String, SshAccessRequest> = emptyMap(),
     val memories: Map<String, Memory> = emptyMap(),
@@ -170,6 +172,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ConversationConnectionChanged -> state.copy(conversationConnections = if (message.connection.revokedAt == null) state.conversationConnections + (message.connection.id to message.connection) else state.conversationConnections - message.connection.id)
     is StreamMessage.GroupConnectionChanged -> state.copy(groupConnections = if (message.connection.revokedAt == null) state.groupConnections + (message.connection.id to message.connection) else state.groupConnections - message.connection.id)
     is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
+    is StreamMessage.StartProposalChanged -> state.copy(startProposals = state.startProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.ApiAccessRequestChanged -> state.copy(apiAccessRequests = state.apiAccessRequests + (message.request.id to message.request))
     is StreamMessage.SshAccessRequestChanged -> state.copy(sshAccessRequests = state.sshAccessRequests + (message.request.id to message.request))
