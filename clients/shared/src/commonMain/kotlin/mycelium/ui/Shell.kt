@@ -504,8 +504,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 } +
                 Choice(NoGroup, "No group")
 
-            Box(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S1_5)) {
-                OptionMenu("Group", choices, groupFilter.value, groupFilter.choose, title = "Show", icon = MyIcon.Layers, size = ButtonSize.Sm, fill = true)
+            Box(Modifier.fillMaxWidth().padding(start = Tokens.Space.S1_5, end = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5)) {
+                OptionMenu("Group", choices, groupFilter.value, groupFilter.choose, title = "Show", icon = MyIcon.Layers, fill = true)
             }
         }
 
