@@ -135,10 +135,16 @@ pub async fn instructions_of(state: &AppState, id: Uuid) -> ApiResult<String> {
     Ok(String::from_utf8_lossy(&content.unwrap_or_default()).into_owned())
 }
 
-pub async fn store_file(state: &AppState, id: Uuid, path: &str, content: &[u8]) -> ApiResult<()> {
+fn check_file_size(path: &str, content: &[u8]) -> ApiResult<()> {
     if content.len() > FILE_LIMIT {
         return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "file_too_large", format!("{path} is over 1 MiB. Shorten it or split it into smaller files.")));
     }
+
+    Ok(())
+}
+
+pub async fn store_file(state: &AppState, id: Uuid, path: &str, content: &[u8]) -> ApiResult<()> {
+    check_file_size(path, content)?;
 
     let others = sqlx::query_scalar::<_, i64>("select coalesce(sum(length(content)), 0)::bigint from assistant_files where assistant_id = $1 and path <> $2").bind(id).bind(path).fetch_one(&state.pool).await?;
 
@@ -236,6 +242,9 @@ async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &Assis
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateAssistantRequest>) -> ApiResult<(StatusCode, Json<Assistant>)> {
     let name = valid_name(&request.name)?;
     let preferences = request.preferences.unwrap_or_default();
+    let instructions = request.instructions.unwrap_or_default();
+
+    check_file_size(INSTRUCTIONS_PATH, instructions.as_bytes())?;
 
     if let Some(group_id) = request.group_id {
         groups::find_owned(&state, group_id, user.id).await?;
@@ -258,7 +267,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         Err(cause) => return Err(cause.into()),
     };
 
-    store_file(&state, id, INSTRUCTIONS_PATH, request.instructions.unwrap_or_default().as_bytes()).await?;
+    store_file(&state, id, INSTRUCTIONS_PATH, instructions.as_bytes()).await?;
 
     let assistant = publish(&state, user.id, id).await?;
 

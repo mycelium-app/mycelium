@@ -864,3 +864,14 @@ async fn a_schedule_on_an_assistant_prompts_its_current_session() {
     assert_eq!(said, vec!["Post the stand-up every weekday", "Post the stand-up"]);
     assert_eq!(fake.requests.lock().unwrap().len(), 3);
 }
+
+#[tokio::test]
+async fn oversized_instructions_are_refused_without_creating_the_assistant() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+
+    let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Stand-up", "instructions": "x".repeat(1024 * 1024 + 1)}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/assistants")).await;
+
+    assert_eq!((status, refused["error"].clone(), listed), (413, json!("file_too_large"), json!([])));
+}
