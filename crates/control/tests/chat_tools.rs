@@ -718,6 +718,50 @@ async fn tool_servers_are_added_checked_switched_and_removed_without_returning_t
     assert!(remote.seen.lock().unwrap().iter().all(|(_, _, headers)| headers.get("mcp-protocol-version").is_some()));
 }
 
+async fn add_outline(server: &Server, url: &str, key: Option<&str>) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Docs", "kind": "outline", "url": url, "bearer_token": key}))).await
+}
+
+#[tokio::test]
+async fn an_outline_address_resolves_to_its_mcp_endpoint_and_connects_with_an_api_key() {
+    let server = Server::start().await;
+    let (router, _) = remote_server(false);
+    let base = serve(router).await;
+
+    let (status, added) = add_outline(&server, &base, Some(MCP_TOKEN)).await;
+
+    assert_eq!(status, 201, "{added}");
+    assert_eq!((added["kind"].as_str(), added["url"].as_str().map(str::to_string)), (Some("mcp"), Some(format!("{base}/mcp"))));
+    assert_eq!(added["settings"], json!({"app": "outline"}));
+    assert_eq!(added["tools"][0]["name"], "get_weather");
+}
+
+#[tokio::test]
+async fn an_outline_address_that_already_ends_in_mcp_is_used_as_given() {
+    let server = Server::start().await;
+    let (router, _) = remote_server(false);
+    let base = serve(router).await;
+
+    let (_, added) = add_outline(&server, &format!("{base}/mcp"), Some(MCP_TOKEN)).await;
+
+    assert_eq!(added["url"], json!(format!("{base}/mcp")));
+}
+
+#[tokio::test]
+async fn outline_refusing_the_api_key_says_to_check_the_key_and_stores_nothing() {
+    let server = Server::start().await;
+    let (router, _) = remote_server(false);
+    let base = serve(router).await;
+
+    let (status, refused) = add_outline(&server, &base, Some("wrong")).await;
+    let (_, missing) = add_outline(&server, &base, None).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    assert_eq!((status, refused["message"].as_str()), (400, Some("Outline refused that API key. Check it was copied whole and has not been revoked.")));
+    assert_eq!((missing["error"].as_str(), missing["message"].as_str()), (Some("api_key_required"), Some("Enter your Outline API key. Create one in Outline under Settings, API & Apps.")));
+    assert_eq!(listed, json!([]));
+}
+
 #[tokio::test]
 async fn a_tool_server_is_renamed_with_the_same_rules_as_adding_one() {
     let server = Server::start().await;

@@ -2,16 +2,55 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::forges::token_hint;
 use crate::integrations::{Credentials, Integration};
-use crate::mcp_client::{McpConnection, McpTool};
+use crate::mcp_client::{McpConnection, McpError, McpTool};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{ChatToolInfo, ChatToolServer, CreateChatToolServerRequest, PatchChatToolServerRequest};
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub const OWN_SERVER: &str = "mycelium";
+
+pub struct KnownApp {
+    pub id: &'static str,
+    pub stored_kind: &'static str,
+    pub stored_in_settings: bool,
+    pub key_prompt: &'static str,
+    pub refused: &'static str,
+    pub default_path: &'static str,
+    pub keeps_path: fn(&str) -> bool,
+}
+
+pub const KNOWN_APPS: [KnownApp; 1] = [KnownApp {
+    id: "outline",
+    stored_kind: "mcp",
+    stored_in_settings: true,
+    key_prompt: "Enter your Outline API key. Create one in Outline under Settings, API & Apps.",
+    refused: "Outline refused that API key. Check it was copied whole and has not been revoked.",
+    default_path: "/mcp",
+    keeps_path: |path| path.trim_end_matches('/').ends_with("/mcp"),
+}];
+
+impl KnownApp {
+    fn address(&self, parsed: &url::Url) -> String {
+        if (self.keeps_path)(parsed.path()) {
+            return parsed.as_str().to_string();
+        }
+
+        let mut resolved = parsed.clone();
+        resolved.set_path(self.default_path);
+        resolved.set_query(None);
+        resolved.set_fragment(None);
+
+        resolved.as_str().to_string()
+    }
+}
+
+fn known_app(id: &str) -> Option<&'static KnownApp> {
+    KNOWN_APPS.iter().find(|app| app.id == id)
+}
 const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, enabled, always_allow, tools, created_at";
 
 #[derive(sqlx::FromRow, Clone)]
@@ -43,6 +82,10 @@ pub fn slug(name: &str) -> String {
 }
 
 impl ServerRow {
+    fn known_app(&self) -> Option<&'static KnownApp> {
+        known_app(&self.kind).or_else(|| self.settings["app"].as_str().and_then(known_app))
+    }
+
     pub fn to_proto(&self) -> ChatToolServer {
         ChatToolServer {
             id: self.id,
@@ -64,9 +107,12 @@ fn stored(tools: Vec<McpTool>) -> Vec<StoredTool> {
     tools.into_iter().map(|tool| StoredTool { name: tool.name, description: tool.description, input_schema: tool.input_schema }).collect()
 }
 
-async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>) -> ApiResult<Vec<StoredTool>> {
+async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
     let mut connection = McpConnection::new(&state.http, url, token);
-    let tools = connection.list_tools().await.map_err(|error| ApiError::bad_request("tool_server_failed", error.describe(name)))?;
+    let tools = connection.list_tools().await.map_err(|error| match (&error, app) {
+        (McpError::Rejected, Some(app)) => ApiError::bad_request("tool_server_failed", app.refused),
+        _ => ApiError::bad_request("tool_server_failed", error.describe(name)),
+    })?;
 
     Ok(stored(tools))
 }
@@ -110,8 +156,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     let kind = request.kind.as_deref().map(str::trim).filter(|kind| !kind.is_empty()).unwrap_or("mcp");
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+    let app = known_app(kind);
     let integration = match kind {
         "mcp" => None,
+        _ if app.is_some() => None,
         other => match Integration::parse(other) {
             Some(integration) => Some(integration),
             None => return Err(ApiError::bad_request("kind_invalid", "Choose MCP or one of the built-in integrations, such as Zulip, Email or Stoat.")),
@@ -125,9 +173,16 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 return Err(ApiError::bad_request("url_invalid", "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp, or https://example.zulipchat.com for Zulip."));
             };
 
-            parsed.as_str().to_string()
+            match app {
+                Some(app) => app.address(&parsed),
+                None => parsed.as_str().to_string(),
+            }
         }
     };
+
+    if let (Some(app), None) = (app, token) {
+        return Err(ApiError::bad_request("api_key_required", app.key_prompt));
+    }
 
     let mut settings = Value::Object(Default::default());
     let tools = match integration {
@@ -151,8 +206,15 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
             Vec::new()
         }
-        None => fetch_tools(&state, name, &address, token).await?,
+        None => {
+            if app.is_some_and(|app| app.stored_in_settings) {
+                settings = json!({"app": kind});
+            }
+
+            fetch_tools(&state, name, &address, token, app).await?
+        }
     };
+    let kind = app.map_or(kind, |app| app.stored_kind);
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("insert into chat_tool_servers (owner, name, kind, url, account, bearer_token, tools, settings) values ($1, $2, $3, $4, $5, $6, $7, $8) returning {SERVER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
@@ -198,7 +260,7 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Ok(Json(row.to_proto()));
     }
 
-    let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref()).await?;
+    let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref(), row.known_app()).await?;
     let updated = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("update chat_tool_servers set tools = $2 where id = $1 returning {SERVER_COLUMNS}"))).bind(id).bind(sqlx::types::Json(tools)).fetch_one(&state.pool).await?;
     state.hub.tools_changed(user.id);
 

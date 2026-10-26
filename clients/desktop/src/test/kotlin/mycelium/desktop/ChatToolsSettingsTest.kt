@@ -104,6 +104,27 @@ class ChatToolsSettingsTest {
     }
 
     @Test
+    fun outlineAsksForItsAddressAndApiKeyAndIsListedAsOutline() {
+        postAnswer = HttpStatusCode.Created to """{"id":"s6","name":"Docs","url":"https://docs.test/mcp","settings":{"app":"outline"},"token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"search","description":"Search"}],"created_at":"2026-10-22T15:00:00Z"}"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Outline").performClick()
+        rule.onNodeWithContentDescription("Name").performTextInput("Docs")
+        rule.onNodeWithContentDescription("Outline address").performTextInput("https://docs.test")
+        rule.onNodeWithContentDescription("Outline API key").performTextInput("ol_api_secret")
+        rule.onNodeWithContentDescription("Outline API key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
+        assertEquals("""{"name":"Docs","url":"https://docs.test","bearer_token":"ol_api_secret","kind":"outline"}""", bodies.last { it.isNotEmpty() })
+        rule.onAllNodesWithText("ol_api_secret").assertCountEquals(0)
+        rule.onNodeWithText("Docs").assertExists()
+        rule.onNodeWithText("Outline").assertExists()
+    }
+
+    @Test
     fun aGatewayEndpointCanBeSubmittedFromTheBearerTokenFieldWithEnter() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
