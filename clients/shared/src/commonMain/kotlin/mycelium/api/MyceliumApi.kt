@@ -434,6 +434,9 @@ class MyceliumApi(
     suspend fun approveAndConnectMessageProposal(id: String): MessageProposal =
         call("/message-proposals/$id/connect") { client.post(it) { authorise() } }.body()
 
+    suspend fun approveAndConnectGroups(id: String): MessageProposal =
+        call("/message-proposals/$id/connect-groups") { client.post(it) { authorise() } }.body()
+
     suspend fun messageProposals(): List<MessageProposal> = call("/message-proposals") { client.get(it) { authorise() } }.body()
 
     suspend fun approveMessageProposal(id: String): MessageProposal =

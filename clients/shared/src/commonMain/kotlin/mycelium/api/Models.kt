@@ -368,8 +368,6 @@ data class InstructionProposal(
     @SerialName("out_of_date") val outOfDate: Boolean = false,
     @SerialName("created_at") val createdAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
-    @SerialName("source_group") val sourceGroup: String? = null,
-    @SerialName("target_group") val targetGroup: String? = null,
 ) {
     val waiting: Boolean get() = state == "proposed"
 }
@@ -424,6 +422,8 @@ data class MessageProposal(
     val state: String,
     @SerialName("created_at") val createdAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
+    @SerialName("source_group") val sourceGroup: String? = null,
+    @SerialName("target_group") val targetGroup: String? = null,
 ) {
     val waiting: Boolean get() = state == "proposed"
 }

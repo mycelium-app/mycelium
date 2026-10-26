@@ -490,6 +490,13 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         refreshConversationConnections()
     }
 
+    suspend fun approveAndConnectGroupsMessageProposal(proposal: MessageProposal) {
+        val sent = api.approveAndConnectGroups(proposal.id)
+
+        mutableState.update { it.copy(messageProposals = it.messageProposals + (sent.id to sent)) }
+        refreshGroupConnections()
+    }
+
     suspend fun refreshMessageProposals() {
         val proposals = api.messageProposals()
 

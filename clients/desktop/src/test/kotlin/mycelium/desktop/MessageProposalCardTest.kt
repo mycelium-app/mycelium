@@ -20,6 +20,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import mycelium.api.Event
@@ -47,8 +48,12 @@ private fun sendToConversation(): List<Event> {
     )
 }
 
-private fun proposal(state: String) =
-    """{"id":"$ProposalId","conversation_id":"c1","target_id":"c2","target_title":"Fix billing export","target_node":"laptop","target_project":"billing","message":"The schema is ready","reason":"You asked for the schema","state":"$state","created_at":"2026-10-23T10:00:00Z"}"""
+private fun proposal(state: String, groups: String = "") =
+    """{"id":"$ProposalId","conversation_id":"c1","target_id":"c2","target_title":"Fix billing export","target_node":"laptop","target_project":"billing","message":"The schema is ready","reason":"You asked for the schema","state":"$state","created_at":"2026-10-23T10:00:00Z"$groups}"""
+
+private const val AcrossGroups = ""","source_group":"yucca","target_group":"Immich""""
+
+private const val WithinOneGroup = ""","source_group":"yucca","target_group":"yucca""""
 
 class MessageProposalCardTest {
     @get:Rule
@@ -59,18 +64,19 @@ class MessageProposalCardTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<HttpMethod, String>>())
 
-    private fun show() {
+    private fun show(groups: String = "", experiments: String = "{}") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             requests += request.method to path
             request.body.toByteArray()
             val body = when {
-                path.endsWith("/connect") -> proposal("sent")
+                path.endsWith("/experiments") -> experiments
+                path.endsWith("/connect") || path.endsWith("/connect-groups") -> proposal("sent", groups)
                 path.endsWith("/conversation-connections") -> "[]"
                 path.endsWith("/approve") -> proposal("sent")
                 path.endsWith("/decline") -> proposal("declined")
-                path.endsWith("/message-proposals") -> "[${proposal("proposed")}]"
+                path.endsWith("/message-proposals") -> "[${proposal("proposed", groups)}]"
                 else -> "{}"
             }
 
@@ -78,6 +84,7 @@ class MessageProposalCardTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         val items = buildThread(sendToConversation())
+        runBlocking { store.refreshExperiments() }
 
         rule.setContent {
             MyceliumTheme(true) {
@@ -141,4 +148,32 @@ class MessageProposalCardTest {
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Sent").fetchSemanticsNodes().isNotEmpty() }
     }
 
+
+    @Test
+    fun aMessageAcrossGroupsOffersSendAndConnectGroups() {
+        show(AcrossGroups, EnabledExperiments)
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect groups").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Connecting groups lets every conversation in yucca and Immich start and message the other without approval.").assertExists()
+
+        rule.onNodeWithText("Send and connect groups").performClick()
+
+        waitForRequest(HttpMethod.Post, "/message-proposals/$ProposalId/connect-groups")
+        assertEquals(false, requests.any { it.second.endsWith("/approve") })
+    }
+
+    @Test
+    fun aMessageWithinOneGroupHasNoConnectGroupsButton() {
+        show(WithinOneGroup, EnabledExperiments)
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
+    }
+
+    @Test
+    fun aMessageAcrossGroupsOffersNoConnectGroupsWhileTheExperimentIsOff() {
+        show(AcrossGroups)
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
+    }
 }
