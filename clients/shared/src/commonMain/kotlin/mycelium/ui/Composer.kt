@@ -276,6 +276,7 @@ fun Composer(
 
     var listening by remember(conversation.id) { mutableStateOf(false) }
     var dictationProblem by remember(conversation.id) { mutableStateOf<DictationProblem?>(null) }
+    val dictationOpen = remember(conversation.id, dictation) { booleanArrayOf(true) }
 
     fun changeText(changed: TextFieldValue) {
         val before = ComposerEdit(text, pastes, images)
@@ -311,6 +312,10 @@ fun Composer(
         listening = true
         dictation?.start(
             onHeard = { heard ->
+                if (!dictationOpen[0] || heard.isBlank()) {
+                    return@start
+                }
+
                 val cursor = text.selection.end
                 val separator = if (cursor > 0 && !text.text[cursor - 1].isWhitespace()) " " else ""
                 val inserted = separator + heard
@@ -327,6 +332,8 @@ fun Composer(
 
     DisposableEffect(conversation.id, dictation) {
         onDispose {
+            dictationOpen[0] = false
+
             if (listening) {
                 dictation?.stop()
             }

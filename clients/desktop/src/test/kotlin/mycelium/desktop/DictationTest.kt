@@ -111,6 +111,18 @@ class DictationTest {
     }
 
     @Test
+    fun a_blank_transcript_leaves_the_draft_alone() {
+        val dictation = FakeDictation()
+        open(SpeakingPlatform(dictation = dictation))
+
+        rule.onNode(hasSetTextAction()).performTextInput("Please")
+        rule.onNodeWithContentDescription("Dictate").performClick()
+        rule.runOnIdle { dictation.onHeard("  ") }
+
+        rule.onNode(hasSetTextAction()).assertTextEquals("Please")
+    }
+
+    @Test
     fun the_button_reads_stop_dictating_while_listening() {
         val dictation = FakeDictation()
         open(SpeakingPlatform(dictation = dictation))
