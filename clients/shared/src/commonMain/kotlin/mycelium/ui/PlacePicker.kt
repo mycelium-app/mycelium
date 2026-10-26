@@ -148,14 +148,16 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
         listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
     }
 
+    val severalNodes = projects.map { it.nodeId }.distinct().size > 1
+
     MenuPopup(onDismiss = onDismiss) {
         MenuLabel(label)
-        TextInput(query, { query = it }, label = "Search projects", placeholder = "Name, path or node", showLabel = false)
+        TextInput(query, { query = it }, label = "Search projects", placeholder = if (severalNodes) "Name, path or node" else "Name or path", showLabel = false)
         val scroll = rememberLazyListState()
 
         LazyColumn(Modifier.heightIn(max = 320.dp).scrollbar(scroll), state = scroll) {
             items(matching, key = { it.id }) { option ->
-                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, leading = nodes[option.nodeId]?.let(::nodeIcon), hint = nodes[option.nodeId]?.name)
+                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name?.takeIf { severalNodes }, leadingContent = { ProjectIcon(option) })
             }
 
             if (matching.isEmpty()) {

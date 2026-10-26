@@ -700,7 +700,7 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null) {
     val colors = MyTheme.colors
 
     Row(
@@ -713,6 +713,8 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        leadingContent?.invoke()
+
         if (leading != null) {
             Icon(leading, colors.textMuted)
         }
