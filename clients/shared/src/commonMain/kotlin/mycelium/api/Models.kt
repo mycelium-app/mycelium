@@ -952,6 +952,8 @@ data class PatchConversationRequest(
     @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
     @SerialName("provider_id") val providerId: String? = null,
     val model: String? = null,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("clear_project") val clearProject: Boolean? = null,
 )
 
 @Serializable

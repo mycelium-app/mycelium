@@ -56,7 +56,7 @@ class ProjectMenuTest {
     @Test
     fun aLargeProjectListKeepsTheFolderChoiceVisibleAndFindsAProjectByName() {
         open()
-        rule.onNodeWithText("A folder").assertIsDisplayed()
+        rule.onNodeWithText("No project").assertIsDisplayed()
         rule.onNodeWithContentDescription("Search projects").performTextReplacement("PROJECT 99")
         rule.onNodeWithText("Project 99").performClick()
         assertEquals("p99", picked)

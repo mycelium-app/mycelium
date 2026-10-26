@@ -49,7 +49,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var cwdError by remember { mutableStateOf<String?>(null) }
     var nodeMenu by remember { mutableStateOf(false) }
     var chosenProject by remember { mutableStateOf(projectId) }
-    var projectMenu by remember { mutableStateOf(false) }
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
@@ -112,7 +111,24 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            BarTitle("New conversation")
+            val breadcrumb: @Composable () -> Unit = {
+                if (projects.isNotEmpty()) {
+                    ProjectBreadcrumb(project, projects, state.nodes, onSelect = { chosenProject = it })
+                }
+            }
+
+            if (LocalOpenList.current != null) {
+                BarTitle("New conversation")
+                breadcrumb()
+            } else {
+                breadcrumb()
+
+                if (projects.isNotEmpty()) {
+                    Label("/", color = colors.textFaint)
+                }
+
+                BarTitle("New conversation")
+            }
         }
 
         if (node == null) {
@@ -168,26 +184,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     }
 
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
-                        if (projects.isNotEmpty()) {
-                            Box {
-                                MyButton(
-                                    { projectMenu = true },
-                                    text = project?.name ?: "A folder",
-                                    icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
-                                    description = "Project: ${project?.name ?: "A folder"}",
-                                    variant = ButtonVariant.Outline,
-                                    trailingIcon = MyIcon.ChevronDown,
-                                )
-
-                                if (projectMenu) {
-                                    ProjectMenu(projects, state.nodes, project?.id, "Start in", onDismiss = { projectMenu = false }) {
-                                        chosenProject = it
-                                        projectMenu = false
-                                    }
-                                }
-                            }
-                        }
-
                         if (project == null) {
                             Box {
                                 MyButton(

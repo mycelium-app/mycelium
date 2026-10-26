@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.Conversation
+import mycelium.api.CreateProjectRequest
+import mycelium.api.Project
 import mycelium.api.ConversationStatus
 import mycelium.api.ConfigRequest
 import mycelium.api.LoginInfo
@@ -68,7 +70,6 @@ import mycelium.state.SubagentSection
 import mycelium.state.subagentSections
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
-import mycelium.state.projectName
 import mycelium.state.statusSectionName
 
 @Composable
@@ -236,6 +237,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
+                    project = state.projects[conversation.projectId],
+                    projects = state.projects.values.filter { it.nodeId == conversation.nodeId }.sortedBy { it.name },
+                    nodes = state.nodes,
+                    onProject = { projectId -> store.setConversationProject(conversation, projectId) },
+                    onSetUp = { store.act { store.createProject(CreateProjectRequest(conversation.nodeId, path = conversation.cwd)) } },
                     onRename = { title -> store.rename(conversation, title) },
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
                     onCloseSession = { store.closeSession(conversation) },
@@ -456,6 +462,11 @@ private fun ConversationHeader(
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
+    project: Project?,
+    projects: List<Project>,
+    nodes: Map<String, NodeSummary>,
+    onProject: (String?) -> Unit,
+    onSetUp: () -> Unit,
     onRename: (String) -> Unit,
     onPin: () -> Unit,
     onCloseSession: () -> Unit,
@@ -472,6 +483,7 @@ private fun ConversationHeader(
     var menuOpen by remember { mutableStateOf(false) }
     var nodeMenuOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
+    var projectMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
 
     Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
@@ -513,12 +525,11 @@ private fun ConversationHeader(
                 MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
             }
         } else {
-            Label(
-                if (chat) conversation.model.orEmpty() else projectName(conversation.cwd),
-                style = Tokens.Type.Meta,
-                color = colors.textMuted,
-                maxLines = 1,
-            )
+            if (chat) {
+                Label(conversation.model.orEmpty(), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            } else {
+                ProjectBreadcrumb(project, projects, nodes, onProject, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = onSetUp)
+            }
 
             if (node != null) {
                 Box {
@@ -554,6 +565,10 @@ private fun ConversationHeader(
                 MenuPopup(onDismiss = { menuOpen = false }) {
                     if (compact) {
                         MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
+
+                        if (!chat) {
+                            MenuItem("Project", onClick = { menuOpen = false; projectMenuOpen = true }, hint = project?.name ?: "None", leading = MyIcon.Folder)
+                        }
                     }
 
                     MenuItem(if (conversation.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
@@ -573,6 +588,13 @@ private fun ConversationHeader(
                     }
                 }
             }
+        }
+    }
+
+    if (projectMenuOpen) {
+        ProjectMenu(projects, nodes, project?.id, "Project", onDismiss = { projectMenuOpen = false }, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = { projectMenuOpen = false; onSetUp() }) {
+            projectMenuOpen = false
+            onProject(it)
         }
     }
 

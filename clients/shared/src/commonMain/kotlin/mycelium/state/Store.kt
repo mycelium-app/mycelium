@@ -812,6 +812,21 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
     }
 
+    fun setConversationProject(conversation: Conversation, projectId: String?) {
+        mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation.copy(projectId = projectId))) }
+
+        act {
+            try {
+                val request = if (projectId == null) PatchConversationRequest(clearProject = true) else PatchConversationRequest(projectId = projectId)
+                val moved = api.patchConversation(conversation.id, request)
+                mutableState.update { it.copy(conversations = it.conversations + (moved.id to moved)) }
+            } catch (failure: Exception) {
+                mutableState.update { it.copy(conversations = it.conversations + (conversation.id to conversation)) }
+                throw failure
+            }
+        }
+    }
+
     fun closeSession(conversation: Conversation) {
         act { api.closeSession(conversation.id) }
     }

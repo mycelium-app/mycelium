@@ -330,6 +330,18 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         switched_to = Some((provider, model.to_string()));
     }
 
+    if (request.project_id.is_some() || request.clear_project == Some(true)) && chats::is_chat(&before) {
+        return Err(ApiError::bad_request("not_a_workspace", "Only a workspace conversation belongs to a project."));
+    }
+
+    if let Some(project_id) = request.project_id {
+        let project = projects::find_owned(&state, project_id, user.id).await?;
+
+        if project.node_id != before.node_id {
+            return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+        }
+    }
+
     let switched_provider = switched_to.as_ref().map(|(provider, _)| provider.id);
     let switched_model = switched_to.as_ref().map(|(_, model)| model.as_str());
     let row = sqlx::query_as::<_, ConversationRow>(
@@ -340,7 +352,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              provider_id = coalesce($7, provider_id), model = coalesce($8, model),
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
              agent_active = case when $3::bool is true then false else agent_active end,
-             pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end
+             pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end,
+             project_id = case when $10 then null else coalesce($11, project_id) end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
@@ -354,6 +367,8 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(switched_provider)
     .bind(switched_model)
     .bind(request.pinned)
+    .bind(request.clear_project == Some(true))
+    .bind(request.project_id)
     .fetch_one(&mut *tx)
     .await?;
     let model_change = match &switched_to {

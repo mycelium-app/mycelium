@@ -504,3 +504,62 @@ async fn a_new_project_adopts_the_unassigned_conversations_of_its_node_inside_it
     }).await;
     assert_eq!(streamed.project_id.map(|id| json!(id)), Some(project["id"].clone()));
 }
+
+#[tokio::test]
+async fn a_conversation_in_no_project_can_be_put_in_a_project_on_its_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    let (_, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/elsewhere"}))).await;
+    assert_eq!(conversation["project_id"], Value::Null);
+
+    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", conversation["id"].as_str().unwrap())).json(&json!({"project_id": listed[0]["id"]}))).await;
+
+    assert_eq!(status, 200, "{patched}");
+    assert_eq!((patched["project_id"].clone(), patched["cwd"].clone()), (listed[0]["id"].clone(), json!("/elsewhere")));
+}
+
+#[tokio::test]
+async fn a_conversation_cannot_be_put_in_a_project_on_another_node() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let elsewhere = server.online_node("server").await;
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+    let (_, conversation) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": elsewhere.id, "agent": "claude", "cwd": "/elsewhere"}))).await;
+
+    let (status, refused) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", conversation["id"].as_str().unwrap())).json(&json!({"project_id": listed[0]["id"]}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (400, json!("project_not_on_node")));
+}
+
+#[tokio::test]
+async fn taking_a_conversation_out_of_its_project_leaves_it_in_no_project() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    create_project(&server, &mut link, json!({"path": "work/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, inside) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app"}))).await;
+    assert_ne!(inside["project_id"], Value::Null);
+
+    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/conversations/{}", inside["id"].as_str().unwrap())).json(&json!({"clear_project": true}))).await;
+
+    assert_eq!((status, patched["project_id"].clone()), (200, Value::Null));
+}
+
+#[tokio::test]
+async fn setting_up_a_conversations_folder_as_a_project_binds_every_conversation_in_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (_, first) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app"}))).await;
+    let (_, second) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/w/app/crates"}))).await;
+
+    create_project(&server, &mut link, json!({"path": "/w/app"}), Ok(json!({"path": "/w/app"}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/projects")).await;
+
+    for conversation in [first, second] {
+        let (_, after) = server.user.json(server.user.get(&format!("/api/v1/conversations/{}", conversation["id"].as_str().unwrap()))).await;
+
+        assert_eq!(after["project_id"], listed[0]["id"]);
+    }
+}

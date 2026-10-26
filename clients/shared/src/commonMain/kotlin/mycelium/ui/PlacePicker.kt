@@ -23,6 +23,7 @@ import mycelium.api.Project
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.agentName
+import mycelium.state.projectName
 
 @Stable
 class Place {
@@ -80,9 +81,9 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
             Box {
                 MyButton(
                     { projectMenu = true },
-                    text = project?.name ?: "A folder",
+                    text = project?.name ?: "No project",
                     icon = if (project != null) state.nodes[project.nodeId]?.let(::nodeIcon) else MyIcon.Folder,
-                    description = "Project: ${project?.name ?: "A folder"}",
+                    description = "Project: ${project?.name ?: "No project"}",
                     variant = ButtonVariant.Outline,
                     trailingIcon = MyIcon.ChevronDown,
                 )
@@ -141,7 +142,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
 }
 
 @Composable
-fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, onSelect: (String?) -> Unit) {
+fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, onSelect: (String?) -> Unit) {
     var query by remember { mutableStateOf("") }
     val matching = projects.filter { project ->
         listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
@@ -162,6 +163,10 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
             }
         }
 
-        MenuItem("A folder", onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
+        MenuItem("No project", onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
+
+        if (setUpFolder != null) {
+            MenuItem("Set up ${projectName(setUpFolder)} as a project", onClick = onSetUp, leading = MyIcon.Plus)
+        }
     }
 }
