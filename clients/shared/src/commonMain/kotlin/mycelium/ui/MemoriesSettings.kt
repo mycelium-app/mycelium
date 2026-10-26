@@ -126,7 +126,16 @@ fun MemoriesSettings(store: Store) {
                             Tag(scope)
                         }
 
-                        Label("${memory.createdBy}  ·  ${timestamp(memory.createdAt)}", Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                        val origin = memory.source.summary.ifEmpty { memory.createdBy }
+
+                        Label("$origin  ·  ${timestamp(memory.createdAt)}", Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+
+                        val conversationId = memory.conversationId
+                        val title = memory.source.conversationTitle
+
+                        if (conversationId != null && title != null) {
+                            MyButton({ store.act { store.open(conversationId) } }, text = title, size = ButtonSize.Sm, muted = true)
+                        }
                     }
                 }
 

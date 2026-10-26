@@ -218,3 +218,46 @@ async fn managing_memories_needs_a_signed_in_user() {
 
     assert_eq!(status, 401);
 }
+
+#[tokio::test]
+async fn remember_stamps_model_agent_node_account_project_conversation_message_and_tool_call() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Fix the login")).await;
+    let project = Uuid::new_v4();
+    sqlx::query("insert into projects (id, owner, node_id, name, path) select $1, created_by, id, 'Mycelium', '/work/mycelium' from nodes where id = $2").bind(project).bind(link.id).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set model = 'claude-opus-5-5', account = 'work', project_id = $2 where id = $1").bind(conversation.id).bind(project).execute(&server.pool).await.unwrap();
+    sqlx::query("insert into events (conversation_id, seq, kind, payload) values ($1, 9000, 'prompt', '{}')").bind(conversation.id).execute(&server.pool).await.unwrap();
+
+    let (status, body) = mcp(&server, &link.token, Some(conversation.id), json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "remember", "arguments": {"text": "Login needs the public URL"}, "_meta": {"claudecode/toolUseId": "toolu_42"}}})).await;
+    assert_eq!(status, 200, "{body}");
+
+    let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
+    let source = &memories[0]["source"];
+    assert_eq!(source["model"], "claude-opus-5-5");
+    assert_eq!(source["agent"], "claude");
+    assert_eq!(source["node_id"], json!(link.id));
+    assert_eq!(source["node_name"], "laptop");
+    assert_eq!(source["account"], "work");
+    assert_eq!(source["project_id"], json!(project));
+    assert_eq!(source["project_name"], "Mycelium");
+    assert_eq!(source["conversation_title"], conversation.title);
+    assert_eq!(source["message_seq"], 9000);
+    assert_eq!(source["tool_call_id"], "toolu_42");
+}
+
+#[tokio::test]
+async fn remember_without_a_conversation_stores_the_node_and_leaves_the_rest_empty() {
+    let server = Server::start().await;
+    let (node, token) = server.join("node", "laptop").await;
+
+    call(&server, &token, None, "remember", json!({"text": "No conversation here"})).await;
+
+    let (_, memories) = server.user.json(server.user.get("/api/v1/memories")).await;
+    let source = &memories[0]["source"];
+    assert_eq!(source["node_id"], json!(node));
+    assert_eq!(source["node_name"], "laptop");
+    assert_eq!(source["model"], Value::Null);
+    assert_eq!(source["project_id"], Value::Null);
+    assert_eq!(source["tool_call_id"], Value::Null);
+}

@@ -315,8 +315,34 @@ pub struct Memory {
     pub scopes: Vec<String>,
     pub created_by: String,
     pub conversation_id: Option<Uuid>,
+    #[serde(default)]
+    pub source: MemorySource,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemorySource {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    #[serde(default)]
+    pub node_name: Option<String>,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[serde(default)]
+    pub project_name: Option<String>,
+    #[serde(default)]
+    pub conversation_title: Option<String>,
+    #[serde(default)]
+    pub message_seq: Option<i64>,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

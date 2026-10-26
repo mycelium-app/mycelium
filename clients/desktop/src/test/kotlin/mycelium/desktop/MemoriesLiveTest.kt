@@ -1,6 +1,8 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -66,6 +68,16 @@ class MemoriesLiveTest {
         showMemories((1..60).map { memory("m$it", "Memory entry $it") }, inSettings = true)
         rule.waitUntil(5_000) { shows("Memory entry 60") }
         rule.onNodeWithText("Memory entry 60").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun aMemoryShowsWhereItCameFromAndLinksToItsConversation() {
+        val sourced = memory("m1", "Staging listens on 5433")
+            .replace("\"conversation_id\":null", "\"conversation_id\":\"c1\",\"source\":{\"model\":\"claude-opus-5-5\",\"agent\":\"claude\",\"node_name\":\"laptop\",\"project_name\":\"Mycelium\",\"conversation_title\":\"Fix login\"}")
+        showMemories(listOf(sourced))
+        rule.waitUntil(5_000) { shows("Staging listens on 5433") }
+        rule.onNodeWithText("claude-opus-5-5", substring = true).assertExists()
+        rule.onNode(hasText("Fix login") and hasClickAction()).assertExists()
     }
 
     @Test

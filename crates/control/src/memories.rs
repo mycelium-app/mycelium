@@ -4,13 +4,14 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{Memory, UpdateMemoryRequest};
+use mycelium_proto::api::{Memory, MemorySource, UpdateMemoryRequest};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
-pub const MEMORY_COLUMNS: &str = "id, text, scopes, created_by, conversation_id, created_at, updated_at";
+pub const MEMORY_COLUMNS: &str = "id, text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id, created_at, updated_at";
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -24,6 +25,15 @@ pub struct MemoryRow {
     pub scopes: Vec<String>,
     pub created_by: String,
     pub conversation_id: Option<Uuid>,
+    pub model: Option<String>,
+    pub agent: Option<String>,
+    pub node_id: Option<Uuid>,
+    pub node_name: Option<String>,
+    pub account: Option<String>,
+    pub project_id: Option<Uuid>,
+    pub project_name: Option<String>,
+    pub message_seq: Option<i64>,
+    pub tool_call_id: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -36,6 +46,18 @@ impl MemoryRow {
             scopes: self.scopes,
             created_by: self.created_by,
             conversation_id: self.conversation_id,
+            source: MemorySource {
+                model: self.model,
+                agent: self.agent,
+                node_id: self.node_id,
+                node_name: self.node_name,
+                account: self.account,
+                project_id: self.project_id,
+                project_name: self.project_name,
+                conversation_title: None,
+                message_seq: self.message_seq,
+                tool_call_id: self.tool_call_id,
+            },
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -74,8 +96,24 @@ pub async fn omitted_groups(pool: &PgPool, query: &str, visible_scopes: &[String
 
 pub async fn list(State(state): State<AppState>, _user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Memory>>> {
     let rows = search(&state.pool, query.query.as_deref(), None, i64::MAX).await?;
+    let titles: HashMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>("select id, title from conversations where id = any($1)")
+        .bind(rows.iter().filter_map(|row| row.conversation_id).collect::<Vec<Uuid>>())
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .collect();
+    let memories = rows
+        .into_iter()
+        .map(|row| {
+            let title = row.conversation_id.and_then(|conversation_id| titles.get(&conversation_id)).filter(|title| !title.trim().is_empty()).cloned();
+            let mut memory = row.to_proto();
+            memory.source.conversation_title = title;
 
-    Ok(Json(rows.into_iter().map(MemoryRow::to_proto).collect()))
+            memory
+        })
+        .collect();
+
+    Ok(Json(memories))
 }
 
 pub async fn update(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<UpdateMemoryRequest>) -> ApiResult<Json<Memory>> {

@@ -201,10 +201,10 @@ impl Toolbox {
         !server_trusted && !self.always_allowed.contains(&tool.name)
     }
 
-    async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
+    async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool_call: &str, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
         match &tool.source {
             Source::Own if tool.original == "walkthrough" => Ok(("A walkthrough is about the changes in a workspace, and this chat has no workspace. Open a conversation on a node to write one.".to_string(), true)),
-            Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, &tool.original, input).await,
+            Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, Some(tool_call), &tool.original, input).await,
             Source::BuiltIn { server } => {
                 let Some(integration) = server.integration() else {
                     return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
@@ -281,7 +281,7 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
     }
 
-    let (text, is_error) = match toolbox.call(state, owner, id, &tool, &call.input).await {
+    let (text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &call.input).await {
         Ok(result) => result,
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };

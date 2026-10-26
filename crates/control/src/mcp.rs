@@ -425,6 +425,16 @@ pub fn tools_instructions() -> String {
     )
 }
 
+#[derive(Default, sqlx::FromRow)]
+struct ConversationFacts {
+    agent: Option<String>,
+    model: Option<String>,
+    account: Option<String>,
+    project_id: Option<Uuid>,
+    project_name: Option<String>,
+    message_seq: Option<i64>,
+}
+
 async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {
     let claimed = headers.get("x-mycelium-conversation").and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<Uuid>().ok());
 
@@ -621,11 +631,39 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         (Some("global"), _) | (_, None) => (vec!["global".to_string()], "every conversation".to_string()),
                         (_, Some((group_id, name))) => (vec![format!("group:{group_id}")], format!("the {name} group")),
                     };
-                    let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!("insert into memories (text, scopes, created_by, conversation_id) values ($1, $2, $3, $4) returning {MEMORY_COLUMNS}")))
+                    let conversation_id = conversation.map(|(conversation_id, _)| conversation_id);
+                    let facts = match conversation_id {
+                        Some(conversation_id) => {
+                            sqlx::query_as::<_, ConversationFacts>(
+                                "select c.agent, coalesce(nullif(c.model, ''), (select e.payload->'update'->'_meta'->>'_claude/model' from events e where e.conversation_id = c.id and e.kind = 'acp_update' and e.payload->'update'->'_meta'->>'_claude/model' <> '' order by e.seq desc limit 1)) as model,
+                                        c.account, c.project_id, p.name as project_name, (select max(e.seq) from events e where e.conversation_id = c.id) as message_seq
+                                 from conversations c left join projects p on p.id = c.project_id where c.id = $1",
+                            )
+                            .bind(conversation_id)
+                            .fetch_optional(&state.pool)
+                            .await?
+                        }
+                        None => None,
+                    };
+                    let facts = facts.unwrap_or_default();
+                    let tool_call_id = params["_meta"]["claudecode/toolUseId"].as_str().map(String::from).or_else(|| headers.get("x-mycelium-tool-call").and_then(|value| value.to_str().ok()).map(String::from));
+                    let memory = sqlx::query_as::<_, MemoryRow>(sqlx::AssertSqlSafe(format!(
+                        "insert into memories (text, scopes, created_by, conversation_id, model, agent, node_id, node_name, account, project_id, project_name, message_seq, tool_call_id)
+                         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning {MEMORY_COLUMNS}"
+                    )))
                         .bind(crate::store::text_without_nul(&text))
                         .bind(&scopes)
                         .bind(format!("{node_name}/{source}"))
-                        .bind(conversation.map(|(conversation_id, _)| conversation_id))
+                        .bind(conversation_id)
+                        .bind(facts.model)
+                        .bind(facts.agent)
+                        .bind(node.id)
+                        .bind(&node_name)
+                        .bind(facts.account)
+                        .bind(facts.project_id)
+                        .bind(facts.project_name)
+                        .bind(facts.message_seq)
+                        .bind(tool_call_id)
                         .fetch_one(&state.pool)
                         .await?
                         .to_proto();
@@ -1029,8 +1067,13 @@ pub async fn stream(State(state): State<AppState>, node: AuthNode) -> ApiResult<
     Ok(Sse::new(notifications).keep_alive(KeepAlive::default()).into_response())
 }
 
-pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: Uuid, name: &str, arguments: &Value) -> ApiResult<(String, bool)> {
+pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: Uuid, tool_call: Option<&str>, name: &str, arguments: &Value) -> ApiResult<(String, bool)> {
     let mut headers = HeaderMap::new();
+
+    if let Some(tool_call) = tool_call.and_then(|tool_call| tool_call.parse().ok()) {
+        headers.insert("x-mycelium-tool-call", tool_call);
+    }
+
     headers.insert("x-mycelium-conversation", conversation_id.to_string().parse().map_err(crate::error::ApiError::internal)?);
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
     let response = handle(State(state.clone()), AuthNode { id: node_id }, headers, Json(request)).await?;
