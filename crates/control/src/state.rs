@@ -98,6 +98,11 @@ pub struct ResetAnswer {
     pub error: Option<String>,
 }
 
+pub struct PendingReview {
+    pub items: Vec<serde_json::Value>,
+    pub answer: oneshot::Sender<mycelium_proto::conversation::ReviewAnswer>,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -119,6 +124,7 @@ pub struct Hub {
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
     chat_approvals: Mutex<HashMap<(Uuid, String), oneshot::Sender<String>>>,
+    reviews: Mutex<HashMap<(Uuid, String), PendingReview>>,
     tool_streams: Mutex<HashMap<Uuid, broadcast::Sender<()>>>,
 }
 
@@ -182,6 +188,30 @@ impl Hub {
         if let Ok(mut approvals) = self.chat_approvals.lock() {
             approvals.retain(|(conversation, _), _| *conversation != conversation_id);
         }
+
+        if let Ok(mut reviews) = self.reviews.lock() {
+            reviews.retain(|(conversation, _), _| *conversation != conversation_id);
+        }
+    }
+
+    pub fn await_review(&self, conversation_id: Uuid, request_id: &str, items: Vec<serde_json::Value>) -> oneshot::Receiver<mycelium_proto::conversation::ReviewAnswer> {
+        let (answer, receiver) = oneshot::channel();
+
+        if let Ok(mut reviews) = self.reviews.lock() {
+            reviews.insert((conversation_id, request_id.to_string()), PendingReview { items, answer });
+        }
+
+        receiver
+    }
+
+    pub fn review_items(&self, conversation_id: Uuid, request_id: &str) -> Option<Vec<serde_json::Value>> {
+        self.reviews.lock().ok().and_then(|reviews| reviews.get(&(conversation_id, request_id.to_string())).map(|pending| pending.items.clone()))
+    }
+
+    pub fn answer_review(&self, conversation_id: Uuid, request_id: &str, answer: mycelium_proto::conversation::ReviewAnswer) -> bool {
+        let pending = self.reviews.lock().ok().and_then(|mut reviews| reviews.remove(&(conversation_id, request_id.to_string())));
+
+        pending.is_some_and(|pending| pending.answer.send(answer).is_ok())
     }
 
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {

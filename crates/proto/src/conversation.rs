@@ -64,11 +64,34 @@ pub enum EventKind {
     AcpUpdate,
     PermissionRequest,
     PermissionResolved,
+    ReviewRequest,
+    ReviewResolved,
     TurnEnd,
     Error,
     Workflow,
     ModelChanged,
     Continued,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewDecision {
+    Share,
+    Remove,
+    Withhold,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReviewAnswer {
+    pub request_id: String,
+    pub decision: ReviewDecision,
+    #[serde(default)]
+    pub removed: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReviewItems {
+    pub items: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

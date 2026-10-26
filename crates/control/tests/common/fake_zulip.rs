@@ -38,7 +38,7 @@ async fn handle(State(zulip): State<Arc<FakeZulip>>, method: Method, uri: Uri, h
     match (method, uri.path()) {
         (Method::GET, "/api/v1/users/me") => Json(json!({"result": "success", "email": ACCOUNT})).into_response(),
         (Method::GET, "/api/v1/users/me/subscriptions") => Json(json!({"result": "success", "subscriptions": [{"stream_id": 7, "name": "general", "description": "Everything"}]})).into_response(),
-        (Method::GET, "/api/v1/messages") => Json(json!({"result": "success", "messages": [{"id": 41, "type": "stream", "timestamp": 1700000000, "sender_full_name": "Grace", "sender_email": "grace@example.com", "display_recipient": "general", "subject": "lunch", "content": "Noon?"}]})).into_response(),
+        (Method::GET, "/api/v1/messages") => Json(json!({"result": "success", "messages": [{"id": 41, "type": "stream", "timestamp": 1700000000, "sender_full_name": "Grace", "sender_email": "grace@example.com", "display_recipient": "general", "subject": "lunch", "content": "Noon?"}, {"id": 42, "type": "stream", "timestamp": 1700000060, "sender_full_name": "Linus", "sender_email": "linus@example.com", "display_recipient": "general", "subject": "lunch", "content": "Pizza secret-recipe?"}]})).into_response(),
         (Method::POST, "/api/v1/messages") => Json(json!({"result": "success", "id": 99})).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }

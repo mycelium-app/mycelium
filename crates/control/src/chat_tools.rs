@@ -2,6 +2,7 @@ use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refres
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
 use crate::integration_policy::Source as PolicySource;
+use crate::integration_review;
 use crate::mcp;
 use crate::mcp_client::{McpConnection, McpError};
 use crate::model_providers::{ToolCall, ToolDefinition, ToolResult};
@@ -70,6 +71,32 @@ fn words(text: &str) -> Vec<String> {
     text.to_lowercase().split(|character: char| !character.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_string).collect()
 }
 
+pub struct Candidate<T> {
+    pub value: T,
+    pub sort_key: String,
+    pub server: String,
+    pub tool: String,
+    pub description: String,
+}
+
+pub fn best_matches<T>(query: &str, candidates: Vec<Candidate<T>>) -> Vec<T> {
+    let wanted = words(query);
+    let mut scored: Vec<(usize, Candidate<T>)> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let name = words(&format!("{} {}", candidate.server, candidate.tool));
+            let description = words(&candidate.description);
+            let score: usize = wanted.iter().map(|word| if name.iter().any(|candidate| candidate.contains(word.as_str())) { 3 } else if description.iter().any(|candidate| candidate.contains(word.as_str())) { 1 } else { 0 }).sum();
+
+            (score > 0).then_some((score, candidate))
+        })
+        .collect();
+    scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.sort_key.cmp(&right.1.sort_key)));
+    scored.truncate(SEARCH_RESULTS);
+
+    scored.into_iter().map(|(_, candidate)| candidate.value).collect()
+}
+
 fn event_text(update: Value) -> Value {
     json!({"update": update})
 }
@@ -86,6 +113,10 @@ impl Toolbox {
             .flatten()
             .filter_map(|definition| {
                 let original = definition["name"].as_str()?;
+
+                if mcp::WORKSPACE_ONLY_TOOLS.contains(&original) {
+                    return None;
+                }
 
                 Some(Tool { name: model_name(OWN_SERVER, original), server: OWN_SERVER.to_string(), original: original.to_string(), description: definition["description"].as_str()?.to_string(), schema: definition["inputSchema"].clone(), source: Source::Own })
             })
@@ -175,26 +206,15 @@ impl Toolbox {
             return ("Nothing was searched. Give a few keywords for what the tool should do.".to_string(), Vec::new());
         }
 
-        let mut scored: Vec<(usize, &Tool)> = self
-            .tools
-            .iter()
-            .filter_map(|tool| {
-                let name = words(&format!("{} {}", tool.server, tool.original));
-                let description = words(&tool.description);
-                let score: usize = wanted.iter().map(|word| if name.iter().any(|candidate| candidate.contains(word.as_str())) { 3 } else if description.iter().any(|candidate| candidate.contains(word.as_str())) { 1 } else { 0 }).sum();
-
-                (score > 0).then_some((score, tool))
-            })
-            .collect();
-        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.name.cmp(&right.1.name)));
-        scored.truncate(SEARCH_RESULTS);
+        let candidates = self.tools.iter().map(|tool| Candidate { value: tool, sort_key: tool.name.clone(), server: tool.server.clone(), tool: tool.original.clone(), description: tool.description.clone() }).collect();
+        let scored = best_matches(query, candidates);
 
         if scored.is_empty() {
             return ("No tools match those keywords. Try other words, for example a verb and a noun.".to_string(), Vec::new());
         }
 
-        let names: Vec<String> = scored.iter().map(|(_, tool)| tool.name.clone()).collect();
-        let entries: Vec<String> = scored.iter().map(|(_, tool)| format!("{} (server: {})\n{}\nInput schema: {}", tool.name, tool.server, tool.description, tool.schema)).collect();
+        let names: Vec<String> = scored.iter().map(|tool| tool.name.clone()).collect();
+        let entries: Vec<String> = scored.iter().map(|tool| format!("{} (server: {})\n{}\nInput schema: {}", tool.name, tool.server, tool.description, tool.schema)).collect();
         self.loaded.extend(names.iter().cloned());
 
         (format!("These tools are now loaded. Call them by name.\n\n{}", entries.join("\n\n")), names)
@@ -213,9 +233,10 @@ impl Toolbox {
         effective.ask_source == PolicySource::Locked || (effective.ask && !self.always_allowed.contains(&tool.name))
     }
 
-    async fn record(&self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, decision: &str, is_error: bool) {
+    #[allow(clippy::too_many_arguments)]
+    async fn record(&self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, decision: &str, is_error: bool, review: Option<&str>) {
         if let Some(server) = tool.server_row() {
-            record_call(state, owner, server, &tool.original, Some(conversation_id), "chat", self.provider.as_deref(), decision, is_error).await;
+            record_call(state, owner, server, &tool.original, Some(conversation_id), "chat", self.provider.as_deref(), decision, is_error, review).await;
         }
     }
 
@@ -309,7 +330,7 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
 
         if answer != ALLOW_ONCE && answer != ALLOW_ALWAYS {
-            toolbox.record(state, owner, id, &tool, "declined", false).await;
+            toolbox.record(state, owner, id, &tool, "declined", false, None).await;
 
             return Ok((DECLINED_TEXT.to_string(), true, None));
         }
@@ -317,23 +338,31 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         decision = "approved";
     }
 
-    let (text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &call.input).await {
+    let (mut text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &call.input).await {
         Ok(result) => result,
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };
 
-    toolbox.record(state, owner, id, &tool, decision, is_error).await;
+    let mut review = None;
+
+    if !is_error && tool.server_row().is_some_and(|server| server.effective(&tool.original).review) {
+        let reviewed = integration_review::hold(state, owner, id, &call.id, &tool.server, &tool.original, text).await?;
+        text = reviewed.text;
+        review = Some(reviewed.review);
+    }
+
+    toolbox.record(state, owner, id, &tool, decision, is_error, review).await;
 
     Ok((text, is_error, None))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, conversation_id: Option<Uuid>, surface: &str, provider: Option<&str>, decision: &str, is_error: bool) {
+pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, conversation_id: Option<Uuid>, surface: &str, provider: Option<&str>, decision: &str, is_error: bool, review: Option<&str>) {
     let kind = match server.tool_kind(tool) {
         ToolKind::Read => "read",
         ToolKind::Write => "write",
     };
-    let recorded = sqlx::query("insert into integration_calls (owner, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, is_error) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")
+    let recorded = sqlx::query("insert into integration_calls (owner, server_id, server_name, tool, kind, conversation_id, surface, provider, decision, is_error, review) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
         .bind(owner)
         .bind(server.id)
         .bind(&server.name)
@@ -344,6 +373,7 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
         .bind(provider)
         .bind(decision)
         .bind(is_error)
+        .bind(review)
         .execute(&state.pool)
         .await;
 
@@ -418,6 +448,18 @@ pub async fn close_open_calls(state: &AppState, owner: Uuid, id: Uuid, reason: &
 
     for request_id in requests {
         record(state, owner, id, EventKind::PermissionResolved, &json!({"request_id": request_id, "option_id": "cancelled"})).await?;
+    }
+
+    let reviews = sqlx::query_scalar::<_, String>(
+        "select r.payload->>'request_id' from events r where r.conversation_id = $1 and r.kind = 'review_request'
+           and not exists (select 1 from events s where s.conversation_id = $1 and s.kind = 'review_resolved' and s.payload->>'request_id' = r.payload->>'request_id')",
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    for request_id in reviews {
+        record(state, owner, id, EventKind::ReviewResolved, &json!({"request_id": request_id, "decision": "withhold", "removed_count": 0})).await?;
     }
 
     let calls = sqlx::query_scalar::<_, String>(

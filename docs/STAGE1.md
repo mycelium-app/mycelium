@@ -237,6 +237,7 @@ Conversations:
 - `POST /{id}/cancel`.
 - `POST /{id}/close` (204, owner only) ends the agent process of a conversation that is `working` or waiting for input, even if the agent is not answering: the node is sent `close_session`, unacknowledged prompts for it are dropped, the conversation becomes `done` (not archived) and is streamed. A conversation that is idle, failed or a chat is left alone and the answer is still 204. 409 `node_offline` while the node is offline. A later message resumes the session from its transcript.
 - `POST /{id}/permission` `{request_id, option_id}`.
+- `GET /{id}/reviews/{request_id}` `{items}`: the held items of an integration result, 404 once answered. `POST /{id}/review` `{request_id, decision: share|remove|withhold, removed: [index]}`: 204, 409 `already_resolved`, 400 `nothing_to_remove`. A result held for review raises `review_request` (`request_id, server, tool, count`, never the content) with the chat `input`, then `review_resolved` (`request_id, decision, removed_count`). Held content lives only in memory: share returns it, remove returns the kept items with a note, withhold or a cancel tells the agent it was withheld.
 - `POST /{id}/config` `{mode?, model?, config?: {id: value}}` → ACP `session/set_mode`, `session/set_model`
   or `session/set_config_option`, whichever the agent advertises.
 

@@ -143,3 +143,46 @@ async fn an_open_stream_is_told_when_a_tool_server_is_added() {
 
     assert!(received.contains(r#""jsonrpc":"2.0""#));
 }
+
+#[tokio::test]
+async fn an_open_stream_is_told_when_a_server_is_switched_back_on() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let (_, lab) = add_lab(&server).await;
+    let anonymous = server.anonymous();
+    let mut stream = anonymous.http.get(format!("{}/api/v1/mcp", anonymous.base)).header("authorization", format!("Bearer {token}")).header("accept", "text/event-stream").send().await.unwrap();
+    let path = format!("/api/v1/chat-tool-servers/{lab}");
+
+    server.user.json(server.user.patch(&path).json(&json!({"enabled": false}))).await;
+    let mut received = String::new();
+
+    while received.matches("notifications/tools/list_changed").count() < 1 {
+        let chunk = tokio::time::timeout(Duration::from_secs(10), stream.chunk()).await.expect("no notification arrived").unwrap().expect("the stream closed");
+        received.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    server.user.json(server.user.patch(&path).json(&json!({"enabled": true}))).await;
+
+    while received.matches("notifications/tools/list_changed").count() < 2 {
+        let chunk = tokio::time::timeout(Duration::from_secs(10), stream.chunk()).await.expect("switching back on sent no notification").unwrap().expect("the stream closed");
+        received.push_str(&String::from_utf8_lossy(&chunk));
+    }
+}
+
+#[tokio::test]
+async fn find_and_call_integration_tool_reach_a_server_added_after_tools_list() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let before = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).await;
+    add_lab(&server).await;
+
+    let found = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "find_integration_tools", "arguments": {"query": "weather"}}})).await;
+    let called = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "call_integration_tool", "arguments": {"name": "lab__get_weather", "arguments": {"city": "Paris"}}}})).await;
+    let wrong = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "call_integration_tool", "arguments": {"name": "recall", "arguments": {"query": "x"}}}})).await;
+
+    assert!(names(&before).iter().all(|name| !name.starts_with("lab__")));
+    assert!(names(&before).contains(&"find_integration_tools".to_string()));
+    assert!(found["result"]["content"][0]["text"].as_str().unwrap().contains("lab__get_weather"));
+    assert_eq!(called["result"]["content"][0]["text"], "Sunny in Paris");
+    assert_eq!(wrong["result"]["isError"], true);
+}

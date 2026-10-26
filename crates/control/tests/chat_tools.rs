@@ -290,6 +290,22 @@ impl Rig {
         .await
     }
 
+    async fn review_waiting(&self, id: &str) -> Value {
+        eventually("a review request", || async {
+            let events = self.events(id).await;
+            let open = events.iter().find(|event| event["kind"] == "review_request" && !events.iter().any(|other| other["kind"] == "review_resolved" && other["payload"]["request_id"] == event["payload"]["request_id"]));
+
+            open.map(|event| event["payload"].clone())
+        })
+        .await
+    }
+
+    async fn review(&self, id: &str, request: &Value, decision: &str) -> u16 {
+        let (status, _) = self.server.user.json(self.server.user.post(&format!("/api/v1/conversations/{id}/review")).json(&json!({"request_id": request["request_id"], "decision": decision, "removed": []}))).await;
+
+        status
+    }
+
     async fn decide(&self, id: &str, request: &Value, option: &str) -> (u16, Value) {
         self.server.user.json(self.server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": option}))).await
     }
@@ -944,6 +960,8 @@ async fn zulip_reads_and_sends_ask_every_time_and_cannot_be_overridden() {
     let read = rig.request_waiting(&id).await;
     assert_eq!(read["toolCall"]["title"], "mcp__zulip__list_channels");
     rig.decide(&id, &read, "allow_always").await;
+    let held = rig.review_waiting(&id).await;
+    rig.review(&id, &held, "share").await;
     let request = eventually("the send to ask", || async {
         let events = rig.events(&id).await;
         let open = events.iter().find(|event| event["kind"] == "permission_request" && event["payload"]["toolCall"]["title"] == "mcp__zulip__send_message");
@@ -953,6 +971,8 @@ async fn zulip_reads_and_sends_ask_every_time_and_cannot_be_overridden() {
     .await;
     assert!(zulip.sent().is_empty());
     rig.decide(&id, &request, "allow_always").await;
+    let held = eventually("the send result to be held", || async { rig.events(&id).await.iter().filter(|event| event["kind"] == "review_request").nth(1).map(|event| event["payload"].clone()) }).await;
+    rig.review(&id, &held, "share").await;
     let events = rig.turns_ended(&id, 1).await;
 
     assert_eq!((status, patched), (201, 200));
@@ -1092,4 +1112,88 @@ async fn an_expiry_within_two_weeks_shows_expires_soon_and_clears() {
 
     assert_eq!(warned["status"], "expires_soon");
     assert_eq!((cleared["status"].clone(), cleared.get("token_expires_at").cloned()), (json!("connected"), None));
+}
+
+#[tokio::test]
+async fn a_chat_zulip_call_is_held_for_review_after_approval() {
+    let rig = rig(vec![Reply::Call("mcp__zulip__get_messages", json!({"channel": "general", "topic": "lunch"})), Reply::Say("They suggested noon.")]).await;
+    let (router, zulip) = fake_zulip();
+    let base = serve(router).await;
+    rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Zulip", "kind": "zulip", "url": base, "account": ACCOUNT, "bearer_token": API_KEY}))).await;
+    let id = rig.chat("What did they say about lunch?").await;
+
+    let permission = rig.request_waiting(&id).await;
+    rig.decide(&id, &permission, "allow_once").await;
+    let review = rig.review_waiting(&id).await;
+    let status = rig.server.conversation(id.parse().unwrap()).await["status"].clone();
+    let (_, shown) = rig.server.user.json(rig.server.user.get(&format!("/api/v1/conversations/{id}/reviews/{}", review["request_id"].as_str().unwrap()))).await;
+
+    assert_eq!(status, "input");
+    assert_eq!((review["server"].clone(), review["tool"].clone(), review["count"].clone()), (json!("Zulip"), json!("get_messages"), json!(2)));
+    assert_eq!(shown["items"].as_array().unwrap().len(), 2);
+    assert_eq!(zulip.paths().iter().filter(|path| *path == "/api/v1/messages").count(), 1);
+    assert_eq!(rig.review(&id, &review, "withhold").await, 204);
+
+    let events = rig.turns_ended(&id, 1).await;
+    let result = updates(&events, "tool_call_update")[0]["content"][0]["content"]["text"].as_str().unwrap().to_string();
+
+    assert!(result.contains("The person withheld this result"));
+    assert!(!serde_json::to_string(&events).unwrap().contains("Noon?"));
+    assert!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"].as_str().unwrap().contains("withheld"));
+    assert_eq!(rig.calls().await[0]["review"], "withheld");
+}
+
+#[tokio::test]
+async fn policy_review_on_a_tool_override_holds_only_that_tool() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Call("mcp__lab__list_files", json!({"path": "/"})), Reply::Say("Done.")]).await;
+    let (status, _) = rig.patch_lab(json!({"always_allow": true, "policy": {"review": {"tools": {"get_weather": true}}}})).await;
+    let id = rig.chat("Weather, then files.").await;
+
+    let review = rig.review_waiting(&id).await;
+    assert_eq!(rig.remote.calls().len(), 1);
+    assert_eq!(rig.review(&id, &review, "share").await, 204);
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(status, 200);
+    assert_eq!(events.iter().filter(|event| event["kind"] == "review_request").count(), 1);
+    assert_eq!(rig.remote.calls().len(), 2);
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().iter().filter_map(|message| message["content"].as_str()).filter(|content| content.contains("Sunny in Paris")).count(), 1);
+}
+
+#[tokio::test]
+async fn policy_ask_applies_to_workspace_calls_on_remote_servers() {
+    let rig = rig(vec![]).await;
+    let node = rig.server.online_node("laptop").await;
+    let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "lab__get_weather", "arguments": {"city": "Paris"}}});
+    let anonymous = rig.server.anonymous();
+    let (_, untouched) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", node.token)).json(&body)).await;
+    rig.patch_lab(json!({"policy": {"ask": {"all": true}}})).await;
+    let conversation = rig.server.node_conversation(&node.token).await;
+
+    let (reply, ()) = tokio::join!(rig.server.agent_mcp(&node.token, conversation, body), async {
+        let request = rig.server.open_request(conversation).await;
+        let before = rig.remote.calls().len();
+        rig.server.answer(conversation, &request, "allow_once").await;
+
+        assert_eq!(before, 1);
+    });
+
+    assert_eq!(untouched["result"]["isError"], false);
+    assert_eq!(reply["result"]["content"][0]["text"], "Sunny in Paris");
+    assert_eq!(rig.remote.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn an_integration_added_mid_conversation_is_found_next_turn() {
+    let rig = rig(vec![Reply::Say("Hello."), Reply::Say("Now I see it.")]).await;
+    let id = rig.chat("Hi.").await;
+    rig.turns_ended(&id, 1).await;
+    let (router, _) = fake_zulip();
+    let base = serve(router).await;
+    rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Zulip", "kind": "zulip", "url": base, "account": ACCOUNT, "bearer_token": API_KEY}))).await;
+    rig.say(&id, "Anything new?").await;
+    rig.turns_ended(&id, 2).await;
+
+    assert!(!rig.model.request(0)["messages"][0]["content"].as_str().unwrap().contains("- Zulip:"));
+    assert!(rig.model.request(1)["messages"][0]["content"].as_str().unwrap().contains("- Zulip:"));
 }
