@@ -772,19 +772,29 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
         return Ok(());
     }
 
-    record_turn(state, conversation_id, usage.as_ref()).await?;
+    if let Err(error) = record_turn(state, conversation_id, usage.as_ref()).await {
+        tracing::warn!("could not record the turn of {conversation_id}: {}", error.message());
+    }
+
     crate::conversations::spawn_branch_refresh(state, conversation_id);
 
-    sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await?;
+    if let Err(error) = sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await {
+        tracing::warn!("could not reset the limit resumes of {conversation_id}: {error}");
+    }
+
     state.hub.forget_prompts_of(conversation_id);
-    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-    crate::moves::turn_ended(state, owner, conversation_id).await;
-    crate::assistants::workspace_turn_ended(state, owner, node_id, conversation_id);
+
+    match sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await {
+        Ok(owner) => {
+            crate::moves::turn_ended(state, owner, conversation_id).await;
+            crate::assistants::workspace_turn_ended(state, owner, node_id, conversation_id);
+        }
+        Err(error) => tracing::warn!("could not find the owner of {conversation_id} after its turn: {error}"),
+    }
 
     if let Err(error) = crate::goals::turn_ended(state, conversation_id, &stop_reason).await {
         tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());
     }
-
 
     let send_now = state.hub.take_send_now(conversation_id);
     let archived = sqlx::query_scalar::<_, bool>("select archived_at is not null from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
@@ -802,7 +812,10 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
 
     if !send_now {
         let mut connection = state.pool.acquire().await?;
-        merge_queue(&mut connection, conversation_id).await?;
+
+        if let Err(error) = merge_queue(&mut connection, conversation_id).await {
+            tracing::warn!("could not combine the queued messages of {conversation_id}: {error:?}");
+        }
     }
 
     pump(state, conversation_id, false).await

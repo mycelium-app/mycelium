@@ -128,3 +128,30 @@ async fn an_attachment_on_a_queued_message_waits_in_the_queue_and_arrives_with_i
 
     assert_eq!(queue[0]["attachments"], json!([attachment]));
 }
+
+#[tokio::test]
+async fn a_queued_message_whose_attachment_is_lost_stays_queued_and_the_conversation_is_not_left_working() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("hello")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.expect_prompt().await;
+    let (_, attachment) = upload(&server.user, conversation.id, "shot.png", "image/png", PNG.to_vec()).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{}/prompt", conversation.id)).json(&json!({"text": "later", "attachments": [attachment]}))).await;
+    std::fs::remove_file(server.data_dir.join("attachments").join(attachment["sha256"].as_str().unwrap())).unwrap();
+
+    link.send(mycelium_proto::link::NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+
+    let user = server.user.clone();
+    let id = conversation.id;
+    common::eventually("the turn to end", || async {
+        let (_, row) = user.json(user.get(&format!("/api/v1/conversations/{id}"))).await;
+
+        (row["status"] == "review").then_some(())
+    })
+    .await;
+    let (_, queue) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/queue"))).await;
+
+    assert_eq!(queue.as_array().unwrap().len(), 1);
+}

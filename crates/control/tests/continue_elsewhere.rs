@@ -258,6 +258,33 @@ async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff()
 }
 
 #[tokio::test]
+async fn a_refused_start_after_continuing_elsewhere_fails_the_conversation_and_the_next_prompt_starts_afresh() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    continue_on(&server, id, json!({"agent": "codex"})).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Carry on"}))).await;
+    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
+    assert!(matches!(next_command(&mut link).await, ControlToNode::StartSession { .. }));
+    expect_prompt(&mut link).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 30, message: "codex is not installed on this node.".into() }).await;
+
+    let user = server.user.clone();
+    let failed = common::eventually("the conversation to fail", || async {
+        let (_, conversation) = user.json(user.get(&format!("/api/v1/conversations/{id}"))).await;
+
+        (conversation["status"] == "failed").then_some(conversation)
+    })
+    .await;
+    assert_eq!(failed["agent_active"], json!(false));
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Try again"}))).await;
+    assert!(matches!(next_command(&mut link).await, ControlToNode::StartSession { agent: AgentId::Codex, .. }));
+}
+
+#[tokio::test]
 async fn the_handoff_is_prepended_once_even_if_the_new_session_has_not_reported_its_id() {
     let server = Server::start().await;
     enable(&server).await;

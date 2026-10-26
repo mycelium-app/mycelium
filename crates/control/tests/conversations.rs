@@ -1127,13 +1127,30 @@ async fn queued_prompts_wait_for_a_node_that_is_offline_and_go_out_when_it_retur
     })
     .await;
 
-    assert_eq!(prompt(&server, id, "while you were away").await, 204);
+    let (status, answer) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "while you were away"}))).await;
+    assert_eq!(status, 202);
+    assert_eq!(answer["message"], "The node is not connected. Your message is queued and goes as soon as it reconnects.");
     assert_eq!(queue(&server, id).await.len(), 1);
 
     let mut returned = server.connect_node(node_id, &token).await;
     returned.hello(vec![(id, 1)]).await;
 
     assert_eq!(returned.expect_prompt().await.1, "while you were away");
+}
+
+#[tokio::test]
+async fn the_queue_is_sent_when_a_turn_ends_even_if_recording_the_turn_fails() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+    sqlx::query("alter table usage_turns rename to usage_turns_gone").execute(&server.pool).await.unwrap();
+
+    assert_eq!(prompt(&server, id, "second").await, 204);
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+
+    assert_eq!(link.expect_prompt().await.1, "second");
+    assert!(queue(&server, id).await.is_empty());
 }
 
 #[tokio::test]
@@ -1238,7 +1255,7 @@ async fn a_prompt_sent_before_the_node_says_hello_waits_for_the_sessions_it_repo
     .await;
 
     let mut returned = server.connect_node(node_id, &token).await;
-    assert_eq!(prompt(&server, id, "before hello").await, 204);
+    assert_eq!(prompt(&server, id, "before hello").await, 202);
     returned.hello(vec![(id, 1)]).await;
 
     assert_eq!(returned.expect_prompt().await.1, "before hello");
