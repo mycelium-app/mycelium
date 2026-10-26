@@ -218,6 +218,20 @@ async fn the_default_is_to_ask_and_the_choice_is_kept() {
 }
 
 #[tokio::test]
+async fn a_stored_switch_setting_acts_and_reads_as_resume_while_continue_elsewhere_is_off() {
+    let server = Server::start().await;
+    server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "switch"}))).await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    let (_, shown) = server.user.json(server.user.get("/api/v1/usage-limit")).await;
+    hit_limit(&server, &mut link, id, &limit_message(2)).await;
+
+    assert_eq!(shown["on_usage_limit"], "resume");
+    common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
+}
+
+#[tokio::test]
 async fn with_automatic_resume_chosen_a_usage_limit_schedules_itself() {
     let server = Server::start().await;
     choose_automatic_resume(&server).await;

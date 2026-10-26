@@ -232,8 +232,14 @@ async fn reset_of_latest_failure(state: &AppState, conversation_id: Uuid) -> Api
 }
 
 pub async fn get_setting(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<UsageLimitSetting>> {
-    let stored = sqlx::query_scalar::<_, String>("select on_usage_limit from user_settings where owner = $1").bind(user.id).fetch_optional(&state.pool).await?;
-    let on_usage_limit = stored.map_or(Ok(OnUsageLimit::Ask), |text| parse_enum(&text))?;
+    let stored = sqlx::query_as::<_, (String, bool)>("select on_usage_limit, experiment_continue_elsewhere from user_settings where owner = $1").bind(user.id).fetch_optional(&state.pool).await?;
+    let on_usage_limit = match stored {
+        Some((text, continue_elsewhere)) => match parse_enum(&text)? {
+            OnUsageLimit::Switch if !continue_elsewhere => OnUsageLimit::Resume,
+            setting => setting,
+        },
+        None => OnUsageLimit::Ask,
+    };
 
     Ok(Json(UsageLimitSetting { on_usage_limit }))
 }
