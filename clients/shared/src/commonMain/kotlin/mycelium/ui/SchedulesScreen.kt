@@ -46,6 +46,7 @@ private const val SkippedOutcome = "skipped"
 @Composable
 fun SchedulesScreen(store: Store, state: AppState) {
     val colors = MyTheme.colors
+    val stamp = timestamper()
     var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.conversations.size) {
@@ -69,40 +70,72 @@ fun SchedulesScreen(store: Store, state: AppState) {
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
-                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec())) {
-                    ContentRow(header = true) {
-                        Label("Prompt", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Project", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("When", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Each run", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Next", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                    }
+                Table(
+                    listOf(
+                        Col("Prompt", 140.dp, weight = 1f),
+                        Col("Project", 100.dp, max = 240.dp, priority = 1),
+                        Col("When", 100.dp, max = 240.dp),
+                        Col("Each run", 88.dp, priority = 1),
+                        Col("Next", 88.dp, max = 120.dp),
+                        ActionColumn,
+                    ),
+                    schedules.size,
+                    { row, column ->
+                        val schedule = schedules[row]
 
-                    Hairline()
+                        when (column) {
+                            0 -> TableCell.Text(schedule.prompt)
+                            1 -> TableCell.Text(state.assistants[schedule.assistantId]?.name ?: state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), color = colors.textMuted)
+                            2 -> TableCell.Slot(listOf(describeCron(schedule.cron), schedule.timeZone).maxBy { it.length }) {
+                                Column {
+                                    Label(describeCron(schedule.cron), style = Tokens.Type.Code, maxLines = 1)
+                                    Label(schedule.timeZone, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                                }
+                            }
 
-                    for (schedule in schedules) {
-                        ScheduleRow(schedule, store, state)
-                        Hairline()
-                    }
-                }
+                            3 -> TableCell.Text(eachRunName(schedule.eachRun), color = colors.textMuted)
+                            4 -> TableCell.Text(if (schedule.proposed) "Waiting for you" else if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text)
+                            else -> TableCell.Slot { ScheduleActions(schedule, store, state) }
+                        }
+                    },
+                )
             }
 
             if (runs.isNotEmpty()) {
-                ContentTable(listOf(ColumnSpec(max = 120.dp), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp))) {
-                    ContentRow(header = true) {
-                        Label("Last runs", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted)
-                        Label("Conversation", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Result", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    }
+                Table(
+                    listOf(
+                        Col("Last runs", 88.dp),
+                        Col("Conversation", 140.dp, weight = 1f),
+                        Col("Result", 100.dp, max = 240.dp),
+                    ),
+                    runs.size,
+                    { row, column ->
+                        val run = runs[row]
+                        val conversation = state.conversations[run.conversationId]
 
-                    Hairline()
-
-                    for (run in runs) {
-                        RunRow(run, state)
-                        Hairline()
-                    }
-                }
+                        when (column) {
+                            0 -> TableCell.Text(stamp(run.ranAt, true), color = colors.textMuted)
+                            1 -> TableCell.Text(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty())
+                            else -> TableCell.Slot(if (run.outcome == SkippedOutcome) "Skipped: ${run.reason.orEmpty()}" else conversation?.let { statusSectionName(it.status) }.orEmpty(), Tokens.Size.IconSm + Tokens.Space.S1_5) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    if (run.outcome == SkippedOutcome) {
+                                        StatusMark("Skipped: ${run.reason.orEmpty()}", Tone.Attention, MyIcon.Alert)
+                                    } else if (conversation != null) {
+                                        StatusGlyph(conversation.status)
+                                        Label(statusSectionName(conversation.status), color = colors.text, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    headerCell = { column ->
+                        if (column == 0) {
+                            TableCell.Slot("Last runs") { Label("Last runs", Modifier.semantics { heading() }, Tokens.Type.MetaStrong, colors.textMuted) }
+                        } else {
+                            TableCell.Text(if (column == 1) "Conversation" else "Result", Tokens.Type.MetaStrong)
+                        }
+                    },
+                )
             }
 
             if (schedules.isEmpty()) {
@@ -117,32 +150,20 @@ fun SchedulesScreen(store: Store, state: AppState) {
 }
 
 @Composable
-private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
+private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
     val colors = MyTheme.colors
     var reviewing by remember(schedule.id) { mutableStateOf(false) }
     var editing by remember(schedule.id) { mutableStateOf(false) }
 
-    ContentRow {
-        Label(schedule.prompt, maxLines = 1)
-        Label(state.assistants[schedule.assistantId]?.name ?: state.projects[schedule.projectId]?.name ?: projectName(schedule.cwd), color = colors.textMuted, maxLines = 1)
-        Column {
-            Label(describeCron(schedule.cron), style = Tokens.Type.Code, maxLines = 1)
-            Label(schedule.timeZone, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-        }
-
-        Label(eachRunName(schedule.eachRun), color = colors.textMuted, maxLines = 1)
-        Label(if (schedule.proposed) "Waiting for you" else if (schedule.paused) "Paused" else until(schedule.nextRunAt), color = if (schedule.paused) colors.textFaint else colors.text, maxLines = 1)
-
-        RowMenu(schedule.prompt) { close ->
-            if (schedule.proposed) {
-                MenuItem("Review", onClick = { close(); reviewing = true }, leading = MyIcon.Review)
-                MenuItem("Decline", onClick = { close(); store.act { store.declineSchedule(schedule) } }, leading = MyIcon.Close)
-            } else {
-                MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
-                MenuItem("Edit", onClick = { close(); editing = true }, leading = MyIcon.Pencil)
-                MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
-                MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
-            }
+    RowMenu(schedule.prompt) { close ->
+        if (schedule.proposed) {
+            MenuItem("Review", onClick = { close(); reviewing = true }, leading = MyIcon.Review)
+            MenuItem("Decline", onClick = { close(); store.act { store.declineSchedule(schedule) } }, leading = MyIcon.Close)
+        } else {
+            MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
+            MenuItem("Edit", onClick = { close(); editing = true }, leading = MyIcon.Pencil)
+            MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
+            MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
         }
     }
 
@@ -152,26 +173,6 @@ private fun ScheduleRow(schedule: Schedule, store: Store, state: AppState) {
 
     if (editing) {
         ScheduleDialog(store, state, schedule, onDismiss = { editing = false })
-    }
-}
-
-@Composable
-private fun RunRow(run: ScheduleRun, state: AppState) {
-    val colors = MyTheme.colors
-    val conversation = state.conversations[run.conversationId]
-
-    ContentRow {
-        Label(timestamp(run.ranAt, ago = true), color = colors.textMuted, maxLines = 1)
-        Label(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty(), maxLines = 1)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-            if (run.outcome == SkippedOutcome) {
-                StatusMark("Skipped: ${run.reason.orEmpty()}", Tone.Attention, MyIcon.Alert)
-            } else if (conversation != null) {
-                StatusGlyph(conversation.status)
-                Label(statusSectionName(conversation.status), color = colors.text, maxLines = 1)
-            }
-        }
     }
 }
 

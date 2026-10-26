@@ -217,147 +217,154 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
-            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 160.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 360.dp))) {
-                if (forges != null && connected.isEmpty() && folders.isEmpty()) {
-                    Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
-                } else {
-                    ContentRow(header = true) {
-                        Label("Repository", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Forge", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Set up on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                    }
+            if (forges != null && connected.isEmpty() && folders.isEmpty()) {
+                Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+            } else {
+                Table(
+                    listOf(
+                        Col("Repository", 200.dp, weight = 1f),
+                        Col("Forge", 72.dp, max = 160.dp, priority = 1),
+                        Col("Set up on", 120.dp, max = 280.dp, overflow = Overflow.Wrap, priority = 1),
+                        Col("", 190.dp, preferred = 190.dp, align = ColumnAlign.End),
+                    ),
+                    rows.size,
+                    { index, column ->
+                        when (val row = rows[index]) {
+                            is RepositoryRow -> {
+                                val repository = row.repository
+                                val key = "${repository.forgeId}/${repository.fullName}"
+                                val setUp = projectsOfRepository(state.projects.values, repository)
+                                val forge = connected.firstOrNull { it.id == repository.forgeId }
+                                val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
 
-                    Hairline()
-                }
-
-                for (row in rows) {
-                    when (row) {
-                        is RepositoryRow -> {
-                            val repository = row.repository
-                            val key = "${repository.forgeId}/${repository.fullName}"
-                            val setUp = projectsOfRepository(state.projects.values, repository)
-                            val forge = connected.firstOrNull { it.id == repository.forgeId }
-                            val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
-
-                            ContentRow {
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                    ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
-                                    Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
-                                    Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
-                                    repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
-                                }
-
-                                Label(forge?.let(::forgeName).orEmpty(), color = colors.textMuted, maxLines = 1)
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                    NodeMarks(setUp, state)
-
-                                    if (key in cloning) {
-                                        Box(Modifier.width(Tokens.Size.NumberField)) {
-                                            IndeterminateProgress("Cloning ${repository.fullName}")
+                                when (column) {
+                                    0 -> TableCell.Slot("${repository.name} ${repository.owner} updated 12 minutes ago", Tokens.Size.IconMd + Tokens.Space.S1_5 * 3) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                            ProjectIcon(setUp.firstOrNull(), Tokens.Size.IconMd)
+                                            Label(repository.name, style = Tokens.Type.UiStrong, maxLines = 1)
+                                            Label(repository.owner, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                                            repository.updatedAt?.let { Label("updated ${timestamp(it, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
                                         }
-                                    } else if (elsewhere.isNotEmpty()) {
-                                        Box {
-                                            MyButton(
-                                                { setUpMenu = key },
-                                                icon = MyIcon.Plus,
-                                                description = if (setUp.isEmpty()) "Set up ${repository.fullName} on a node" else "Set up ${repository.fullName} on another node",
-                                                tooltip = if (setUp.isEmpty()) "Set up on a node" else "Set up on another node",
-                                                size = ButtonSize.Sm,
-                                                muted = true,
-                                            )
+                                    }
 
-                                            if (setUpMenu == key) {
-                                                MenuPopup(onDismiss = { setUpMenu = null; cloneChoice = false }) {
-                                                    if (!cloneChoice) {
-                                                        MenuLabel("Set up on")
-                                                        MenuItem("Clone onto a node", onClick = { cloneChoice = true })
-                                                        MenuItem("Use an existing folder", onClick = { setUpMenu = null; existingFolder = repository })
-                                                    } else {
-                                                        MenuLabel("Clone onto")
+                                    1 -> TableCell.Text(forge?.let(::forgeName).orEmpty(), color = colors.textMuted)
+                                    2 -> TableCell.Slot(setUp.mapNotNull { state.nodes[it.nodeId]?.name }.joinToString(" "), Tokens.Size.IconMd + Tokens.Size.IconMd) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
 
-                                                        for (node in elsewhere) {
-                                                            MenuItem(
-                                                                node.name,
-                                                                onClick = {
-                                                                    setUpMenu = null
-                                                                    cloneChoice = false
-                                                                    cloning = cloning + key
-                                                                    store.act {
-                                                                        try {
-                                                                            store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
-                                                                        } finally {
-                                                                            cloning = cloning - key
-                                                                        }
-                                                                    }
-                                                                },
-                                                                leading = nodeIcon(node),
-                                                            )
+                                            NodeMarks(setUp, state)
+
+                                            if (key in cloning) {
+                                                Box(Modifier.width(Tokens.Size.NumberField)) {
+                                                    IndeterminateProgress("Cloning ${repository.fullName}")
+                                                }
+                                            } else if (elsewhere.isNotEmpty()) {
+                                                Box {
+                                                    MyButton(
+                                                        { setUpMenu = key },
+                                                        icon = MyIcon.Plus,
+                                                        description = if (setUp.isEmpty()) "Set up ${repository.fullName} on a node" else "Set up ${repository.fullName} on another node",
+                                                        tooltip = if (setUp.isEmpty()) "Set up on a node" else "Set up on another node",
+                                                        size = ButtonSize.Sm,
+                                                        muted = true,
+                                                    )
+
+                                                    if (setUpMenu == key) {
+                                                        MenuPopup(onDismiss = { setUpMenu = null; cloneChoice = false }) {
+                                                            if (!cloneChoice) {
+                                                                MenuLabel("Set up on")
+                                                                MenuItem("Clone onto a node", onClick = { cloneChoice = true })
+                                                                MenuItem("Use an existing folder", onClick = { setUpMenu = null; existingFolder = repository })
+                                                            } else {
+                                                                MenuLabel("Clone onto")
+
+                                                                for (node in elsewhere) {
+                                                                    MenuItem(
+                                                                        node.name,
+                                                                        onClick = {
+                                                                            setUpMenu = null
+                                                                            cloneChoice = false
+                                                                            cloning = cloning + key
+                                                                            store.act {
+                                                                                try {
+                                                                                    store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName))
+                                                                                } finally {
+                                                                                    cloning = cloning - key
+                                                                                }
+                                                                            }
+                                                                        },
+                                                                        leading = nodeIcon(node),
+                                                                    )
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                                    if (setUp.isNotEmpty()) {
-                                        ProjectGroupMenu(store, state, setUp, repository.fullName)
-                                    }
+                                    else -> TableCell.Slot {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                            if (setUp.isNotEmpty()) {
+                                                ProjectGroupMenu(store, state, setUp, repository.fullName)
+                                            }
 
-                                    if (setUp.isNotEmpty()) {
-                                        MyButton(
-                                            { onNewConversation(newConversationProject(setUp, state).id) },
-                                            text = "New conversation",
-                                            size = ButtonSize.Sm,
-                                            variant = ButtonVariant.Outline,
-                                            description = "New conversation in ${repository.fullName}",
-                                        )
+                                            if (setUp.isNotEmpty()) {
+                                                MyButton(
+                                                    { onNewConversation(newConversationProject(setUp, state).id) },
+                                                    text = "New conversation",
+                                                    size = ButtonSize.Sm,
+                                                    variant = ButtonVariant.Outline,
+                                                    description = "New conversation in ${repository.fullName}",
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            Hairline()
-                        }
+                            is FolderRow -> {
+                                val folder = row.folder
 
-                        is FolderRow -> {
-                            val folder = row.folder
-                            ContentRow {
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                    ProjectIcon(folder, Tokens.Size.IconMd)
-                                    Label(folder.name, maxLines = 1)
-                                    Label("updated ${timestamp(row.updatedAt, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                                }
+                                when (column) {
+                                    0 -> TableCell.Slot("${folder.name} updated 12 minutes ago", Tokens.Size.IconMd + Tokens.Space.S1_5 * 2) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                            ProjectIcon(folder, Tokens.Size.IconMd)
+                                            Label(folder.name, maxLines = 1)
+                                            Label("updated ${timestamp(row.updatedAt, ago = true)}", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                                        }
+                                    }
 
-                                Box(Modifier)
+                                    1 -> TableCell.Text("")
+                                    2 -> TableCell.Slot(state.nodes[folder.nodeId]?.name.orEmpty(), Tokens.Size.IconMd) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                            NodeMarks(listOf(folder), state)
+                                        }
+                                    }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                    NodeMarks(listOf(folder), state)
-                                }
+                                    else -> TableCell.Slot {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                            ProjectGroupMenu(store, state, listOf(folder), folder.name)
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                                    ProjectGroupMenu(store, state, listOf(folder), folder.name)
-
-                                    MyButton(
-                                        { onNewConversation(folder.id) },
-                                        text = "New conversation",
-                                        size = ButtonSize.Sm,
-                                        variant = ButtonVariant.Outline,
-                                        description = "New conversation in ${folder.name}",
-                                    )
+                                            MyButton(
+                                                { onNewConversation(folder.id) },
+                                                text = "New conversation",
+                                                size = ButtonSize.Sm,
+                                                variant = ButtonVariant.Outline,
+                                                description = "New conversation in ${folder.name}",
+                                            )
+                                        }
+                                    }
                                 }
                             }
-
-                            Hairline()
                         }
-                    }
-                }
+                    },
+                    lazy = false,
+                )
+            }
 
-                if (forges != null && connected.isNotEmpty() && listing != null && repositories.isEmpty() && folders.isEmpty()) {
-                    Label("No repositories match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
-                }
+            if (forges != null && connected.isNotEmpty() && listing != null && repositories.isEmpty() && folders.isEmpty()) {
+                Label("No repositories match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
             }
         }
     }

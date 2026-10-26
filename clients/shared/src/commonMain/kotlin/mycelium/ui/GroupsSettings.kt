@@ -143,39 +143,39 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
             if (groups.isEmpty()) {
                 Label("Groups keep instructions, memory and the sidebar filter apart for different kinds of work.", color = colors.textMuted)
             } else {
-                ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 96.dp), ColumnSpec(max = 64.dp))) {
-                    ContentRow(header = true) {
-                        Label("Group", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Folders", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Projects", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                    }
-
-                    Hairline()
-
-                    for (group in groups) {
+                Table(
+                    listOf(
+                        Col("Group", 140.dp, weight = 1f),
+                        Col("Folders", 100.dp, max = 360.dp, priority = 1),
+                        Col("Projects", 72.dp, numeric = true),
+                        ActionColumn,
+                    ),
+                    groups.size,
+                    { row, column ->
+                        val group = groups[row]
                         val folders = folderSummary(group, state)
 
-                        ContentRow {
-                            Label(group.name, Modifier.pressable({ onOpenGroup(group.id) }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), maxLines = 1)
-
-                            if (folders.isEmpty()) {
-                                Label("None", color = colors.textFaint)
-                            } else {
-                                Label(if (folders.size > 1) "${folders.first()} +${folders.size - 1} more" else folders.first(), style = Tokens.Type.Code, maxLines = 1)
+                        when (column) {
+                            0 -> TableCell.Slot(group.name) {
+                                Label(group.name, Modifier.pressable({ onOpenGroup(group.id) }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), maxLines = 1)
                             }
 
-                            Label(state.projects.values.count { it.groupId == group.id }.toString(), color = colors.textMuted)
+                            1 -> if (folders.isEmpty()) {
+                                TableCell.Text("None", color = colors.textFaint)
+                            } else {
+                                TableCell.Text(if (folders.size > 1) "${folders.first()} +${folders.size - 1} more" else folders.first(), Tokens.Type.Code)
+                            }
 
-                            RowMenu("${group.name} group") { close ->
-                                MenuItem("Rename", onClick = { close(); renaming = group.id; renamed = group.name; deleting = null })
-                                MenuItem("Delete", onClick = { close(); deleting = group.id; renaming = null })
+                            2 -> TableCell.Text(state.projects.values.count { it.groupId == group.id }.toString(), color = colors.textMuted)
+                            else -> TableCell.Slot {
+                                RowMenu("${group.name} group") { close ->
+                                    MenuItem("Rename", onClick = { close(); renaming = group.id; renamed = group.name; deleting = null })
+                                    MenuItem("Delete", onClick = { close(); deleting = group.id; renaming = null })
+                                }
                             }
                         }
-
-                        Hairline()
-                    }
-                }
+                    },
+                )
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

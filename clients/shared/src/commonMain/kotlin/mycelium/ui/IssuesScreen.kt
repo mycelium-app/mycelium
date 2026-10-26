@@ -127,109 +127,110 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
-            ContentTable(listOf(ColumnSpec(max = 64.dp), ColumnSpec(flexible = true), ColumnSpec(max = 240.dp), ColumnSpec(max = 280.dp), ColumnSpec(max = 200.dp))) {
-                if (state.projects.values.none { it.forgeId != null }) {
-                    Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
-                } else {
-                    ContentRow(header = true) {
-                        Box(Modifier)
-                        Label("Issue", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Worktree", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Pull request", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                    }
+            if (state.projects.values.none { it.forgeId != null }) {
+                Label("Issues come from forge repositories you have set up as projects. Set one up in Projects first.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+            } else {
+                Table(
+                    listOf(
+                        Col("", 40.dp, numeric = true),
+                        Col("Issue", 160.dp, weight = 1f, overflow = Overflow.Wrap),
+                        Col("Worktree", 120.dp, max = 240.dp, priority = 1),
+                        Col("Pull request", 120.dp, max = 280.dp, priority = 1),
+                        Col("", 150.dp, preferred = 150.dp, align = ColumnAlign.End),
+                    ),
+                    shown.size,
+                    { row, column ->
+                        val issue = shown[row]
+                        val projects = projectsOfIssue(state.projects.values, issue)
+                        val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
 
-                    Hairline()
-                }
+                        when (column) {
+                            0 -> TableCell.Text("#${issue.number}", Tokens.Type.Code, colors.textFaint)
+                            1 -> TableCell.Text(issue.title)
+                            2 -> TableCell.Slot(existing.maxByOrNull { it.branch.length }?.branch ?: "None", Tokens.Size.IconSm * 2 + Tokens.Space.S1_5 * 2) {
+                                Column {
+                                    if (existing.isEmpty()) {
+                                        Label("None", color = colors.textFaint)
+                                    }
 
-                for (issue in shown) {
-                    val projects = projectsOfIssue(state.projects.values, issue)
-                    val existing = worktreesOfIssue(state.projects.values, worktrees, issue)
+                                    for (worktree in existing) {
+                                        val node = state.nodes[state.projects[worktree.projectId]?.nodeId]
 
-                    ContentRow {
-                        Label("#${issue.number}", style = Tokens.Type.Code, color = colors.textFaint, maxLines = 1)
-                        Label(issue.title)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                                            Label(worktree.branch, Modifier.weight(1f, fill = false), Tokens.Type.Code, maxLines = 1)
 
-                        Column {
-                            if (existing.isEmpty()) {
-                                Label("None", color = colors.textFaint)
-                            }
-
-                            for (worktree in existing) {
-                                val node = state.nodes[state.projects[worktree.projectId]?.nodeId]
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
-                                    Label(worktree.branch, Modifier.weight(1f, fill = false), Tokens.Type.Code, maxLines = 1)
-
-                                    if (node != null) {
-                                        Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
+                                            if (node != null) {
+                                                Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        Column {
-                            val requests = issue.pullRequests
+                            3 -> TableCell.Slot(issue.pullRequests.orEmpty().maxOfOrNull { pullRequestText(it) } ?: "Unknown") {
+                                Column {
+                                    val requests = issue.pullRequests
 
-                            when {
-                                requests == null -> Label("Unknown", color = colors.textFaint)
-                                requests.isEmpty() -> Label("None", color = colors.textFaint)
-                            }
+                                    when {
+                                        requests == null -> Label("Unknown", color = colors.textFaint)
+                                        requests.isEmpty() -> Label("None", color = colors.textFaint)
+                                    }
 
-                            for (request in requests.orEmpty()) {
-                                Label(pullRequestText(request), color = if (request.state == PullRequestState.Open) colors.diffAdd else colors.textMuted, maxLines = 1)
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.End) {
-                            if (issue.number in starting) {
-                                Box(Modifier.width(Tokens.Size.NumberField)) {
-                                    IndeterminateProgress("Starting a workspace for issue ${issue.number}")
+                                    for (request in requests.orEmpty()) {
+                                        Label(pullRequestText(request), color = if (request.state == PullRequestState.Open) colors.diffAdd else colors.textMuted, maxLines = 1)
+                                    }
                                 }
-                            } else if (existing.isNotEmpty()) {
-                                MyButton(
-                                    { start(projects.first { it.id == existing.first().projectId }, issue) },
-                                    text = "Open workspace",
-                                    size = ButtonSize.Sm,
-                                    description = "Open the workspace for issue ${issue.number}",
-                                )
-                            } else {
-                                Box {
+                            }
+
+                            else -> TableCell.Slot {
+                                if (issue.number in starting) {
+                                    Box(Modifier.width(Tokens.Size.NumberField)) {
+                                        IndeterminateProgress("Starting a workspace for issue ${issue.number}")
+                                    }
+                                } else if (existing.isNotEmpty()) {
                                     MyButton(
-                                        { if (projects.size == 1) start(projects.first(), issue) else menuFor = issue.number },
-                                        text = "Create workspace",
+                                        { start(projects.first { it.id == existing.first().projectId }, issue) },
+                                        text = "Open workspace",
                                         size = ButtonSize.Sm,
-                                        variant = ButtonVariant.Outline,
-                                        description = "Create a workspace for issue ${issue.number}",
+                                        description = "Open the workspace for issue ${issue.number}",
                                     )
+                                } else {
+                                    Box {
+                                        MyButton(
+                                            { if (projects.size == 1) start(projects.first(), issue) else menuFor = issue.number },
+                                            text = "Create workspace",
+                                            size = ButtonSize.Sm,
+                                            variant = ButtonVariant.Outline,
+                                            description = "Create a workspace for issue ${issue.number}",
+                                        )
 
-                                    if (menuFor == issue.number) {
-                                        MenuPopup(onDismiss = { menuFor = null }) {
-                                            MenuLabel("Create on")
+                                        if (menuFor == issue.number) {
+                                            MenuPopup(onDismiss = { menuFor = null }) {
+                                                MenuLabel("Create on")
 
-                                            for (project in projects) {
-                                                val node = state.nodes[project.nodeId]
+                                                for (project in projects) {
+                                                    val node = state.nodes[project.nodeId]
 
-                                                MenuItem(
-                                                    node?.name ?: project.name,
-                                                    onClick = { menuFor = null; start(project, issue) },
-                                                    leading = node?.let(::nodeIcon),
-                                                )
+                                                    MenuItem(
+                                                        node?.name ?: project.name,
+                                                        onClick = { menuFor = null; start(project, issue) },
+                                                        leading = node?.let(::nodeIcon),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
+                    },
+                    lazy = false,
+                )
+            }
 
-                    Hairline()
-                }
-
-                if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
-                    Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
-                }
+            if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
+                Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
             }
         }
     }
