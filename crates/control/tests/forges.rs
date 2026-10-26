@@ -5,7 +5,7 @@ use axum::Router;
 use axum::extract::Query;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use common::{Server, serve};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -78,6 +78,123 @@ fn fake_gitlab() -> Router {
     }
 
     Router::new().route("/api/v4/user", get(user)).route("/api/v4/groups", get(groups)).route("/api/v4/projects", get(projects))
+}
+
+fn fake_gitlab_mcp(allowed: bool) -> Router {
+    async fn accepted(headers: HeaderMap, Json(body): Json<Value>) -> Response {
+        if !authorised(&headers, "bearer", GITLAB_TOKEN) {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+
+        if body.get("id").is_none() {
+            return StatusCode::ACCEPTED.into_response();
+        }
+
+        let result = match body["method"].as_str().unwrap_or_default() {
+            "initialize" => json!({"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "gitlab", "version": "1"}}),
+            _ => json!({"tools": [{"name": "get_issue", "description": "Get an issue", "inputSchema": {"type": "object"}}]}),
+        };
+
+        Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
+    }
+
+    async fn refused() -> StatusCode {
+        StatusCode::FORBIDDEN
+    }
+
+    match allowed {
+        true => fake_gitlab().route("/api/v4/mcp", post(accepted)),
+        false => fake_gitlab().route("/api/v4/mcp", post(refused)),
+    }
+}
+
+async fn mcp_servers(server: &Server) -> Vec<Value> {
+    let (_, listed) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
+
+    listed.as_array().unwrap().clone()
+}
+
+async fn connect_without_mcp(server: &Server, base_url: &str) -> (u16, Value) {
+    server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": "gitlab", "base_url": base_url, "token": GITLAB_TOKEN, "add_mcp": false}))).await
+}
+
+#[tokio::test]
+async fn adding_gitlab_adds_its_mcp_server() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+
+    let (status, forge) = connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    let servers = mcp_servers(&server).await;
+
+    assert_eq!(status, 201, "{forge}");
+    assert_eq!(servers.len(), 1);
+    assert_eq!((servers[0]["name"].clone(), servers[0]["url"].clone(), servers[0]["forge_id"].clone()), (json!("GitLab"), json!(format!("{gitlab}/api/v4/mcp")), forge["id"].clone()));
+    assert_eq!(forge["mcp_server_id"], servers[0]["id"]);
+    assert_eq!(servers[0]["tools"][0]["name"], "get_issue");
+    assert!(!servers.iter().any(|listed| listed.to_string().contains(GITLAB_TOKEN)));
+}
+
+#[tokio::test]
+async fn add_mcp_false_adds_none() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+
+    let (status, forge) = connect_without_mcp(&server, &gitlab).await;
+
+    assert_eq!(status, 201, "{forge}");
+    assert_eq!(mcp_servers(&server).await.len(), 0);
+    assert_eq!(forge.get("mcp_server_id"), None);
+}
+
+#[tokio::test]
+async fn a_refused_token_still_connects_the_forge_with_an_mcp_error() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(false)).await;
+
+    let (status, forge) = connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+
+    assert_eq!(status, 201, "{forge}");
+    assert_eq!(forge["mcp_error"], "GitLab's MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead.");
+    assert_eq!(mcp_servers(&server).await.len(), 0);
+    let (_, listed) = server.user.json(server.user.get("/api/v1/forges")).await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn reconnecting_updates_the_linked_server_instead_of_adding_another() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+    connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+
+    let (_, again) = connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    let servers = mcp_servers(&server).await;
+
+    assert_eq!(servers.len(), 1);
+    assert_eq!(again["mcp_server_id"], servers[0]["id"]);
+}
+
+#[tokio::test]
+async fn disconnecting_removes_the_linked_server() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+    let (_, forge) = connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+
+    let status = server.user.delete(&format!("/api/v1/forges/{}", forge["id"].as_str().unwrap())).send().await.unwrap().status().as_u16();
+
+    assert_eq!(status, 204);
+    assert_eq!(mcp_servers(&server).await.len(), 0);
+}
+
+#[tokio::test]
+async fn github_enterprise_is_not_offered_an_mcp_server() {
+    let server = Server::start().await;
+    let github = serve(fake_github()).await;
+
+    let (status, forge) = connect(&server, "github", &github, GITHUB_TOKEN).await;
+
+    assert_eq!(status, 201, "{forge}");
+    assert_eq!(mcp_servers(&server).await.len(), 0);
+    assert_eq!(forge.get("mcp_error"), None);
 }
 
 async fn connect(server: &Server, kind: &str, base_url: &str, token: &str) -> (u16, Value) {

@@ -19,7 +19,7 @@ use uuid::Uuid;
 const FORGE_TIMEOUT: Duration = Duration::from_secs(15);
 const PAGE_SIZE: usize = 100;
 const MOST_PAGES: usize = 5;
-const FORGE_COLUMNS: &str = "id, kind, base_url, account, token, organisations, created_at";
+const FORGE_COLUMNS: &str = "id, kind, base_url, account, token, organisations, created_at, (select s.id from chat_tool_servers s where s.forge_id = forges.id limit 1) as mcp_server_id";
 
 #[derive(Deserialize)]
 pub struct RepositoryQuery {
@@ -40,6 +40,7 @@ pub struct ForgeRow {
     pub token: String,
     pub organisations: Vec<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub mcp_server_id: Option<Uuid>,
 }
 
 pub enum ForgeError {
@@ -100,6 +101,8 @@ impl ForgeRow {
             token_hint: token_hint(&self.token),
             organisations: self.organisations.clone(),
             created_at: self.created_at,
+            mcp_server_id: self.mcp_server_id,
+            mcp_error: None,
         })
     }
 }
@@ -785,7 +788,64 @@ pub async fn connect(State(state): State<AppState>, user: AuthUser, Json(request
 
     state.forge_cache.invalidate(row.id);
 
-    Ok((StatusCode::CREATED, Json(row.to_proto()?)))
+    let mcp_error = link_mcp_server(&state, user.id, &row, request.kind, request.add_mcp != Some(false)).await?;
+    let linked = find_owned(&state, row.id, user.id).await?;
+    let mut forge = linked.to_proto()?;
+    forge.mcp_error = mcp_error;
+
+    Ok((StatusCode::CREATED, Json(forge)))
+}
+
+fn mcp_address(kind: ForgeKind, base_url: &str) -> Option<(&'static str, String)> {
+    match kind {
+        ForgeKind::Gitlab => Some(("GitLab", format!("{base_url}/api/v4/mcp"))),
+        ForgeKind::Github if base_url == "https://github.com" => Some(("GitHub", "https://api.githubcopilot.com/mcp/".to_string())),
+        ForgeKind::Github => None,
+    }
+}
+
+async fn link_mcp_server(state: &AppState, owner: Uuid, forge: &ForgeRow, kind: ForgeKind, wanted: bool) -> ApiResult<Option<String>> {
+    let Some((product, address)) = mcp_address(kind, &forge.base_url) else {
+        return Ok(None);
+    };
+    let linked = sqlx::query_scalar::<_, Uuid>("select id from chat_tool_servers where forge_id = $1").bind(forge.id).fetch_optional(&state.pool).await?;
+
+    if linked.is_none() && !wanted {
+        return Ok(None);
+    }
+
+    let tools = match crate::chat_tool_servers::fetch_tools(state, product, &address, Some(&forge.token), crate::chat_tool_servers::DEFAULT_KEY_HEADER, None).await {
+        Ok(tools) => tools,
+        Err(_) => return Ok(Some(format!("{product}'s MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead."))),
+    };
+
+    match linked {
+        Some(id) => {
+            sqlx::query("update chat_tool_servers set bearer_token = $2, tools = $3 where id = $1").bind(id).bind(&forge.token).bind(sqlx::types::Json(tools)).execute(&state.pool).await?;
+        }
+        None => {
+            let host = url::Url::parse(&forge.base_url).ok().and_then(|parsed| parsed.host_str().map(str::to_string)).unwrap_or_default();
+            let name = match crate::chat_tool_servers::check_name(state, owner, product, None).await {
+                Ok(()) => product.to_string(),
+                Err(_) => format!("{product} {host}"),
+            };
+
+            sqlx::query("insert into chat_tool_servers (owner, name, kind, url, bearer_token, tools, settings, forge_id) values ($1, $2, 'mcp', $3, $4, $5, '{}', $6)")
+                .bind(owner)
+                .bind(name)
+                .bind(&address)
+                .bind(&forge.token)
+                .bind(sqlx::types::Json(tools))
+                .bind(forge.id)
+                .execute(&state.pool)
+                .await?;
+        }
+    }
+
+    state.hub.tools_changed(owner);
+    state.publish(Some(owner), mycelium_proto::stream::StreamMessage::IntegrationsChanged);
+
+    Ok(None)
 }
 
 pub async fn disconnect(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
@@ -796,6 +856,8 @@ pub async fn disconnect(State(state): State<AppState>, user: AuthUser, Path(id):
     }
 
     state.forge_cache.invalidate(id);
+    state.hub.tools_changed(user.id);
+    state.publish(Some(user.id), mycelium_proto::stream::StreamMessage::IntegrationsChanged);
 
     Ok(StatusCode::NO_CONTENT)
 }

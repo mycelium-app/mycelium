@@ -182,7 +182,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
         _ => json!({}),
     };
 
-    state.hub.track_oauth(sign_in, PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client_id, token_endpoint: authorisation.token_endpoint, verifier, created: std::time::Instant::now() });
+    state.hub.track_oauth(sign_in, PendingOAuth { owner: user.id, name: name.to_string(), url: resource, settings, client_id, token_endpoint: authorisation.token_endpoint, verifier, forge_id: request.forge_id, created: std::time::Instant::now() });
 
     Ok(Json(OAuthStart { authorize_url: authorize.to_string() }))
 }
@@ -229,7 +229,7 @@ async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app:
     let oauth = json!({"client_id": pending.client_id, "token_endpoint": pending.token_endpoint, "resource": pending.url});
 
     sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-        "insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, tools, settings) values ($1, $2, 'mcp', $3, $4, $5, $6, $7, $8, $9) returning {SERVER_COLUMNS}"
+        "insert into chat_tool_servers (owner, name, kind, url, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, tools, settings, forge_id) values ($1, $2, 'mcp', $3, $4, $5, $6, $7, $8, $9, $10) returning {SERVER_COLUMNS}"
     )))
     .bind(pending.owner)
     .bind(&pending.name)
@@ -240,6 +240,7 @@ async fn connect(state: &AppState, pending: &PendingOAuth, tokens: &Tokens, app:
     .bind(sqlx::types::Json(oauth))
     .bind(sqlx::types::Json(listed))
     .bind(sqlx::types::Json(&pending.settings))
+    .bind(pending.forge_id)
     .fetch_one(&state.pool)
     .await?;
     state.hub.tools_changed(pending.owner);

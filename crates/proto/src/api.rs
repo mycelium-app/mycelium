@@ -495,6 +495,10 @@ pub struct Forge {
     pub token_hint: String,
     pub organisations: Vec<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_server_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_error: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -503,6 +507,8 @@ pub struct ConnectForgeRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_mcp: Option<bool>,
 }
 
 impl std::fmt::Debug for ConnectForgeRequest {
@@ -691,6 +697,8 @@ pub struct StartChatToolServerOAuthRequest {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
