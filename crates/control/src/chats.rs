@@ -5,7 +5,7 @@ use crate::activity::record_turn;
 use crate::chat_tools::{self, Toolbox};
 use crate::conversations::derived_title;
 use crate::error::{ApiError, ApiResult};
-use crate::instructions::{assistant_chat_layers, extensions_of};
+use crate::instructions::{assistant_chat_layers, extensions_of, teach_me_layer};
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue, enum_text, find_owned, lock_owned, publish_queue, set_status};
@@ -417,6 +417,10 @@ async fn relay(state: &AppState, owner: Uuid, id: Uuid, provider: &ProviderRow, 
 
     if let Some(layers) = assistant_chat_layers(state, id).await? {
         base_instructions = format!("{base_instructions}\n\n{layers}");
+    }
+
+    if let Some(teach_me) = teach_me_layer(state, id).await? {
+        base_instructions = format!("{base_instructions}\n\n{teach_me}");
     }
 
     let mut toolbox = Toolbox::open(state, owner, id).await?;

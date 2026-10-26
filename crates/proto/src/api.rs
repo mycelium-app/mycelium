@@ -217,6 +217,8 @@ pub struct PatchConversationRequest {
     pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clear_project: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teach_me: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

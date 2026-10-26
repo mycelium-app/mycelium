@@ -71,6 +71,7 @@ pub enum EventKind {
     Workflow,
     ModelChanged,
     Continued,
+    TeachMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -167,6 +168,8 @@ pub struct Conversation {
     pub pull_request_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assistant_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub teach_me: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

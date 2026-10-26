@@ -358,6 +358,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              agent_active = case when $3::bool is true then false else agent_active end,
              pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end,
              project_id = case when $10 then null else coalesce($11, project_id) end,
+             teach_me = coalesce($12, teach_me),
              pull_request_label = case when $10 or $11 is not null then null else pull_request_label end,
              pull_request_url = case when $10 or $11 is not null then null else pull_request_url end
          where id = $1
@@ -375,8 +376,13 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.pinned)
     .bind(request.clear_project == Some(true))
     .bind(request.project_id)
+    .bind(request.teach_me)
     .fetch_one(&mut *tx)
     .await?;
+    let teach_change = match request.teach_me {
+        Some(on) if on != before.teach_me => append_event(&mut tx, id, EventKind::TeachMode, &json!({"on": on}), None).await?,
+        _ => None,
+    };
     let model_change = match &switched_to {
         Some((provider, model)) if before.provider_id != Some(provider.id) || before.model.as_deref() != Some(model.as_str()) => {
             append_event(&mut tx, id, EventKind::ModelChanged, &json!({"provider_id": provider.id, "provider_name": provider.name, "model": model}), None).await?
@@ -385,8 +391,12 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     };
     tx.commit().await?;
 
-    if let Some(event) = model_change {
+    for event in model_change.into_iter().chain(teach_change) {
         state.publish(Some(user.id), StreamMessage::Event(event));
+    }
+
+    if request.teach_me.is_some_and(|on| on != before.teach_me) {
+        state.hub.mark_secrets_stale(id);
     }
 
     if title.is_some() && chats::is_chat(&row) {

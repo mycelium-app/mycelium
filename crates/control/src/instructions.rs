@@ -213,6 +213,14 @@ async fn conversation_layers(state: &AppState, conversation_id: Uuid, with_globa
     Ok(global.into_iter().chain(group).chain(assistant).filter(|text| !text.trim().is_empty()).collect())
 }
 
+const TEACH_ME_INSTRUCTIONS: &str = "Teach me mode is on for this conversation. The person wants to learn, not to receive finished code. Answer with hints, explanations and questions that lead them to the solution, and show at most a short fragment where it clarifies a point. Do not edit, create or delete files, and do not run commands that change anything. If they ask you to just do it, offer to explain the approach first and tell them they can switch Teach me off.";
+
+pub async fn teach_me_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
+    let on = sqlx::query_scalar::<_, bool>("select teach_me from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.unwrap_or(false);
+
+    Ok(on.then(|| TEACH_ME_INSTRUCTIONS.to_string()))
+}
+
 pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
     let revision = current_revision(state).await?;
 
@@ -220,12 +228,14 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
 
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let extensions = extensions_of(state, owner).await?;
+    let teach_me = teach_me_layer(state, conversation_id).await?;
     let layers: Vec<String> = conversation_layers(state, conversation_id, false)
         .await?
         .into_iter()
         .chain(extensions.generated_ui.then(generated_ui_instructions))
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
         .chain(extensions.mycelium_tools.then(tools_instructions))
+        .chain(teach_me)
         .collect();
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
