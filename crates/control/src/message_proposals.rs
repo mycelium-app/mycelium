@@ -205,7 +205,7 @@ pub async fn approve_and_connect_groups(State(state): State<AppState>, user: Aut
     };
 
     if source_group == target_group {
-        return Err(ApiError::conflict("connection_no_group", "Both conversations need a group to connect their groups."));
+        return Err(ApiError::conflict("connection_same_group", "Both conversations are already in the same group, so there is nothing to connect. Approve the message without connecting groups."));
     }
 
     crate::group_connections::connect(&state, &user, source_group, target_group).await?;

@@ -1061,9 +1061,13 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
 
                     if !allowed {
-                        let own_name = match caller_group {
-                            Some(own) => sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(own).fetch_one(&state.pool).await?,
-                            None => "this conversation's".to_string(),
+                        let message = match caller_group {
+                            Some(own) => {
+                                let own_name = sqlx::query_scalar::<_, String>("select name from groups where id = $1").bind(own).fetch_one(&state.pool).await?;
+
+                                format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections.")
+                            }
+                            None => format!("This conversation is not in a group, so it cannot start one in {target_name}. Ask the person to put it in a group and connect that group to {target_name} in Settings, Agent connections."),
                         };
 
                         return Ok(nothing(format!("The {own_name} and {target_name} groups are not connected. Ask the person to connect them in Settings, Agent connections.")));

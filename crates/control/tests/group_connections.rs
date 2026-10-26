@@ -278,6 +278,32 @@ async fn starting_in_an_unconnected_group_starts_nothing_and_says_how_to_connect
 }
 
 #[tokio::test]
+async fn starting_from_a_conversation_with_no_group_says_to_put_it_in_one() {
+    let mut fleet = fleet().await;
+    let loose = working_conversation(&fleet.server, &mut fleet.link, "Loose chat", "/elsewhere").await;
+    project_in(&fleet, "billing", Some(fleet.immich)).await;
+
+    let refused = call(&fleet.server, &fleet.link, loose, "start_conversation", start_arguments("Immich", "billing")).await;
+
+    assert_eq!(text(&refused), "Nothing was started. This conversation is not in a group, so it cannot start one in Immich. Ask the person to put it in a group and connect that group to Immich in Settings, Agent connections.");
+}
+
+#[tokio::test]
+async fn connecting_groups_for_two_conversations_in_the_same_group_says_there_is_nothing_to_connect() {
+    let mut fleet = fleet().await;
+    let loose = working_conversation(&fleet.server, &mut fleet.link, "Loose chat", "/elsewhere").await;
+    propose(&fleet.server, &fleet.link, loose, fleet.immich_chat).await;
+    sqlx::query("update conversations set cwd = '/work/immich/other' where id = $1").bind(loose).execute(&fleet.server.pool).await.unwrap();
+    let waiting = proposals(&fleet.server).await;
+    let id = waiting[0]["id"].as_str().unwrap();
+
+    let (status, refused) = fleet.server.user.json(fleet.server.user.post(&format!("/api/v1/message-proposals/{id}/connect-groups"))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("connection_same_group")));
+    assert!(refused["message"].as_str().unwrap().contains("Approve the message without connecting groups"));
+}
+
+#[tokio::test]
 async fn starting_in_a_project_outside_the_named_group_is_refused() {
     let fleet = fleet().await;
     connect(&fleet.server, fleet.yucca, fleet.immich).await;
