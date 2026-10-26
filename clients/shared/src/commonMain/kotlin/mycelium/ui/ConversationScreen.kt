@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -78,7 +79,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: (@Composable () -> Unit)? = null) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
@@ -241,7 +242,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { chatWidth = with(density) { it.width.toDp() } }) {
                 ConversationHeader(
-                    custom = header,
+                    slots = header,
                     conversation = conversation,
                     node = node,
                     chat = chat,
@@ -266,6 +267,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         }
                     },
                     onRetry = { store.act { api.retryConversation(id) } },
+                    onDismissFailure = { store.dismissFailure(conversation) },
                     dismissedWalkthrough = !chat && state.walkthroughs[id]?.dismissed == true,
                     onShowWalkthrough = { store.setWalkthroughDismissed(id, false) },
                     onDelete = {
@@ -421,6 +423,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         },
                         onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                         onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
+                        onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
                         goal = if (chat) null else GoalControls(
                             goal = state.goals[id],
                             onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
@@ -439,7 +442,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
-                            SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
+                            SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
@@ -457,7 +460,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         BottomSheet(onDismiss = { openPanel(null) }) {
             when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
-                SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
+                SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
@@ -479,7 +482,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
 @Composable
 private fun ConversationHeader(
-    custom: (@Composable () -> Unit)?,
+    slots: HeaderSlots?,
     conversation: Conversation,
     node: NodeSummary?,
     chat: Boolean,
@@ -499,6 +502,7 @@ private fun ConversationHeader(
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
     onRetry: () -> Unit,
+    onDismissFailure: () -> Unit,
     dismissedWalkthrough: Boolean,
     onShowWalkthrough: () -> Unit,
     onDelete: () -> Unit,
@@ -513,18 +517,14 @@ private fun ConversationHeader(
     var projectMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
 
-    if (custom != null) {
-        custom()
-
-        return
-    }
-
     Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
         LocalOpenList.current?.let { openList ->
             MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
         }
 
-        if (renaming) {
+        if (slots != null) {
+            slots.title(this)
+        } else if (renaming) {
             TextInput(draft, { draft = it }, label = "Conversation name", placeholder = "Leave empty to use the suggested title", modifier = if (compact) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn), showLabel = false, onSubmit = {
                 onRename(draft.trim())
                 renaming = false
@@ -582,18 +582,22 @@ private fun ConversationHeader(
                 Tag("Archived")
             } else if (conversation.status == ConversationStatus.Failed) {
                 MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry ${conversation.title}")
+                MyButton(onDismissFailure, text = "Dismiss", size = ButtonSize.Sm, muted = true, description = "Dismiss the failure of ${conversation.title}")
             }
 
             Box(Modifier.weight(1f))
         }
 
         Box {
-            if (!compact) {
-                MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = "More", muted = true)
+            if (!compact || slots != null) {
+                MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = if (slots != null) "More for ${conversation.title}" else "More", muted = true)
             }
 
             if (menuOpen) {
                 MenuPopup(onDismiss = { menuOpen = false }) {
+                    if (slots != null) {
+                        slots.menu { menuOpen = false }
+                    } else {
                     if (compact) {
                         MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
 
@@ -617,10 +621,13 @@ private fun ConversationHeader(
                     if (archived) {
                         MenuItem("Delete", onClick = { menuOpen = false; confirmingDelete = true })
                     }
+                    }
                 }
             }
         }
     }
+
+    slots?.notices?.invoke()
 
     if (projectMenuOpen) {
         ProjectMenu(projects, nodes, project?.id, "Project", onDismiss = { projectMenuOpen = false }, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = { projectMenuOpen = false; onSetUp() }) {
@@ -633,6 +640,8 @@ private fun ConversationHeader(
         DeleteConversationDialog(conversation.title, onDismiss = { confirmingDelete = false }, onConfirm = { confirmingDelete = false; onDelete() })
     }
 }
+
+class HeaderSlots(val title: @Composable RowScope.() -> Unit, val menu: @Composable (close: () -> Unit) -> Unit, val notices: @Composable () -> Unit)
 
 fun toneOf(status: ConversationStatus): Tone = when (status) {
     ConversationStatus.Working -> Tone.Working
@@ -691,25 +700,25 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
 }
 
 @Composable
-private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit) {
+private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
     Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents" }) {
         Bar {
             BarTitle("Subagents")
         }
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(vertical = Tokens.Space.S2)) {
-            SubagentsList(sections, currentId, parent, onOpen)
+            SubagentsList(sections, currentId, parent, onOpen, onStop)
         }
     }
 }
 
 @Composable
-private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit) {
+private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
     val colors = MyTheme.colors
     val stamp = timestamper()
 
     if (parent != null) {
-        MyButton({ onOpen(parent.id) }, text = "Back to ${parent.title}", icon = MyIcon.ChevronLeft, description = "Back to ${parent.title}", size = ButtonSize.Sm, muted = true, modifier = Modifier.padding(horizontal = Tokens.Space.S2))
+        BackButton(parent.title, { onOpen(parent.id) }, Modifier.padding(horizontal = Tokens.Space.S2), showText = true)
     }
 
     if (sections.isEmpty()) {
@@ -729,9 +738,13 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
             val status = statusSectionName(subagent.status)
             val since = stamp(subagent.updatedAt, false)
 
+            val menu = rememberRowMenuState()
+            val running = subagent.status == ConversationStatus.Working || subagent.status == ConversationStatus.Input
+
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .rowContextMenu(menu)
                     .pressable({ onOpen(subagent.id) }, selected = subagent.id == currentId, shape = BlockShape, description = "${subagent.title}, $status, $since")
                     .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -741,6 +754,14 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
                 Label(subagent.title, Modifier.weight(1f), maxLines = 1)
                 Label(status, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 Label(since, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+
+                RowMenu(subagent.title, menu) { close ->
+                    MenuItem("Open", onClick = { close(); onOpen(subagent.id) }, leading = MyIcon.Agent)
+
+                    if (running) {
+                        MenuItem("Stop", onClick = { close(); onStop(subagent) }, leading = MyIcon.Stop)
+                    }
+                }
             }
         }
     }

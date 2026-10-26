@@ -954,6 +954,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         act { api.closeSession(conversation.id) }
     }
 
+    fun dismissFailure(conversation: Conversation) {
+        act { api.dismissConversation(conversation.id) }
+    }
+
     fun act(block: suspend () -> Unit) {
         scope.launch {
             mutableProblem.value = null

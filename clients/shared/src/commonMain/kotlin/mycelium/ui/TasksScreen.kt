@@ -308,6 +308,7 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
     val permission = remember(events) { events?.let { pendingPermission(it) } }
     var explained by remember { mutableStateOf(false) }
     var startMenu by remember { mutableStateOf(false) }
+    var confirmingDelete by remember(card.title) { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxWidth().background(colors.bgRaised, BlockShape).padding(Tokens.Space.S2),
@@ -390,7 +391,11 @@ private fun TaskCardView(card: BoardCard, store: Store, state: AppState, now: ko
                                 }
                             }
                         }
-                        MyButton({ store.act { store.deleteTask(task) } }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+                        MyButton({ confirmingDelete = true }, text = "Delete", description = "Delete ${task.title}", size = ButtonSize.Sm, muted = true)
+                    }
+
+                    if (confirmingDelete) {
+                        ConfirmDialog("Delete ${task.title}?", "The task is removed from the board. This cannot be undone.", "Delete task", onDismiss = { confirmingDelete = false }, onConfirm = { confirmingDelete = false; store.act { store.deleteTask(task) } })
                     }
 
                     if (explained && card.waitingOn.isNotEmpty()) {

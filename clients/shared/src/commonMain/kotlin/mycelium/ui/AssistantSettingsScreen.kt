@@ -79,7 +79,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            MyButton(onBack, icon = MyIcon.ChevronLeft, description = if (creating) "Back to assistants" else "Back to ${loaded?.name ?: "the assistant"}", muted = true)
+            BackButton(if (creating) "assistants" else loaded?.name ?: "the assistant", onBack)
             BarTitle(if (creating) "New assistant" else "${loaded?.name ?: "Assistant"} settings")
         }
 

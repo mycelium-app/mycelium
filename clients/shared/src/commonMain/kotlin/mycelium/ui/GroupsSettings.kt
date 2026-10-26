@@ -73,7 +73,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                 MyButton({ naming = true; newName = "" }, text = "New group", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
             }
         } else {
-            MyButton({ onOpenGroup(null) }, text = "Groups", icon = MyIcon.Back, muted = true, description = "Back to groups")
+            BackButton("groups", { onOpenGroup(null) }, showText = true)
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Label(open.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)

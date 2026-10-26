@@ -233,6 +233,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/queue/{queue_id}/send-now", post(prompts::send_now))
         .route("/api/v1/conversations/{id}/queue/send-all-now", post(prompts::send_all_now))
         .route("/api/v1/conversations/{id}/retry", post(prompts::retry))
+        .route("/api/v1/conversations/{id}/dismiss", post(prompts::dismiss))
         .route("/api/v1/conversations/{id}/resume", post(usage_limits::resume).delete(usage_limits::cancel_resume))
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))

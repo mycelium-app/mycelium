@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.Assistant
 import mycelium.api.PatchAssistantRequest
+import mycelium.api.ConversationStatus
 import mycelium.state.AllGroups
 import mycelium.state.AllStates
 import mycelium.state.AppState
@@ -61,7 +62,30 @@ internal fun AssistantStateMark(state: String) {
     }
 }
 
-internal fun LazyListScope.sidebarAssistantItems(assistants: List<Assistant>, route: Route, onRoute: (Route) -> Unit) {
+@Composable
+internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assistant, close: () -> Unit, onSettings: () -> Unit) {
+    val conversation = assistant.conversationId?.let { state.conversations[it] }
+
+    MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
+
+    if (assistant.conversationId != null) {
+        MenuItem("Close session", onClick = { close(); store.act { store.api.closeSession(assistant.conversationId) } }, leading = MyIcon.Stop)
+    }
+
+    if (conversation?.status == ConversationStatus.Failed) {
+        MenuItem("Retry", onClick = { close(); store.act { store.api.retryConversation(conversation.id) } }, leading = MyIcon.Working)
+        MenuItem("Dismiss", onClick = { close(); store.dismissFailure(conversation) }, leading = MyIcon.Check)
+    }
+
+    if (assistant.conversationId != null) {
+        MenuItem("Clear", onClick = { close(); store.clearAssistant(assistant) }, leading = MyIcon.Close)
+    }
+
+    MenuItem("Settings", onClick = { close(); onSettings() }, leading = MyIcon.Sliders)
+    MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
+}
+
+internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, assistants: List<Assistant>, route: Route, onRoute: (Route) -> Unit) {
     item(key = "assistants-label") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Label("Assistants", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1).semantics { heading() }, Tokens.Type.Meta, MyTheme.colors.textMuted)
@@ -70,22 +94,32 @@ internal fun LazyListScope.sidebarAssistantItems(assistants: List<Assistant>, ro
     }
 
     items(assistants, key = { "assistant-${it.id}" }) { assistant ->
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = rowHeight())
-                .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id), shape = BlockShape)
-                .padding(horizontal = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AssistantAvatar(assistant.name)
-            Label(assistant.name, Modifier.weight(1f), maxLines = 1)
+        val menu = rememberRowMenuState()
 
-            when (assistant.state) {
-                "working" -> Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
-                "input" -> Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
-                else -> assistant.lastActiveAt?.let { Label(ago(it), style = Tokens.Type.Meta, color = MyTheme.colors.textFaint, maxLines = 1) }
+        Box(Modifier.fillMaxWidth().rowContextMenu(menu), contentAlignment = Alignment.CenterStart) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = rowHeight())
+                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id), shape = BlockShape)
+                    .padding(horizontal = Tokens.Space.S2),
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AssistantAvatar(assistant.name)
+                Label(assistant.name, Modifier.weight(1f), maxLines = 1)
+
+                when (assistant.state) {
+                    "working" -> Icon(MyIcon.Working, MyTheme.colors.statusWorking, Tokens.Size.IconSm)
+                    "input" -> Icon(MyIcon.Alert, MyTheme.colors.statusAttention, Tokens.Size.IconSm)
+                    else -> assistant.lastActiveAt?.let { Label(ago(it), style = Tokens.Type.Meta, color = MyTheme.colors.textFaint, maxLines = 1) }
+                }
+            }
+
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S1).background(MyTheme.colors.bgRaised, ControlShape)) {
+                RowMenu(assistant.name, menu, revealOnHover = true) { close ->
+                    AssistantMenuItems(store, state, assistant, close, onSettings = { onRoute(Route.AssistantSettings(assistant.id)) })
+                }
             }
         }
     }
@@ -99,6 +133,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
     var group by remember(sidebarGroup) { mutableStateOf(sidebarGroup) }
     var showing by remember { mutableStateOf(AllStates) }
     var groupBy by remember { mutableStateOf(GroupByNone) }
+    val menus = remember { mutableMapOf<String, RowMenuState>() }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshAssistants() }
@@ -155,7 +190,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                         when (column) {
                             0 -> TableCell.Slot(assistant.name, Tokens.Space.S8) {
                                 Row(
-                                    Modifier.pressable({ onOpen(assistant) }, role = Role.Button, description = "Open ${assistant.name}", shape = BlockShape).padding(vertical = Tokens.Space.S1),
+                                    Modifier.rowContextMenu(menus.getOrPut(assistant.id) { RowMenuState() }).pressable({ onOpen(assistant) }, role = Role.Button, description = "Open ${assistant.name}", shape = BlockShape).padding(vertical = Tokens.Space.S1),
                                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
@@ -175,10 +210,8 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                             }
 
                             else -> TableCell.Slot {
-                                RowMenu(assistant.name) { close ->
-                                    MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
-                                    MenuItem("Settings", onClick = { close(); onSettings(assistant) }, leading = MyIcon.Sliders)
-                                    MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
+                                RowMenu(assistant.name, menus.getOrPut(assistant.id) { RowMenuState() }) { close ->
+                                    AssistantMenuItems(store, state, assistant, close, onSettings = { onSettings(assistant) })
                                 }
                             }
                         }

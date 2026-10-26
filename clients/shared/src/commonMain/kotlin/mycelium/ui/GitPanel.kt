@@ -164,10 +164,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             val commit = openCommit
 
             if (commit != null) {
-                MyButton({ openCommit = null; commitDiff = null }, icon = MyIcon.Back, description = "Back to the graph", muted = true)
+                BackButton("the graph", { openCommit = null; commitDiff = null })
                 Label(commit.subject, Modifier.weight(1f), Tokens.Type.Ui, maxLines = 1)
             } else if (open != null) {
-                MyButton({ viewing = null; diff = null }, icon = MyIcon.Back, description = "Back to the changes", muted = true)
+                BackButton("the changes", { viewing = null; diff = null })
                 Label(open.path, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
             } else {
                 BarTitle("Git")

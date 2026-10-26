@@ -42,7 +42,7 @@ fun ArtefactViewer(
     modifier: Modifier = Modifier,
     onPopOut: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
-    onBackDescription: String = "Back to artefacts",
+    onBackTo: String = "artefacts",
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = MyTheme.colors
@@ -54,7 +54,7 @@ fun ArtefactViewer(
     Column(modifier) {
         Bar {
             if (onBack != null) {
-                MyButton(onBack, icon = MyIcon.ChevronLeft, description = onBackDescription, muted = true)
+                BackButton(onBackTo, onBack)
             }
 
             Icon(artifactIcon(artifact.kind), colors.textMuted, Tokens.Size.IconSm)
@@ -152,7 +152,7 @@ fun ArtefactsPanel(
         modifier,
         onPopOut = { onPopOut(viewed.id) },
         onBack = { onSelect(null) },
-        onBackDescription = "Back to this conversation's artefacts",
+        onBackTo = "this conversation's artefacts",
     )
 }
 
@@ -177,7 +177,7 @@ fun ArtefactFullView(
     if (artifact == null) {
         Column(Modifier.fillMaxSize()) {
             Bar {
-                MyButton(onBack, icon = MyIcon.ChevronLeft, description = "Back to artefacts", muted = true)
+                BackButton("artefacts", onBack)
                 Label("Artefact not found", style = Tokens.Type.Title, maxLines = 1)
             }
 
@@ -211,7 +211,7 @@ fun ArtefactFullView(
             if (compact) {
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     Bar {
-                        MyButton({ chatShown = false }, icon = MyIcon.ChevronLeft, description = "Back to the artefact", muted = true)
+                        BackButton("the artefact", { chatShown = false })
                         Label(artifact.title, style = Tokens.Type.Title, maxLines = 1)
                     }
 

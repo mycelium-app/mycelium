@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,7 +33,7 @@ import mycelium.state.ThreadBuilder
 import mycelium.state.ThreadItem
 
 @Composable
-fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: () -> Unit, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}) {
+fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: () -> Unit, onBack: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}) {
     val assistant = state.assistants[id]
 
     LaunchedEffect(id) {
@@ -48,42 +49,50 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     }
 
     val earlier = state.conversations.values.filter { it.assistantId == id && it.id != assistant.conversationId && it.parentId == null }.sortedByDescending { it.createdAt }
-    val header: @Composable () -> Unit = { AssistantHeader(store, state, assistant, earlier, onOpenSettings) }
     val conversationId = assistant.conversationId
+    val title: @Composable RowScope.() -> Unit = { AssistantTitle(state, assistant, onBack) }
+    val menu: @Composable (() -> Unit) -> Unit = { close -> AssistantMenuItems(store, state, assistant, close, onOpenSettings) }
+    val notices: @Composable () -> Unit = { AssistantNotices(store, state, assistant, earlier) }
 
     if (conversationId != null) {
-        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = header)
+        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices))
     } else {
         Column(Modifier.fillMaxSize()) {
-            header()
+            Bar {
+                LocalOpenList.current?.let { openList ->
+                    MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
+                }
+
+                title()
+                Box(Modifier.weight(1f))
+
+                val menuState = rememberRowMenuState()
+
+                RowMenu(assistant.name, menuState) { close -> menu(close) }
+            }
+
+            notices()
             StartSession(store, state, assistant)
         }
     }
 }
 
 @Composable
-private fun AssistantHeader(store: Store, state: AppState, assistant: Assistant, earlier: List<Conversation>, onOpenSettings: () -> Unit) {
+private fun RowScope.AssistantTitle(state: AppState, assistant: Assistant, onBack: () -> Unit) {
     val groupName = assistant.groupId?.let { state.groups[it]?.name }
-    var showingEarlier by remember(assistant.id) { mutableStateOf(false) }
 
-    Bar {
-        LocalOpenList.current?.let { openList ->
-            MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
-        }
-
-        AssistantAvatar(assistant.name)
-        Label(assistant.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
-        groupName?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1) }
-        Box(Modifier.weight(1f))
-
-        if (assistant.conversationId != null) {
-            MyButton({ store.clearAssistant(assistant) }, text = "Clear", icon = MyIcon.Close, variant = ButtonVariant.Outline)
-        }
-
-        RowMenu(assistant.name) { close ->
-            MenuItem("Settings", onClick = { close(); onOpenSettings() }, leading = MyIcon.Sliders)
-        }
+    if (LocalOpenList.current != null) {
+        BackButton("Assistants", onBack)
     }
+
+    AssistantAvatar(assistant.name)
+    Label(assistant.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
+    groupName?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1) }
+}
+
+@Composable
+private fun AssistantNotices(store: Store, state: AppState, assistant: Assistant, earlier: List<Conversation>) {
+    var showingEarlier by remember(assistant.id) { mutableStateOf(false) }
 
     for (secret in assistant.secrets.filter { it.state == "waiting" }) {
         WaitingSecret(store, assistant, secret.name, secret.description)

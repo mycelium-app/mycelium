@@ -168,6 +168,8 @@ class SchedulesTest {
         showSchedules()
 
         chooseFromMenu("Check backups", "Delete")
+        assertEquals(null, sent("DELETE", "/schedules/s2"))
+        rule.onNodeWithText("Delete schedule").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Check backups").fetchSemanticsNodes().isEmpty() }
         assertTrue(sent("DELETE", "/schedules/s2") != null)

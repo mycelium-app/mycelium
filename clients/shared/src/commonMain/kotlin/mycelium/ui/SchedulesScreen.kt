@@ -154,6 +154,7 @@ private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
     val colors = MyTheme.colors
     var reviewing by remember(schedule.id) { mutableStateOf(false) }
     var editing by remember(schedule.id) { mutableStateOf(false) }
+    var confirmingDelete by remember(schedule.id) { mutableStateOf(false) }
 
     RowMenu(schedule.prompt) { close ->
         if (schedule.proposed) {
@@ -163,7 +164,7 @@ private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
             MenuItem("Run now", onClick = { close(); store.act { store.runSchedule(schedule) } }, leading = MyIcon.Refresh)
             MenuItem("Edit", onClick = { close(); editing = true }, leading = MyIcon.Pencil)
             MenuItem(if (schedule.paused) "Resume" else "Pause", onClick = { close(); store.act { store.pauseSchedule(schedule, !schedule.paused) } }, leading = MyIcon.Clock)
-            MenuItem("Delete", onClick = { close(); store.act { store.deleteSchedule(schedule) } }, leading = MyIcon.Close)
+            MenuItem("Delete", onClick = { close(); confirmingDelete = true }, leading = MyIcon.Close)
         }
     }
 
@@ -173,6 +174,10 @@ private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
 
     if (editing) {
         ScheduleDialog(store, state, schedule, onDismiss = { editing = false })
+    }
+
+    if (confirmingDelete) {
+        ConfirmDialog("Delete this schedule?", "It stops running and its settings are removed. Conversations it already started are kept.", "Delete schedule", onDismiss = { confirmingDelete = false }, onConfirm = { confirmingDelete = false; store.act { store.deleteSchedule(schedule) } })
     }
 }
 

@@ -654,6 +654,10 @@ class MyceliumApi(
         call("/conversations/$id/retry") { client.post(it) { authorise() } }
     }
 
+    suspend fun dismissConversation(id: String) {
+        call("/conversations/$id/dismiss") { client.post(it) { authorise() } }
+    }
+
     suspend fun scheduleResume(id: String) {
         call("/conversations/$id/resume") { client.post(it) { authorise() } }
     }

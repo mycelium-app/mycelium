@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -91,12 +92,23 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
         }
     }
 
+    val control: (String, String) -> Unit = { workflowId, action ->
+        scope.launch {
+            try {
+                store.api.controlWorkflow(workflowId, buildJsonObject { put("action", action) })
+                store.refreshWorkflows()
+            } catch (failure: Exception) {
+                error = failure.message
+            }
+        }
+    }
+
     val selectedWorkflow = workflows.firstOrNull { it["id"]?.jsonPrimitive?.content == selected }
 
     Column(Modifier.fillMaxSize().background(colors.bgContent)) {
         Bar {
             if (selectedWorkflow != null) {
-                MyButton({ selected = null }, icon = MyIcon.ChevronLeft, description = "All workflows", muted = true)
+                BackButton("workflows", { selected = null })
             }
 
             BarTitle(selectedWorkflow?.get("title")?.jsonPrimitive?.content ?: "Workflows")
@@ -255,7 +267,21 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                 val status = workflow["status"]!!.jsonPrimitive.content
                 val name = workflow["title"]!!.jsonPrimitive.content
                 if (selected != id) {
-                    MyButton({ selected = id }, text = "$name · $status · Round ${workflow["round"]}")
+                    val menu = rememberRowMenuState()
+
+                    Row(Modifier.rowContextMenu(menu), verticalAlignment = Alignment.CenterVertically) {
+                        MyButton({ selected = id }, text = "$name · $status · Round ${workflow["round"]}")
+
+                        RowMenu(name, menu) { close ->
+                            MenuItem("Open", onClick = { close(); selected = id }, leading = MyIcon.Layers)
+
+                            if (status == "running" || status == "paused") {
+                                MenuItem(if (status == "paused") "Resume" else "Pause", onClick = { close(); control(id, if (status == "paused") "resume" else "pause") }, leading = MyIcon.Clock)
+                                MenuItem("Stop", onClick = { close(); control(id, "stop") }, leading = MyIcon.Stop)
+                            }
+                        }
+                    }
+
                     continue
                 }
 
@@ -266,16 +292,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((action, label) in listOf(if (status == "paused") "resume" to "Resume workflow" else "pause" to "Pause workflow", "stop" to "Stop workflow")) {
-                        MyButton({
-                            scope.launch {
-                                try {
-                                    store.api.controlWorkflow(id, buildJsonObject { put("action", action) })
-                                    store.refreshWorkflows()
-                                } catch (failure: Exception) {
-                                    error = failure.message
-                                }
-                            }
-                        }, text = label)
+                        MyButton({ control(id, action) }, text = label)
                     }
                 }
 
@@ -306,7 +323,13 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                                 val names = dependencies.map { dependency -> specs.first { it.jsonObject["key"] == dependency }.jsonObject["title"]!!.jsonPrimitive.content }
                                 Label("Uses ${names.joinToString()}", style = Tokens.Type.Meta, color = colors.textMuted)
                             }
-                            step["conversation_id"]?.jsonPrimitive?.content?.takeUnless { it == "null" }?.let { conversation -> MyButton({ onOpenConversation(conversation) }, text = "Open conversation") }
+                            step["conversation_id"]?.jsonPrimitive?.content?.takeUnless { it == "null" }?.let { conversation ->
+                                MyButton({ onOpenConversation(conversation) }, text = "Open conversation")
+
+                                if (step["status"]?.jsonPrimitive?.content in setOf("running", "starting")) {
+                                    MyButton({ store.act { store.api.closeSession(conversation) } }, text = "Stop", icon = MyIcon.Stop, description = "Stop ${spec["title"]!!.jsonPrimitive.content}", size = ButtonSize.Sm, muted = true)
+                                }
+                            }
                             step["workflow_id"]?.jsonPrimitive?.content?.takeUnless { it == "null" }?.let { child -> MyButton({ selected = child }, text = "Open nested workflow") }
                             if (step["status"]!!.jsonPrimitive.content == "gate") {
                                 WorkflowField("Decision for $key", gateDecisions["$id/$key"].orEmpty(), { value -> gateDecisions = gateDecisions + ("$id/$key" to value) }, multiline = true)

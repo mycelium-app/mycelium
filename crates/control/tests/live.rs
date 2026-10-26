@@ -61,6 +61,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/opened",
     "POST /api/v1/conversations/{id}/prompt",
     "POST /api/v1/conversations/{id}/retry",
+    "POST /api/v1/conversations/{id}/dismiss",
     "POST /api/v1/conversations/{id}/resume",
     "DELETE /api/v1/conversations/{id}/resume",
     "PATCH /api/v1/conversations/{id}/queue/{queue_id}",
@@ -865,6 +866,22 @@ async fn retrying_a_failed_conversation_streams_it_as_no_longer_failed() {
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/retry"))).await;
 
     conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
+}
+
+#[tokio::test]
+async fn dismissing_a_failed_conversation_settles_it_as_done_and_keeps_its_history() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "limit".into() }).await;
+    let mut stream = server.user.stream().await;
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Failed).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/dismiss"))).await;
+
+    conversation_where(&mut stream, id, |conversation| conversation.status == ConversationStatus::Done).await;
+    let (status, _) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/events"))).await;
+    assert_eq!(status, 200);
 }
 
 #[tokio::test]

@@ -92,7 +92,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
     Column(Modifier.fillMaxSize()) {
         Bar {
             if (touch && opened != null) {
-                MyButton({ section = null }, icon = MyIcon.Back, description = "Back to settings", muted = true)
+                BackButton("settings", { section = null })
                 Label(opened.label, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
             } else {
                 BarTitle("Settings")

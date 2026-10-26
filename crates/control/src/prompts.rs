@@ -182,6 +182,23 @@ pub async fn retry(State(state): State<AppState>, user: AuthUser, Path(id): Path
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn dismiss(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, user.id).await?;
+
+    if row.status != "failed" {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    sqlx::query("update conversations set resume_at = null where id = $1").bind(id).execute(&mut *tx).await?;
+    let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
+    tx.commit().await?;
+
+    state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn continue_unless_queued(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
     let waiting = sqlx::query_scalar::<_, bool>("select exists (select 1 from queued_prompts where conversation_id = $1)").bind(id).fetch_one(&state.pool).await?;
 

@@ -402,7 +402,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
             is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
-            is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+            is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onBack = { onRoute(Route.Assistants) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
             Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistants) })
             is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
@@ -537,7 +537,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         val list = rememberLazyListState()
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
-            sidebarAssistantItems(sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
+            sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
 
             if (mode == ChatsMode) {
                 conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
@@ -652,6 +652,7 @@ private fun LazyListScope.conversationRows(
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
             onRename = { title -> store.rename(row.conversation, title) },
             onCloseSession = { store.closeSession(row.conversation) },
+            onDismiss = { store.dismissFailure(row.conversation) },
             onArchive = {
                 store.act { store.api.patchConversation(row.conversation.id, PatchConversationRequest(archived = true)) }
 
@@ -706,10 +707,10 @@ private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: ()
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
-    var menuOpen by remember { mutableStateOf(false) }
+    val menu = rememberRowMenuState()
     var renaming by remember { mutableStateOf(false) }
     val statusName = if (row.resumeAt != null) WaitingForReset else statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
@@ -721,33 +722,9 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     Box(
         Modifier
             .fillMaxWidth()
-            .pointerInput(Unit) { detectTapGestures(onLongPress = { menuOpen = true }) }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-
-                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                            menuOpen = true
-                        }
-                    }
-                }
-            },
+            .rowContextMenu(menu),
         contentAlignment = Alignment.CenterStart,
     ) {
-        if (menuOpen) {
-            MenuPopup(onDismiss = { menuOpen = false }) {
-                MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { menuOpen = false; onPin() }, leading = MyIcon.Pin)
-                MenuItem("Rename", onClick = { menuOpen = false; renaming = true }, leading = MyIcon.Pencil)
-
-                if (!row.isChat) {
-                    MenuItem("Close session", onClick = { menuOpen = false; onCloseSession() }, leading = MyIcon.Stop)
-                }
-
-                MenuItem("Archive", onClick = { menuOpen = false; onArchive() }, leading = MyIcon.Archive)
-            }
-        }
-
         if (renaming) {
             var title by remember { mutableStateOf(row.title) }
             val save = {
@@ -851,8 +828,25 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
         }
 
+        Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S1).background(colors.bgRaised, ControlShape)) {
+            RowMenu(row.title, menu, revealOnHover = true) { close ->
+                MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); onPin() }, leading = MyIcon.Pin)
+                MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
+
+                if (!row.isChat) {
+                    MenuItem("Close session", onClick = { close(); onCloseSession() }, leading = MyIcon.Stop)
+                }
+
+                if (row.status == ConversationStatus.Failed) {
+                    MenuItem("Dismiss", onClick = { close(); onDismiss() }, leading = MyIcon.Check)
+                }
+
+                MenuItem("Archive", onClick = { close(); onArchive() }, leading = MyIcon.Archive)
+            }
+        }
+
         if (row.resumeAt != null) {
-            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S2 * 3 + Tokens.Size.IconSm * 2)) {
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S2 * 3 + Tokens.Size.IconSm * 2 + Tokens.Size.ControlSm)) {
                 MyButton(onCancelResume, text = "Cancel", description = "Cancel the automatic resume of ${row.title}, due at ${clockTime(row.resumeAt) { millis -> platform?.localDateTime(millis) }}", size = ButtonSize.Sm, muted = true)
             }
         }

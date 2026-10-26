@@ -72,7 +72,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            MyButton(onBack, text = "Nodes", muted = true, description = "Back to Nodes")
+            BackButton("Nodes", onBack, showText = true)
 
             if (node == null) {
                 Label("This node no longer exists.", color = colors.textMuted)
