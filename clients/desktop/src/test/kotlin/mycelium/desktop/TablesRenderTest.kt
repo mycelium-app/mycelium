@@ -25,6 +25,11 @@ import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.ui.Col
 import mycelium.ui.DataTable
+import mycelium.ui.ChatToolsSettings
+import mycelium.ui.IntegrationPage
+import mycelium.ui.IntegrationUsage
+import mycelium.ui.PageActions
+import mycelium.ui.integrationsOf
 import mycelium.ui.HistoryGroup
 import mycelium.ui.HistoryEntry
 import mycelium.ui.HistoryGrouping
@@ -61,6 +66,8 @@ private val RenderArchived = "[" + listOf(
     archived("c3", "/home/sam/projects/okapi", "Zebra fixes", "2026-10-20T10:00:00Z"),
 ).joinToString(",") + "]"
 
+private const val RenderTools = """[{"id":"s1","name":"Lab","url":"https://lab.test/mcp","token_hint":"cdef","enabled":true,"always_allow":false,"tools":[{"name":"get_weather","description":"Get the weather"},{"name":"list_files","description":"List files and a very long description that should not break the table layout"}],"created_at":"2026-10-22T10:00:00Z"}]"""
+
 private const val RenderForges = """[{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"wxyz","organisations":["samexample","acme-org","immich-app","another-organisation"],"created_at":"2026-10-22T10:00:00Z"},
 {"id":"f2","kind":"gitlab","base_url":"https://gitlab.example.com","account":"sam","token_hint":"1234","organisations":["sam","slop"],"created_at":"2026-10-22T10:00:00Z"}]"""
 
@@ -84,6 +91,7 @@ class TablesRenderTest {
 
             val body = when {
                 path.endsWith("/nodes") -> RenderNodes
+                path.endsWith("/chat-tool-servers") -> RenderTools
                 path.endsWith("/forges") -> RenderForges
                 path.endsWith("/sessions") -> RenderSessions
                 path.endsWith("/model-providers") -> RenderProviders
@@ -152,6 +160,19 @@ class TablesRenderTest {
                 HistoryTable(groups, HistoryLayout(grouping = grouping), {}, emptyMap(), {}, { iso, _ -> iso.take(10) }, {}) { RowMenu(it.title) { } }
             }
         }
+    }
+
+    @Test
+    fun integrationsRender() {
+        val store = store()
+        val json = headersOf(HttpHeaders.ContentType, "application/json")
+        val api = MyceliumApi("https://mycelium.test", "token", MockEngine { respond(RenderTools, HttpStatusCode.OK, json) })
+        val integration = integrationsOf(runBlocking { api.chatToolServers() }).first()
+        val actions = PageActions({}, {}, {}, {}, {}, {})
+
+        everywhere("integrations-home", 700) { ChatToolsSettings(store) }
+        everywhere("integration-page", 900) { IntegrationPage(store, integration, actions, {}) }
+        everywhere("integration-usage", 700) { IntegrationUsage(store, integration, {}, {}) }
     }
 
     @Test
