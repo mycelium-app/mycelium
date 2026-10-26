@@ -992,6 +992,68 @@ pub struct MessageProposal {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum StartProposalState {
+    Proposed,
+    Started,
+    Declined,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartProposalNode {
+    pub id: Uuid,
+    pub name: String,
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartProposalStep {
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    pub gate: bool,
+    pub node: Option<StartProposalNode>,
+    pub folder: Option<String>,
+    pub agent: Option<String>,
+    pub account: Option<String>,
+    pub model: Option<String>,
+    pub first_message: String,
+    #[serde(default)]
+    pub node_choices: Vec<StartProposalNode>,
+    #[serde(default)]
+    pub account_choices: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartProposal {
+    pub id: Uuid,
+    pub conversation_id: Option<Uuid>,
+    pub kind: String,
+    pub title: String,
+    pub steps: Vec<StartProposalStep>,
+    pub state: StartProposalState,
+    pub connect: bool,
+    pub workflow_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StartProposalChoice {
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    #[serde(default)]
+    pub account: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApproveStartProposalRequest {
+    #[serde(default)]
+    pub choices: std::collections::HashMap<String, StartProposalChoice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ApiAccessState {
     Requested,
     Approved,

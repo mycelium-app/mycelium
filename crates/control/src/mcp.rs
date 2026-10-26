@@ -57,8 +57,9 @@ const RECALL_PREFACE: &str = "Recalled memories are notes written by earlier age
 
 pub fn tool_definitions() -> Value {
     json!([
-        {"name":"start_workflow","description":"Start a native workflow or subagent. Steps use ordinary conversations across agents and nodes. Dependencies fan out automatically; gate steps wait for the person. Prompts reference {{step_key.output}} and {{previous}}. Nested workflow steps contain another plan. Use max_rounds (1 to 20) and optional stop_when text for bounded debate loops.","inputSchema":{"type":"object","properties":{"plan":{"type":"object"}},"required":["plan"]}},
-        {"name":"start_subagent","description":"Start a native subagent as an ordinary conversation, independently of the current agent harness. Supply a step with title, prompt, node_id, agent (claude or codex), cwd, optional model, difficulty, account, project_id and branch. Or provider_id and model for a chat-model subagent. Read its conversation and result with get_workflow.","inputSchema":{"type":"object","properties":{"step":{"type":"object"}},"required":["step"]}},
+        {"name":"start_workflow","description":"Propose a native workflow or subagent; the person approves it on a card first and nothing starts before. Steps may name node and account by name or id (see list_places). Steps use ordinary conversations across agents and nodes. Dependencies fan out automatically; gate steps wait for the person. Prompts reference {{step_key.output}} and {{previous}}. Nested workflow steps contain another plan. Use max_rounds (1 to 20) and optional stop_when text for bounded debate loops.","inputSchema":{"type":"object","properties":{"plan":{"type":"object"}},"required":["plan"]}},
+        {"name":"start_subagent","description":"Start a native subagent as an ordinary conversation, independently of the current agent harness. Supply a step with title, prompt, node_id, agent (claude or codex), cwd, optional model, difficulty, account, project_id and branch. Or provider_id and model for a chat-model subagent. Name node and account by name or id (see list_places). The person approves the card first: nothing starts until they do. Read its conversation and result with get_workflow.","inputSchema":{"type":"object","properties":{"step":{"type":"object"}},"required":["step"]}},
+        {"name":"list_places","description":"List the person's nodes with whether each is online, their agents, signed-in accounts, chat models and projects with their folders. Use it to name a node, agent and account for start_subagent or start_workflow. It only reads and needs no approval.","inputSchema":{"type":"object","properties":{}}},
         {"name":"get_workflow","description":"Read a native workflow, its step conversations, outputs and gates.","inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}},
         {
             "name": "recall",
@@ -495,6 +496,27 @@ async fn node_owner(state: &AppState, node_id: Uuid) -> ApiResult<Uuid> {
     Ok(sqlx::query_scalar::<_, Uuid>("select created_by from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?)
 }
 
+async fn list_places(state: &AppState, owner: Uuid) -> ApiResult<Value> {
+    let nodes = sqlx::query_as::<_, (Uuid, String)>("select id, name from nodes where created_by = $1 and revoked_at is null order by name").bind(owner).fetch_all(&state.pool).await?;
+    let ids: Vec<Uuid> = nodes.iter().map(|(id, _)| *id).collect();
+    let agents = sqlx::query_as::<_, (Uuid, String)>("select node_id, agent from agents where node_id = any($1) and available order by agent").bind(&ids).fetch_all(&state.pool).await?;
+    let logins = sqlx::query_as::<_, (Uuid, String, String)>("select node_id, agent, account from logins where node_id = any($1) and state = 'signed_in' and account is not null order by account").bind(&ids).fetch_all(&state.pool).await?;
+    let projects = sqlx::query_as::<_, (Uuid, Uuid, String, String)>("select id, node_id, name, path from projects where owner = $1 order by name").bind(owner).fetch_all(&state.pool).await?;
+    let providers = sqlx::query_as::<_, (Uuid, String, Vec<String>)>("select id, name, models from model_providers where owner = $1 order by name").bind(owner).fetch_all(&state.pool).await?;
+
+    let nodes: Vec<Value> = nodes
+        .iter()
+        .map(|(node_id, name)| {
+            let accounts: Vec<Value> = logins.iter().filter(|login| login.0 == *node_id).map(|(_, agent, account)| json!({"agent": agent, "account": account})).collect();
+            let folders: Vec<Value> = projects.iter().filter(|project| project.1 == *node_id).map(|(project_id, _, name, path)| json!({"project_id": project_id, "name": name, "path": path})).collect();
+
+            json!({"id": node_id, "name": name, "online": state.hub.is_online(*node_id), "agents": agents.iter().filter(|agent| agent.0 == *node_id).map(|agent| agent.1.clone()).collect::<Vec<_>>(), "signed_in_accounts": accounts, "projects": folders})
+        })
+        .collect();
+
+    Ok(json!({"nodes": nodes, "chat_models": providers.iter().map(|(provider_id, name, models)| json!({"provider_id": provider_id, "provider": name, "models": models})).collect::<Vec<_>>()}))
+}
+
 pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
     let Some(id) = request.get("id").cloned() else {
         return Ok(StatusCode::ACCEPTED.into_response());
@@ -563,6 +585,12 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         "tools/call" => {
             let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
             match params.get("name").and_then(Value::as_str) {
+                Some("list_places") => {
+                    let owner = node_owner(&state, node.id).await?;
+                    let places = list_places(&state, owner).await?;
+
+                    reply(&id, tool_text(&places.to_string(), false))
+                }
                 Some("start_workflow") | Some("start_subagent") | Some("get_workflow") => {
                     let owner = node_owner(&state, node.id).await?;
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(id, _)| id);
@@ -573,12 +601,15 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                             if let Some(step) = step.as_object_mut() { step.insert("key".into(), json!("subagent")); }
                             json!({"title":step.get("title").cloned().unwrap_or(json!("Subagent")),"steps":[step]})
                         } else { arguments.get("plan").cloned().unwrap_or(Value::Null) };
-                        let plan = match serde_json::from_value::<crate::workflows::Plan>(plan) {
-                            Ok(plan) => plan,
-                            Err(error) => return Ok(reply(&id, tool_text(&format!("Enter a workflow plan: {error}"), true))),
+                        let Some(conversation) = conversation else {
+                            return Ok(reply(&id, tool_text("Nothing was proposed. A start proposal belongs to a conversation, and this call came from none.", true)));
                         };
-                        let workflow = crate::workflows::create_owned(&state, owner, None, conversation, plan).await?;
-                        return Ok(reply(&id, tool_text(&format!("Started workflow {workflow}."), false)));
+                        let kind = if tool == Some("start_subagent") { "subagent" } else { "workflow" };
+
+                        return Ok(match crate::start_proposals::propose(&state, owner, conversation, kind, plan).await? {
+                            Ok(proposal) => reply(&id, tool_text(&format!("Waiting for the person to approve starting {} (proposal {}). Nothing has started.", proposal.title, proposal.id), false)),
+                            Err(message) => reply(&id, tool_text(&message, true)),
+                        });
                     }
                     let Some(workflow) = arguments.get("id").and_then(Value::as_str).and_then(|id| id.parse().ok()) else {
                         return Ok(failure(&id, INVALID_PARAMS, "get_workflow needs a workflow id."));
@@ -1262,7 +1293,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(error) => reply(&id, tool_text(&error.describe(&server.name), true)),
                     }
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use recall, remember, propose_task, ask_question, propose_schedule, walkthrough, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

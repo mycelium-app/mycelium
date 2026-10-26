@@ -102,7 +102,7 @@ fn waiting(plan: &Plan) -> Vec<RunStep> {
         .collect()
 }
 
-fn validate(plan: &Plan, depth: usize) -> ApiResult<()> {
+pub fn validate(plan: &Plan, depth: usize) -> ApiResult<()> {
     if depth > 8
         || plan.title.trim().is_empty()
         || plan.steps.is_empty()
@@ -372,6 +372,7 @@ async fn link_native(
     owner: Uuid,
     parent: Option<Uuid>,
     conversation: Uuid,
+    workflow: Uuid,
 ) -> ApiResult<()> {
     if let Some(parent) = parent {
         sqlx::query("update conversations set parent_id=$2,side_kind='side' where id=$1")
@@ -384,6 +385,17 @@ async fn link_native(
             Some(owner),
             mycelium_proto::stream::StreamMessage::Conversation(linked.to_proto()?),
         );
+
+        let connect = sqlx::query_scalar::<_, bool>("select exists (select 1 from start_proposals where workflow_id = $1 and connect)").bind(workflow).fetch_one(&state.pool).await?;
+
+        if connect {
+            let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+            let connected = crate::conversation_connections::connect(state, &user, parent, conversation).await;
+
+            if let Err(error) = connected {
+                tracing::warn!(%workflow, error = error.message(), "connecting the step conversation failed");
+            }
+        }
     }
     Ok(())
 }
@@ -603,7 +615,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                     conversation.id
                 }
             };
-            link_native(state, row.owner, row.conversation_id, conversation).await?;
+            link_native(state, row.owner, row.conversation_id, conversation, id).await?;
             steps[index].conversation_id = Some(conversation);
             steps[index].status = "running".into();
         } else {
@@ -634,7 +646,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                     conversation.id
                 }
             };
-            link_native(state, row.owner, row.conversation_id, conversation).await?;
+            link_native(state, row.owner, row.conversation_id, conversation, id).await?;
             steps[index].conversation_id = Some(conversation);
             steps[index].status = "starting".into();
         }

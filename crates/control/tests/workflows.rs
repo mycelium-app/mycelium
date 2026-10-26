@@ -272,6 +272,9 @@ async fn a_workflow_started_by_an_agent_returns_its_result_to_the_calling_conver
     let anonymous = server.anonymous();
     let (_, response) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization",format!("Bearer {}",node.token)).header("x-mycelium-conversation",caller.id.to_string()).json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_workflow","arguments":{"plan":{"title":"Review","steps":[{"key":"decision","title":"Approve","gate":true}]}}}}))).await;
     assert_eq!(response["result"]["isError"], false, "{response}");
+    let (_, proposals) = server.user.json(server.user.get("/api/v1/start-proposals")).await;
+    let proposal = proposals[0]["id"].as_str().unwrap();
+    server.user.json(server.user.post(&format!("/api/v1/start-proposals/{proposal}/approve")).json(&json!({}))).await;
     let (_, listed) = server.user.json(server.user.get("/api/v1/workflows")).await;
     let id = listed[0]["id"].as_str().unwrap();
     eventually("waiting gate", || async {

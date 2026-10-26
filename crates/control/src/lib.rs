@@ -56,6 +56,7 @@ mod search;
 mod sessions;
 mod snapshots;
 mod ssh_access;
+mod start_proposals;
 mod state;
 mod store;
 mod stream;
@@ -287,6 +288,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/message-proposals", get(message_proposals::list))
         .route("/api/v1/message-proposals/{id}/approve", post(message_proposals::approve))
         .route("/api/v1/message-proposals/{id}/decline", post(message_proposals::decline))
+        .route("/api/v1/start-proposals", get(start_proposals::list))
+        .route("/api/v1/start-proposals/{id}/approve", post(start_proposals::approve))
+        .route("/api/v1/start-proposals/{id}/connect", post(start_proposals::approve_and_connect))
+        .route("/api/v1/start-proposals/{id}/decline", post(start_proposals::decline))
         .route("/api/v1/api-access-requests", get(api_access::list))
         .route("/api/v1/api-access-requests/{id}/approve", post(api_access::approve))
         .route("/api/v1/api-access-requests/{id}/decline", post(api_access::decline))
