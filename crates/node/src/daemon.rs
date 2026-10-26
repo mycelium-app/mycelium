@@ -2,7 +2,7 @@ use crate::acp::Command;
 use crate::agents::{ALL_AGENTS, account_env, account_homes, accounts_dir, detect_agents, find_account, login_command, login_state, new_account, resolve_program};
 use crate::usage::{CODEX_USAGE_ENDPOINT, USAGE_ENDPOINT, USAGE_MIN_AGE, UsageCache};
 use crate::instructions::deliver;
-use crate::config::{NodeConfig, agent_command, agent_env, config_path, with_developer_instructions};
+use crate::config::{NodeConfig, agent_command, codex_command, agent_env, config_path, with_developer_instructions};
 use crate::join::hostname;
 use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
@@ -47,6 +47,7 @@ pub struct DaemonOptions {
     pub transcript_poll: Duration,
     pub usage_endpoint: String,
     pub codex_usage_endpoint: String,
+    pub codex_command: String,
 }
 
 impl DaemonOptions {
@@ -63,6 +64,7 @@ impl DaemonOptions {
             transcript_poll: Duration::from_secs(2),
             usage_endpoint: USAGE_ENDPOINT.to_string(),
             codex_usage_endpoint: CODEX_USAGE_ENDPOINT.to_string(),
+            codex_command: codex_command(),
             home,
         })
     }
@@ -100,7 +102,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     let agents = detect_agents(|agent| (options.agent_commands)(agent)).await;
     let logins_home = options.home.clone();
     let logins_accounts = accounts_dir(&config.state_dir);
-    let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, USAGE_MIN_AGE));
+    let usage = Arc::new(UsageCache::new(&options.usage_endpoint, &options.codex_usage_endpoint, &options.codex_command, USAGE_MIN_AGE));
     let logins_usage = usage.clone();
     let login_report = Arc::new(move || NodeToControl::Logins { logins: login_state(&logins_home, &logins_accounts, &agents, &logins_usage) });
     let transcripts = TranscriptFollower::new(options.home.clone(), options.transcript_roots.clone(), config.state_dir.join("transcripts.json"), out.clone());

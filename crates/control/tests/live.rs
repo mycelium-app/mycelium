@@ -348,7 +348,7 @@ async fn a_node_connecting_greeting_reporting_logins_and_leaving_is_streamed() {
     let greeted = node_message(&mut stream, id, |node| node.online && !node.agents.is_empty()).await;
     assert_eq!(greeted.agents[0].agent, AgentId::Claude);
 
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: Some("me@example.com".into()), method: "token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }] }).await;
     let signed_in = node_message(&mut stream, id, |node| !node.logins.is_empty()).await;
     assert_eq!(signed_in.logins[0].state, LoginState::SignedIn);
 

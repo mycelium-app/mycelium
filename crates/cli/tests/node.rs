@@ -158,6 +158,7 @@ impl Fixture {
             transcript_poll: Duration::from_millis(50),
             usage_endpoint: "http://127.0.0.1:9/api/oauth/usage".to_string(),
             codex_usage_endpoint: "http://127.0.0.1:9/backend-api/wham/usage".to_string(),
+            codex_command: "codex-not-installed".to_string(),
         };
 
         Fixture { root, config, options }

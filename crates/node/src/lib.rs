@@ -2,6 +2,7 @@ pub mod acp;
 pub mod agents;
 pub mod attachments;
 pub mod changes;
+pub mod codex_app_server;
 pub mod config;
 pub mod daemon;
 pub mod files;

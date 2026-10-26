@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
-use mycelium_proto::conversation::UsageWindow;
+use mycelium_proto::conversation::{ResetCredits, UsageWindow};
+use crate::codex_app_server::read_reset_credits;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -15,19 +16,21 @@ const LEADING_WINDOWS: [&str; 2] = ["five_hour", "seven_day"];
 pub struct Reading {
     pub windows: Vec<UsageWindow>,
     pub read_at: DateTime<Utc>,
+    pub reset_credits: Option<ResetCredits>,
 }
 
 pub struct UsageCache {
     endpoint: String,
     codex_endpoint: String,
+    codex_command: String,
     min_age: Duration,
     http: reqwest::Client,
     entries: Mutex<HashMap<PathBuf, (Instant, Option<Reading>)>>,
 }
 
 impl UsageCache {
-    pub fn new(endpoint: &str, codex_endpoint: &str, min_age: Duration) -> UsageCache {
-        UsageCache { endpoint: endpoint.to_string(), codex_endpoint: codex_endpoint.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
+    pub fn new(endpoint: &str, codex_endpoint: &str, codex_command: &str, min_age: Duration) -> UsageCache {
+        UsageCache { endpoint: endpoint.to_string(), codex_endpoint: codex_endpoint.to_string(), codex_command: codex_command.to_string(), min_age, http: reqwest::Client::new(), entries: Mutex::new(HashMap::new()) }
     }
 
     pub fn reading(&self, config_dir: &Path) -> Option<Reading> {
@@ -36,6 +39,12 @@ impl UsageCache {
 
     pub fn left(&self, config_dir: &Path) -> Option<u8> {
         usage_left(&self.reading(config_dir)?.windows)
+    }
+
+    pub fn invalidate(&self, config_dir: &Path) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.remove(config_dir);
+        }
     }
 
     pub async fn refresh(&self, config_dirs: &[PathBuf]) {
@@ -57,16 +66,20 @@ impl UsageCache {
     }
 
     async fn fetch(&self, config_dir: &Path) -> Option<Reading> {
-        let windows = match read_json(&config_dir.join(".credentials.json")) {
-            Some(credentials) => self.fetch_claude(&credentials).await?,
-            None => self.fetch_codex(&read_json(&config_dir.join("auth.json"))?).await?,
+        let (windows, reset_credits) = match read_json(&config_dir.join(".credentials.json")) {
+            Some(credentials) => (self.fetch_claude(&credentials).await?, None),
+            None => {
+                let windows = self.fetch_codex(&read_json(&config_dir.join("auth.json"))?).await?;
+
+                (windows, read_reset_credits(&self.codex_command, config_dir).await)
+            }
         };
 
         if windows.is_empty() {
             return None;
         }
 
-        Some(Reading { windows, read_at: Utc::now() })
+        Some(Reading { windows, read_at: Utc::now(), reset_credits })
     }
 
     async fn fetch_claude(&self, credentials: &serde_json::Value) -> Option<Vec<UsageWindow>> {
@@ -190,7 +203,7 @@ mod tests {
         let seen = Seen::default();
         let endpoint = serve(200, json!({"five_hour": {"utilization": 42.0}}), seen.clone()).await;
         let account = account_with_token("fake-access-token");
-        let mut cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, Duration::ZERO);
+        let mut cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", Duration::ZERO);
         cache.refresh(&[account.path().to_path_buf()]).await;
         let before = cache.reading(account.path()).unwrap();
         cache.endpoint = serve(503, json!({}), seen).await;
@@ -203,7 +216,7 @@ mod tests {
         let seen = Seen::default();
         let endpoint = serve(200, json!({"five_hour": {"utilization": 82.0}, "seven_day": {"utilization": 31}}), seen.clone()).await;
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
 
@@ -219,7 +232,7 @@ mod tests {
         let endpoint = serve(200, json!({"rate_limit": {"primary_window": five_hour, "secondary_window": weekly}}), seen.clone()).await;
         let account = tempfile::tempdir().unwrap();
         std::fs::write(account.path().join("auth.json"), json!({"tokens": {"access_token": "chatgpt-token", "account_id": "acct"}}).to_string()).unwrap();
-        let cache = UsageCache::new(USAGE_ENDPOINT, &endpoint, USAGE_MIN_AGE);
+        let cache = UsageCache::new(USAGE_ENDPOINT, &endpoint, "codex", USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
 
@@ -230,14 +243,52 @@ mod tests {
         assert_eq!(seen.lock().unwrap()[0].0, "Bearer chatgpt-token");
     }
 
+    async fn codex_account(codex: &str) -> (tempfile::TempDir, UsageCache) {
+        let five_hour = json!({"used_percent": 40, "limit_window_seconds": 18000, "reset_at": 1_792_900_000});
+        let endpoint = serve(200, json!({"rate_limit": {"primary_window": five_hour}}), Seen::default()).await;
+        let account = tempfile::tempdir().unwrap();
+        std::fs::write(account.path().join("auth.json"), json!({"tokens": {"access_token": "chatgpt-token"}}).to_string()).unwrap();
+        let cache = UsageCache::new(USAGE_ENDPOINT, &endpoint, codex, USAGE_MIN_AGE);
+        cache.refresh(&[account.path().to_path_buf()]).await;
+
+        (account, cache)
+    }
+
+    #[tokio::test]
+    async fn a_codex_account_reports_its_banked_resets_and_their_expiry_from_the_app_server() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scripts = tempfile::tempdir().unwrap();
+        let script = scripts.path().join("codex");
+        let credits = r#"{"id":2,"result":{"rateLimitResetCredits":{"availableCount":1,"credits":[{"id":"a","status":"available","expiresAt":"2026-11-14T00:00:00Z"}]}}}"#;
+        std::fs::write(&script, format!("#!/bin/sh\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *'\"method\":\"initialize\"'*) echo '{{\"id\":1,\"result\":{{}}}}';;\n    *'\"method\":\"account/rateLimits/read\"'*) echo '{credits}';;\n  esac\ndone\n")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let (account, cache) = codex_account(&script.display().to_string()).await;
+
+        let reading = cache.reading(account.path()).unwrap();
+        let credits = reading.reset_credits.unwrap();
+        assert_eq!(credits.available_count, 1);
+        assert_eq!(credits.credits.unwrap()[0].expires_at, "2026-11-14T00:00:00Z".parse().ok());
+    }
+
+    #[tokio::test]
+    async fn banked_resets_are_unknown_when_codex_is_missing_and_the_windows_still_come_from_wham() {
+        let (account, cache) = codex_account("/nonexistent/codex").await;
+
+        let reading = cache.reading(account.path()).unwrap();
+        assert_eq!(reading.reset_credits, None);
+        assert_eq!(reading.windows[0].used_percent, 40.0);
+    }
+
     #[tokio::test]
     async fn a_fresh_reading_is_not_fetched_again_until_it_is_old_enough() {
         let seen = Seen::default();
         let endpoint = serve(200, json!({"five_hour": {"utilization": 10}}), seen.clone()).await;
         let account = account_with_token("fake-access-token");
         let dirs = [account.path().to_path_buf()];
-        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
-        let eager = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, Duration::ZERO);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
+        let eager = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", Duration::ZERO);
 
         cache.refresh(&dirs).await;
         cache.refresh(&dirs).await;
@@ -255,13 +306,13 @@ mod tests {
         let bare = tempfile::tempdir().unwrap();
 
         for endpoint in [&refused, &empty] {
-            let cache = UsageCache::new(endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+            let cache = UsageCache::new(endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
             cache.refresh(&[account.path().to_path_buf()]).await;
 
             assert_eq!(cache.left(account.path()), None);
         }
 
-        let cache = UsageCache::new(&empty, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&empty, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
         cache.refresh(&[bare.path().to_path_buf()]).await;
 
         assert_eq!(cache.left(bare.path()), None);
@@ -270,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn usage_is_unknown_when_the_endpoint_cannot_be_reached() {
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new("http://127.0.0.1:9/api/oauth/usage", CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new("http://127.0.0.1:9/api/oauth/usage", CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
 
@@ -285,7 +336,7 @@ mod tests {
         let work = accounts.join("claude").join("work");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join(".credentials.json"), json!({"claudeAiOauth": {"accessToken": "fake-access-token"}}).to_string()).unwrap();
-        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
         let available = [AgentInfo { agent: AgentId::Claude, version: None, available: true, update_available: None }];
 
         cache.refresh(std::slice::from_ref(&work)).await;
@@ -310,7 +361,7 @@ mod tests {
         });
         let endpoint = serve(200, body, Seen::default()).await;
         let account = account_with_token("fake-access-token");
-        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
 
         cache.refresh(&[account.path().to_path_buf()]).await;
         let reading = cache.reading(account.path()).unwrap();
@@ -335,7 +386,7 @@ mod tests {
         let work = accounts.join("claude").join("work");
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join(".credentials.json"), json!({"claudeAiOauth": {"accessToken": "fake-access-token"}}).to_string()).unwrap();
-        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, USAGE_MIN_AGE);
+        let cache = UsageCache::new(&endpoint, CODEX_USAGE_ENDPOINT, "codex", USAGE_MIN_AGE);
         let available = [AgentInfo { agent: AgentId::Claude, version: None, available: true, update_available: None }];
 
         cache.refresh(std::slice::from_ref(&work)).await;

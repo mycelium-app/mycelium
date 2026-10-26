@@ -169,6 +169,10 @@ pub fn agent_command(agent: AgentId) -> Vec<String> {
     value.split_whitespace().map(str::to_string).collect()
 }
 
+pub fn codex_command() -> String {
+    std::env::var("MYCELIUM_CODEX").unwrap_or_else(|_| "codex".to_string())
+}
+
 pub fn agent_env(agent: AgentId) -> Vec<(String, String)> {
     match agent {
         AgentId::Claude => vec![("CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(), "1".to_string())],

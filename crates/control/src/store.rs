@@ -370,7 +370,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         for (_, agent, account, method, login_state, usage_left, windows, usage_read_at) in logins.iter().filter(|row| row.0 == node.id) {
             let history = usage_history.iter().find(|group| group.0 == node.id && group.1 == *agent && group.2 == account.clone().unwrap_or_default()).map(|group| group.3.as_slice()).unwrap_or_default();
             let windows = crate::account_usage::with_projections(windows.0.clone(), history);
-            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: *usage_read_at });
+            node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: *usage_read_at, reset_credits: None });
         }
 
         summaries.push(NodeSummary {

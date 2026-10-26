@@ -6,7 +6,7 @@ use mycelium_proto::link::{ControlToNode, NodeToControl};
 use serde_json::json;
 
 fn login(account: &str, state: LoginState) -> LoginInfo {
-    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None }
+    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
 }
 
 async fn node_with_accounts(server: &Server, accounts: Vec<LoginInfo>) -> common::NodeLink {
