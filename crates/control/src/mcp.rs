@@ -17,6 +17,7 @@ use crate::state::AppState;
 use crate::store::CONVERSATION_GROUP_SQL;
 use crate::tasks;
 use crate::reflections;
+use crate::exercises;
 use crate::walkthroughs;
 use axum::Json;
 use base64::Engine;
@@ -246,6 +247,46 @@ pub fn tool_definitions() -> Value {
                     "waiting": {"type": "string", "description": "What is blocked or waiting on someone, in Markdown."},
                     "next_week": {"type": "string", "description": "What to pick up next week, in Markdown."},
                 },
+            },
+        },
+        {
+            "name": "propose_exercise",
+            "description": "Propose a practice exercise for the person, based on code an agent wrote recently. It appears as a suggestion; the person decides whether to start it. The brief says what to build or fix and must not give the answer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "A short title."},
+                    "brief": {"type": "string", "description": "What to build or fix, in Markdown, without the answer."},
+                    "skill_kind": {"type": "string", "enum": ["language", "area", "other"], "description": "What kind of skill it practises."},
+                    "skill_name": {"type": "string", "description": "The language, like Rust, or the area of the codebase, like crates/control."},
+                    "source_conversation_id": {"type": "string", "description": "The conversation whose code the exercise is drawn from. Defaults to this one."},
+                    "minutes": {"type": "integer", "description": "About how long it should take."},
+                },
+                "required": ["title", "brief", "skill_name"],
+            },
+        },
+        {
+            "name": "save_exercise_review",
+            "description": "Save the review of the person's solution to a practice exercise. Only a review the person asked for may call it, once. Never edit files.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "A short summary of the review."},
+                    "comments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "line": {"type": "integer"},
+                                "body": {"type": "string"},
+                                "praise": {"type": "boolean", "description": "True for something done well."},
+                            },
+                            "required": ["path", "line", "body"],
+                        },
+                    },
+                },
+                "required": ["summary"],
             },
         },
         {
@@ -1013,6 +1054,26 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
+                Some("propose_exercise") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was saved. An exercise belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match exercises::propose_from_agent(&state, conversation_id, &arguments).await? {
+                        Ok(exercise) => reply(&id, tool_text(&format!("Exercise \"{}\" proposed. The person can start it from Skills.", exercise.title), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some("save_exercise_review") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was saved. A review belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match exercises::save_review(&state, conversation_id, &arguments).await? {
+                        Ok(_) => reply(&id, tool_text("Review saved. The person can read it on the exercise.", false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
                 Some("get_instructions") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
                         let latest = sqlx::query_as::<_, (String, String)>("select id, text from instruction_versions where layer = 'global' order by seq desc limit 1").fetch_optional(&state.pool).await?;
@@ -1399,7 +1460,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     reply(&id, tool_text(&text, is_error))
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, save_exercise_review, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

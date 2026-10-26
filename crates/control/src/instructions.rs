@@ -221,6 +221,14 @@ pub async fn teach_me_layer(state: &AppState, conversation_id: Uuid) -> ApiResul
     Ok(on.then(|| TEACH_ME_INSTRUCTIONS.to_string()))
 }
 
+const EXERCISE_REVIEW_INSTRUCTIONS: &str = "This conversation is reviewing the person's solution to a practice exercise. Never edit, create or delete files. Read the changes, comment on specific lines, and ask a question where a hint will teach more than an answer. Call save_exercise_review once with a short summary and the comments.";
+
+pub async fn exercise_review_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
+    let reviewing = sqlx::query_scalar::<_, bool>("select exists (select 1 from exercises where conversation_id = $1 and reviewing)").bind(conversation_id).fetch_one(&state.pool).await?;
+
+    Ok(reviewing.then(|| EXERCISE_REVIEW_INSTRUCTIONS.to_string()))
+}
+
 pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
     let revision = current_revision(state).await?;
 
@@ -229,6 +237,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let extensions = extensions_of(state, owner).await?;
     let teach_me = teach_me_layer(state, conversation_id).await?;
+    let exercise_review = exercise_review_layer(state, conversation_id).await?;
     let layers: Vec<String> = conversation_layers(state, conversation_id, false)
         .await?
         .into_iter()
@@ -236,6 +245,7 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
         .chain(extensions.mycelium_tools.then(tools_instructions))
         .chain(teach_me)
+        .chain(exercise_review)
         .collect();
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))

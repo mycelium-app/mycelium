@@ -1,7 +1,7 @@
 mod common;
 
 use common::{NodeLink, Server};
-use mycelium_proto::link::{ControlToNode, NodeToControl};
+use mycelium_proto::link::{ControlToNode, GitCommand, NodeToControl};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -378,4 +378,183 @@ async fn hidden_skills_are_left_out() {
 
     let (status, body) = server.user.json(server.user.put("/api/v1/skills/hidden").json(&json!({"kind": "nonsense", "name": "Rust"}))).await;
     assert_eq!((status, body["error"].clone()), (400, json!("skill_invalid")));
+}
+
+async fn project_on(server: &Server, link: &NodeLink) {
+    sqlx::query("insert into projects (owner, node_id, name, path) select id, $1, 'app', '/work/app' from users limit 1").bind(link.id).execute(&server.pool).await.unwrap();
+}
+
+async fn tool(server: &Server, token: &str, conversation: Uuid, name: &str, arguments: Value) -> Value {
+    let body = server.agent_mcp(token, conversation, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}})).await;
+
+    body["result"].clone()
+}
+
+async fn proposed_exercise(server: &Server, link: &NodeLink, source: Uuid) -> String {
+    let result = tool(server, &link.token, source, "propose_exercise", json!({"title": "Parse a duration", "brief": "Write parse_duration.", "skill_kind": "language", "skill_name": "Rust", "minutes": 20})).await;
+    assert_ne!(result["isError"], true, "{result}");
+    let (_, listed) = server.user.json(server.user.get("/api/v1/exercises")).await;
+
+    listed[0]["id"].as_str().unwrap().to_string()
+}
+
+async fn answer_git(link: &mut NodeLink, output: Value) -> (String, GitCommand) {
+    loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command } => {
+                link.send(NodeToControl::GitResult { request_id, ok: true, output, error: None }).await;
+
+                return (cwd, command);
+            }
+            ControlToNode::StartSession { .. } => continue,
+            other => panic!("expected git, got {other:?}"),
+        }
+    }
+}
+
+async fn start_exercise(server: &Server, link: &mut NodeLink, exercise: &str) -> (Uuid, Value) {
+    let user = server.user.clone();
+    let path = format!("/api/v1/exercises/{exercise}/start");
+    let starting = tokio::spawn(async move { user.json(user.post(&path)).await });
+    let (cwd, command) = answer_git(link, json!({"path": "/work/app-worktrees/learn-parse", "branch": "learn/x"})).await;
+    let (status, body) = starting.await.unwrap();
+
+    assert_eq!((status, cwd.as_str()), (201, "/work/app"), "{body}");
+    assert!(matches!(command, GitCommand::AddWorktree { ref branch } if branch.starts_with("learn/parse-a-duration-")), "{command:?}");
+
+    let conversation: Uuid = body["conversation_id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+    link.start_session(conversation, "acp-learn").await;
+
+    (conversation, body)
+}
+
+#[tokio::test]
+async fn starting_an_exercise_adds_a_learn_branch_worktree_and_conversation() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    project_on(&server, &link).await;
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+
+    let (conversation, started) = start_exercise(&server, &mut link, &exercise).await;
+
+    assert_eq!(started["state"], "started");
+    assert!(started["branch"].as_str().unwrap().starts_with("learn/parse-a-duration-"));
+    let opened = server.conversation(conversation).await;
+    assert_eq!(opened["cwd"], "/work/app-worktrees/learn-parse");
+    assert_eq!(opened["branch"], started["branch"]);
+}
+
+#[tokio::test]
+async fn starting_an_exercise_without_a_project_says_what_to_do() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/start"))).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("exercise_needs_project")));
+}
+
+async fn suggested_count(server: &Server) -> usize {
+    let (_, body) = server.user.json(server.user.get("/api/v1/exercises/suggested")).await;
+
+    body.as_array().unwrap().len()
+}
+
+#[tokio::test]
+async fn not_now_hides_a_suggestion_until_tomorrow() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+    assert_eq!(suggested_count(&server).await, 1);
+
+    let (status, hidden) = server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/not-now"))).await;
+    assert_eq!(status, 200, "{hidden}");
+    assert_eq!(suggested_count(&server).await, 0);
+
+    sqlx::query("update exercises set not_now_until = now() - interval '1 minute'").execute(&server.pool).await.unwrap();
+    assert_eq!(suggested_count(&server).await, 1);
+}
+
+#[tokio::test]
+async fn run_tests_relays_the_project_test_command() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    project_on(&server, &link).await;
+    sqlx::query("update projects set test_command = 'cargo nextest run'").execute(&server.pool).await.unwrap();
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+    start_exercise(&server, &mut link, &exercise).await;
+    let user = server.user.clone();
+    let path = format!("/api/v1/exercises/{exercise}/tests");
+    let running = tokio::spawn(async move { user.json(user.post(&path)).await });
+
+    let result = json!({"exit": 101, "passed": 5, "failed": 1, "failing": ["a::broken"], "output_tail": ""});
+    let (cwd, command) = answer_git(&mut link, result.clone()).await;
+    let (status, body) = running.await.unwrap();
+
+    assert_eq!((cwd.as_str(), command), ("/work/app-worktrees/learn-parse", GitCommand::RunTests { command: Some("cargo nextest run".into()), timeout_secs: 600 }));
+    assert_eq!((status, body), (200, result.clone()));
+    let (_, listed) = server.user.json(server.user.get("/api/v1/exercises?skill=Rust")).await;
+    assert_eq!(listed[0]["tests"], result);
+}
+
+#[tokio::test]
+async fn review_saves_comments_and_test_results() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    project_on(&server, &link).await;
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+    let (conversation, _) = start_exercise(&server, &mut link, &exercise).await;
+    let tests = json!({"exit": 0, "passed": 6, "failed": 0, "failing": []});
+    sqlx::query("update exercises set last_tests = $1").bind(&tests).execute(&server.pool).await.unwrap();
+    let token = link.token.clone();
+
+    let early = tool(&server, &token, conversation, "save_exercise_review", json!({"summary": "Looks fine"})).await;
+    assert_eq!(early["isError"], true);
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/review"))).await;
+    assert_eq!(status, 202);
+    let (_, asked) = link.expect_prompt().await;
+    assert!(asked.contains("save_exercise_review") && asked.contains("Do not edit"));
+
+    let saved = tool(&server, &token, conversation, "save_exercise_review", json!({"summary": "Close", "comments": [{"path": "src/lib.rs", "line": 4, "body": "Handle an empty string."}, {"path": "src/lib.rs", "line": 9, "body": "Nice use of split_once.", "praise": true}]})).await;
+    assert_ne!(saved["isError"], true, "{saved}");
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/exercises")).await;
+    let review = &listed[0]["review"];
+    assert_eq!((listed[0]["state"].clone(), review["summary"].clone(), review["tests"].clone()), (json!("reviewed"), json!("Close"), tests));
+    assert_eq!((review["comments"][0]["line"].clone(), review["comments"][1]["praise"].clone()), (json!(4), json!(true)));
+}
+
+#[tokio::test]
+async fn review_session_cannot_edit_files() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    project_on(&server, &link).await;
+    let source = started_conversation(&server, &mut link).await;
+    let exercise = proposed_exercise(&server, &link, source).await;
+    let (conversation, _) = start_exercise(&server, &mut link, &exercise).await;
+    server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/review"))).await;
+    link.expect_prompt().await;
+
+    let options = json!([{"optionId": "allow", "name": "Allow", "kind": "allow_once"}, {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]);
+    link.send(NodeToControl::PermissionRequest { conversation_id: conversation, seq: 10, request_id: "edit-1".into(), request: json!({"toolCall": {"title": "Edit lib.rs", "kind": "edit"}, "options": options}) }).await;
+
+    match link.next().await {
+        ControlToNode::PermissionResponse { request_id, outcome, .. } => assert_eq!((request_id.as_str(), outcome), ("edit-1", json!({"outcome": "selected", "optionId": "reject"}))),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    link.send(NodeToControl::PermissionRequest { conversation_id: conversation, seq: 11, request_id: "read-1".into(), request: json!({"toolCall": {"title": "git log", "kind": "execute"}, "options": options}) }).await;
+    common::eventually("a command request waits for the person", || async {
+        let events = server.events(conversation).await;
+
+        events.iter().any(|event| event["kind"] == "permission_request").then_some(())
+    }).await;
 }

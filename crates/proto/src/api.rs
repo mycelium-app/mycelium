@@ -2047,3 +2047,56 @@ pub struct HiddenSkillRequest {
     pub kind: String,
     pub name: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReviewComment {
+    pub path: String,
+    pub line: i32,
+    pub body: String,
+    #[serde(default)]
+    pub praise: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExerciseReview {
+    pub id: Uuid,
+    pub summary: String,
+    pub comments: Vec<ReviewComment>,
+    pub tests: Option<Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Exercise {
+    pub id: Uuid,
+    pub kind: String,
+    pub name: String,
+    pub title: String,
+    pub brief: String,
+    pub minutes: Option<i32>,
+    pub state: String,
+    pub branch: Option<String>,
+    pub conversation_id: Option<Uuid>,
+    pub reviewing: bool,
+    pub not_now_until: Option<chrono::DateTime<chrono::Utc>>,
+    pub tests: Option<Value>,
+    pub review: Option<ExerciseReview>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposeExercisesRequest {
+    pub node_id: Uuid,
+    pub agent: AgentId,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SolutionFile {
+    pub path: String,
+    pub diff: String,
+}

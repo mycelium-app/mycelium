@@ -178,6 +178,10 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
+            if crate::exercises::refuse_edit(state, node_id, conversation_id, &request_id, &request).await? {
+                return Ok(());
+            }
+
             let mut payload = request.clone();
 
             match payload.as_object_mut() {

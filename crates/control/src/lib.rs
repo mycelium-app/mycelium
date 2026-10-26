@@ -31,6 +31,7 @@ mod imports;
 mod instruction_proposals;
 mod instructions;
 mod email;
+mod exercises;
 mod integration_policy;
 mod integration_review;
 mod integrations;
@@ -319,6 +320,15 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/reflections/schedule", get(reflections::get_schedule).post(reflections::set_schedule))
         .route("/api/v1/reflections/{id}", patch(reflections::patch))
         .route("/api/v1/reflections/{id}/redraft", post(reflections::redraft))
+        .route("/api/v1/exercises", get(exercises::list))
+        .route("/api/v1/exercises/suggested", get(exercises::suggested))
+        .route("/api/v1/exercises/propose", post(exercises::propose))
+        .route("/api/v1/exercises/{id}/start", post(exercises::start))
+        .route("/api/v1/exercises/{id}/not-now", post(exercises::not_now))
+        .route("/api/v1/exercises/{id}/tests", post(exercises::run_tests))
+        .route("/api/v1/exercises/{id}/review", post(exercises::review))
+        .route("/api/v1/exercises/{id}/done", post(exercises::done))
+        .route("/api/v1/exercises/{id}/solution", get(exercises::solution))
         .route("/api/v1/skills", get(skills::list))
         .route("/api/v1/skills/hidden", put(skills::hide).delete(skills::unhide))
         .route("/api/v1/wellness/settings", get(wellness::get_settings).put(wellness::save_settings))

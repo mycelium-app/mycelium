@@ -108,7 +108,7 @@ fn file_of(file: &Value, step_number: usize) -> Result<GivenFile, String> {
     Ok(GivenFile { path, text })
 }
 
-async fn scope_changes(state: &AppState, conversation_id: Uuid, scope: &str) -> Option<Vec<FileChange>> {
+pub(crate) async fn scope_changes(state: &AppState, conversation_id: Uuid, scope: &str) -> Option<Vec<FileChange>> {
     let (node_id, cwd) = sqlx::query_as::<_, (Uuid, String)>("select node_id, cwd from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await.ok()??;
     let output = relay(state, node_id, cwd, GitCommand::ScopeDiff { scope: scope.to_string() }).await.ok()?;
 
