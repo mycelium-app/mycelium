@@ -136,58 +136,56 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
             for (section in sections) {
                 section.title?.let { Label(it, Modifier.semantics { heading() }, Tokens.Type.UiStrong, colors.textMuted) }
 
-                ContentTable(listOf(ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 140.dp), ColumnSpec(max = 160.dp), ColumnSpec(max = 120.dp), ColumnSpec(min = 0.dp, max = 28.dp), ColumnSpec())) {
-                    ContentRow(header = true) {
-                        Label("Name", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Description", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("State", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Wakes", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Last active", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                        Box(Modifier)
-                    }
+                val assistants = section.rows
 
-                    Hairline()
+                Table(
+                    listOf(
+                        Col("Name", 140.dp, rigid = true),
+                        Col("Description", 120.dp, weight = 1f, priority = 1),
+                        Col("State", 110.dp, preferred = 110.dp),
+                        Col("Wakes", 88.dp, max = 160.dp, priority = 1),
+                        Col("Last active", 88.dp, max = 120.dp),
+                        Col("", 24.dp, preferred = 24.dp),
+                        ActionColumn,
+                    ),
+                    assistants.size,
+                    { row, column ->
+                        val assistant = assistants[row]
 
-                    for (assistant in section.rows) {
-                        AssistantRow(assistant, store, onOpen, onSettings)
-                        Hairline()
-                    }
-                }
+                        when (column) {
+                            0 -> TableCell.Slot(assistant.name, Tokens.Space.S8) {
+                                Row(
+                                    Modifier.pressable({ onOpen(assistant) }, role = Role.Button, description = "Open ${assistant.name}", shape = BlockShape).padding(vertical = Tokens.Space.S1),
+                                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    AssistantAvatar(assistant.name)
+                                    Label(assistant.name, maxLines = 1)
+                                }
+                            }
+
+                            1 -> TableCell.Text(assistant.description.orEmpty(), color = colors.textMuted)
+                            2 -> TableCell.Slot { AssistantStateMark(assistant.state) }
+                            3 -> TableCell.Text(assistant.wakes ?: "Never", color = colors.textMuted)
+                            4 -> TableCell.Text(assistant.lastActiveAt?.let { ago(it) } ?: "Never", color = colors.textMuted)
+                            5 -> TableCell.Slot {
+                                if (assistant.pinnedAt != null) {
+                                    Icon(MyIcon.Pin, colors.textMuted, Tokens.Size.IconSm)
+                                }
+                            }
+
+                            else -> TableCell.Slot {
+                                RowMenu(assistant.name) { close ->
+                                    MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
+                                    MenuItem("Settings", onClick = { close(); onSettings(assistant) }, leading = MyIcon.Sliders)
+                                    MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
+                                }
+                            }
+                        }
+                    },
+                    lazy = false,
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun AssistantRow(assistant: Assistant, store: Store, onOpen: (Assistant) -> Unit, onSettings: (Assistant) -> Unit) {
-    val colors = MyTheme.colors
-
-    ContentRow {
-        Row(
-            Modifier.pressable({ onOpen(assistant) }, role = Role.Button, description = "Open ${assistant.name}", shape = BlockShape).padding(vertical = Tokens.Space.S1),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AssistantAvatar(assistant.name)
-            Label(assistant.name, maxLines = 1)
-        }
-
-        Label(assistant.description.orEmpty(), color = colors.textMuted, maxLines = 1)
-        AssistantStateMark(assistant.state)
-        Label(assistant.wakes ?: "Never", color = colors.textMuted, maxLines = 1)
-        Label(assistant.lastActiveAt?.let { ago(it) } ?: "Never", color = colors.textMuted, maxLines = 1)
-
-        if (assistant.pinnedAt != null) {
-            Icon(MyIcon.Pin, colors.textMuted, Tokens.Size.IconSm)
-        } else {
-            Box(Modifier)
-        }
-
-        RowMenu(assistant.name) { close ->
-            MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
-            MenuItem("Settings", onClick = { close(); onSettings(assistant) }, leading = MyIcon.Sliders)
-            MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
         }
     }
 }

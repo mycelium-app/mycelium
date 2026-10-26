@@ -212,33 +212,37 @@ private fun harnessName(agent: String): String = if (agent == "codex") "Codex" e
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().also { it.add(to, it.removeAt(from)) }
 
 @Composable
-private fun OrderedRows(names: List<String>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, extra: @Composable (Int) -> Unit = {}) {
+private fun OrderedRows(names: List<String>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, extra: (@Composable (Int) -> Unit)? = null) {
     if (names.isEmpty()) {
         return
     }
 
-    ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 200.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
-        names.forEachIndexed { index, name ->
-            ContentRow {
-                Label(name, maxLines = 1)
-                Box { extra(index) }
+    Table(
+        listOfNotNull(Col("", 140.dp, weight = 1f), extra?.let { Col("", 100.dp, preferred = 180.dp) }, ActionColumn),
+        names.size,
+        { index, column ->
+            val name = names[index]
 
-                RowMenu(name) { close ->
-                    if (index > 0) {
-                        MenuItem("Move up", onClick = { close(); onMove(index, index - 1) }, leading = MyIcon.ArrowUp)
+            when {
+                column == 0 -> TableCell.Text(name)
+                column == 1 && extra != null -> TableCell.Slot { extra(index) }
+                else -> TableCell.Slot {
+                    RowMenu(name) { close ->
+                        if (index > 0) {
+                            MenuItem("Move up", onClick = { close(); onMove(index, index - 1) }, leading = MyIcon.ArrowUp)
+                        }
+
+                        if (index < names.lastIndex) {
+                            MenuItem("Move down", onClick = { close(); onMove(index, index + 1) }, leading = MyIcon.ArrowDown)
+                        }
+
+                        MenuItem("Remove", onClick = { close(); onRemove(index) }, leading = MyIcon.Close)
                     }
-
-                    if (index < names.lastIndex) {
-                        MenuItem("Move down", onClick = { close(); onMove(index, index + 1) }, leading = MyIcon.ArrowDown)
-                    }
-
-                    MenuItem("Remove", onClick = { close(); onRemove(index) }, leading = MyIcon.Close)
                 }
             }
-
-            Hairline()
-        }
-    }
+        },
+        header = false,
+    )
 }
 
 private const val InstructionsFile = "AGENTS.md"
@@ -266,33 +270,34 @@ private fun StorageSection(store: Store, assistantId: String) {
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
         if (files.isNotEmpty()) {
-            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 120.dp), ColumnSpec(max = 100.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
-                ContentRow(header = true) {
-                    Label("Path", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Size", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Updated", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Backed up", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
+            val updated = files.map { ago(it.updatedAt) }
 
-                Hairline()
+            Table(
+                listOf(
+                    Col("Path", 140.dp, weight = 1f),
+                    Col("Size", 56.dp, numeric = true),
+                    Col("Updated", 88.dp, priority = 1),
+                    Col("Backed up", 80.dp, priority = 1),
+                    ActionColumn,
+                ),
+                files.size,
+                { row, column ->
+                    val file = files[row]
 
-                for (file in files) {
-                    ContentRow {
-                        Label(file.path, style = Tokens.Type.Code, maxLines = 1)
-                        Label(formatSize(file.size), color = colors.textMuted, maxLines = 1)
-                        Label(ago(file.updatedAt), color = colors.textMuted, maxLines = 1)
-                        Label(if (file.backedUp) "Yes" else "No", color = colors.textMuted, maxLines = 1)
-
-                        RowMenu(file.path) { close ->
-                            MenuItem("Edit", onClick = { close(); attempt { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
-                            MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantFile(assistantId, file.path); reload() } }, leading = MyIcon.Close)
+                    when (column) {
+                        0 -> TableCell.Text(file.path, Tokens.Type.Code)
+                        1 -> TableCell.Text(formatSize(file.size), color = colors.textMuted)
+                        2 -> TableCell.Text(updated[row], color = colors.textMuted)
+                        3 -> TableCell.Text(if (file.backedUp) "Yes" else "No", color = colors.textMuted)
+                        else -> TableCell.Slot {
+                            RowMenu(file.path) { close ->
+                                MenuItem("Edit", onClick = { close(); attempt { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
+                                MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantFile(assistantId, file.path); reload() } }, leading = MyIcon.Close)
+                            }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
 
         editing?.let { (path, text) ->
@@ -350,33 +355,32 @@ private fun SecretsSection(store: Store, assistantId: String) {
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
         if (secrets.isNotEmpty()) {
-            ContentTable(listOf(ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 100.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
-                ContentRow(header = true) {
-                    Label("Name", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Description", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("State", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Set by", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
+            Table(
+                listOf(
+                    Col("Name", 120.dp, rigid = true),
+                    Col("Description", 120.dp, weight = 1f, priority = 1),
+                    Col("State", 72.dp),
+                    Col("Set by", 80.dp, priority = 1),
+                    ActionColumn,
+                ),
+                secrets.size,
+                { row, column ->
+                    val secret = secrets[row]
 
-                Hairline()
-
-                for (secret in secrets) {
-                    ContentRow {
-                        Label(secret.name, style = Tokens.Type.Code, maxLines = 1)
-                        Label(secret.description.orEmpty(), color = colors.textMuted, maxLines = 1)
-                        Label(if (secret.state == "set") "Set" else "Waiting", color = colors.textMuted, maxLines = 1)
-                        Label(secret.setBy.orEmpty(), color = colors.textMuted, maxLines = 1)
-
-                        RowMenu(secret.name) { close ->
-                            MenuItem("Set value", onClick = { close(); setting = secret.name }, leading = MyIcon.Pencil)
-                            MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
+                    when (column) {
+                        0 -> TableCell.Text(secret.name, Tokens.Type.Code)
+                        1 -> TableCell.Text(secret.description.orEmpty(), color = colors.textMuted)
+                        2 -> TableCell.Text(if (secret.state == "set") "Set" else "Waiting", color = colors.textMuted)
+                        3 -> TableCell.Text(secret.setBy.orEmpty(), color = colors.textMuted)
+                        else -> TableCell.Slot {
+                            RowMenu(secret.name) { close ->
+                                MenuItem("Set value", onClick = { close(); setting = secret.name }, leading = MyIcon.Pencil)
+                                MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
+                            }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
 
         setting?.let { name ->
