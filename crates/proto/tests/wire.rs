@@ -129,6 +129,7 @@ fn every_control_message_round_trips_under_its_tag() {
     let cases = vec![
         (ControlToNode::Ack { conversation_id: id(), seq: 9 }, "ack"),
         (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: false, account: None, instructions: None, env: vec![] }, "start_session"),
+        (ControlToNode::SecretsChanged { conversation_id: id(), env: vec![("TOKEN".into(), "v".into())] }, "secrets_changed"),
         (ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()), take_over: false }, "instructions"),
         (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into(), attachments: vec![] }, "prompt"),
         (ControlToNode::Steer { conversation_id: id(), request_id: id(), text: "hi".into(), attachments: vec![] }, "steer"),

@@ -14,6 +14,7 @@ pub mod link;
 pub mod login;
 pub mod logo;
 pub mod resources;
+pub mod secrets_file;
 pub mod session;
 pub mod ssh;
 pub mod ssh_proxy;

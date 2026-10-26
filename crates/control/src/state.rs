@@ -104,6 +104,7 @@ pub struct Hub {
     logins: Mutex<HashMap<Uuid, LoginOwner>>,
     terminals: Mutex<HashMap<Uuid, LoginOwner>>,
     send_now: Mutex<HashMap<Uuid, Uuid>>,
+    stale_secrets: Mutex<HashSet<Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
@@ -618,6 +619,22 @@ impl Hub {
         terminals.retain(|_, owner| owner.node_id != node_id);
 
         finished
+    }
+
+    pub fn mark_secrets_stale(&self, conversation_id: Uuid) {
+        if let Ok(mut stale) = self.stale_secrets.lock() {
+            stale.insert(conversation_id);
+        }
+    }
+
+    pub fn secrets_stale(&self, conversation_id: Uuid) -> bool {
+        self.stale_secrets.lock().is_ok_and(|stale| stale.contains(&conversation_id))
+    }
+
+    pub fn secrets_fresh(&self, conversation_id: Uuid) {
+        if let Ok(mut stale) = self.stale_secrets.lock() {
+            stale.remove(&conversation_id);
+        }
     }
 
     pub fn expect_send_now(&self, conversation_id: Uuid, node_id: Uuid) {

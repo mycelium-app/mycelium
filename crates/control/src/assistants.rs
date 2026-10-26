@@ -518,6 +518,7 @@ pub async fn put_secret(State(state): State<AppState>, user: AuthUser, Path((id,
         .execute(&state.pool)
         .await?;
         redact_stored(&state, id, value).await?;
+        push_secrets(&state, id).await?;
     } else {
         sqlx::query(
             "insert into assistant_secrets (assistant_id, name, description) values ($1, $2, $3)
@@ -546,6 +547,7 @@ pub async fn delete_secret(State(state): State<AppState>, user: AuthUser, Path((
         return Err(ApiError::not_found("That secret"));
     }
 
+    push_secrets(&state, id).await?;
     publish(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -867,6 +869,22 @@ pub async fn secret_env(state: &AppState, conversation_id: Uuid) -> ApiResult<Ve
     Ok(rows)
 }
 
+async fn push_secrets(state: &AppState, assistant_id: Uuid) -> ApiResult<()> {
+    let sessions = sqlx::query_as::<_, (Uuid, Uuid)>("select id, node_id from conversations where assistant_id = $1 and agent <> $2").bind(assistant_id).bind(chats::CHAT_AGENT).fetch_all(&state.pool).await?;
+
+    for (conversation_id, node_id) in sessions {
+        if !state.hub.has_session(node_id, conversation_id) {
+            continue;
+        }
+
+        let env = secret_env(state, conversation_id).await?;
+        state.hub.mark_secrets_stale(conversation_id);
+        state.hub.send(node_id, ControlToNode::SecretsChanged { conversation_id, env });
+    }
+
+    Ok(())
+}
+
 async fn redact_stored(state: &AppState, assistant_id: Uuid, value: &str) -> ApiResult<()> {
     if value.len() < crate::store::MIN_REDACTED_SECRET as usize {
         return Ok(());
@@ -918,6 +936,7 @@ pub async fn secret_tool(state: &AppState, conversation_id: Option<Uuid>, tool: 
         .execute(&state.pool)
         .await?;
         redact_stored(state, id, &value).await?;
+        push_secrets(state, id).await?;
         publish(state, owner, id).await?;
 
         return Ok((format!("Stored {name}. It reaches working folder sessions as an environment variable when they start."), false));

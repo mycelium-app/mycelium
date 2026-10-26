@@ -71,7 +71,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         None => text.clone(),
     };
     let loaded = attachments::for_node(state, &attachments).await?;
-    let starts_session = !state.hub.has_session(node_id, conversation_id);
+    let starts_session = !state.hub.has_session(node_id, conversation_id) || state.hub.secrets_stale(conversation_id);
     let session = match starts_session {
         true => Some((instructions::session_layer(state, conversation_id).await?, crate::assistants::secret_env(state, conversation_id).await?, parse_enum(&agent)?)),
         false => None,
@@ -104,6 +104,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
             tracing::warn!("could not publish the new session of {conversation_id}: {}", error.message());
         }
 
+        state.hub.secrets_fresh(conversation_id);
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, env });
     }
 

@@ -370,6 +370,11 @@ pub enum ControlToNode {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         env: Vec<(String, String)>,
     },
+    SecretsChanged {
+        conversation_id: Uuid,
+        #[serde(default)]
+        env: Vec<(String, String)>,
+    },
     Instructions {
         revision: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

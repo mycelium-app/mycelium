@@ -615,6 +615,49 @@ async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redact
 }
 
 #[tokio::test]
+async fn a_changed_secret_reaches_the_running_session_at_once_and_restarts_it_before_the_next_turn() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+    server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": "ghp_first"})).send().await.unwrap();
+
+    let started = prompt(&server.user, id, "Push the branch").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+
+    server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": "ghp_second"})).send().await.unwrap();
+    let rewritten = next_matching(&mut link, |message| match message {
+        ControlToNode::SecretsChanged { env, .. } => Some(env.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(rewritten, vec![("GITHUB_TOKEN".to_string(), "ghp_second".to_string())]);
+
+    server.user.put(&format!("/api/v1/assistants/{id}/secrets/OTHER_KEY")).json(&json!({"value": "other-value"})).send().await.unwrap();
+    server.user.delete(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).send().await.unwrap();
+    let after_delete = next_matching(&mut link, |message| match message {
+        ControlToNode::SecretsChanged { env, .. } if env.len() == 1 && env[0].0 == "OTHER_KEY" => Some(env.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(after_delete, vec![("OTHER_KEY".to_string(), "other-value".to_string())]);
+
+    prompt(&server.user, id, "Try again").await;
+    let restarted = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { env, resume, .. } => Some((env.clone(), resume.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(restarted, (vec![("OTHER_KEY".to_string(), "other-value".to_string())], Some("acp-1".to_string())));
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "Try again");
+}
+
+#[tokio::test]
 async fn request_secret_creates_a_waiting_secret_the_person_can_fill() {
     let server = Server::start().await;
     let calls = vec![("mcp__mycelium__assistant_request_secret", json!({"name": "JELLYFIN_KEY", "description": "From Jellyfin, Dashboard, API keys"}))];

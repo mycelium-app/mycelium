@@ -86,6 +86,7 @@ pub struct Daemon {
     options: DaemonOptions,
     out: mpsc::UnboundedSender<NodeToControl>,
     sessions: Mutex<HashMap<Uuid, SessionHandle>>,
+    launched_secrets: Mutex<HashMap<Uuid, Vec<(String, String)>>>,
     logins: LoginManager,
     usage: Arc<UsageCache>,
     terminals: TerminalManager,
@@ -115,6 +116,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
         sessions: Mutex::new(HashMap::new()),
+        launched_secrets: Mutex::new(HashMap::new()),
         connected: AtomicBool::new(false),
         config,
         config_file,
@@ -267,6 +269,7 @@ impl Daemon {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
             ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, env),
+            ControlToNode::SecretsChanged { conversation_id, env } => self.rewrite_secrets(conversation_id, &env),
             ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
             ControlToNode::Steer { conversation_id, request_id, text, attachments } => self.steer(conversation_id, request_id, text, attachments),
@@ -464,6 +467,16 @@ impl Daemon {
         self.session_handles().into_iter().find(|(_, handle)| handle.acp_session_id().as_deref() == Some(acp_session_id)).map(|(id, _)| id)
     }
 
+    fn secrets_differ_from_launch(&self, conversation_id: Uuid, secrets: &[(String, String)]) -> bool {
+        self.launched_secrets.lock().is_ok_and(|launched| launched.get(&conversation_id).is_some_and(|held| held != secrets))
+    }
+
+    fn rewrite_secrets(&self, conversation_id: Uuid, secrets: &[(String, String)]) {
+        if let Err(error) = crate::secrets_file::write(&self.session_dir(conversation_id), secrets) {
+            tracing::warn!(conversation = %conversation_id, "could not rewrite the secrets file: {error}");
+        }
+    }
+
     fn session_dir(&self, conversation_id: Uuid) -> PathBuf {
         self.config.sessions_dir().join(conversation_id.to_string())
     }
@@ -514,7 +527,7 @@ impl Daemon {
         let existing = self.session_handles();
         let running_here = existing.iter().find(|(id, handle)| *id == conversation_id && handle.running());
         if let Some((_, handle)) = running_here {
-            if handle.launched_as(agent, &account) {
+            if handle.launched_as(agent, &account) && !self.secrets_differ_from_launch(conversation_id, &secrets) {
                 return;
             }
 
@@ -544,6 +557,15 @@ impl Daemon {
         }
 
         let mut env = agent_env(agent);
+        match crate::secrets_file::write(&self.session_dir(conversation_id), &secrets) {
+            Ok(path) => env.push((crate::secrets_file::SECRETS_FILE_ENV.to_string(), path.to_string_lossy().into_owned())),
+            Err(error) => tracing::warn!(conversation = %conversation_id, "could not write the secrets file: {error}"),
+        }
+
+        if let Ok(mut launched) = self.launched_secrets.lock() {
+            launched.insert(conversation_id, secrets.clone());
+        }
+
         env.extend(secrets);
 
         if let (AgentId::Codex, Some(text)) = (agent, &instructions) {

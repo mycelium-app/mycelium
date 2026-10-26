@@ -692,6 +692,33 @@ async fn a_session_started_while_the_previous_one_is_closing_replaces_it_and_tak
 }
 
 #[tokio::test]
+async fn secrets_live_in_a_private_file_that_follows_changes_and_a_changed_start_replaces_the_session() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(19);
+    let file = fixture.session_dir(conversation).join("secrets.env");
+    let start = |token: &str| ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![("TOKEN".into(), token.into())] };
+
+    connection.send(start("it's one"));
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "TOKEN='it'\\''s one'\n");
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+
+    connection.send(ControlToNode::SecretsChanged { conversation_id: conversation, env: vec![("TOKEN".into(), "two".into())] });
+    prompt(&connection, conversation, "hello");
+    connection.next_matching(|message| update_text(message).is_some()).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "TOKEN='two'\n");
+
+    connection.send(start("two"));
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "TOKEN='two'\n");
+}
+
+#[tokio::test]
 async fn a_session_started_for_another_agent_replaces_the_running_one() {
     let mut control = ControlServer::start().await;
     let mut fixture = Fixture::new(&control.url);
