@@ -66,6 +66,7 @@ object EventKinds {
     const val Error = "error"
     const val Workflow = "workflow"
     const val ModelChanged = "model_changed"
+    const val Continued = "continued"
 }
 
 @Serializable
@@ -567,6 +568,7 @@ data class Experiments(
     val walkthrough: Boolean = false,
     @SerialName("move_chats") val moveChats: Boolean = false,
     val groups: Boolean = false,
+    @SerialName("continue_elsewhere") val continueElsewhere: Boolean = false,
 )
 
 @Serializable
@@ -954,6 +956,17 @@ data class PatchConversationRequest(
     val model: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("clear_project") val clearProject: Boolean? = null,
+)
+
+@Serializable
+data class ContinueRequest(
+    val agent: String,
+    val account: String? = null,
+    @SerialName("use_default_account") val useDefaultAccount: Boolean? = null,
+    @SerialName("provider_id") val providerId: String? = null,
+    val model: String? = null,
+    @SerialName("node_id") val nodeId: String? = null,
+    val cwd: String? = null,
 )
 
 @Serializable

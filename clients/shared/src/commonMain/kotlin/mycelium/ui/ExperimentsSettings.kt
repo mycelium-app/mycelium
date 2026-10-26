@@ -25,6 +25,7 @@ fun ExperimentsSettings(store: Store) {
         Triple("Subagents sidebar", held.subagents) { value -> store.updateExperiments { it.copy(subagents = value) } },
         Triple("Walkthrough", held.walkthrough) { value -> store.updateExperiments { it.copy(walkthrough = value) } },
         Triple("Move chats between machines", held.moveChats) { value -> store.updateExperiments { it.copy(moveChats = value) } },
+        Triple("Continue elsewhere", held.continueElsewhere) { value -> store.updateExperiments { it.copy(continueElsewhere = value) } },
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

@@ -56,6 +56,7 @@ import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
+import mycelium.state.continueChoices
 import mycelium.state.agentName
 import mycelium.state.isWorktree
 import mycelium.state.switchableAccounts
@@ -168,8 +169,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val chat = conversation.isChat
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
-    LaunchedEffect(chat) {
-        if (chat) {
+    LaunchedEffect(chat, state.experiments.continueElsewhere) {
+        if (chat || state.experiments.continueElsewhere) {
             store.act { providers = api.modelProviders() }
         }
     }
@@ -380,6 +381,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onSearchFiles = { query -> api.files(id, query) },
                         accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                         accountLocked = conversation.acpSessionId != null,
+                        continueOn = if (state.experiments.continueElsewhere) {
+                            val events = state.events[id].orEmpty()
+                            val choices = remember(conversation, node, providers, events) { continueChoices(conversation, node, providers, events) }
+
+                            ContinueControls(choices) { choice -> store.act { store.continueOn(id, choice) } }
+                        } else null,
                         onSetAccount = { account ->
                             store.act {
                                 when {

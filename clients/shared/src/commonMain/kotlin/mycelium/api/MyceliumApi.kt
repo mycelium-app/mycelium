@@ -526,6 +526,9 @@ class MyceliumApi(
     suspend fun patchConversation(id: String, request: PatchConversationRequest): Conversation =
         call("/conversations/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
+    suspend fun continueConversation(id: String, request: ContinueRequest): Conversation =
+        call("/conversations/$id/continue") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun retryConversation(id: String) {
         call("/conversations/$id/retry") { client.post(it) { authorise() } }
     }

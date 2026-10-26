@@ -29,6 +29,7 @@ import mycelium.api.CreateProjectRequest
 import mycelium.api.DeclineInstructionProposalRequest
 import mycelium.api.InstructionProposal
 import mycelium.api.ConfirmScheduleRequest
+import mycelium.api.ContinueRequest
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.CreateTaskRequest
 import mycelium.api.ApiAccessRequest
@@ -826,6 +827,22 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             }
         }
     }
+
+    suspend fun continueOn(id: String, choice: String) {
+        val conversation = mutableState.value.conversations[id] ?: return
+        val request = when {
+            choice.startsWith(ContinueAccountPrefix) -> accountRequest(conversation.agent, choice.removePrefix(ContinueAccountPrefix))
+            choice.startsWith(ContinueAgentPrefix) -> choice.removePrefix(ContinueAgentPrefix).let { accountRequest(it.substringBefore(':'), it.substringAfter(':')) }
+            choice.startsWith(ContinueChatPrefix) -> choice.removePrefix(ContinueChatPrefix).let { ContinueRequest("chat", providerId = it.substringBefore(':'), model = it.substringAfter(':')) }
+            else -> return
+        }
+        val continued = api.continueConversation(id, request)
+
+        mutableState.update { it.copy(conversations = it.conversations + (continued.id to continued)) }
+    }
+
+    private fun accountRequest(agent: String, account: String): ContinueRequest =
+        if (account == DefaultAccountId) ContinueRequest(agent, useDefaultAccount = true) else ContinueRequest(agent, account = account)
 
     fun closeSession(conversation: Conversation) {
         act { api.closeSession(conversation.id) }

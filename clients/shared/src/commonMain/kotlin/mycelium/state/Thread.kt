@@ -133,6 +133,8 @@ sealed interface ThreadItem {
     data class Workflow(override val key: String, val progress: WorkflowProgress) : ThreadItem
 
     data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
+
+    data class Continued(override val key: String, val text: String) : ThreadItem
 }
 
 data class UsageLimitNote(val window: String, val resetsAt: String?)
@@ -223,6 +225,7 @@ class ThreadBuilder {
             EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", usageLimitFrom(payload))
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
+            EventKinds.Continued -> items += ThreadItem.Continued(key, continuedText(payload))
         }
     }
 }
@@ -646,6 +649,19 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
     }
 
     return before + result + after
+}
+
+private fun continuedText(payload: JsonObject): String {
+    val agent = payload.string("agent").orEmpty()
+    val account = payload.string("account")
+    val target = when {
+        agent == "chat" -> listOfNotNull(payload.string("provider_name"), payload.string("model")).joinToString(" · ")
+        account != null -> "${agentName(agent)} as $account"
+        else -> agentName(agent)
+    }
+    val after = if (payload.string("reason") == "usage_limit") " after the usage limit" else ""
+
+    return "Continued on $target$after"
 }
 
 internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

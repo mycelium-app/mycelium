@@ -119,6 +119,8 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
     else -> emptyList()
 }
 
+data class ContinueControls(val choices: List<Choice>, val onPick: (String) -> Unit)
+
 @Composable
 fun Composer(
     conversation: Conversation,
@@ -139,6 +141,7 @@ fun Composer(
     modifier: Modifier = Modifier,
     accounts: List<Choice> = emptyList(),
     accountLocked: Boolean = false,
+    continueOn: ContinueControls? = null,
     onSetAccount: (String) -> Unit = {},
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
     annotations: List<Annotation> = emptyList(),
@@ -333,7 +336,9 @@ fun Composer(
     }
 
     val pickers: @Composable () -> Unit = {
-        if (accounts.isNotEmpty() && accountLocked) {
+        if (accountLocked && continueOn != null && continueOn.choices.isNotEmpty()) {
+            OptionMenu("Continue on…", continueOn.choices, conversation.account ?: "Default account", continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
+        } else if (accounts.isNotEmpty() && accountLocked) {
             Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
         } else if (accounts.isNotEmpty()) {
             OptionMenu("Account", accounts, conversation.account ?: DefaultAccountId.takeIf { id -> accounts.any { it.id == id } }, onSetAccount, title = accountMenuTitle(conversation.agent), icon = MyIcon.Person)
@@ -353,6 +358,10 @@ fun Composer(
 
         for (setting in settings) {
             OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
+        }
+
+        if (modelPicker != null && continueOn != null && continueOn.choices.isNotEmpty()) {
+            OptionMenu("Continue on…", continueOn.choices, null, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
         }
     }
 

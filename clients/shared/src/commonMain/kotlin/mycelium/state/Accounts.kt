@@ -1,10 +1,15 @@
 package mycelium.state
 
+import mycelium.api.Conversation
+import mycelium.api.Event
+import mycelium.api.EventKinds
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
+import mycelium.api.ModelProvider
 import mycelium.api.NodeSummary
 import mycelium.api.ResetCredits
 import mycelium.api.UsageWindow
+import kotlinx.serialization.json.JsonObject
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Clock
@@ -109,6 +114,42 @@ fun accountChoices(logins: List<LoginInfo>, elsewhere: List<String>, nodeName: S
             LoginState.Unknown -> "Unknown"
         }, usedPercent = left?.let { 100 - it }.takeIf { login.state == LoginState.SignedIn })
     } + elsewhere.map { Choice(SignInPrefix + it, it, "Sign in on $nodeName") }
+
+const val ContinueAccountPrefix = "account:"
+
+const val ContinueAgentPrefix = "agent:"
+
+const val ContinueChatPrefix = "chat:"
+
+private const val LowUsageLeft = 10
+
+private fun lowUsageHint(login: LoginInfo): String? = login.usageLeft?.takeIf { it < LowUsageLeft }?.let { "$it% left" }
+
+fun continueChoices(conversation: Conversation, node: NodeSummary?, providers: List<ModelProvider>, events: List<Event>): List<Choice> {
+    if (conversation.agent == "chat") {
+        val from = events.lastOrNull { event ->
+            val origin = ((event.payload as? JsonObject)?.get("from") as? JsonObject)?.string("agent")
+
+            event.kind == EventKinds.Continued && (origin == "claude" || origin == "codex")
+        }?.let { (it.payload as? JsonObject)?.get("from") as? JsonObject } ?: return emptyList()
+        val agent = from.string("agent").orEmpty()
+        val account = from.string("account")
+
+        return listOf(Choice("$ContinueAgentPrefix$agent:${account ?: DefaultAccountId}", "${agentName(agent)} · ${account ?: "Default account"}"))
+    }
+
+    val current = conversation.account ?: DefaultAccountId
+    val signedIn = node?.logins.orEmpty().filter { it.state == LoginState.SignedIn }
+    val sameHarness = signedIn.filter { it.agent == conversation.agent && accountChoiceId(it) != current }.map { login ->
+        Choice("$ContinueAccountPrefix${accountChoiceId(login)}", "${agentName(login.agent)} · ${login.account ?: "Default account"}", lowUsageHint(login))
+    }
+    val otherHarness = signedIn.filter { login -> login.agent != conversation.agent && node?.agents.orEmpty().any { it.agent == login.agent && it.available } }.map { login ->
+        Choice("$ContinueAgentPrefix${login.agent}:${accountChoiceId(login)}", "${agentName(login.agent)} · ${login.account ?: "Default account"}", lowUsageHint(login))
+    }
+    val models = providers.mapNotNull { provider -> provider.defaultModel?.let { Choice("$ContinueChatPrefix${provider.id}:$it", "${provider.name} · $it") } }
+
+    return sameHarness + otherHarness + models
+}
 
 fun windowName(name: String): String = when (name) {
     "five_hour" -> "5-hour window"
