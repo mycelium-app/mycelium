@@ -25,6 +25,7 @@ import mycelium.api.ArtifactAccessRequest
 import mycelium.api.PatchArtifactRequest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
+import mycelium.api.CreateGroupConnectionRequest
 import mycelium.api.CreateProjectRequest
 import mycelium.api.DeclineInstructionProposalRequest
 import mycelium.api.InstructionProposal
@@ -463,6 +464,23 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     suspend fun revokeConversationConnection(id: String) {
         api.revokeConversationConnection(id)
         mutableState.update { it.copy(conversationConnections = it.conversationConnections - id) }
+    }
+
+    suspend fun refreshGroupConnections() {
+        val connections = api.groupConnections()
+
+        mutableState.update { it.copy(groupConnections = connections.associateBy { connection -> connection.id }) }
+    }
+
+    suspend fun connectGroups(request: CreateGroupConnectionRequest) {
+        val connection = api.connectGroups(request)
+
+        mutableState.update { it.copy(groupConnections = it.groupConnections + (connection.id to connection)) }
+    }
+
+    suspend fun revokeGroupConnection(id: String) {
+        api.revokeGroupConnection(id)
+        mutableState.update { it.copy(groupConnections = it.groupConnections - id) }
     }
 
     suspend fun approveAndConnectMessageProposal(proposal: MessageProposal) {

@@ -57,6 +57,7 @@ data class AppState(
     val scheduleRuns: List<ScheduleRun> = emptyList(),
     val instructionProposals: Map<String, InstructionProposal> = emptyMap(),
     val conversationConnections: Map<String, mycelium.api.ConversationConnection> = emptyMap(),
+    val groupConnections: Map<String, mycelium.api.GroupConnection> = emptyMap(),
     val messageProposals: Map<String, MessageProposal> = emptyMap(),
     val apiAccessRequests: Map<String, ApiAccessRequest> = emptyMap(),
     val sshAccessRequests: Map<String, SshAccessRequest> = emptyMap(),
@@ -167,6 +168,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.InstructionProposalChanged -> state.copy(instructionProposals = state.instructionProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.ConversationConnectionChanged -> state.copy(conversationConnections = if (message.connection.revokedAt == null) state.conversationConnections + (message.connection.id to message.connection) else state.conversationConnections - message.connection.id)
+    is StreamMessage.GroupConnectionChanged -> state.copy(groupConnections = if (message.connection.revokedAt == null) state.groupConnections + (message.connection.id to message.connection) else state.groupConnections - message.connection.id)
     is StreamMessage.MessageProposalChanged -> state.copy(messageProposals = state.messageProposals + (message.proposal.id to message.proposal))
 
     is StreamMessage.ApiAccessRequestChanged -> state.copy(apiAccessRequests = state.apiAccessRequests + (message.request.id to message.request))

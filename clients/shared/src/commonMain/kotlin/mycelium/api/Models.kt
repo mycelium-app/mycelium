@@ -368,6 +368,8 @@ data class InstructionProposal(
     @SerialName("out_of_date") val outOfDate: Boolean = false,
     @SerialName("created_at") val createdAt: String,
     @SerialName("decided_at") val decidedAt: String? = null,
+    @SerialName("source_group") val sourceGroup: String? = null,
+    @SerialName("target_group") val targetGroup: String? = null,
 ) {
     val waiting: Boolean get() = state == "proposed"
 }
@@ -390,6 +392,23 @@ data class ConversationConnection(
 data class CreateConversationConnectionRequest(
     @SerialName("source_id") val sourceId: String,
     @SerialName("target_id") val targetId: String,
+)
+
+@Serializable
+data class GroupConnection(
+    val id: String,
+    @SerialName("source_group_id") val sourceGroupId: String,
+    @SerialName("target_group_id") val targetGroupId: String,
+    @SerialName("source_name") val sourceName: String,
+    @SerialName("target_name") val targetName: String,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("revoked_at") val revokedAt: String? = null,
+)
+
+@Serializable
+data class CreateGroupConnectionRequest(
+    @SerialName("source_group_id") val sourceGroupId: String,
+    @SerialName("target_group_id") val targetGroupId: String,
 )
 
 @Serializable
@@ -1356,6 +1375,8 @@ sealed interface StreamMessage {
 
     data class ConversationConnectionChanged(val connection: ConversationConnection) : StreamMessage
 
+    data class GroupConnectionChanged(val connection: GroupConnection) : StreamMessage
+
     data class ApiAccessRequestChanged(val request: ApiAccessRequest) : StreamMessage
 
     data class SshAccessRequestChanged(val request: SshAccessRequest) : StreamMessage
@@ -1423,6 +1444,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "artifact_comment" -> StreamMessage.ArtifactCommentAdded(element.requireString("artifact_id"))
         "instruction_proposal" -> StreamMessage.InstructionProposalChanged(MyceliumJson.decodeFromJsonElement(InstructionProposal.serializer(), element))
         "conversation_connection" -> StreamMessage.ConversationConnectionChanged(MyceliumJson.decodeFromJsonElement(ConversationConnection.serializer(), element))
+        "group_connection" -> StreamMessage.GroupConnectionChanged(MyceliumJson.decodeFromJsonElement(GroupConnection.serializer(), element))
         "message_proposal" -> StreamMessage.MessageProposalChanged(MyceliumJson.decodeFromJsonElement(MessageProposal.serializer(), element))
         "api_access_request" -> StreamMessage.ApiAccessRequestChanged(MyceliumJson.decodeFromJsonElement(ApiAccessRequest.serializer(), element))
         "ssh_access_request" -> StreamMessage.SshAccessRequestChanged(MyceliumJson.decodeFromJsonElement(SshAccessRequest.serializer(), element))

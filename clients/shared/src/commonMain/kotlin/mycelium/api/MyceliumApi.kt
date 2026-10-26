@@ -423,6 +423,14 @@ class MyceliumApi(
     suspend fun revokeConversationConnection(id: String): ConversationConnection =
         call("/conversation-connections/$id") { client.delete(it) { authorise() } }.body()
 
+    suspend fun groupConnections(): List<GroupConnection> = call("/group-connections") { client.get(it) { authorise() } }.body()
+
+    suspend fun connectGroups(request: CreateGroupConnectionRequest): GroupConnection =
+        call("/group-connections") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun revokeGroupConnection(id: String): GroupConnection =
+        call("/group-connections/$id") { client.delete(it) { authorise() } }.body()
+
     suspend fun approveAndConnectMessageProposal(id: String): MessageProposal =
         call("/message-proposals/$id/connect") { client.post(it) { authorise() } }.body()
 
