@@ -1129,6 +1129,16 @@ async fn a_call_with_an_expired_token_is_refused_and_asks_to_re_authenticate() {
 }
 
 #[tokio::test]
+async fn replacing_the_token_after_it_expired_reconnects_the_integration() {
+    let rig = rig(vec![]).await;
+    sqlx::query("update chat_tool_servers set token_expires_at = now() - interval '1 day'").execute(&rig.server.pool).await.unwrap();
+    let later = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+    let (status, replaced) = rig.patch_lab(json!({"bearer_token": "fresh-secret-0123456789wxyz", "token_expires_at": later})).await;
+
+    assert_eq!((status, replaced["status"].clone(), replaced["token_hint"].clone()), (200, json!("connected"), json!("••••wxyz")));
+}
+
+#[tokio::test]
 async fn a_chat_zulip_call_is_held_for_review_after_approval() {
     let rig = rig(vec![Reply::Call("mcp__zulip__get_messages", json!({"channel": "general", "topic": "lunch"})), Reply::Say("They suggested noon.")]).await;
     let (router, zulip) = fake_zulip();

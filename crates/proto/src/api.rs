@@ -738,7 +738,7 @@ impl std::fmt::Debug for CreateChatToolServerRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PatchChatToolServerRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -752,6 +752,14 @@ pub struct PatchChatToolServerRequest {
     pub clear_token_expiry: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<IntegrationPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
+}
+
+impl std::fmt::Debug for PatchChatToolServerRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PatchChatToolServerRequest").field("enabled", &self.enabled).field("name", &self.name).field("bearer_token", &self.bearer_token.as_ref().map(|_| "<hidden>")).finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

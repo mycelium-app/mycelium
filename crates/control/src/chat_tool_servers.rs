@@ -361,7 +361,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
         "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow), name = coalesce($5, name),
-           token_expires_at = case when $6 then null else coalesce($7, token_expires_at) end, policy = coalesce($8, policy) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
+           token_expires_at = case when $6 then null else coalesce($7, token_expires_at) end, policy = coalesce($8, policy), bearer_token = coalesce($9, bearer_token) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
     )))
     .bind(id)
     .bind(user.id)
@@ -371,6 +371,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     .bind(request.clear_token_expiry)
     .bind(request.token_expires_at)
     .bind(request.policy.map(sqlx::types::Json))
+    .bind(request.bearer_token.as_deref().map(str::trim).filter(|token| !token.is_empty()))
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("That tool server"))?;
