@@ -39,6 +39,8 @@ private const val OutlineType = "Outline"
 private const val ZulipType = "Zulip"
 private const val EmailType = "Email"
 private const val StoatType = "Stoat"
+
+private const val StoatAddress = "https://stoat.chat/api"
 private const val Tls = "TLS"
 private const val StartTls = "STARTTLS"
 private const val UserSession = "User session"
@@ -148,7 +150,7 @@ fun ChatToolsSettings(store: Store) {
                     OutlineType -> CreateChatToolServerRequest(name.trim().ifEmpty { OutlineType }, url.trim(), token.trim().ifEmpty { null }, kind = "outline")
                     ZulipType -> CreateChatToolServerRequest(name.trim().ifEmpty { ZulipType }, url.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = account.trim().ifEmpty { null })
                     EmailType -> CreateChatToolServerRequest(name.trim().ifEmpty { EmailType }, "", token.trim().ifEmpty { null }, kind = "email", account = account.trim().ifEmpty { null }, settings = emailSettings() ?: return@launch)
-                    StoatType -> CreateChatToolServerRequest(name.trim().ifEmpty { StoatType }, url.trim(), token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
+                    StoatType -> CreateChatToolServerRequest(name.trim().ifEmpty { StoatType }, url.trim().ifEmpty { StoatAddress }, token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
                     else -> CreateChatToolServerRequest(name.trim(), url.trim(), token.trim().ifEmpty { null })
                 }
                 val added = store.api.createChatToolServer(request)
@@ -242,7 +244,7 @@ fun ChatToolsSettings(store: Store) {
                     } else if (kind == StoatType) {
                         Label("Chats and agents can read and search Stoat messages and, with your approval, send them. Use a bot token for a bot, or your session token to act as yourself.", style = Tokens.Type.Meta, color = colors.textMuted)
                         TextInput(name, { name = it }, label = "Name", placeholder = "Stoat")
-                        TextInput(url, { url = it }, label = "Stoat API address", placeholder = "https://api.stoat.chat", mono = true)
+                        TextInput(url, { url = it }, label = "Stoat API address", placeholder = StoatAddress, mono = true)
                         Segmented(listOf(UserSession, Bot), tokenType, { tokenType = it }, "Stoat token type")
                         TextInput(token, { token = it }, label = "Stoat token", mono = true, masked = true, onSubmit = ::add)
                     } else {

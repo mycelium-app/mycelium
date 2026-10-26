@@ -36,6 +36,7 @@ import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val LabJson = """{"id":"s1","name":"Lab","url":"https://lab.test/mcp","token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"get_weather","description":"Get the weather"},{"name":"list_files","description":"List files"}],"created_at":"2026-10-22T10:00:00Z"}"""
 
@@ -384,5 +385,20 @@ class ChatToolsSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Built-in").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"name":"Stoat","url":"https://api.stoat.chat","bearer_token":"stoat-secret","kind":"stoat","settings":{"token_kind":"bot"}}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("stoat-secret").assertCountEquals(0)
+    }
+
+    @Test
+    fun stoatUsesItsOwnAddressWhenNoneIsGiven() {
+        postAnswer = HttpStatusCode.Created to StoatJson
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { ChatToolsSettings(store) } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Stoat").performClick()
+        rule.onNodeWithContentDescription("Stoat token").performTextInput("stoat-secret")
+        rule.onNodeWithText("Connect integration").performClick()
+
+        rule.waitUntil(5_000) { bodies.any { it.contains("stoat-secret") } }
+        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"url\":\"https://stoat.chat/api\""), bodies.last())
     }
 }
