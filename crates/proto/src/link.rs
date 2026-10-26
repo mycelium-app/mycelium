@@ -290,6 +290,8 @@ pub enum GitCommand {
         credentials: Option<GitCredentials>,
     },
     Register,
+    Head,
+    Directories,
     AddWorktree {
         branch: String,
     },

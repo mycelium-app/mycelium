@@ -10,6 +10,7 @@ use uuid::Uuid;
 const MOST_DIFF_BYTES: usize = 200 * 1024;
 const MOST_MOVE_BYTES: usize = 8 * 1024 * 1024;
 const MOST_READ_FILE_BYTES: u64 = 20 * 1024 * 1024;
+const MOST_LISTED_DIRECTORIES: usize = 500;
 const GIT_TOWN: &str = "git-town";
 const MOST_INFERRED_BRANCHES: usize = 50;
 
@@ -23,6 +24,7 @@ pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value, Stri
             clone(&within(root, cwd)?, &url, credentials.as_ref())
         }
         GitCommand::Register => register(&within(root, cwd)?),
+        GitCommand::Directories => directories(root, cwd),
         GitCommand::AddWorktree { branch } => add_worktree(&within(root, cwd)?, &branch),
         other => run(Path::new(cwd), other),
     }
@@ -60,7 +62,8 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
         GitCommand::ReadFile { path } => read_file(cwd, &path),
         GitCommand::FindLogo => Ok(crate::logo::find(cwd)),
-        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
+        GitCommand::Head => head(cwd),
+        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::Directories | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
     }
 }
 
@@ -104,6 +107,46 @@ fn within(root: &Path, requested: &str) -> Result<PathBuf, String> {
     }
 
     Ok(joined)
+}
+
+fn directories(root: &Path, requested: &str) -> Result<Value, String> {
+    let canonical_root = root.canonicalize().map_err(|cause| format!("The projects folder {} cannot be read: {cause}.", root.display()))?;
+    let wanted = if requested.is_empty() { canonical_root.clone() } else { canonical_root.join(requested) };
+    let path = wanted.canonicalize().map_err(|_| format!("{} does not exist on this node. Choose a folder inside {}.", wanted.display(), canonical_root.display()))?;
+
+    if !path.starts_with(&canonical_root) {
+        return Err(format!("{} is outside {}. Choose a folder inside it.", path.display(), canonical_root.display()));
+    }
+
+    let entries = std::fs::read_dir(&path).map_err(|cause| format!("{} cannot be read: {cause}.", path.display()))?;
+    let mut folders = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let listed = !name.starts_with('.') && !crate::files::SKIPPED_DIRECTORIES.contains(&name.as_str());
+
+            listed.then(|| (name, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    folders.sort_by_key(|(name, _)| name.to_lowercase());
+
+    let truncated = folders.len() > MOST_LISTED_DIRECTORIES;
+    folders.truncate(MOST_LISTED_DIRECTORIES);
+
+    let directories = folders
+        .into_iter()
+        .map(|(name, folder)| json!({"name": name, "path": folder.to_string_lossy(), "repository": folder.join(".git").exists()}))
+        .collect::<Vec<_>>();
+    let parent = if path == canonical_root { None } else { path.parent().map(|parent| parent.to_string_lossy().into_owned()) };
+
+    Ok(json!({"root": canonical_root.to_string_lossy(), "path": path.to_string_lossy(), "parent": parent, "directories": directories, "truncated": truncated}))
+}
+
+fn head(cwd: &Path) -> Result<Value, String> {
+    let branch = git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"], &[]).ok().map(|output| String::from_utf8_lossy(&output).trim().to_string()).filter(|name| !name.is_empty() && name != "HEAD");
+
+    Ok(json!({"branch": branch}))
 }
 
 fn clone(target: &Path, url: &str, credentials: Option<&GitCredentials>) -> Result<Value, String> {
@@ -1001,6 +1044,68 @@ mod tests {
 
     fn file<'a>(status: &'a Value, path: &str) -> &'a Value {
         status["files"].as_array().unwrap().iter().find(|file| file["path"] == path).unwrap_or_else(|| panic!("{path} missing from {status}"))
+    }
+
+    #[test]
+    fn directories_lists_the_folders_under_the_projects_root_and_marks_git_checkouts() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("Zed")).unwrap();
+        std::fs::create_dir_all(root.path().join("alpha")).unwrap();
+        init(&root.path().join("alpha"));
+        std::fs::write(root.path().join("file.txt"), "x").unwrap();
+
+        let listing = run_in(root.path(), "", GitCommand::Directories).unwrap();
+        let names: Vec<_> = listing["directories"].as_array().unwrap().iter().map(|entry| (entry["name"].as_str().unwrap(), entry["repository"].as_bool().unwrap())).collect();
+
+        assert_eq!(names, vec![("alpha", true), ("Zed", false)]);
+        assert_eq!(listing["truncated"], false);
+    }
+
+    #[test]
+    fn directories_leaves_out_hidden_and_build_folders() {
+        let root = tempfile::tempdir().unwrap();
+
+        for name in [".cache", "node_modules", "target", "app"] {
+            std::fs::create_dir_all(root.path().join(name)).unwrap();
+        }
+
+        let listing = run_in(root.path(), "", GitCommand::Directories).unwrap();
+        let names: Vec<_> = listing["directories"].as_array().unwrap().iter().map(|entry| entry["name"].as_str().unwrap()).collect();
+
+        assert_eq!(names, vec!["app"]);
+    }
+
+    #[test]
+    fn directories_refuses_a_folder_outside_the_projects_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        let error = run_in(root.path(), &outside.path().to_string_lossy(), GitCommand::Directories).unwrap_err();
+
+        assert!(error.contains("Choose a folder inside it."), "{error}");
+    }
+
+    #[test]
+    fn directories_at_the_root_has_no_parent_and_a_child_points_back_to_it() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("app")).unwrap();
+
+        let at_root = run_in(root.path(), "", GitCommand::Directories).unwrap();
+        let inside = run_in(root.path(), "app", GitCommand::Directories).unwrap();
+
+        assert!(at_root["parent"].is_null());
+        assert_eq!(inside["parent"], at_root["path"]);
+    }
+
+    #[test]
+    fn head_reports_the_checked_out_branch_and_null_outside_a_repository() {
+        let dir = repository();
+        write(&dir, "a.txt", "a\n");
+        commit_all(&dir, "first");
+        let plain = tempfile::tempdir().unwrap();
+
+        assert_eq!(run(dir.path(), GitCommand::Head).unwrap()["branch"], "main");
+        assert!(run(plain.path(), GitCommand::Head).unwrap()["branch"].is_null());
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::process::Command;
 
 const MOST_MATCHES: usize = 50;
 const MOST_WALKED: usize = 20_000;
-const SKIPPED_DIRECTORIES: &[&str] = &[".git", "node_modules", "target", "build", ".gradle", "dist", ".venv"];
+pub(crate) const SKIPPED_DIRECTORIES: &[&str] = &[".git", "node_modules", "target", "build", ".gradle", "dist", ".venv"];
 
 pub fn matching_files(cwd: &Path, query: &str) -> Vec<String> {
     let mut paths = tracked_files(cwd).unwrap_or_else(|| walked_files(cwd));
