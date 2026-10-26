@@ -2,6 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::prompts;
 use crate::state::AppState;
+use crate::store::CONVERSATION_GROUP_SQL;
 use axum::Json;
 use axum::extract::{Path, State};
 use mycelium_proto::api::{MessageProposal, MessageProposalState, PromptRequest};
@@ -10,8 +11,12 @@ use uuid::Uuid;
 
 const LISTED: i64 = 100;
 
-const PROPOSAL_COLUMNS: &str = "p.id, p.conversation_id, p.target_id, t.title as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
-    s.title as source_title, t.archived_at is not null as target_archived";
+fn proposal_columns() -> String {
+    format!("p.id, p.conversation_id, p.target_id, t.title as target_title, coalesce(n.name, '') as target_node, pr.name as target_project, p.message, p.reason, p.state, p.created_at, p.decided_at,
+    s.title as source_title, t.archived_at is not null as target_archived,
+    (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = p.conversation_id) as source_group,
+    (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = p.target_id) as target_group")
+}
 
 const PROPOSAL_JOINS: &str = "message_proposals p join conversations t on t.id = p.target_id left join nodes n on n.id = t.node_id left join projects pr on pr.id = t.project_id left join conversations s on s.id = p.conversation_id";
 
@@ -30,6 +35,8 @@ struct ProposalRow {
     decided_at: Option<chrono::DateTime<chrono::Utc>>,
     source_title: Option<String>,
     target_archived: bool,
+    source_group: Option<String>,
+    target_group: Option<String>,
 }
 
 impl ProposalRow {
@@ -52,6 +59,8 @@ impl ProposalRow {
             state,
             created_at: self.created_at,
             decided_at: self.decided_at,
+            source_group: self.source_group,
+            target_group: self.target_group,
         }
     }
 }
@@ -61,7 +70,7 @@ pub fn label(id: Uuid, title: &str) -> String {
 }
 
 async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ProposalRow> {
-    let row = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {PROPOSAL_COLUMNS} from {PROPOSAL_JOINS} where p.id = $1 and p.owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
+    let row = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {} from {PROPOSAL_JOINS} where p.id = $1 and p.owner = $2", proposal_columns()))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That proposal"))
 }
@@ -100,7 +109,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
 
     let proposal = publish(state, owner, find_owned(state, id, owner).await?);
 
-    if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? {
+    if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? || crate::group_connections::connected(state, owner, conversation_id, target_id).await? {
         let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
         let Json(sent) = approve(State(state.clone()), user, Path(id)).await?;
 
@@ -111,7 +120,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<MessageProposal>>> {
-    let rows = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {PROPOSAL_COLUMNS} from {PROPOSAL_JOINS} where p.owner = $1 order by (p.state = 'proposed') desc, p.created_at desc limit {LISTED}")))
+    let rows = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {} from {PROPOSAL_JOINS} where p.owner = $1 order by (p.state = 'proposed') desc, p.created_at desc limit {LISTED}", proposal_columns())))
         .bind(user.id)
         .fetch_all(&state.pool)
         .await?;
@@ -176,6 +185,30 @@ pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, 
 
     let source = found.conversation_id.ok_or_else(|| ApiError::conflict("source_removed", "The source conversation has been removed."))?;
     crate::conversation_connections::connect(&state, &user, source, found.target_id).await?;
+
+    approve(State(state), user, Path(id)).await
+}
+
+pub async fn approve_and_connect_groups(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
+    user.require_full_access()?;
+    let found = find_owned(&state, id, user.id).await?;
+
+    if found.state != "proposed" {
+        return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
+    }
+
+    let source = found.conversation_id.ok_or_else(|| ApiError::conflict("source_removed", "The source conversation has been removed."))?;
+    let groups = (crate::group_connections::group_of(&state, source).await?, crate::group_connections::group_of(&state, found.target_id).await?);
+
+    let (Some(source_group), Some(target_group)) = groups else {
+        return Err(ApiError::conflict("connection_no_group", "Both conversations need a group to connect their groups."));
+    };
+
+    if source_group == target_group {
+        return Err(ApiError::conflict("connection_no_group", "Both conversations need a group to connect their groups."));
+    }
+
+    crate::group_connections::connect(&state, &user, source_group, target_group).await?;
 
     approve(State(state), user, Path(id)).await
 }

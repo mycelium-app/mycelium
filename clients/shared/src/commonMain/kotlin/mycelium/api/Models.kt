@@ -687,6 +687,7 @@ data class Experiments(
     @SerialName("continue_elsewhere") val continueElsewhere: Boolean = false,
     val assistants: Boolean = false,
     @SerialName("memory_banks") val memoryBanks: Boolean = false,
+    @SerialName("chat_across_groups") val chatAcrossGroups: Boolean = false,
 )
 
 @Serializable

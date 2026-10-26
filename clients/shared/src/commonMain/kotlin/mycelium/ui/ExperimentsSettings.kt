@@ -28,6 +28,7 @@ fun ExperimentsSettings(store: Store) {
         Triple("Continue elsewhere", held.continueElsewhere) { value -> store.updateExperiments { it.copy(continueElsewhere = value) } },
         Triple("Assistants", held.assistants) { value -> store.updateExperiments { it.copy(assistants = value) } },
         Triple("Memory banks", held.memoryBanks) { value -> store.updateExperiments { it.copy(memoryBanks = value) } },
+        Triple("Chat across groups", held.chatAcrossGroups) { value -> store.updateExperiments { it.copy(chatAcrossGroups = value) } },
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

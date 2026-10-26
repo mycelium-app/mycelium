@@ -857,6 +857,23 @@ pub struct CreateConversationConnectionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupConnection {
+    pub id: Uuid,
+    pub source_group_id: Uuid,
+    pub target_group_id: Uuid,
+    pub source_name: String,
+    pub target_name: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateGroupConnectionRequest {
+    pub source_group_id: Uuid,
+    pub target_group_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MessageProposal {
     pub id: Uuid,
     pub conversation_id: Option<Uuid>,
@@ -869,6 +886,10 @@ pub struct MessageProposal {
     pub state: MessageProposalState,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub source_group: Option<String>,
+    #[serde(default)]
+    pub target_group: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

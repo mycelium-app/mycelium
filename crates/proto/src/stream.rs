@@ -38,6 +38,7 @@ pub enum StreamMessage {
     InstructionProposal(InstructionProposal),
     MessageProposal(MessageProposal),
     ConversationConnection(crate::api::ConversationConnection),
+    GroupConnection(crate::api::GroupConnection),
     ApiAccessRequest(ApiAccessRequest),
     SshAccessRequest(SshAccessRequest),
     Memory(Memory),

@@ -40,6 +40,7 @@ mod mcp_oauth;
 mod memories;
 mod message_proposals;
 mod conversation_connections;
+mod group_connections;
 mod model_providers;
 mod provider_usage;
 mod moves;
@@ -274,7 +275,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/instruction-proposals/{id}/decline", post(instruction_proposals::decline))
         .route("/api/v1/conversation-connections", get(conversation_connections::list).post(conversation_connections::create))
         .route("/api/v1/conversation-connections/{id}", delete(conversation_connections::revoke))
+        .route("/api/v1/group-connections", get(group_connections::list).post(group_connections::create))
+        .route("/api/v1/group-connections/{id}", delete(group_connections::revoke))
         .route("/api/v1/message-proposals/{id}/connect", post(message_proposals::approve_and_connect))
+        .route("/api/v1/message-proposals/{id}/connect-groups", post(message_proposals::approve_and_connect_groups))
         .route("/api/v1/message-proposals", get(message_proposals::list))
         .route("/api/v1/message-proposals/{id}/approve", post(message_proposals::approve))
         .route("/api/v1/message-proposals/{id}/decline", post(message_proposals::decline))
