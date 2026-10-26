@@ -112,14 +112,6 @@ fun Label(
 }
 
 @Composable
-fun TableCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().border(Tokens.Size.Hairline, MyTheme.colors.border, BlockShape).clip(BlockShape), content = content)
-}
-
-@Composable
-fun Modifier.tableHeader(): Modifier = background(MyTheme.colors.bgPanel).heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S3)
-
-@Composable
 fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(Tokens.Size.Hairline).background(MyTheme.colors.border))
 }
