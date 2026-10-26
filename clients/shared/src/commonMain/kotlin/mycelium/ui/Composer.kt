@@ -740,6 +740,7 @@ fun OptionMenu(
     title: String = name,
     icon: MyIcon? = null,
     size: ButtonSize = ButtonSize.Md,
+    fill: Boolean = false,
 ) {
     val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: current ?: name
     var open by remember { mutableStateOf(false) }
@@ -747,8 +748,8 @@ fun OptionMenu(
     val searchable = choices.size > SearchableChoices
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
-    Box {
-        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name)
+    Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
+        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name, fill = fill)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {

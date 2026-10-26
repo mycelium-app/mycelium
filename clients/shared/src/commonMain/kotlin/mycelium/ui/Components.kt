@@ -222,6 +222,7 @@ fun MyButton(
     selected: Boolean = false,
     trailingIcon: MyIcon? = null,
     tooltip: String? = if (text == null) description else null,
+    fill: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -248,10 +249,14 @@ fun MyButton(
     val textStyle = (if (size == ButtonSize.Sm) Tokens.Type.Meta else Tokens.Type.Ui).let {
         if (variant == ButtonVariant.Primary) it.copy(fontWeight = Tokens.Type.UiStrong.fontWeight) else it
     }
-    val sized = if (text == null) modifier.size(height) else modifier.height(height)
+    val sized = when {
+        text == null -> modifier.size(height)
+        fill -> modifier.fillMaxWidth().height(height)
+        else -> modifier.height(height)
+    }
     val outlined = if (variant == ButtonVariant.Outline) sized.border(Tokens.Size.Hairline, colors.borderControl, ControlShape) else sized
 
-    Box {
+    Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
         Row(
             outlined
                 .pressable(
@@ -263,7 +268,7 @@ fun MyButton(
                     source = source,
                 )
                 .padding(horizontal = if (text == null) 0.dp else padding),
-            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(gap, if (fill) Alignment.Start else Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -271,7 +276,7 @@ fun MyButton(
             }
 
             if (text != null) {
-                Label(text, style = textStyle, color = contentColor, maxLines = 1)
+                Label(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle, color = contentColor, maxLines = 1)
             }
 
             if (trailingIcon != null) {
