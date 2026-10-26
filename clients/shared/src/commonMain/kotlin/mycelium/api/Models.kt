@@ -131,6 +131,20 @@ data class LoginInfo(
     @SerialName("usage_left") val usageLeft: Int? = null,
     val windows: List<UsageWindow> = emptyList(),
     @SerialName("usage_read_at") val usageReadAt: String? = null,
+    @SerialName("reset_credits") val resetCredits: ResetCredits? = null,
+)
+
+@Serializable
+data class ResetCredits(
+    @SerialName("available_count") val availableCount: Int,
+    val credits: List<ResetCredit>? = null,
+)
+
+@Serializable
+data class ResetCredit(
+    val id: String,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    val title: String? = null,
 )
 
 @Serializable

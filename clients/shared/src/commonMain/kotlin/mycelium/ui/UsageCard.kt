@@ -34,6 +34,7 @@ import mycelium.api.ModelProviderUsage
 import mycelium.api.OpenRouterSpend
 import mycelium.state.AgentAccount
 import mycelium.state.ago
+import mycelium.state.bankedResetsSummary
 import mycelium.state.compactWindowUsage
 import mycelium.state.windowName
 
@@ -147,6 +148,12 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
 
                 Meter(usage.percent, description, attention = usage.attention, markerPercent = pace)
             }
+        }
+
+        val banked = account.resetCredits?.takeIf { it.availableCount > 0 }
+
+        if (banked != null) {
+            Label(bankedResetsSummary(banked, localDateTime), style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
         }
     }
 }

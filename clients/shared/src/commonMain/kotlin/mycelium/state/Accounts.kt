@@ -3,6 +3,7 @@ package mycelium.state
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.ResetCredits
 import mycelium.api.UsageWindow
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -18,7 +19,7 @@ const val UnnamedAccount = "Account name not reported"
 
 data class AccountOnNode(val nodeName: String, val state: LoginState)
 
-data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null)
+data class AgentAccount(val agent: String, val label: String, val method: String, val nodes: List<AccountOnNode>, val windows: List<UsageWindow> = emptyList(), val usageReadAt: String? = null, val resetCredits: ResetCredits? = null)
 
 fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     val grouped = linkedMapOf<Triple<String, String?, String?>, MutableList<Pair<NodeSummary, LoginInfo>>>()
@@ -40,7 +41,7 @@ fun agentAccounts(nodes: Collection<NodeSummary>): List<AgentAccount> {
     return grouped.map { (key, entries) ->
         val freshest = entries.map { it.second }.filter { it.windows.isNotEmpty() }.maxByOrNull { it.usageReadAt.orEmpty() }
 
-        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt)
+        AgentAccount(key.first, entries.first().second.account?.trim()?.ifBlank { null } ?: UnnamedAccount, entries.first().second.method, entries.map { (node, login) -> AccountOnNode(node.name, login.state) }, freshest?.windows.orEmpty(), freshest?.usageReadAt, freshest?.resetCredits)
     }.sortedWith(compareBy({ AgentOrder.indexOf(it.agent).let { index -> if (index < 0) AgentOrder.size else index } }, { it.label }))
 }
 
@@ -58,6 +59,15 @@ fun chatAccountFirst(accounts: List<AgentAccount>, agent: String?, nodeName: Str
     }
 
     return accounts.sortedBy { if (it == current) 0 else 1 }.map { it to (it == current) }
+}
+
+fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?): String {
+    val count = if (credits.availableCount == 1) "1 reset banked" else "${credits.availableCount} resets banked"
+    val next = credits.credits.orEmpty().mapNotNull { credit -> credit.expiresAt?.let { runCatching { Instant.parse(it) }.getOrNull() } }.minOrNull() ?: return count
+    val date = (localDateTime(next.toEpochMilliseconds()) ?: next.toString()).substringBefore('T')
+    val (_, month, day) = date.split('-')
+
+    return "$count, next expires ${day.toInt()} ${MonthNames[month.toInt() - 1]}"
 }
 
 fun runsOutBeforeReset(window: UsageWindow): Boolean {

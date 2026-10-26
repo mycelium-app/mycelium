@@ -277,3 +277,29 @@ async fn the_default_account_can_be_chosen_explicitly_until_the_conversation_has
     assert_eq!(status, 409);
     assert_eq!(body["error"], "account_locked");
 }
+
+#[tokio::test]
+async fn banked_resets_a_node_reports_appear_on_its_login() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let credits = mycelium_proto::conversation::ResetCredits {
+        available_count: 2,
+        credits: Some(vec![mycelium_proto::conversation::ResetCredit { id: "a".into(), expires_at: Some(chrono::Utc::now() + chrono::Duration::days(14)), title: Some("Bonus reset".into()) }]),
+    };
+
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { reset_credits: Some(credits), ..login("sam@example.com", LoginState::SignedIn) }] }).await;
+    let reported = first_login(&server, |login| login["reset_credits"].is_object()).await;
+
+    assert_eq!(reported["reset_credits"]["available_count"], json!(2));
+    assert_eq!(reported["reset_credits"]["credits"][0]["title"], json!("Bonus reset"));
+    assert!(reported["reset_credits"]["credits"][0]["expires_at"].is_string());
+
+    link.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    let user = server.user.clone();
+    common::eventually("the spent resets to clear", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes[0]["logins"][0].get("reset_credits").is_none().then_some(())
+    })
+    .await;
+}

@@ -3,6 +3,9 @@ package mycelium
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.ResetCredit
+import mycelium.api.ResetCredits
+import mycelium.state.bankedResetsSummary
 import mycelium.api.UsageWindow
 import mycelium.state.AccountOnNode
 import mycelium.state.AgentAccount
@@ -43,6 +46,26 @@ class AccountUsageTest {
         assertEquals(listOf(AccountOnNode("laptop", LoginState.SignedIn), AccountOnNode("nas", LoginState.Expired)), accounts.single().nodes)
         assertEquals(40.0, accounts.single().windows.single().usedPercent)
         assertEquals("2026-10-23T12:00:00Z", accounts.single().usageReadAt)
+    }
+
+    @Test
+    fun theBankedResetsComeFromTheFreshestLogin() {
+        val stale = LoginInfo("codex", "sam@example.com", "token", LoginState.SignedIn, windows = listOf(UsageWindow("five_hour", 10.0)), usageReadAt = "2026-10-23T10:00:00Z", resetCredits = ResetCredits(1))
+        val fresh = LoginInfo("codex", "sam@example.com", "token", LoginState.SignedIn, windows = listOf(UsageWindow("five_hour", 20.0)), usageReadAt = "2026-10-23T12:00:00Z", resetCredits = ResetCredits(3))
+
+        val accounts = agentAccounts(listOf(node("n1", "laptop", stale), node("n2", "nas", fresh)))
+
+        assertEquals(3, accounts.single().resetCredits?.availableCount)
+    }
+
+    @Test
+    fun bankedResetsAreSummarisedWithTheNextExpiryWhenOneIsKnown() {
+        val utc: (Long) -> String? = { millis -> utc(millis) }
+        val credits = ResetCredits(2, listOf(ResetCredit("b", "2026-12-01T00:00:00Z"), ResetCredit("a", "2026-11-14T09:00:00Z"), ResetCredit("c")))
+
+        assertEquals("2 resets banked, next expires 14 Nov", bankedResetsSummary(credits, utc))
+        assertEquals("1 reset banked", bankedResetsSummary(ResetCredits(1), utc))
+        assertEquals("1 reset banked", bankedResetsSummary(ResetCredits(1, listOf(ResetCredit("a"))), utc))
     }
 
     @Test

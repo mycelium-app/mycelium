@@ -38,6 +38,8 @@ import mycelium.api.ModelProviderUsage
 import mycelium.api.OpenRouterSpend
 import mycelium.ui.UsageCard
 import mycelium.api.MyceliumApi
+import mycelium.api.ResetCredit
+import mycelium.api.ResetCredits
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
@@ -152,6 +154,25 @@ class UsageCardTest {
 
         assertEquals(updated.right, value.boundsInRoot.right.toDp(rule), 1.dp)
         assertTrue(value.config[SemanticsProperties.Text].single().text.endsWith("left"))
+    }
+
+    @Test
+    fun aCodexAccountWithBankedResetsShowsTheCountAndNextExpiry() {
+        val credits = ResetCredits(2, listOf(ResetCredit("a", "2099-11-14T09:00:00Z")))
+        val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = credits)
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("2 resets banked, next expires 14 Nov").assertIsDisplayed()
+    }
+
+    @Test
+    fun anAccountWithNoBankedResetsShowsNoBankedLine() {
+        val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(0))
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
+
+        rule.onNodeWithText("banked", substring = true).assertDoesNotExist()
     }
 
     @Test
