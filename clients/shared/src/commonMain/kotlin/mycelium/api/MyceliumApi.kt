@@ -166,6 +166,9 @@ class MyceliumApi(
         call("/nodes/$id/update") { client.post(it) { authorise() } }
     }
 
+    suspend fun directories(nodeId: String, path: String): Directories =
+        call("/nodes/$nodeId/directories") { client.get(it) { authorise(); parameter("path", path) } }.body()
+
     suspend fun watchNode(id: String): NodeResources = call("/nodes/$id/watch") { client.post(it) { authorise() } }.body()
 
     suspend fun useReset(request: UseResetRequest): UseResetResponse = call("/usage/resets") { client.post(it) { authorise(); json(request) } }.body()

@@ -3,10 +3,12 @@ use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::store::{node_summaries, publish_node};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_COLOURS, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
-use mycelium_proto::link::ControlToNode;
+use mycelium_proto::link::{ControlToNode, GitCommand};
+use serde::Deserialize;
+use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
@@ -163,6 +165,39 @@ pub async fn stop_login(State(state): State<AppState>, user: AuthUser, Path(logi
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Deserialize)]
+pub struct DirectoriesQuery {
+    #[serde(default)]
+    path: String,
+}
+
+pub async fn directories(State(state): State<AppState>, _user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<DirectoriesQuery>) -> ApiResult<Json<Value>> {
+    let version = sqlx::query_scalar::<_, String>("select version from nodes where id = $1 and revoked_at is null").bind(id).fetch_optional(&state.pool).await?;
+    let Some(version) = version else {
+        return Err(ApiError::not_found("That node"));
+    };
+
+    if !state.hub.is_online(id) {
+        return Err(node_offline());
+    }
+
+    if !node_has(&version, HEAD_AND_DIRECTORIES_SINCE) {
+        let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(id).fetch_one(&state.pool).await?;
+
+        return Err(ApiError::conflict("node_outdated", format!("Update {name} to browse its folders, or enter the path.")));
+    }
+
+    let answer = crate::git::relay(&state, id, query.path, GitCommand::Directories).await?;
+
+    Ok(Json(answer))
+}
+
+pub fn node_has(node_version: &str, since: (u64, u64, u64)) -> bool {
+    semver::Version::parse(node_version.trim_start_matches('v')).is_ok_and(|version| version >= semver::Version::new(since.0, since.1, since.2))
+}
+
+pub const HEAD_AND_DIRECTORIES_SINCE: (u64, u64, u64) = (0, 10, 0);
 
 pub fn node_offline() -> ApiError {
     ApiError::conflict("node_offline", "This node is offline. Start it, then try again.")

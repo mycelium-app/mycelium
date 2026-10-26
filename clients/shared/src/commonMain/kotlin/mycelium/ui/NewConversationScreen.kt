@@ -225,7 +225,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     }
 
                     if (project == null) {
-                        TextInput(cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError, onSubmit = ::create)
+                        FolderField(store, node, cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", error = cwdError, onSubmit = ::create)
                     }
 
                     if (project != null && worktree) {

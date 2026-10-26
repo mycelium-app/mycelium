@@ -512,6 +512,12 @@ data class CreateChatRequest(
 )
 
 @Serializable
+data class DirectoryEntry(val name: String, val path: String, val repository: Boolean = false)
+
+@Serializable
+data class Directories(val root: String, val path: String, val parent: String? = null, val directories: List<DirectoryEntry> = emptyList(), val truncated: Boolean = false)
+
+@Serializable
 data class Project(
     val id: String,
     @SerialName("node_id") val nodeId: String,

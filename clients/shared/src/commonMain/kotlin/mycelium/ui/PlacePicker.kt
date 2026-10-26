@@ -122,7 +122,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
             }
         }
 
-        TextInput(place.cwd, { place.cwd = it }, label = "Folder", placeholder = "/home/you/project", mono = true, error = cwdError)
+        FolderField(store, node, place.cwd, { place.cwd = it }, label = "Folder", placeholder = "/home/you/project", error = cwdError)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {

@@ -88,7 +88,7 @@ fun ExistingFolderDialog(store: Store, state: AppState, repository: Repository, 
                 }
             }
 
-            TextInput(folder, { folder = it }, label = "Folder on the node", placeholder = "work/${repository.name}", mono = true, onSubmit = ::submit)
+            FolderField(store, node, folder, { folder = it }, label = "Folder on the node", placeholder = "work/${repository.name}", onSubmit = ::submit)
         }
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }

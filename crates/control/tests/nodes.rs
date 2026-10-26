@@ -331,3 +331,64 @@ async fn a_process_that_is_not_stoppable_or_not_reported_is_never_sent_to_the_no
     let (status, body) = stop(&server, link.id, 7).await;
     assert_eq!((status, body["error"].as_str()), (404, Some("not_found")));
 }
+
+async fn node_at(server: &Server, version: &str) -> common::NodeLink {
+    let (id, token) = server.join("node", "laptop").await;
+    let mut link = server.connect_node(id, &token).await;
+
+    link.hello_as(version, vec![]).await;
+
+    let user = server.user.clone();
+    common::eventually("node online", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(id) && node["online"] == true).then_some(())
+    })
+    .await;
+
+    link
+}
+
+#[tokio::test]
+async fn the_folders_on_a_node_are_listed_through_the_node() {
+    let server = Server::start().await;
+    let mut link = node_at(&server, "v0.10.0").await;
+    let user = server.user.clone();
+    let id = link.id;
+    let asking = tokio::spawn(async move { user.json(user.get(&format!("/api/v1/nodes/{id}/directories?path=%2Fwork"))).await });
+
+    let (request_id, cwd, command) = loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command } => break (request_id, cwd, command),
+            _ => continue,
+        }
+    };
+    let listing = json!({"root": "/work", "path": "/work", "parent": null, "directories": [{"name": "app", "path": "/work/app", "repository": true}]});
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: listing.clone(), error: None }).await;
+
+    let (status, body) = asking.await.unwrap();
+
+    assert_eq!((status, cwd.as_str(), command), (200, "/work", mycelium_proto::link::GitCommand::Directories));
+    assert_eq!(body, listing);
+}
+
+#[tokio::test]
+async fn listing_folders_on_an_offline_node_says_it_is_offline() {
+    let server = Server::start().await;
+    let (id, _) = server.join("node", "laptop").await;
+
+    let (status, body) = server.user.json(server.user.get(&format!("/api/v1/nodes/{id}/directories"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("node_offline")));
+}
+
+#[tokio::test]
+async fn listing_folders_on_a_node_too_old_to_browse_asks_for_an_update() {
+    let server = Server::start().await;
+    let link = node_at(&server, "v0.9.1").await;
+
+    let (status, body) = server.user.json(server.user.get(&format!("/api/v1/nodes/{}/directories", link.id))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("node_outdated")));
+    assert!(body["message"].as_str().unwrap().contains("to browse its folders, or enter the path."), "{body}");
+}

@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import mycelium.DefaultEventPageSize
 import mycelium.Platform
+import mycelium.api.Directories
 import mycelium.api.Experiments
 import mycelium.api.ApiException
 import mycelium.api.Artifact
@@ -279,6 +280,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         return progress
     }
+    suspend fun directories(nodeId: String, path: String): Directories = api.directories(nodeId, path)
+
 
     suspend fun cancelMove(conversationId: String) {
         api.cancelMove(conversationId)

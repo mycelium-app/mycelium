@@ -133,6 +133,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/device/{user_code}/deny", post(device::deny))
         .route("/api/v1/nodes", get(nodes::list))
         .route("/api/v1/nodes/{id}", patch(nodes::update).delete(nodes::revoke))
+        .route("/api/v1/nodes/{id}/directories", get(nodes::directories))
         .route("/api/v1/nodes/{id}/drain", post(nodes::drain))
         .route("/api/v1/nodes/{id}/update", post(node_updates::update))
         .route("/api/v1/nodes/{id}/instructions/take-over", post(instructions::take_over))
