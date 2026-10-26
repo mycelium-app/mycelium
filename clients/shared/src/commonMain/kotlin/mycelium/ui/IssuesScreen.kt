@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import mycelium.state.ColumnAlign
 import mycelium.api.Conversation
 import mycelium.api.Issue
 import mycelium.api.Issues

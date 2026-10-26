@@ -138,7 +138,7 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
 
     DataTable(
         "Agents",
-        listOf(TableColumn("Agent", 1.4f), TableColumn("Version", 1.4f), TableColumn("Signed in")),
+        listOf(TableColumn("Agent", 1.4f), TableColumn("Version", 1.4f), TableColumn("Signed in", numeric = true)),
         installed.map { agent -> listOf(agentName(agent.agent), versionWithUpdate(agentVersion(agent.version), agent.updateAvailable), node.logins.count { it.agent == agent.agent && it.state == LoginState.SignedIn }.toString()) },
         "No agents installed",
     )
@@ -154,7 +154,7 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
 
     DataTable(
         "Agent processes",
-        listOf(TableColumn("Process", 1.4f), TableColumn("Conversation", 1.6f), TableColumn("CPU"), TableColumn("Memory")),
+        listOf(TableColumn("Process", 1.4f), TableColumn("Conversation", 1.6f), TableColumn("CPU", numeric = true), TableColumn("Memory", numeric = true)),
         sample?.processes.orEmpty().filter { it.agent }.map { listOf(it.command.ifEmpty { it.name }, state.conversationTitle(it.conversationId).orEmpty(), "${it.cpuPercent.roundToInt()}%", formatBytes(it.memoryBytes)) },
         "Agent processes appear when this node reports its resources.",
     )
@@ -215,7 +215,7 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
 
     DataTable(
         "Busiest processes",
-        listOf(TableColumn("Process", 2f), TableColumn("CPU"), TableColumn("Memory")),
+        listOf(TableColumn("Process", 2f), TableColumn("CPU", numeric = true), TableColumn("Memory", numeric = true)),
         sample.processes.mapIndexed { index, process -> listOf(processNames[index], "${process.cpuPercent.roundToInt()}%", formatBytes(process.memoryBytes)) },
         "No processes reported.",
         trailing = { index ->
@@ -269,7 +269,7 @@ private fun PortsTab(node: NodeSummary, state: AppState, platform: Platform) {
 
     DataTable(
         "Listening ports",
-        listOf(TableColumn("Port", 0.7f), TableColumn("Address"), TableColumn("Process"), TableColumn("Conversation", 1.6f)),
+        listOf(TableColumn("Port", 0.7f, numeric = true), TableColumn("Address"), TableColumn("Process"), TableColumn("Conversation", 1.6f)),
         sample.ports.map { port -> listOf(port.port.toString(), port.address, port.process.orEmpty(), state.conversationTitle(port.conversationId).orEmpty()) },
         "No process is listening on this node.",
         trailing = { index ->

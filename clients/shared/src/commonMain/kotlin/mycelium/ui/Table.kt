@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,14 +23,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlin.math.ceil
-
-enum class ColumnAlign { Start, Center, End }
+import mycelium.state.ColumnAlign
 
 enum class Overflow { Truncate, Wrap }
 
@@ -48,6 +50,8 @@ data class Col(
 
 sealed interface TableCell {
     data class Text(val text: String, val style: TextStyle = Tokens.Type.Ui, val color: Color? = null) : TableCell
+
+    class Rich(val text: AnnotatedString, val style: TextStyle) : TableCell
 
     class Slot(val measureAs: String? = null, val extra: Dp = 0.dp, val content: @Composable () -> Unit) : TableCell
 }
@@ -152,13 +156,13 @@ fun Table(
         val visible = columns.indices.filter { it !in hidden }
         val inset = with(density) { Tokens.Space.S3.roundToPx() }
         val border = with(density) { Tokens.Size.Hairline.roundToPx() }
-        val wrapCap = with(density) { Tokens.Size.TableCell.roundToPx() }
         val tnumStyle = { style: TextStyle, numeric: Boolean -> if (numeric) style.copy(fontFeatureSettings = "tnum") else style }
 
         val natural = remember(columns, rows, cell, headerCell, header, visible, fonts, codeScale, density) {
             val measure = { column: Int, source: TableCell ->
                 when (source) {
                     is TableCell.Text -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
+                    is TableCell.Rich -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
                     is TableCell.Slot -> {
                         val text = requireNotNull(source.measureAs) { "A slot in column ${columns[column].title} needs measureAs, or the column needs preferred" }
 
@@ -180,9 +184,7 @@ fun Table(
                         widest = maxOf(widest, measure(column, cell(row, column)))
                     }
 
-                    val capped = if (spec.overflow == Overflow.Wrap) minOf(widest, wrapCap) else widest
-
-                    spec.max?.let { minOf(capped, with(density) { it.roundToPx() }) } ?: capped
+                    spec.max?.let { minOf(widest, with(density) { it.roundToPx() }) } ?: widest
                 }
             }
         }
@@ -283,12 +285,24 @@ private fun CellBox(spec: Col, source: TableCell, wrapped: Boolean, last: Boolea
         ColumnAlign.End -> Alignment.CenterEnd
     }
 
+    val textAlign = when (align) {
+        ColumnAlign.Start -> TextAlign.Start
+        ColumnAlign.Center -> TextAlign.Center
+        ColumnAlign.End -> TextAlign.End
+    }
+
     Box(Modifier.fillMaxWidth().padding(start = inset, end = if (last) inset else 0.dp), contentAlignment = alignment) {
         when (source) {
             is TableCell.Text -> {
                 val style = if (spec.numeric) source.style.copy(fontFeatureSettings = "tnum") else source.style
 
-                Label(source.text, style = style, color = source.color ?: if (muted) MyTheme.colors.textMuted else MyTheme.colors.text, maxLines = if (wrapped) Int.MAX_VALUE else 1)
+                Label(source.text, style = style.copy(textAlign = textAlign), color = source.color ?: if (muted) MyTheme.colors.textMuted else MyTheme.colors.text, maxLines = if (wrapped) Int.MAX_VALUE else 1)
+            }
+
+            is TableCell.Rich -> {
+                val style = if (spec.numeric) source.style.copy(fontFeatureSettings = "tnum") else source.style
+
+                BasicText(source.text, style = style.themed().copy(textAlign = textAlign), maxLines = if (wrapped) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis)
             }
 
             is TableCell.Slot -> source.content()

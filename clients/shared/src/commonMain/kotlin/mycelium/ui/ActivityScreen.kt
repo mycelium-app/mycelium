@@ -42,9 +42,9 @@ import mycelium.state.tokensPerHourSummary
 import mycelium.state.tokensPerHourTitle
 import mycelium.state.usageNotice
 
-private val Columns = listOf(TableColumn("", 2f), TableColumn("Turns", 0.7f), TableColumn("Tokens", 0.9f), TableColumn("API equivalent", 1.1f), TableColumn("Time working", 1.1f))
+private val Columns = listOf(TableColumn("", 2f), TableColumn("Turns", 0.7f, numeric = true), TableColumn("Tokens", 0.9f, numeric = true), TableColumn("API equivalent", 1.1f, numeric = true), TableColumn("Time working", 1.1f, numeric = true))
 
-private val CompactColumns = listOf(TableColumn("", 2f), TableColumn("Tokens", 0.9f), TableColumn("API equivalent", 1.1f))
+private val CompactColumns = listOf(TableColumn("", 2f), TableColumn("Tokens", 0.9f, numeric = true), TableColumn("API equivalent", 1.1f, numeric = true))
 
 private val SideBySideWidth = 600.dp
 
@@ -153,7 +153,7 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
                 rowDescription = { "Open ${loaded.conversations[it].name}" },
             )
             DataTable("Agents", Columns.withTitle("Agent"), loaded.agents.map { rowCells(it, agentName(it.name)) }, "No agents in this range.")
-            DataTable("Models", Columns.withTitle("Model"), loaded.models.map { rowCells(it) }, "No models in this range.")
+            DataTable("Models", Columns.withTitle("Model").let { listOf(it.first().copy(rigid = true)) + it.drop(1) }, loaded.models.map { rowCells(it) }, "No models in this range.")
         }
     }
 }

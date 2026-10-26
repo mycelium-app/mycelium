@@ -28,8 +28,9 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import mycelium.state.ColumnAlign
 
-data class TableColumn(val title: String, val weight: Float = 1f)
+data class TableColumn(val title: String, val weight: Float = 1f, val numeric: Boolean = false, val rigid: Boolean = false)
 
 private val ChartHeight = 96.dp
 private val MeterHeight = 6.dp
@@ -137,40 +138,25 @@ fun DataTable(
             return@Column
         }
 
-        val specs = columns.mapIndexed { position, _ -> ColumnSpec(flexible = position == 0) } + listOfNotNull(trailing?.let { ColumnSpec(min = TrailingWidth, max = TrailingWidth) })
+        val tableColumns = columns.mapIndexed { position, column ->
+            Col(column.title, if (position == 0) 120.dp else if (column.numeric) 56.dp else 72.dp, weight = if (column.numeric) 0f else column.weight, numeric = column.numeric, rigid = column.rigid)
+        } + listOfNotNull(trailing?.let { Col("", TrailingWidth, preferred = TrailingWidth, align = ColumnAlign.End) })
 
-        ContentTable(specs, card = false) {
-            ContentRow {
-                for (column in columns) {
-                    Label(column.title, style = Tokens.Type.MetaStrong, color = colors.textMuted, maxLines = 1)
+        Table(
+            tableColumns,
+            rows.size,
+            { row, position ->
+                if (position >= columns.size) {
+                    TableCell.Slot { trailing?.invoke(row) }
+                } else {
+                    TableCell.Text(rows[row].getOrElse(position) { "" }, if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui, if (position == 0) colors.text else colors.textMuted)
                 }
-
-                if (trailing != null) {
-                    Box(Modifier)
-                }
-            }
-
-            rows.forEachIndexed { index, cells ->
-                Hairline()
-
-                val clickable = if (onRow != null) Modifier.pressable({ onRow(index) }, description = rowDescription(index)) else Modifier
-
-                ContentRow(clickable) {
-                    columns.forEachIndexed { position, _ ->
-                        Label(
-                            cells.getOrElse(position) { "" },
-                            style = if (position in monospaceColumns) Tokens.Type.Code else Tokens.Type.Ui,
-                            color = if (position == 0) colors.text else colors.textMuted,
-                            maxLines = 1,
-                        )
-                    }
-
-                    if (trailing != null) {
-                        Box(contentAlignment = Alignment.CenterEnd) { trailing(index) }
-                    }
-                }
-            }
-        }
+            },
+            card = false,
+            lazy = false,
+            onRow = onRow,
+            rowDescription = rowDescription,
+        )
     }
 }
 
