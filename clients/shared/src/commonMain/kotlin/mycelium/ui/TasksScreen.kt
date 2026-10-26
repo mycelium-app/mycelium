@@ -97,7 +97,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
         store.act { store.refreshBoard() }
     }
 
-    val lanes = boardCards(state, filter)
+    val lanes = boardCards(state, filter, LocalGroupFilter.current)
     val claimed = lanes.getValue(Lane.Claimed)
     val waiting = claimed.mapNotNull { it.conversation?.takeIf { conversation -> conversation.status == ConversationStatus.Input }?.id }
 

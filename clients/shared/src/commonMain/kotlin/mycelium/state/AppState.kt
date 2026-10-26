@@ -242,11 +242,13 @@ const val AllGroups = "all"
 const val NoGroup = "none"
 const val PinnedName = "Pinned"
 
-fun inGroupFilter(conversation: Conversation, filter: String): Boolean = when (filter) {
+fun inGroup(groupId: String?, filter: String): Boolean = when (filter) {
     AllGroups -> true
-    NoGroup -> conversation.groupId == null
-    else -> conversation.groupId == filter
+    NoGroup -> groupId == null
+    else -> groupId == filter
 }
+
+fun inGroupFilter(conversation: Conversation, filter: String): Boolean = inGroup(conversation.groupId, filter)
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
     val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isSubagent && inGroupFilter(it, filter) }

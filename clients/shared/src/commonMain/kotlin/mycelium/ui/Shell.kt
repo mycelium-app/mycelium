@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
@@ -162,6 +163,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
 
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
+    val groupFilter = rememberGroupFilter(platform, state)
     var route by remember { mutableStateOf(initialRoute) }
 
     LaunchedEffect(store) {
@@ -188,6 +190,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
                 state = state,
                 route = route,
                 onRoute = { route = it },
+                groupFilter = groupFilter,
                 modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
             )
         }
@@ -202,7 +205,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
+                RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
             }
         }
     }
@@ -213,6 +216,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
 fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
+    val groupFilter = rememberGroupFilter(platform, state)
     var route by remember { mutableStateOf(initialRoute) }
 
     LaunchedEffect(store) {
@@ -314,7 +318,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
 
                 Box(Modifier.weight(1f).fillMaxWidth().then(if (route is Route.Artefact) Modifier else openDrag)) {
-                    RouteContent(store, state, platform, me, route, onRoute = { route = it }, onSignOut = onSignOut)
+                    RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }
         }
@@ -336,6 +340,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                     state = state,
                     route = route,
                     onRoute = { route = it; drawerOpen = false },
+                    groupFilter = groupFilter,
                     modifier = Modifier
                         .width(drawerWidth)
                         .fillMaxHeight()
@@ -348,7 +353,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
     var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
 
     LaunchedEffect(route) {
@@ -357,7 +362,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter) {
         when (route) {
             Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
             is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
@@ -412,12 +417,10 @@ private const val WorkspacesMode = "Workspaces"
 private const val ChatsMode = "Chats"
 
 @Composable
-private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, modifier: Modifier = Modifier) {
+private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
-    var savedGroupFilter by remember { mutableStateOf(platform.loadPreference(GroupFilterPreference) ?: AllGroups) }
-    val groupFilter = if (savedGroupFilter == AllGroups || savedGroupFilter == NoGroup || savedGroupFilter in state.groups) savedGroupFilter else AllGroups
-    val pinned = pinnedConversations(state.conversations.values, groupFilter)
-    val sections = sidebarSections(state.conversations.values, groupFilter)
+    val pinned = pinnedConversations(state.conversations.values, groupFilter.value)
+    val sections = sidebarSections(state.conversations.values, groupFilter.value)
     val pinnedChatRows = pinnedChats(state.conversations.values)
     val chats = chatSections(state.conversations.values)
 
@@ -466,14 +469,14 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (mode == WorkspacesMode && state.groups.isNotEmpty()) {
             val choices = listOf(Choice(AllGroups, "All groups")) +
                 state.groups.values.sortedBy { it.name.lowercase() }.map { group ->
-                    val waiting = if (group.id == groupFilter) 0 else needsInputIn(state.conversations.values, group.id)
+                    val waiting = if (group.id == groupFilter.value) 0 else needsInputIn(state.conversations.values, group.id)
 
                     Choice(group.id, group.name, if (waiting > 0) "$waiting needs input" else null)
                 } +
                 Choice(NoGroup, "No group")
 
             Box(Modifier.padding(horizontal = Tokens.Space.S1_5)) {
-                OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show", icon = MyIcon.Layers, size = ButtonSize.Sm)
+                OptionMenu("Group", choices, groupFilter.value, groupFilter.choose, title = "Show", icon = MyIcon.Layers, size = ButtonSize.Sm)
             }
         }
 
@@ -831,3 +834,15 @@ private const val UsageOpenPreference = "usage-card-open"
 private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"
+
+val LocalGroupFilter = staticCompositionLocalOf { AllGroups }
+
+private class GroupFilterChoice(val value: String, val choose: (String) -> Unit)
+
+@Composable
+private fun rememberGroupFilter(platform: Platform, state: AppState): GroupFilterChoice {
+    var saved by remember { mutableStateOf(platform.loadPreference(GroupFilterPreference) ?: AllGroups) }
+    val known = saved == AllGroups || saved == NoGroup || saved in state.groups
+
+    return GroupFilterChoice(if (known) saved else AllGroups) { chosen -> saved = chosen; platform.savePreference(GroupFilterPreference, chosen) }
+}

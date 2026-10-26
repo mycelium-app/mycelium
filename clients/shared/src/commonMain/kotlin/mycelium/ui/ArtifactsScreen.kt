@@ -45,6 +45,7 @@ import mycelium.api.ArtifactKinds
 import mycelium.api.Me
 import mycelium.state.MarkdownBlock
 import mycelium.state.AllArtifacts
+import mycelium.state.artifactInGroup
 import mycelium.state.ArtifactPreview
 import mycelium.state.AppState
 import mycelium.state.ArtifactKindFilters
@@ -93,7 +94,8 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
     }
 
     val kind = ArtifactKindFilters.firstOrNull { it.second == kindName }?.first
-    val shown = visibleArtifacts(state.artifacts.values, tab, me.id, kind, query)
+    val group = LocalGroupFilter.current
+    val shown = visibleArtifacts(state.artifacts.values.filter { artifactInGroup(it, state, group) }, tab, me.id, kind, query)
 
     Column(Modifier.fillMaxSize()) {
         Bar {

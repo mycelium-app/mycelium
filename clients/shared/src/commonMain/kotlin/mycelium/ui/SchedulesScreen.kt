@@ -27,6 +27,7 @@ import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.state.AppState
+import mycelium.state.scheduleInGroup
 import mycelium.state.Store
 import mycelium.state.Cadence
 import mycelium.state.WhenKind
@@ -54,8 +55,10 @@ fun SchedulesScreen(store: Store, state: AppState) {
         }
     }
 
-    val schedules = state.schedules.values.sortedBy { it.createdAt }
-    val runs = state.scheduleRuns
+    val group = LocalGroupFilter.current
+    val schedules = state.schedules.values.filter { scheduleInGroup(it, state, group) }.sortedBy { it.createdAt }
+    val shownIds = schedules.map { it.id }.toSet()
+    val runs = state.scheduleRuns.filter { it.scheduleId in shownIds }
 
     Column(Modifier.fillMaxSize()) {
         Bar {

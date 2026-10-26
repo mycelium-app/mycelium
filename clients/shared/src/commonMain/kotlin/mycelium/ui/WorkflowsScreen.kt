@@ -40,6 +40,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.put
 import mycelium.api.ModelProvider
 import mycelium.state.AppState
+import mycelium.state.workflowInGroup
 import mycelium.state.Store
 import mycelium.state.sessionOptions
 import mycelium.state.agentName
@@ -65,7 +66,8 @@ private data class WorkflowDraft(
 fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
-    val workflows = state.workflows.values.toList()
+    val group = LocalGroupFilter.current
+    val workflows = state.workflows.values.filter { workflowInGroup(it, state, group) }
     var selected by remember { mutableStateOf<String?>(null) }
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var creating by remember { mutableStateOf(false) }

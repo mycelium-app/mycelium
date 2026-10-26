@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import mycelium.state.AllGroups
+import mycelium.state.inGroupFilter
 import mycelium.state.projectName
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,7 +65,7 @@ fun hasTurns(conversation: Conversation, usage: Map<String, ActivityRow>?): Bool
 @Serializable
 enum class PastFilter(val label: String) { All("All"), Done("Done"), Archived("Archived") }
 
-fun pastConversations(current: Collection<Conversation>, archived: Collection<Conversation>, filter: PastFilter, query: String): List<Conversation> {
+fun pastConversations(current: Collection<Conversation>, archived: Collection<Conversation>, filter: PastFilter, query: String, group: String = AllGroups): List<Conversation> {
     val doneRows = current.filter { it.status == ConversationStatus.Done && it.archivedAt == null }
     val source = when (filter) {
         PastFilter.All -> current.filter { it.archivedAt == null } + archived
@@ -73,7 +75,7 @@ fun pastConversations(current: Collection<Conversation>, archived: Collection<Co
 
     return source
         .distinctBy { it.id }
-        .filter { !it.isSubagent }
+        .filter { !it.isSubagent && inGroupFilter(it, group) }
         .filter { query.isBlank() || it.title.contains(query.trim(), ignoreCase = true) }
         .sortedByDescending { it.updatedAt }
 }
@@ -132,7 +134,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     }
 
     val filters = layout.filters
-    val entries = pastConversations(state.conversations.values, archived, filters.state, query)
+    val entries = pastConversations(state.conversations.values, archived, filters.state, query, LocalGroupFilter.current)
         .filter { hasTurns(it, usage) }
         .map { HistoryEntry(it, projectName(it.cwd), state.nodes[it.nodeId]?.name.orEmpty(), usage?.get(it.id)) }
     val groups = groupHistory(sortHistory(filterHistory(entries, filters), layout.sort), layout.grouping)
