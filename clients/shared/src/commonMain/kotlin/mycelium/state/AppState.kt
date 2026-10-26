@@ -45,6 +45,8 @@ data class AppState(
     val resources: Map<String, NodeResources> = emptyMap(),
     val projects: Map<String, Project> = emptyMap(),
     val groups: Map<String, Group> = emptyMap(),
+    val forges: List<mycelium.api.Forge>? = null,
+    val repositoryListing: mycelium.api.Repositories? = null,
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
     val workflows: Map<String, JsonObject> = emptyMap(),

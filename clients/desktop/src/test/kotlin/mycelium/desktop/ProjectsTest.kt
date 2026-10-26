@@ -67,6 +67,7 @@ class ProjectsTest {
 
     private val posts = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private val patches = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private var repositoriesDelay = 20L
     private var groups = "[]"
     private var forges = ForgesJson
     private var repositories = RepositoriesJson
@@ -88,7 +89,7 @@ class ProjectsTest {
             }
 
             if (path.endsWith("/repositories")) {
-                delay(20)
+                delay(repositoriesDelay)
             }
 
             when {
@@ -124,6 +125,17 @@ class ProjectsTest {
         rule.onNodeWithText("laptop").assertExists()
         rule.onNodeWithText("homelab").assertExists()
         rule.onNodeWithContentDescription("Set up on atlas").assertExists()
+    }
+
+    @Test
+    fun the_projects_tab_shows_the_last_repository_listing_before_the_forges_answer() {
+        val store = store()
+        runBlocking { store.refreshRepositories() }
+        repositoriesDelay = 60_000
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
+
+        rule.onNodeWithText("immich").assertExists()
+        rule.onNodeWithContentDescription("Set up on laptop").assertExists()
     }
 
     @Test

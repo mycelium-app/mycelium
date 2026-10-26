@@ -55,8 +55,7 @@ private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow
 @Composable
 fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit) {
     val colors = MyTheme.colors
-    var forges by remember { mutableStateOf<List<Forge>?>(null) }
-    var listing by remember { mutableStateOf<Repositories?>(null) }
+    var filtered by remember { mutableStateOf<Repositories?>(null) }
     var query by remember { mutableStateOf("") }
     var forgeId by remember { mutableStateOf<String?>(null) }
     var organisation by remember { mutableStateOf<String?>(null) }
@@ -77,21 +76,29 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     }
 
     LaunchedEffect(Unit) {
-        store.act { forges = store.api.forges() }
+        store.act { store.refreshRepositories() }
     }
 
+    val filtering = forgeId != null || organisation != null || query.isNotBlank()
+
     LaunchedEffect(forgeId, organisation, query) {
+        if (!filtering) {
+            return@LaunchedEffect
+        }
+
         val asked = Triple(forgeId, organisation, query)
 
         store.act {
             val found = store.api.repositories(forgeId, organisation, query)
 
             if (asked == Triple(forgeId, organisation, query)) {
-                listing = found
+                filtered = found
             }
         }
     }
 
+    val forges = state.forges
+    val listing = if (filtering) filtered ?: state.repositoryListing else state.repositoryListing
     val connected = forges.orEmpty()
     val folders = if (forgeId == null && organisation == null) registeredFolders(state.projects.values).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.nodeId == nodeFilter) } else emptyList()
     val organisations = listing?.organisations.orEmpty().filter { forgeId == null || it.forgeId == forgeId }.map { it.name }.distinct()

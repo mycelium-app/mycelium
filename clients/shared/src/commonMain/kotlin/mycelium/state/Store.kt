@@ -259,6 +259,13 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(projects = projects.associateBy { p -> p.id }) }
     }
 
+    suspend fun refreshRepositories() {
+        val forges = api.forges()
+        val listing = api.repositories()
+
+        mutableState.update { it.copy(forges = forges, repositoryListing = listing) }
+    }
+
     suspend fun refreshGroups() {
         val groups = api.groups()
 
@@ -273,6 +280,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         return project
     }
 
+    suspend fun directories(nodeId: String, path: String): Directories = api.directories(nodeId, path)
+
     suspend fun requestMove(conversationId: String, request: MoveRequest): MoveProgress {
         val progress = api.requestMove(conversationId, request)
 
@@ -280,8 +289,6 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         return progress
     }
-    suspend fun directories(nodeId: String, path: String): Directories = api.directories(nodeId, path)
-
 
     suspend fun cancelMove(conversationId: String) {
         api.cancelMove(conversationId)
