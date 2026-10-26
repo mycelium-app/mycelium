@@ -276,6 +276,7 @@ pub fn tool_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Words that must each appear in the conversation's title, project name or folder."},
+                    "group": {"type": "string", "description": "Only conversations in the group with this name, or none for conversations that are in no group."},
                     "limit": {"type": "number", "description": "How many conversations to return. Defaults to 10."},
                 },
             },
@@ -977,16 +978,20 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let limit = arguments.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_FIND_LIMIT).clamp(1, MAX_FIND_LIMIT);
                     let words: Vec<String> = arguments.get("query").and_then(Value::as_str).unwrap_or_default().split_whitespace().map(String::from).collect();
-                    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, String, chrono::DateTime<chrono::Utc>)>(
-                        "select c.id, c.title, p.name, coalesce(n.name, ''), c.agent, c.status, c.updated_at
+                    let group_filter = arguments.get("group").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty());
+                    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String, String, String, chrono::DateTime<chrono::Utc>, Option<String>)>(sqlx::AssertSqlSafe(format!(
+                        "select * from (select c.id, c.title, p.name, coalesce(n.name, ''), c.agent, c.status, c.updated_at,
+                                (select g.name from conversations x join groups g on g.id = {CONVERSATION_GROUP_SQL} where x.id = c.id) as group_name
                          from conversations c left join projects p on p.id = c.project_id left join nodes n on n.id = c.node_id
                          where c.owner = (select owner from conversations where id = $1) and c.archived_at is null
-                           and not exists (select 1 from unnest($2::text[]) as word where not (strpos(lower(c.title), lower(word)) > 0 or strpos(lower(coalesce(p.name, '')), lower(word)) > 0 or strpos(lower(c.cwd), lower(word)) > 0))
-                         order by c.updated_at desc, c.id limit $3",
-                    )
+                           and not exists (select 1 from unnest($2::text[]) as word where not (strpos(lower(c.title), lower(word)) > 0 or strpos(lower(coalesce(p.name, '')), lower(word)) > 0 or strpos(lower(c.cwd), lower(word)) > 0))) found
+                         where $4::text is null or (lower($4) = 'none' and group_name is null) or lower(group_name) = lower($4)
+                         order by updated_at desc, id limit $3"
+                    )))
                     .bind(conversation_id)
                     .bind(&words)
                     .bind(limit)
+                    .bind(group_filter)
                     .fetch_all(&state.pool)
                     .await?;
 
@@ -995,8 +1000,8 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     } else {
                         let lines: Vec<String> = rows
                             .iter()
-                            .map(|(found, title, project, node_name, agent, status, updated_at)| {
-                                format!("{found}: {} (project {}, node {node_name}, agent {agent}, status {status}, last activity {})", message_proposals::label(*found, title).replace('\n', " "), project.as_deref().unwrap_or("none"), updated_at.to_rfc3339())
+                            .map(|(found, title, project, node_name, agent, status, updated_at, group_name)| {
+                                format!("{found}: {} (project {}, group {}, node {node_name}, agent {agent}, status {status}, last activity {})", message_proposals::label(*found, title).replace('\n', " "), project.as_deref().unwrap_or("none"), group_name.as_deref().unwrap_or("none"), updated_at.to_rfc3339())
                             })
                             .collect();
 

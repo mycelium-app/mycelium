@@ -73,6 +73,30 @@ async fn finding_conversations_lists_only_the_persons_own_unarchived_ones_matchi
 }
 
 #[tokio::test]
+async fn finding_conversations_shows_each_ones_group_and_filters_by_group() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let caller = working_conversation(&server, &mut link, "Plan the release").await;
+    let billing = working_conversation(&server, &mut link, "Fix billing export").await;
+    let loose = working_conversation(&server, &mut link, "Loose notes").await;
+    let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "Immich"}))).await;
+    let group = group["id"].as_str().unwrap();
+    server.user.json(server.user.post(&format!("/api/v1/groups/{group}/folders")).json(&json!({"prefix": "/work/billing"}))).await;
+    sqlx::query("update conversations set cwd = '/work/billing/app' where id = $1").bind(billing).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set cwd = '/elsewhere' where id = $1").bind(loose).execute(&server.pool).await.unwrap();
+
+    let everything = text(&call(&server, &link, caller, "find_conversations", json!({})).await);
+    assert!(everything.lines().any(|line| line.contains("Fix billing export") && line.contains("group Immich")), "{everything}");
+    assert!(everything.lines().any(|line| line.contains("Loose notes") && line.contains("group none")), "{everything}");
+
+    let in_group = text(&call(&server, &link, caller, "find_conversations", json!({"group": "immich"})).await);
+    assert!(in_group.contains("Fix billing export") && !in_group.contains("Loose notes"), "{in_group}");
+
+    let ungrouped = text(&call(&server, &link, caller, "find_conversations", json!({"group": "none"})).await);
+    assert!(ungrouped.contains("Loose notes") && !ungrouped.contains("Fix billing export"), "{ungrouped}");
+}
+
+#[tokio::test]
 async fn proposing_a_message_waits_for_the_person_and_queues_nothing() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
