@@ -245,24 +245,27 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
 
         Label("Node synchronisation", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-        ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp), ColumnSpec(max = 64.dp))) {
-            ContentRow(header = true) {
-                Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                Label("Holds", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                Label("Sessions on an older version", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                Box(Modifier)
-            }
+        val nodes = state.nodes.values.sortedBy { it.name }
 
-            Hairline()
+        Table(
+            listOf(
+                Col("Node", 120.dp, weight = 1f),
+                Col("Holds", 72.dp, max = 160.dp),
+                Col("Sessions on an older version", 140.dp, max = 320.dp, overflow = Overflow.Wrap, priority = 1),
+                ActionColumn,
+            ),
+            nodes.size,
+            { row, column ->
+                val node = nodes[row]
 
-            for (node in state.nodes.values.sortedBy { it.name }) {
-                Column(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(vertical = Tokens.Space.S1)) {
-                    ContentRow(minHeight = 0.dp) {
-                        Label(node.name, maxLines = 1)
-                        Label(heldVersion(node), style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(olderSessions(node), color = colors.textMuted)
-
-                        if (node.instructionsUnmanaged.isNotEmpty()) {
+                when (column) {
+                    0 -> TableCell.Text(node.name)
+                    1 -> TableCell.Text(heldVersion(node), Tokens.Type.Code, colors.textMuted)
+                    2 -> TableCell.Text(olderSessions(node), color = colors.textMuted)
+                    else -> if (node.instructionsUnmanaged.isEmpty()) {
+                        TableCell.Text("")
+                    } else {
+                        TableCell.Slot {
                             RowMenu("instructions on ${node.name}") { close ->
                                 for (file in node.instructionsUnmanaged) {
                                     MenuItem("Manage ${file.substringAfterLast('/')}", onClick = {
@@ -271,20 +274,17 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                                     })
                                 }
                             }
-                        } else {
-                            Box(Modifier)
                         }
                     }
-
-                    for (file in node.instructionsUnmanaged) {
-                        Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
-
-                        Label("Your file is kept as ${file.substringAfterLast('/')}.bak.", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
-                    }
                 }
+            },
+            detail = { row ->
+                for (file in nodes[row].instructionsUnmanaged) {
+                    Label("Not managed, left as it is: $file", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
 
-                Hairline()
-            }
-        }
+                    Label("Your file is kept as ${file.substringAfterLast('/')}.bak.", Modifier.padding(horizontal = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+            },
+        )
     }
 }

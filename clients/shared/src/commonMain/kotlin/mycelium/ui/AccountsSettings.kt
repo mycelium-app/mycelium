@@ -70,38 +70,38 @@ fun AccountsSettings(store: Store) {
                 }
 
                 if (split.accounts.isNotEmpty()) {
-                    ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 360.dp), ColumnSpec(max = 200.dp))) {
-                        ContentRow(header = true) {
-                            Label("Account", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                            Label("Signed in on", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                            Label("Method", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        }
+                    val accounts = split.accounts
 
-                        Hairline()
+                    Table(
+                        listOf(
+                            Col("Account", 120.dp, weight = 1f),
+                            Col("Signed in on", 140.dp, max = 360.dp, overflow = Overflow.Wrap),
+                            Col("Method", 88.dp, priority = 1),
+                        ),
+                        accounts.size,
+                        { row, column ->
+                            val account = accounts[row]
 
-                        for (account in split.accounts) {
-                            ContentRow(Modifier.padding(vertical = Tokens.Space.S1)) {
-                                Label(account.label, maxLines = 1)
-
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                                    for (node in account.nodes) {
-                                        when (node.state) {
-                                            LoginState.SignedIn -> Label(node.nodeName)
-                                            LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
-                                            LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
-                                            LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
+                            when (column) {
+                                0 -> TableCell.Text(account.label)
+                                1 -> TableCell.Slot(account.nodes.joinToString(" ") { it.nodeName }) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                                        for (node in account.nodes) {
+                                            when (node.state) {
+                                                LoginState.SignedIn -> Label(node.nodeName)
+                                                LoginState.Expired -> StatusMark("${node.nodeName}: expired", Tone.Failed, MyIcon.Failed)
+                                                LoginState.SignedOut -> StatusMark("${node.nodeName}: signed out", Tone.Failed, MyIcon.Failed)
+                                                LoginState.Unknown -> Label("${node.nodeName}: unknown", color = colors.textMuted)
+                                            }
                                         }
                                     }
                                 }
 
-                                Label(loginMethodName(account.method), color = colors.textMuted)
+                                else -> TableCell.Text(loginMethodName(account.method), color = colors.textMuted)
                             }
-
-                            AccountUsage(account)
-
-                            Hairline()
-                        }
-                    }
+                        },
+                        detail = { row -> AccountUsage(accounts[row]) },
+                    )
                 }
 
                 if (split.accounts.isEmpty()) {

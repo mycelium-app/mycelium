@@ -51,6 +51,8 @@ sealed interface TableCell {
     class Slot(val measureAs: String? = null, val extra: Dp = 0.dp, val content: @Composable () -> Unit) : TableCell
 }
 
+val ActionColumn = Col("", 32.dp, preferred = 32.dp, align = ColumnAlign.End)
+
 data class ResolvedTable(val widths: List<Int>, val total: Int, val scroll: Boolean)
 
 fun resolveTable(min: List<Int>, natural: List<Int>, weight: List<Float>, available: Int, fill: Boolean = true): ResolvedTable {

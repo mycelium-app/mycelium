@@ -77,31 +77,31 @@ fun ForgesSettings(store: Store) {
             }
 
 
-            ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 320.dp), ColumnSpec(max = 160.dp))) {
-                ContentRow(header = true) {
-                    Label("Forge", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Signed in as", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Organisations", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
-
-                Hairline()
-
-                for (forge in forges) {
+            Table(
+                listOf(
+                    Col("Forge", 160.dp, weight = 1f),
+                    Col("Signed in as", 100.dp),
+                    Col("Organisations", 120.dp, max = 320.dp, overflow = Overflow.Wrap, priority = 1),
+                    ActionColumn,
+                ),
+                forges.size,
+                { row, column ->
+                    val forge = forges[row]
                     val name = if (forge.kind == "gitlab") "GitLab" else "GitHub"
                     val host = forge.baseUrl.substringAfter("://").trimEnd('/')
 
-                    ContentRow {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
-                            Label(name, maxLines = 1)
-                            Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                    when (column) {
+                        0 -> TableCell.Slot("$name $host", Tokens.Size.IconSm + Tokens.Space.S1_5 * 2) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(MyIcon.Forge, colors.textMuted, Tokens.Size.IconSm)
+                                Label(name, maxLines = 1)
+                                Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                            }
                         }
 
-                        Label(forge.account, maxLines = 1)
-                        Label(forge.organisations.joinToString(", "), color = colors.textMuted)
-
-                        Row(horizontalArrangement = Arrangement.End) {
+                        1 -> TableCell.Text(forge.account)
+                        2 -> TableCell.Text(forge.organisations.joinToString(", "), color = colors.textMuted)
+                        else -> TableCell.Slot {
                             RowMenu("$name account ${forge.account} on $host") { close ->
                                 MenuItem("Disconnect", {
                                     close()
@@ -113,10 +113,8 @@ fun ForgesSettings(store: Store) {
                             }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
 
         if (connecting) {

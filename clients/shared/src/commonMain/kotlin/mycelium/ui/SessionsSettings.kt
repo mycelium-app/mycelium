@@ -29,6 +29,7 @@ import mycelium.state.apiScopeLabel
 fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
+    val stamp = timestamper()
     var sessions by remember { mutableStateOf<List<SessionSummary>>(emptyList()) }
     var endingCurrent by remember { mutableStateOf<SessionSummary?>(null) }
     var revoking by remember { mutableStateOf<NodeSummary?>(null) }
@@ -41,51 +42,52 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Clients", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            ContentTable(listOf(ColumnSpec(max = 360.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 160.dp))) {
-                ContentRow(header = true) {
-                    Label("Client", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Address", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Last used", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
+            Table(
+                listOf(
+                    Col("Client", 160.dp, weight = 1f, overflow = Overflow.Wrap),
+                    Col("Address", 100.dp, max = 240.dp, priority = 1),
+                    Col("Last used", 88.dp),
+                    ActionColumn,
+                ),
+                sessions.size,
+                { row, column ->
+                    val session = sessions[row]
 
-                Hairline()
-
-                for (session in sessions) {
                     val where = when {
                         session.kind == "agent" -> session.conversationTitle?.let { "${session.label} for $it" } ?: session.label
                         session.hostname.isBlank() -> session.label
                         else -> "${session.label} on ${session.hostname}"
                     }
 
-                    ContentRow {
-                        Column {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    when (session.kind) {
-                                        "browser" -> MyIcon.Globe
-                                        "agent" -> MyIcon.Key
-                                        else -> MyIcon.Laptop
-                                    },
-                                    colors.textMuted,
-                                    Tokens.Size.IconSm,
-                                )
-                                Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
+                    when (column) {
+                        0 -> TableCell.Slot(where, Tokens.Size.IconSm + Tokens.Space.S1_5) {
+                            Column {
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        when (session.kind) {
+                                            "browser" -> MyIcon.Globe
+                                            "agent" -> MyIcon.Key
+                                            else -> MyIcon.Laptop
+                                        },
+                                        colors.textMuted,
+                                        Tokens.Size.IconSm,
+                                    )
+                                    Label(where, Modifier.weight(1f, fill = false), maxLines = 1)
 
-                                if (session.current) {
-                                    Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
+                                    if (session.current) {
+                                        Label("This session", style = Tokens.Type.Meta, color = colors.textMuted)
+                                    }
                                 }
-                            }
 
-                            session.expiresAt?.let { expiresAt ->
-                                Label("${session.scopes.joinToString(", ") { apiScopeLabel(it) }}. Expires ${timestamp(expiresAt)}", style = Tokens.Type.Meta, color = colors.textMuted)
+                                session.expiresAt?.let { expiresAt ->
+                                    Label("${session.scopes.joinToString(", ") { apiScopeLabel(it) }}. Expires ${timestamp(expiresAt)}", style = Tokens.Type.Meta, color = colors.textMuted)
+                                }
                             }
                         }
 
-                        Label(session.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(if (session.current) "now" else timestamp(session.lastUsedAt, ago = true), color = colors.textMuted)
-
-                        Row(horizontalArrangement = Arrangement.End) {
+                        1 -> TableCell.Text(session.address, Tokens.Type.Code, colors.textMuted)
+                        2 -> TableCell.Text(if (session.current) "now" else stamp(session.lastUsedAt, true), color = colors.textMuted)
+                        else -> TableCell.Slot {
                             RowMenu(where) { close ->
                                 MenuItem(if (session.kind == "agent") "Revoke" else "End session", {
                                     close()
@@ -101,36 +103,37 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                             }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Nodes", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            ContentTable(listOf(ColumnSpec(max = 360.dp, flexible = true), ColumnSpec(), ColumnSpec(max = 120.dp), ColumnSpec(max = 160.dp))) {
-                ContentRow(header = true) {
-                    Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Address", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Last seen", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
+            val nodes = state.nodes.values.sortedBy { it.name }
 
-                Hairline()
+            Table(
+                listOf(
+                    Col("Node", 140.dp, weight = 1f),
+                    Col("Address", 100.dp, max = 240.dp, priority = 1),
+                    Col("Last seen", 88.dp),
+                    ActionColumn,
+                ),
+                nodes.size,
+                { row, column ->
+                    val node = nodes[row]
 
-                for (node in state.nodes.values.sortedBy { it.name }) {
-                    ContentRow {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
-                            Label(node.name, maxLines = 1)
+                    when (column) {
+                        0 -> TableCell.Slot(node.name, Tokens.Size.IconSm + Tokens.Space.S1_5) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(nodeIcon(node), colors.textMuted, Tokens.Size.IconSm)
+                                Label(node.name, maxLines = 1)
+                            }
                         }
 
-                        Label(node.address, style = Tokens.Type.Code, color = colors.textMuted, maxLines = 1)
-                        Label(if (node.online) "online" else node.lastSeenAt?.let { timestamp(it, ago = true) } ?: "never", color = colors.textMuted)
-
-                        Row(horizontalArrangement = Arrangement.End) {
+                        1 -> TableCell.Text(node.address, Tokens.Type.Code, colors.textMuted)
+                        2 -> TableCell.Text(if (node.online) "online" else node.lastSeenAt?.let { stamp(it, true) } ?: "never", color = colors.textMuted)
+                        else -> TableCell.Slot {
                             RowMenu(node.name) { close ->
                                 MenuItem("Revoke", {
                                     close()
@@ -139,10 +142,8 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
                             }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
     }
 
