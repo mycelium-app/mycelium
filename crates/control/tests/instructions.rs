@@ -1035,3 +1035,72 @@ async fn another_persons_proposal_is_not_listed_or_decided() {
     assert_eq!((listed_status, listed), (200, json!([])));
     assert_eq!(approve_status, 404);
 }
+
+async fn set_experiments(server: &Server, groups: bool, instructions: bool) {
+    let (status, body) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"tasks": true, "workflows": true, "instructions": instructions, "details": true, "subagents": true, "walkthrough": true, "move_chats": true, "groups": groups}))).await;
+    assert_eq!(status, 200, "{body}");
+}
+
+#[tokio::test]
+async fn group_instructions_are_refused_until_the_groups_experiment_is_on() {
+    let server = Server::start().await;
+    let group = create_group(&server, "slop").await;
+    let path = format!("/api/v1/groups/{group}/instructions");
+
+    set_experiments(&server, false, true).await;
+    let (read, refused) = server.user.json(server.user.get(&path)).await;
+    let (written, _) = server.user.json(server.user.put(&path).json(&json!({"text": "x"}))).await;
+    assert_eq!((read, written, refused["error"].clone()), (403, 403, json!("experiment_disabled")));
+    assert!(refused["message"].as_str().unwrap().contains("Settings"));
+
+    set_experiments(&server, true, true).await;
+    let (read, _) = server.user.json(server.user.get(&path)).await;
+    let (written, _) = server.user.json(server.user.put(&path).json(&json!({"text": "x"}))).await;
+    assert_eq!((read, written), (200, 200));
+}
+
+#[tokio::test]
+async fn saving_group_instructions_is_a_new_version_the_instructions_page_also_sees() {
+    let server = Server::start().await;
+    let group = create_group(&server, "slop").await;
+    let path = format!("/api/v1/groups/{group}/instructions");
+
+    let (_, saved) = server.user.json(server.user.put(&path).json(&json!({"text": "Slop only"}))).await;
+    let (_, read) = server.user.json(server.user.get(&path)).await;
+    assert_eq!((read["text"].clone(), read["version"]["id"].clone()), (json!("Slop only"), saved["version"]["id"].clone()));
+    assert_eq!(layer(&instructions(&server).await, "slop")["version"]["id"], saved["version"]["id"]);
+
+    let (_, same) = server.user.json(server.user.put(&path).json(&json!({"text": "Slop only"}))).await;
+    assert_eq!(same["version"]["id"], saved["version"]["id"]);
+}
+
+#[tokio::test]
+async fn group_instructions_work_with_the_instructions_experiment_off() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let group = create_group(&server, "slop").await;
+    let grouped = project_in(&server, &mut link, "grouped", Some(group)).await;
+    set_experiments(&server, true, false).await;
+
+    let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/groups/{group}/instructions")).json(&json!({"text": "Use British English."}))).await;
+    assert_eq!((status, saved["text"].clone()), (200, json!("Use British English.")));
+    expect_instructions(&mut link).await;
+
+    set_generated_ui(&server, false).await;
+    let (_, started) = start_in(&server, &mut link, grouped).await;
+
+    assert_eq!(started.as_deref(), Some("Use British English."));
+}
+
+#[tokio::test]
+async fn another_persons_group_instructions_are_not_found() {
+    let server = Server::start().await;
+    let group = create_group(&server, "slop").await;
+    let other = server.second_user("other@example.com").await;
+    let path = format!("/api/v1/groups/{group}/instructions");
+
+    let (read, _) = other.json(other.get(&path)).await;
+    let (written, _) = other.json(other.put(&path).json(&json!({"text": "x"}))).await;
+
+    assert_eq!((read, written), (404, 404));
+}

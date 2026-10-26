@@ -20,6 +20,7 @@ fun ExperimentsSettings(store: Store) {
         Triple("Tasks", held.tasks) { value -> store.updateExperiments { it.copy(tasks = value) } },
         Triple("Workflows", held.workflows) { value -> store.updateExperiments { it.copy(workflows = value) } },
         Triple("Instructions", held.instructions) { value -> store.updateExperiments { it.copy(instructions = value) } },
+        Triple("Groups", held.groups) { value -> store.updateExperiments { it.copy(groups = value) } },
         Triple("Details sidebar", held.details) { value -> store.updateExperiments { it.copy(details = value) } },
         Triple("Subagents sidebar", held.subagents) { value -> store.updateExperiments { it.copy(subagents = value) } },
         Triple("Walkthrough", held.walkthrough) { value -> store.updateExperiments { it.copy(walkthrough = value) } },

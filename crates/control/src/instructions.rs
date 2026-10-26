@@ -246,7 +246,17 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Path(key): Path
 
     apply(&state, &user, &layer, &request.text).await?;
 
-    let described = describe(&state, &user).await?;
+    layer_of(&state, &user, layer).await
+}
+
+pub async fn layer(State(state): State<AppState>, user: AuthUser, Path(key): Path<String>) -> ApiResult<Json<InstructionLayer>> {
+    let layer = find_layer(&state, &user, &key).await?;
+
+    layer_of(&state, &user, layer).await
+}
+
+async fn layer_of(state: &AppState, user: &AuthUser, layer: Layer) -> ApiResult<Json<InstructionLayer>> {
+    let described = describe(state, user).await?;
 
     described.layers.into_iter().find(|candidate| candidate.layer == layer.key).map(Json).ok_or_else(|| ApiError::not_found("That instructions layer"))
 }

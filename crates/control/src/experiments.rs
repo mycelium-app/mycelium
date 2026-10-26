@@ -16,6 +16,7 @@ pub enum Experiment {
     Instructions,
     Walkthrough,
     MoveChats,
+    Groups,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Copy, sqlx::FromRow)]
@@ -27,6 +28,8 @@ pub struct Experiments {
     pub subagents: bool,
     pub walkthrough: bool,
     pub move_chats: bool,
+    #[serde(default)]
+    pub groups: bool,
 }
 
 impl Experiments {
@@ -37,6 +40,7 @@ impl Experiments {
             Experiment::Instructions => self.instructions,
             Experiment::Walkthrough => self.walkthrough,
             Experiment::MoveChats => self.move_chats,
+            Experiment::Groups => self.groups,
         }
     }
 }
@@ -48,6 +52,7 @@ pub fn disabled_message(experiment: Experiment) -> &'static str {
         Experiment::Instructions => "Enable the Instructions experiment in Settings, Experiments to use this.",
         Experiment::Walkthrough => "Enable the Walkthroughs experiment in Settings, Experiments to use this.",
         Experiment::MoveChats => "Enable the Move chats experiment in Settings, Experiments to use this.",
+        Experiment::Groups => "Enable the Groups experiment in Settings, Experiments to use this.",
     }
 }
 
@@ -58,7 +63,7 @@ pub fn refusal(experiment: Experiment) -> ApiError {
 pub async fn of(state: &AppState, owner: Uuid) -> ApiResult<Experiments> {
     let stored = sqlx::query_as::<_, Experiments>(
         "select experiment_tasks as tasks, experiment_workflows as workflows, experiment_instructions as instructions, experiment_details as details,
-                experiment_subagents as subagents, experiment_walkthrough as walkthrough, experiment_move_chats as move_chats
+                experiment_subagents as subagents, experiment_walkthrough as walkthrough, experiment_move_chats as move_chats, experiment_groups as groups
          from user_settings where owner = $1",
     )
     .bind(owner)
@@ -75,11 +80,11 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
 pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): Json<Experiments>) -> ApiResult<Json<Experiments>> {
     user.require_full_access()?;
     sqlx::query(
-        "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+        "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats, experiment_groups)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          on conflict (owner) do update set experiment_tasks = excluded.experiment_tasks, experiment_workflows = excluded.experiment_workflows,
              experiment_instructions = excluded.experiment_instructions, experiment_details = excluded.experiment_details, experiment_subagents = excluded.experiment_subagents,
-             experiment_walkthrough = excluded.experiment_walkthrough, experiment_move_chats = excluded.experiment_move_chats",
+             experiment_walkthrough = excluded.experiment_walkthrough, experiment_move_chats = excluded.experiment_move_chats, experiment_groups = excluded.experiment_groups",
     )
     .bind(user.id)
     .bind(request.tasks)
@@ -89,6 +94,7 @@ pub async fn save(State(state): State<AppState>, user: AuthUser, Json(request): 
     .bind(request.subagents)
     .bind(request.walkthrough)
     .bind(request.move_chats)
+    .bind(request.groups)
     .execute(&state.pool)
     .await?;
 
@@ -103,6 +109,7 @@ fn gated_by(route: &str) -> Option<Experiment> {
         "tasks" => Some(Experiment::Tasks),
         "workflows" => Some(Experiment::Workflows),
         "instructions" | "instruction-proposals" | "instruction-source" => Some(Experiment::Instructions),
+        "groups" if route.ends_with("/instructions") => Some(Experiment::Groups),
         "walkthroughs" => Some(Experiment::Walkthrough),
         "conversations" if route.ends_with("/walkthrough") => Some(Experiment::Walkthrough),
         "conversations" if route.ends_with("/move") || route.ends_with("/move-plan") => Some(Experiment::MoveChats),

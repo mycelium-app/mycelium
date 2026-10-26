@@ -240,6 +240,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
+        .route("/api/v1/groups/{id}/instructions", get(instructions::layer).put(instructions::save))
         .route("/api/v1/groups/{id}/folders", post(groups::add_folder))
         .route("/api/v1/groups/{id}/folders/{folder_id}", delete(groups::remove_folder))
         .route("/api/v1/instructions", get(instructions::get))

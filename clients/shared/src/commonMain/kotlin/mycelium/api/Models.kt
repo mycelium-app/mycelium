@@ -525,6 +525,7 @@ data class Experiments(
     val subagents: Boolean = false,
     val walkthrough: Boolean = false,
     @SerialName("move_chats") val moveChats: Boolean = false,
+    val groups: Boolean = false,
 )
 
 @Serializable

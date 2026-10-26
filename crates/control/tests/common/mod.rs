@@ -296,9 +296,9 @@ impl Server {
 
     async fn enable_experiments(&self) {
         sqlx::query(
-            "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats)
-             select id, true, true, true, true, true, true, true from users
-             on conflict (owner) do update set experiment_tasks = true, experiment_workflows = true, experiment_instructions = true, experiment_details = true, experiment_subagents = true, experiment_walkthrough = true, experiment_move_chats = true",
+            "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats, experiment_groups)
+             select id, true, true, true, true, true, true, true, true from users
+             on conflict (owner) do update set experiment_tasks = true, experiment_workflows = true, experiment_instructions = true, experiment_details = true, experiment_subagents = true, experiment_walkthrough = true, experiment_move_chats = true, experiment_groups = true",
         )
         .execute(&self.pool)
         .await

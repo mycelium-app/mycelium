@@ -27,7 +27,7 @@ import kotlin.test.assertTrue
 
 private const val Chat = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Backups","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 private const val Node = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.1.10","address":"10.0.0.5","online":true,"draining":false,"sessions":["c1"],"agents":[{"agent":"claude","available":true}],"logins":[]}]"""
-private const val AllOff = """{"tasks":false,"workflows":false,"instructions":false,"details":false,"subagents":false,"walkthrough":false,"move_chats":false}"""
+private const val AllOff = """{"tasks":false,"workflows":false,"instructions":false,"details":false,"subagents":false,"walkthrough":false,"move_chats":false,"groups":false}"""
 
 private object GatesPlatform : Platform {
     override val originUrl: String? = null

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 fn flags(enabled: bool) -> Value {
-    json!({"tasks": enabled, "workflows": enabled, "instructions": enabled, "details": enabled, "subagents": enabled, "walkthrough": enabled, "move_chats": enabled})
+    json!({"tasks": enabled, "workflows": enabled, "instructions": enabled, "details": enabled, "subagents": enabled, "walkthrough": enabled, "move_chats": enabled, "groups": enabled})
 }
 
 async fn fresh() -> Server {
@@ -45,7 +45,7 @@ async fn disabled_features_refuse_direct_requests_but_schedules_remain_available
     let server = fresh().await;
     let id = Uuid::new_v4();
 
-    for path in ["/api/v1/tasks".to_string(), "/api/v1/workflows".into(), "/api/v1/instructions".into(), "/api/v1/instruction-proposals".into(), format!("/api/v1/conversations/{id}/walkthrough"), format!("/api/v1/conversations/{id}/move-plan")] {
+    for path in ["/api/v1/tasks".to_string(), "/api/v1/workflows".into(), "/api/v1/instructions".into(), "/api/v1/instruction-proposals".into(), format!("/api/v1/conversations/{id}/walkthrough"), format!("/api/v1/conversations/{id}/move-plan"), format!("/api/v1/groups/{id}/instructions")] {
         let (status, refused) = server.user.json(server.user.get(&path)).await;
         assert_eq!(status, 403, "{path}: {refused}");
         assert_eq!(refused["error"], "experiment_disabled");
