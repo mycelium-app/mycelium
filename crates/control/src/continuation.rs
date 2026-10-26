@@ -207,7 +207,12 @@ pub async fn pending_handoff(state: &AppState, id: Uuid) -> ApiResult<Option<i64
         return Ok(None);
     }
 
-    last_handoff_marker(state, id).await
+    let Some(marker) = last_handoff_marker(state, id).await? else {
+        return Ok(None);
+    };
+    let delivered = sqlx::query_scalar::<_, bool>("select exists (select 1 from events where conversation_id = $1 and kind = 'user_message' and seq > $2)").bind(id).bind(marker).fetch_one(&state.pool).await?;
+
+    Ok(if delivered { None } else { Some(marker) })
 }
 
 pub async fn recent_turns(state: &AppState, id: Uuid, before_seq: i64, limit: i64) -> ApiResult<Vec<String>> {

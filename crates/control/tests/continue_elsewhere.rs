@@ -258,6 +258,28 @@ async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff()
 }
 
 #[tokio::test]
+async fn the_handoff_is_prepended_once_even_if_the_new_session_has_not_reported_its_id() {
+    let server = Server::start().await;
+    enable(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
+    continue_on(&server, id, json!({"agent": "codex"})).await;
+
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Carry on"}))).await;
+    assert!(matches!(next_command(&mut link).await, ControlToNode::CloseSession { .. }));
+    assert!(matches!(next_command(&mut link).await, ControlToNode::StartSession { .. }));
+    let first = expect_prompt(&mut link).await;
+    assert!(first.starts_with("This conversation continues from"), "{first}");
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 20, stop_reason: "end_turn".into(), usage: None }).await;
+    let user = server.user.clone();
+    common::eventually("the first turn to end", || async { (user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["status"] == "review").then_some(()) }).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "Again"}))).await;
+
+    assert_eq!(expect_prompt(&mut link).await, "Again");
+}
+
+#[tokio::test]
 async fn the_previous_session_is_not_offered_for_import_after_a_harness_switch() {
     let server = Server::start().await;
     enable(&server).await;
