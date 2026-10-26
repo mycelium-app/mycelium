@@ -106,12 +106,6 @@ async fn prompt(client: &Client, id: &str, text: &str) -> Value {
     conversation
 }
 
-async fn enable(client: &Client) {
-    let flags = json!({"tasks": false, "workflows": false, "instructions": true, "details": false, "subagents": false, "walkthrough": false, "move_chats": false, "groups": true, "continue_elsewhere": false, "assistants": true});
-    let (status, _) = client.json(client.put("/api/v1/experiments").json(&flags)).await;
-    assert_eq!(status, 200);
-}
-
 async fn create(client: &Client, body: Value) -> Value {
     let (status, assistant) = client.json(client.post("/api/v1/assistants").json(&body)).await;
     assert_eq!(status, 201, "{assistant}");
@@ -120,20 +114,8 @@ async fn create(client: &Client, body: Value) -> Value {
 }
 
 #[tokio::test]
-async fn assistants_are_refused_until_the_experiment_is_on() {
-    let server = Server::start().await;
-    let (status, refused) = server.user.json(server.user.get("/api/v1/assistants")).await;
-    assert_eq!((status, refused["error"].clone()), (403, json!("experiment_disabled")));
-
-    enable(&server.user).await;
-    let (status, listed) = server.user.json(server.user.get("/api/v1/assistants")).await;
-    assert_eq!((status, listed), (200, json!([])));
-}
-
-#[tokio::test]
 async fn an_assistant_is_created_listed_pinned_and_archived_per_person() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
     let created = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "# Stand-up\nCollect what everyone did."})).await;
     assert_eq!((created["name"].clone(), created["group_id"].clone(), created["state"].clone()), (json!("Stand-up"), group["id"].clone(), json!("idle")));
@@ -149,7 +131,6 @@ async fn an_assistant_is_created_listed_pinned_and_archived_per_person() {
     assert_eq!(pinned["description"], "Daily summary");
 
     let other = server.second_user("other@example.com").await;
-    enable(&other).await;
     let (_, theirs) = other.json(other.get("/api/v1/assistants")).await;
     assert_eq!(theirs, json!([]));
     let (status, _) = other.json(other.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true}))).await;
@@ -166,7 +147,6 @@ async fn an_assistant_is_created_listed_pinned_and_archived_per_person() {
 #[tokio::test]
 async fn a_duplicate_name_is_refused_with_a_message_naming_it() {
     let server = Server::start().await;
-    enable(&server.user).await;
     create(&server.user, json!({"name": "War room"})).await;
 
     let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "War room"}))).await;
@@ -180,7 +160,6 @@ async fn a_duplicate_name_is_refused_with_a_message_naming_it() {
 #[tokio::test]
 async fn preferences_naming_an_unknown_node_or_a_model_less_choice_are_refused() {
     let server = Server::start().await;
-    enable(&server.user).await;
 
     let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "A", "preferences": {"nodes": [uuid::Uuid::new_v4()]}}))).await;
     assert_eq!((status, refused["message"].clone()), (400, json!("That node is not one of yours")));
@@ -192,7 +171,6 @@ async fn preferences_naming_an_unknown_node_or_a_model_less_choice_are_refused()
 #[tokio::test]
 async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (provider, fake) = chat_provider(&server).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
     let id = assistant["id"].as_str().unwrap();
@@ -212,7 +190,6 @@ async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
 #[tokio::test]
 async fn a_prompt_with_no_chat_model_chosen_says_how_to_fix_it() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
 
     let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/assistants/{}/prompt", assistant["id"].as_str().unwrap())).json(&json!({"text": "Hello"}))).await;
@@ -224,7 +201,6 @@ async fn a_prompt_with_no_chat_model_chosen_says_how_to_fix_it() {
 #[tokio::test]
 async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (provider, _) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -245,7 +221,6 @@ async fn clear_starts_a_new_session_and_keeps_instructions_and_group() {
 #[tokio::test]
 async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instructions() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (provider, fake) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
     server.user.json(server.user.put("/api/v1/instructions/global").json(&json!({"text": "Global rule."}))).await;
@@ -264,7 +239,6 @@ async fn assistant_sessions_take_the_assistants_group_and_its_agents_md_as_instr
 #[tokio::test]
 async fn assistant_sessions_carry_their_assistant_id_in_the_conversation_api() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (provider, _) = chat_provider(&server).await;
     let (_, group) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": "acme"}))).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "group_id": group["id"], "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -290,7 +264,6 @@ fn tool_results(events: &[Value]) -> Vec<String> {
 #[tokio::test]
 async fn file_tools_read_and_write_storage_from_a_chat_and_refuse_outside_an_assistant() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let calls = vec![
         ("mcp__mycelium__assistant_write_file", json!({"path": "notes/today.md", "content": "Shipped v1"})),
         ("mcp__mycelium__assistant_read_file", json!({"path": "notes/today.md"})),
@@ -318,7 +291,6 @@ async fn file_tools_read_and_write_storage_from_a_chat_and_refuse_outside_an_ass
 #[tokio::test]
 async fn the_file_tools_refuse_a_chat_that_does_not_belong_to_an_assistant() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (provider, _) = scripted_provider(&server, vec![("mcp__mycelium__assistant_list_files", json!({}))]).await;
     let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"provider_id": provider["id"], "prompt": "List my files"}))).await;
     assert_eq!(status, 201, "{chat}");
@@ -333,7 +305,6 @@ async fn the_file_tools_refuse_a_chat_that_does_not_belong_to_an_assistant() {
 #[tokio::test]
 async fn files_are_stored_listed_read_and_deleted_over_http_per_assistant() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "# Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
 
@@ -348,7 +319,6 @@ async fn files_are_stored_listed_read_and_deleted_over_http_per_assistant() {
     assert_eq!(paths, ["AGENTS.md", "notes/today.md"]);
 
     let other = server.second_user("other@example.com").await;
-    enable(&other).await;
     let (status, _) = other.json(other.get(&format!("/api/v1/assistants/{id}/files"))).await;
     assert_eq!(status, 404);
 
@@ -360,7 +330,6 @@ async fn files_are_stored_listed_read_and_deleted_over_http_per_assistant() {
 #[tokio::test]
 async fn writing_agents_md_changes_the_instructions_and_the_description() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "# Old"})).await;
     let id = assistant["id"].as_str().unwrap();
 
@@ -373,7 +342,6 @@ async fn writing_agents_md_changes_the_instructions_and_the_description() {
 #[tokio::test]
 async fn paths_outside_the_storage_and_files_over_a_mebibyte_are_refused_with_a_way_forward() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
 
@@ -406,7 +374,6 @@ async fn harness_assistant(server: &Server, nodes: Value) -> Value {
 #[tokio::test]
 async fn a_workspace_turn_copies_storage_down_and_changes_back() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let mut link = server.online_node("laptop").await;
     let assistant = harness_assistant(&server, json!([link.id])).await;
     let id = assistant["id"].as_str().unwrap();
@@ -456,7 +423,6 @@ async fn a_workspace_turn_copies_storage_down_and_changes_back() {
 #[tokio::test]
 async fn use_workspace_moves_the_thread_to_the_first_online_node() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let mut link = server.online_node("laptop").await;
     let (provider, _) = scripted_provider(&server, vec![("mcp__mycelium__assistant_use_workspace", json!({"reason": "Needs a repository"}))]).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}, {"agent": "claude"}], "nodes": [link.id]}})).await;
@@ -488,7 +454,6 @@ async fn use_workspace_moves_the_thread_to_the_first_online_node() {
 #[tokio::test]
 async fn an_offline_first_node_falls_back_to_the_next_node_before_starting() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (offline, _) = server.join("node", "willow").await;
     let mut link = server.online_node("orion").await;
     let assistant = harness_assistant(&server, json!([offline, link.id])).await;
@@ -502,7 +467,6 @@ async fn an_offline_first_node_falls_back_to_the_next_node_before_starting() {
 #[tokio::test]
 async fn a_prompt_with_no_node_online_says_what_to_bring_online() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let (offline, _) = server.join("node", "willow").await;
     let assistant = harness_assistant(&server, json!([offline])).await;
 
@@ -540,7 +504,6 @@ fn broken_openai() -> Router {
 #[tokio::test]
 async fn a_usage_limit_moves_the_thread_to_the_next_model_and_records_why() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let mut link = server.online_node("laptop").await;
     let (provider, fake) = chat_provider(&server).await;
     let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [link.id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -567,7 +530,6 @@ async fn a_usage_limit_moves_the_thread_to_the_next_model_and_records_why() {
 #[tokio::test]
 async fn a_failing_chat_model_moves_the_turn_to_the_next_model() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let broken = named_provider(&server, "Broken", broken_openai()).await;
     let (router, fake) = fake_openai(Vec::new());
     let working = named_provider(&server, "Working", router).await;
@@ -588,7 +550,6 @@ async fn a_failing_chat_model_moves_the_turn_to_the_next_model() {
 #[tokio::test]
 async fn a_session_whose_node_went_offline_moves_on_before_the_next_prompt() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let mut link = server.online_node("laptop").await;
     let node_id = link.id;
     let (provider, _) = chat_provider(&server).await;
@@ -625,7 +586,6 @@ fn events_text(events: &[Value]) -> String {
 #[tokio::test]
 async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redacted_from_events() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let mut link = server.online_node("laptop").await;
     let assistant = harness_assistant(&server, json!([link.id])).await;
     let id = assistant["id"].as_str().unwrap();
@@ -657,7 +617,6 @@ async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redact
 #[tokio::test]
 async fn request_secret_creates_a_waiting_secret_the_person_can_fill() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let calls = vec![("mcp__mycelium__assistant_request_secret", json!({"name": "JELLYFIN_KEY", "description": "From Jellyfin, Dashboard, API keys"}))];
     let (provider, _) = scripted_provider(&server, calls).await;
     let assistant = create(&server.user, json!({"name": "Jellyfin", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -677,7 +636,6 @@ async fn request_secret_creates_a_waiting_secret_the_person_can_fill() {
 #[tokio::test]
 async fn a_secret_the_assistant_stores_is_redacted_from_its_own_tool_call() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let calls = vec![("mcp__mycelium__assistant_set_secret", json!({"name": "API_KEY", "value": "sk-live-12345"}))];
     let (provider, _) = scripted_provider(&server, calls).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -696,7 +654,6 @@ async fn a_secret_the_assistant_stores_is_redacted_from_its_own_tool_call() {
 #[tokio::test]
 async fn a_secret_name_that_is_not_an_environment_variable_is_refused_with_an_example() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
 
     let (status, refused) = server.user.json(server.user.put(&format!("/api/v1/assistants/{}/secrets/github-token", assistant["id"].as_str().unwrap())).json(&json!({"value": "abcdefgh"}))).await;
@@ -763,7 +720,6 @@ fn remote_paths(repository: &Repository) -> Vec<String> {
 #[tokio::test]
 async fn backup_commits_changed_files_skips_gitignored_ones_and_follows_deletions() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let repository = Repository::default();
     let (id, forge) = backed_up_assistant(&server, &repository).await;
     for (path, text) in [(".gitignore", "secret/\n*.tmp\n"), ("notes/a.md", "Shipped"), ("secret/x.md", "hidden"), ("cache.tmp", "temporary")] {
@@ -787,7 +743,6 @@ async fn backup_commits_changed_files_skips_gitignored_ones_and_follows_deletion
 #[tokio::test]
 async fn connecting_a_repository_that_already_has_files_never_removes_them() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let repository = Repository::default();
     repository.lock().unwrap().insert("README.md".to_string(), b"Hello".to_vec());
     let (id, forge) = backed_up_assistant(&server, &repository).await;
@@ -807,7 +762,6 @@ async fn connecting_a_repository_that_already_has_files_never_removes_them() {
 #[tokio::test]
 async fn pull_replaces_storage_with_the_repository_and_keeps_ignored_files() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let repository = Repository::default();
     repository.lock().unwrap().extend([("AGENTS.md".to_string(), b"Remote rules".to_vec()), ("README.md".to_string(), b"Hello".to_vec()), (".gitignore".to_string(), b"secret/\n".to_vec())]);
     let (id, forge) = backed_up_assistant(&server, &repository).await;
@@ -830,7 +784,6 @@ async fn pull_replaces_storage_with_the_repository_and_keeps_ignored_files() {
 #[tokio::test]
 async fn a_schedule_on_an_assistant_prompts_its_current_session() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let calls = vec![("mcp__mycelium__propose_schedule", json!({"prompt": "Post the stand-up", "preset": "weekdays at 08:00"}))];
     let (provider, fake) = scripted_provider(&server, calls).await;
     let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
@@ -868,7 +821,6 @@ async fn a_schedule_on_an_assistant_prompts_its_current_session() {
 #[tokio::test]
 async fn oversized_instructions_are_refused_without_creating_the_assistant() {
     let server = Server::start().await;
-    enable(&server.user).await;
 
     let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Stand-up", "instructions": "x".repeat(1024 * 1024 + 1)}))).await;
     let (_, listed) = server.user.json(server.user.get("/api/v1/assistants")).await;
@@ -879,7 +831,6 @@ async fn oversized_instructions_are_refused_without_creating_the_assistant() {
 #[tokio::test]
 async fn an_archived_assistant_cannot_be_prompted_until_restored() {
     let server = Server::start().await;
-    enable(&server.user).await;
     let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
     let id = assistant["id"].as_str().unwrap();
     server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true}))).await;

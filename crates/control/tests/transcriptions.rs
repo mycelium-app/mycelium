@@ -53,7 +53,7 @@ async fn add_provider(server: &Server, router: Router, name: &str) -> Value {
 
 async fn voice_on(server: &Server) {
     sqlx::query("delete from user_settings").execute(&server.pool).await.unwrap();
-    let (status, _) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"tasks": false, "workflows": false, "instructions": false, "details": false, "subagents": false, "walkthrough": false, "move_chats": false, "voice": true}))).await;
+    let (status, _) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"voice": true}))).await;
     assert_eq!(status, 200);
 }
 

@@ -63,7 +63,7 @@ async fn ping_and_tools_list_answer_and_unknown_methods_are_json_rpc_errors() {
 
     let (_, tools) = mcp(&server, &token, None, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
     let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["start_workflow", "start_subagent", "get_workflow", "recall", "remember", "propose_task", "ask_question", "propose_schedule", "walkthrough", "get_instructions", "propose_instructions_edit", "get_goal", "get_account_usage", "set_project_icon", "find_conversations", "send_to_conversation", "request_api_access", "request_ssh_access", "find_artifacts", "request_artifact_access", "create_artifact", "update_artifact", "design_set_artboard", "design_remove_item", "read_artifact", "read_artifact_feedback"]);
+    assert_eq!(names, ["start_workflow", "start_subagent", "get_workflow", "recall", "remember", "propose_task", "ask_question", "propose_schedule", "read_earlier_turns", "assistant_list_files", "assistant_read_file", "assistant_write_file", "assistant_delete_file", "assistant_set_secret", "assistant_request_secret", "assistant_use_workspace", "walkthrough", "get_instructions", "propose_instructions_edit", "get_goal", "get_account_usage", "set_project_icon", "find_conversations", "start_conversation", "send_to_conversation", "request_api_access", "request_ssh_access", "find_artifacts", "request_artifact_access", "create_artifact", "update_artifact", "design_set_artboard", "design_remove_item", "read_artifact", "read_artifact_feedback"]);
 
     let (_, unknown) = mcp(&server, &token, None, json!({"jsonrpc": "2.0", "id": 3, "method": "resources/list"})).await;
     assert_eq!(unknown["error"]["code"], -32601);
@@ -308,10 +308,6 @@ async fn create_bank(server: &Server, name: &str, model_class: &str, group_ids: 
     bank
 }
 
-async fn enable_memory_banks(server: &Server) {
-    sqlx::query("update user_settings set experiment_memory_banks = true").execute(&server.pool).await.unwrap();
-}
-
 async fn group_with_claim(server: &Server, name: &str, prefix: &str) -> Uuid {
     let owner = sqlx::query_scalar::<_, Uuid>("select id from users order by created_at limit 1").fetch_one(&server.pool).await.unwrap();
     let group = sqlx::query_scalar::<_, Uuid>("insert into groups (owner, name) values ($1, $2) returning id").bind(owner).bind(name).fetch_one(&server.pool).await.unwrap();
@@ -334,7 +330,6 @@ async fn private_chat_provider(server: &Server, conversation: Uuid, model_class:
 #[tokio::test]
 async fn banked_memories_are_recalled_only_by_models_and_groups_the_bank_allows() {
     let server = Server::start().await;
-    enable_memory_banks(&server).await;
     let link = server.online_node("laptop").await;
     let work = group_with_claim(&server, "Work", "/work").await;
     let other = group_with_claim(&server, "Other", "/other").await;
@@ -357,15 +352,13 @@ async fn banked_memories_are_recalled_only_by_models_and_groups_the_bank_allows(
 }
 
 #[tokio::test]
-async fn banks_still_restrict_recall_when_the_experiment_is_off() {
+async fn banks_restrict_recall_to_conversations_they_are_open_to() {
     let server = Server::start().await;
-    enable_memory_banks(&server).await;
     let link = server.online_node("laptop").await;
     let local = server.create_conversation(link.id, None).await;
     private_chat_provider(&server, local.id, "private").await;
     create_bank(&server, "Health", "private", vec![]).await;
     call(&server, &link.token, Some(local.id), "remember", json!({"text": "Blood pressure readings go in the notes", "bank": "Health"})).await;
-    sqlx::query("update user_settings set experiment_memory_banks = false").execute(&server.pool).await.unwrap();
 
     let found = text_of(&call(&server, &link.token, None, "recall", json!({"query": "blood pressure"})).await);
 
@@ -373,21 +366,12 @@ async fn banks_still_restrict_recall_when_the_experiment_is_off() {
 }
 
 #[tokio::test]
-async fn remember_into_a_bank_needs_the_experiment_and_a_bank_open_here() {
+async fn remember_into_a_bank_needs_a_bank_open_here() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
     let conversation = server.create_conversation(link.id, None).await;
-    enable_memory_banks(&server).await;
     create_bank(&server, "Health", "private", vec![]).await;
-    sqlx::query("update user_settings set experiment_memory_banks = false").execute(&server.pool).await.unwrap();
 
-    let (status, refused) = server.user.json(server.user.get("/api/v1/memory-banks")).await;
-    assert_eq!((status, refused["error"].clone()), (403, json!("experiment_disabled")));
-
-    let off = call(&server, &link.token, Some(conversation.id), "remember", json!({"text": "Nope", "bank": "Health"})).await;
-    assert_eq!((off["result"]["isError"].clone(), text_of(&off)), (json!(true), "Enable the Memory banks experiment in Settings, Experiments to use this.".to_string()));
-
-    enable_memory_banks(&server).await;
     let closed = call(&server, &link.token, Some(conversation.id), "remember", json!({"text": "Nope", "bank": "Health"})).await;
     assert_eq!(closed["result"]["isError"], true);
     assert!(text_of(&closed).contains("No bank called Health is open to this conversation."), "{}", text_of(&closed));
@@ -402,7 +386,6 @@ async fn remember_into_a_bank_needs_the_experiment_and_a_bank_open_here() {
 #[tokio::test]
 async fn banks_are_listed_created_edited_and_deleted_per_person() {
     let server = Server::start().await;
-    enable_memory_banks(&server).await;
     let bank = create_bank(&server, "Health", "private", vec![]).await;
     let id = bank["id"].as_str().unwrap();
 
@@ -416,7 +399,6 @@ async fn banks_are_listed_created_edited_and_deleted_per_person() {
     assert_eq!(listed.as_array().unwrap().len(), 1);
 
     let other = server.second_user("other@example.com").await;
-    sqlx::query("insert into user_settings (owner, experiment_memory_banks) select id, true from users where email = 'other@example.com' on conflict (owner) do update set experiment_memory_banks = true").execute(&server.pool).await.unwrap();
     let (_, theirs) = other.json(other.get("/api/v1/memory-banks")).await;
     let (status, _) = other.json(other.delete(&format!("/api/v1/memory-banks/{id}"))).await;
     assert_eq!((theirs, status), (json!([]), 404));
@@ -428,7 +410,6 @@ async fn banks_are_listed_created_edited_and_deleted_per_person() {
 #[tokio::test]
 async fn a_bank_with_memories_cannot_be_deleted() {
     let server = Server::start().await;
-    enable_memory_banks(&server).await;
     let (_, token) = server.join("node", "laptop").await;
     let bank = create_bank(&server, "Shared", "cloud", vec![]).await;
     call(&server, &token, None, "remember", json!({"text": "Kept in a bank", "bank": "Shared"})).await;

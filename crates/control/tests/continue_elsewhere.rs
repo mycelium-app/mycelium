@@ -70,12 +70,6 @@ async fn expect_prompt(link: &mut NodeLink) -> String {
     }
 }
 
-async fn enable(server: &Server) {
-    let flags = json!({"tasks": false, "workflows": false, "instructions": false, "details": false, "subagents": false, "walkthrough": false, "move_chats": false, "groups": false, "continue_elsewhere": true});
-    let (status, _) = server.user.json(server.user.put("/api/v1/experiments").json(&flags)).await;
-    assert_eq!(status, 200);
-}
-
 async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
     let mut link = server.online_node_as("laptop", version).await;
     link.send(NodeToControl::Logins { logins: accounts }).await;
@@ -117,20 +111,8 @@ async fn continue_on(server: &Server, id: Uuid, body: Value) -> (u16, Value) {
 }
 
 #[tokio::test]
-async fn continue_is_refused_while_the_experiment_is_off() {
-    let server = Server::start().await;
-    let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
-    let id = idle_conversation(&server, &mut link, "sam@example.com").await;
-
-    let (status, body) = continue_on(&server, id, json!({"agent": "claude", "account": "work@example.org"})).await;
-
-    assert_eq!((status, body["error"].as_str()), (403, Some("experiment_disabled")));
-}
-
-#[tokio::test]
 async fn continuing_on_another_account_resumes_the_same_session_there() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
 
@@ -162,7 +144,6 @@ async fn continuing_on_another_account_resumes_the_same_session_there() {
 #[tokio::test]
 async fn continuing_on_an_account_that_is_not_signed_in_is_refused() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedOut)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
 
@@ -174,7 +155,6 @@ async fn continuing_on_an_account_that_is_not_signed_in_is_refused() {
 #[tokio::test]
 async fn continuing_on_the_account_it_already_uses_is_refused() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
 
@@ -186,7 +166,6 @@ async fn continuing_on_the_account_it_already_uses_is_refused() {
 #[tokio::test]
 async fn continuing_while_the_agent_is_working_is_refused() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
     let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "account": "sam@example.com", "prompt": "Work"}))).await;
     let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
@@ -205,7 +184,6 @@ async fn continuing_while_the_agent_is_working_is_refused() {
 #[tokio::test]
 async fn continuing_on_an_outdated_node_asks_for_an_update() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.9.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
 
@@ -218,7 +196,6 @@ async fn continuing_on_an_outdated_node_asks_for_an_update() {
 #[tokio::test]
 async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
     let touched = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Edit", "locations": [{"path": "/work/app/src/lib.rs"}]}});
@@ -260,7 +237,6 @@ async fn continuing_on_another_harness_seeds_the_first_prompt_with_the_handoff()
 #[tokio::test]
 async fn a_refused_start_after_continuing_elsewhere_fails_the_conversation_and_the_next_prompt_starts_afresh() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
     continue_on(&server, id, json!({"agent": "codex"})).await;
@@ -287,7 +263,6 @@ async fn a_refused_start_after_continuing_elsewhere_fails_the_conversation_and_t
 #[tokio::test]
 async fn the_handoff_is_prepended_once_even_if_the_new_session_has_not_reported_its_id() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
     continue_on(&server, id, json!({"agent": "codex"})).await;
@@ -309,7 +284,6 @@ async fn the_handoff_is_prepended_once_even_if_the_new_session_has_not_reported_
 #[tokio::test]
 async fn the_previous_session_is_not_offered_for_import_after_a_harness_switch() {
     let server = Server::start().await;
-    enable(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
     let id = idle_conversation(&server, &mut link, "sam@example.com").await;
     continue_on(&server, id, json!({"agent": "codex"})).await;
@@ -324,7 +298,6 @@ async fn the_previous_session_is_not_offered_for_import_after_a_harness_switch()
 #[tokio::test]
 async fn continuing_on_a_chat_model_sends_the_handoff_then_only_new_turns_and_can_return_to_the_harness() {
     let server = Server::start().await;
-    enable(&server).await;
     let (router, requests) = fake_openai();
     let base = serve(router).await;
     let provider = add_provider(&server, &base).await;
@@ -374,7 +347,6 @@ fn answer_text(reply: &Value) -> String {
 #[tokio::test]
 async fn read_earlier_turns_pages_back_and_searches_this_conversation_only() {
     let server = Server::start().await;
-    enable(&server).await;
     let (mut link, token) = server.online_node_with_token("laptop", "v0.11.0").await;
     let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app"}))).await;
     let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
@@ -411,18 +383,6 @@ async fn read_earlier_turns_pages_back_and_searches_this_conversation_only() {
     assert_eq!(elsewhere, "No earlier messages match.");
 }
 
-#[tokio::test]
-async fn read_earlier_turns_is_refused_while_the_experiment_is_off() {
-    let server = Server::start().await;
-    let (_link, token) = server.online_node_with_token("laptop", "v0.11.0").await;
-    let id = server.node_conversation(&token).await;
-
-    let reply = server.agent_mcp(&token, id, earlier_turns(json!({}))).await;
-
-    assert_eq!(reply["result"]["isError"], true);
-    assert!(answer_text(&reply).contains("Continue elsewhere"));
-}
-
 fn limit_message() -> String {
     let resets = chrono::Utc::now() + chrono::Duration::hours(2);
 
@@ -451,7 +411,6 @@ async fn working_on(server: &Server, link: &mut NodeLink, account: &str) -> Uuid
 #[tokio::test]
 async fn a_full_window_switches_to_the_account_with_most_usage_left() {
     let server = Server::start().await;
-    enable(&server).await;
     switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 30), with_usage("spare@example.org", 80)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
@@ -477,7 +436,6 @@ async fn a_full_window_switches_to_the_account_with_most_usage_left() {
 #[tokio::test]
 async fn a_goal_still_stops_when_the_switch_fails_and_no_reset_is_known() {
     let server = Server::start().await;
-    enable(&server).await;
     switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.9.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
@@ -491,23 +449,8 @@ async fn a_goal_still_stops_when_the_switch_fails_and_no_reset_is_known() {
 #[tokio::test]
 async fn a_full_window_with_no_other_account_waits_for_the_reset() {
     let server = Server::start().await;
-    enable(&server).await;
     switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 0)]).await;
-    let id = working_on(&server, &mut link, "sam@example.com").await;
-
-    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
-    let user = server.user.clone();
-    common::eventually("the resume to be scheduled", || async { (!user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["resume_at"].is_null()).then_some(()) }).await;
-
-    assert!(server.events(id).await.iter().all(|event| event["kind"] != "continued"));
-}
-
-#[tokio::test]
-async fn with_the_experiment_off_switching_waits_for_the_reset_like_resuming() {
-    let server = Server::start().await;
-    switch_on_usage_limit(&server).await;
-    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
     let id = working_on(&server, &mut link, "sam@example.com").await;
 
     link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;

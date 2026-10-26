@@ -287,22 +287,7 @@ impl Server {
 
     pub async fn start_with(configure: impl FnOnce(&mut Config)) -> Server {
         let database_url = create_database().await;
-        let server = Server::start_on(database_url, configure).await;
-
-        server.enable_experiments().await;
-
-        server
-    }
-
-    async fn enable_experiments(&self) {
-        sqlx::query(
-            "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats, experiment_groups)
-             select id, true, true, true, true, true, true, true, true from users
-             on conflict (owner) do update set experiment_tasks = true, experiment_workflows = true, experiment_instructions = true, experiment_details = true, experiment_subagents = true, experiment_walkthrough = true, experiment_move_chats = true, experiment_groups = true",
-        )
-        .execute(&self.pool)
-        .await
-        .unwrap();
+        Server::start_on(database_url, configure).await
     }
 
     pub async fn start_on(database_url: String, configure: impl FnOnce(&mut Config)) -> Server {
@@ -367,7 +352,6 @@ impl Server {
         let token = Uuid::new_v4().to_string();
 
         sqlx::query("insert into web_sessions (user_id, token_hash, expires_at) values ($1, $2, now() + interval '1 day')").bind(user_id).bind(hash(&token)).execute(&self.pool).await.unwrap();
-        self.enable_experiments().await;
 
         Client { base: self.base.clone(), cookie: format!("myc_session={token}"), http: self.user.http.clone() }
     }

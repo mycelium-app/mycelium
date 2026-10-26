@@ -44,10 +44,6 @@ async fn propose(server: &Server, link: &NodeLink, from: Uuid, to: Uuid) -> Valu
     call(server, link, from, "send_to_conversation", json!({"conversation": to.to_string(), "message": "The schema is ready", "reason": "You asked for the schema"})).await
 }
 
-async fn turn_on(server: &Server) {
-    sqlx::query("insert into user_settings (owner, experiment_chat_across_groups) select id, true from users on conflict (owner) do update set experiment_chat_across_groups = true").execute(&server.pool).await.unwrap();
-}
-
 async fn group(server: &Server, name: &str, folder: &str) -> Uuid {
     let (status, created) = server.user.json(server.user.post("/api/v1/groups").json(&json!({"name": name}))).await;
     assert_eq!(status, 201, "{created}");
@@ -73,7 +69,6 @@ struct Fleet {
 
 async fn fleet() -> Fleet {
     let server = Server::start().await;
-    turn_on(&server).await;
     let mut link = server.online_node("laptop").await;
     let yucca = group(&server, "yucca", "/work/yucca").await;
     let immich = group(&server, "Immich", "/work/immich").await;
@@ -81,20 +76,6 @@ async fn fleet() -> Fleet {
     let immich_chat = working_conversation(&server, &mut link, "Fix billing export", "/work/immich/app").await;
 
     Fleet { server, link, yucca, immich, yucca_chat, immich_chat }
-}
-
-#[tokio::test]
-async fn group_connections_are_refused_until_the_experiment_is_on() {
-    let server = Server::start().await;
-    let first = group(&server, "yucca", "/work/yucca").await;
-    let second = group(&server, "Immich", "/work/immich").await;
-
-    let (status, refused) = connect(&server, first, second).await;
-    assert_eq!((status, refused["error"].clone()), (403, json!("experiment_disabled")));
-
-    turn_on(&server).await;
-    let (status, created) = connect(&server, first, second).await;
-    assert_eq!(status, 201, "{created}");
 }
 
 #[tokio::test]
@@ -230,20 +211,14 @@ fn start_arguments(group: &str, project: &str) -> Value {
 }
 
 #[tokio::test]
-async fn start_conversation_is_not_listed_until_the_experiment_is_on() {
+async fn start_conversation_is_listed_to_every_agent() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
-    let listed = |tools: Value| tools["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "start_conversation");
-    let list = |server: &Server| {
-        let anonymous = server.anonymous();
-        let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
-        async move { anonymous.json(request).await.1 }
-    };
+    let anonymous = server.anonymous();
+    let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {}", link.token)).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let (_, tools) = anonymous.json(request).await;
 
-    assert!(!listed(list(&server).await));
-
-    turn_on(&server).await;
-    assert!(listed(list(&server).await));
+    assert!(tools["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "start_conversation"));
 }
 
 #[tokio::test]

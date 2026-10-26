@@ -54,12 +54,6 @@ pub async fn group_of(state: &AppState, conversation: Uuid) -> ApiResult<Option<
 }
 
 pub async fn connected(state: &AppState, owner: Uuid, from: Uuid, to: Uuid) -> ApiResult<bool> {
-    let experiments = crate::experiments::of(state, owner).await?;
-
-    if !experiments.chat_across_groups {
-        return Ok(false);
-    }
-
     let (Some(source), Some(target)) = (group_of(state, from).await?, group_of(state, to).await?) else {
         return Ok(false);
     };

@@ -1218,7 +1218,6 @@ async fn a_remembered_memory_and_its_edit_and_deletion_reach_every_stream_client
 #[tokio::test]
 async fn memory_banks_and_moving_a_memory_into_one_reach_the_stream() {
     let server = Server::start().await;
-    sqlx::query("insert into user_settings (owner, experiment_memory_banks) select id, true from users on conflict (owner) do update set experiment_memory_banks = true").execute(&server.pool).await.unwrap();
     let (_, token) = server.join("node", "laptop").await;
     let mut stream = server.user.stream().await;
     let anonymous = server.anonymous();
