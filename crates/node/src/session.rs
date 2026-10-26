@@ -2,6 +2,7 @@ use crate::attachments;
 use crate::acp::{Action, Command, Direction, SessionSnapshot, SessionState, StartPlan};
 use anyhow::{Context, Result, bail};
 use mycelium_keeper::socket_path;
+use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::NodeToControl;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -26,6 +27,8 @@ const LONGEST_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 1
 
 #[derive(Debug, Clone)]
 pub struct Launch {
+    pub agent: AgentId,
+    pub account: Option<String>,
     pub keeper_binary: PathBuf,
     pub agent_command: Vec<String>,
     pub agent_env: Vec<(String, String)>,
@@ -57,6 +60,7 @@ pub struct SessionHandle {
     acp_session_id: Arc<Mutex<Option<String>>>,
     busy: Arc<AtomicBool>,
     closing: Arc<AtomicBool>,
+    launched_as: Option<(AgentId, Option<String>)>,
     last_active: Arc<AtomicU64>,
 }
 
@@ -67,6 +71,10 @@ fn now_millis() -> u64 {
 impl SessionHandle {
     pub fn running(&self) -> bool {
         !self.ended() && !self.closing.load(Ordering::SeqCst)
+    }
+
+    pub fn launched_as(&self, agent: AgentId, account: &Option<String>) -> bool {
+        self.launched_as.as_ref().is_none_or(|(launched_agent, launched_account)| *launched_agent == agent && launched_account == account)
     }
 
     pub fn idle(&self) -> bool {
@@ -192,7 +200,7 @@ pub fn spawn_session(spec: SessionSpec, out: mpsc::UnboundedSender<NodeToControl
     let (messages, inbox) = mpsc::unbounded_channel();
     let acked = Arc::new(AtomicI64::new(read_acked(&spec.dir)));
     let already_ended = spec.launch.is_none() && (spec.dir.join("exit.json").exists() || !socket_path(&spec.dir).exists());
-    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(true)), closing: Arc::new(AtomicBool::new(false)), last_active: Arc::new(AtomicU64::new(now_millis())) };
+    let handle = SessionHandle { messages, acked: acked.clone(), ended: Arc::new(AtomicBool::new(already_ended)), acp_session_id: Arc::new(Mutex::new(None)), busy: Arc::new(AtomicBool::new(true)), closing: Arc::new(AtomicBool::new(false)), launched_as: spec.launch.as_ref().map(|launch| (launch.agent, launch.account.clone())), last_active: Arc::new(AtomicU64::new(now_millis())) };
 
     let base = if spec.launch.is_some() { start_new_journal_epoch(&spec.dir) } else { read_base(&spec.dir) };
     let saved = if spec.launch.is_none() { load_snapshot(&spec.dir, base) } else { None };
@@ -620,7 +628,7 @@ mod tests {
     #[tokio::test]
     async fn a_state_directory_too_deep_for_a_unix_socket_is_refused_with_the_fix() {
         let dir = PathBuf::from("/tmp").join("d".repeat(120));
-        let launch = Launch { keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, instructions: None, cwd: PathBuf::from("/"), resume: None, fork: false };
+        let launch = Launch { agent: AgentId::Claude, account: None, keeper_binary: PathBuf::from("/bin/true"), agent_command: vec![], agent_env: vec![], mcp_server: Value::Null, instructions: None, cwd: PathBuf::from("/"), resume: None, fork: false };
 
         let error = launch_keeper(&dir, &launch).await.unwrap_err().to_string();
 

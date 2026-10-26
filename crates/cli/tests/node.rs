@@ -692,6 +692,25 @@ async fn a_session_started_while_the_previous_one_is_closing_replaces_it_and_tak
 }
 
 #[tokio::test]
+async fn a_session_started_for_another_agent_replaces_the_running_one() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    let agent = fake_acp();
+    fixture.options.agent_commands = Arc::new(move |_| vec![agent.clone()]);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(19);
+    start_conversation(&mut connection, conversation).await;
+
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Codex, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    prompt(&connection, conversation, "hello");
+
+    let reply = connection.next_matching(|message| update_text(message).is_some() || matches!(message, NodeToControl::SessionClosed { .. } | NodeToControl::SessionFailed { .. })).await;
+    assert_eq!(update_text(&reply).unwrap(), "one");
+}
+
+#[tokio::test]
 async fn after_a_reconnect_only_unacknowledged_messages_are_replayed_once() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

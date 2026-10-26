@@ -512,8 +512,13 @@ impl Daemon {
 
     fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, secrets: Vec<(String, String)>) {
         let existing = self.session_handles();
-        if existing.iter().any(|(id, handle)| *id == conversation_id && handle.running()) {
-            return;
+        let running_here = existing.iter().find(|(id, handle)| *id == conversation_id && handle.running());
+        if let Some((_, handle)) = running_here {
+            if handle.launched_as(agent, &account) {
+                return;
+            }
+
+            handle.close();
         }
 
         let running = existing.iter().filter(|(_, handle)| handle.running()).count();
@@ -545,6 +550,7 @@ impl Daemon {
             env = with_developer_instructions(env, text);
         }
 
+        let requested_account = account.clone();
         let accounts = accounts_dir(&self.config.state_dir);
         let mut chosen = None;
 
@@ -594,6 +600,8 @@ impl Daemon {
         }
 
         let launch = Launch {
+            agent,
+            account: requested_account,
             keeper_binary: self.options.keeper_binary.clone(),
             agent_command,
             agent_env: env,
