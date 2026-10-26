@@ -106,6 +106,12 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    Steered {
+        request_id: Uuid,
+        outcome: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     InstructionsHeld {
         revision: String,
         unmanaged: Vec<String>,
@@ -374,6 +380,13 @@ pub enum ControlToNode {
     Prompt {
         conversation_id: Uuid,
         prompt_id: Uuid,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<PromptAttachment>,
+    },
+    Steer {
+        conversation_id: Uuid,
+        request_id: Uuid,
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<PromptAttachment>,

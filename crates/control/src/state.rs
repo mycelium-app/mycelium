@@ -6,7 +6,7 @@ use crate::store::publish_node;
 use crate::versions::LatestVersions;
 use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
 use mycelium_proto::conversation::AgentId;
-use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, ResourceSample};
+use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, PromptAttachment, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
@@ -65,6 +65,10 @@ pub struct GitAnswer {
     pub error: Option<String>,
 }
 
+pub struct SteerAnswer {
+    pub outcome: String,
+}
+
 const OAUTH_SIGN_IN_LIFETIME: std::time::Duration = std::time::Duration::from_secs(600);
 
 pub struct PendingOAuth {
@@ -103,6 +107,7 @@ pub struct Hub {
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
+    steer_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<SteerAnswer>)>>,
     stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
     folder_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<FolderAnswer>)>>,
     workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
@@ -279,6 +284,39 @@ impl Hub {
 
     pub fn forget_git_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.git_requests.lock() {
+            requests.remove(&request_id);
+        }
+    }
+
+    pub fn request_steer(&self, node_id: Uuid, conversation_id: Uuid, text: String, attachments: Vec<PromptAttachment>) -> Option<(Uuid, oneshot::Receiver<SteerAnswer>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.steer_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::Steer { conversation_id, request_id, text, attachments }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_steer_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_steer(&self, node_id: Uuid, request_id: Uuid, answer: SteerAnswer) {
+        let waiting = self.steer_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    pub fn forget_steer_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.steer_requests.lock() {
             requests.remove(&request_id);
         }
     }

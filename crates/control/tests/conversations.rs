@@ -510,6 +510,141 @@ async fn send_all_now_cancels_the_running_turn_then_sends_the_combined_prompt() 
     assert!(queue(&server, id).await.is_empty());
 }
 
+const STEERING_NODE: &str = "0.10.1";
+
+async fn next_but_git(link: &mut NodeLink) -> ControlToNode {
+    loop {
+        let message = link.next().await;
+
+        if !matches!(message, ControlToNode::Git { .. }) {
+            return message;
+        }
+    }
+}
+
+async fn answer_steer(link: &mut NodeLink, outcome: &str) -> String {
+    let ControlToNode::Steer { request_id, text, .. } = next_but_git(link).await else {
+        panic!("expected a steer");
+    };
+    link.send(NodeToControl::Steered { request_id, outcome: outcome.into(), error: None }).await;
+
+    text
+}
+
+async fn user_message_texts(server: &Server, id: Uuid) -> Vec<String> {
+    server.events(id).await.iter().filter(|event| event["kind"] == "user_message").map(|event| event["payload"]["text"].as_str().unwrap().to_string()).collect()
+}
+
+async fn assert_turn_not_cancelled(server: &Server, link: &mut NodeLink, id: Uuid) {
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/cancel"))).await;
+
+    assert_eq!(next_but_git(link).await, ControlToNode::Cancel { conversation_id: id });
+}
+
+#[tokio::test]
+async fn send_now_on_a_steering_node_injects_into_the_running_turn_instead_of_stopping_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "later").await;
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[1]["id"].as_str().unwrap().to_string();
+
+    let url = format!("/api/v1/conversations/{id}/queue/{urgent}/send-now");
+    let ((status, _), text) = tokio::join!(server.user.json(server.user.post(&url)), answer_steer(&mut link, "injected"));
+
+    assert_eq!((status, text.as_str()), (204, "urgent"));
+    assert_eq!(user_message_texts(&server, id).await, vec!["long task", "urgent"]);
+    let remaining = queue(&server, id).await;
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0]["text"], "later");
+    assert_eq!(status_of(&server, id).await, "working");
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn send_all_now_on_a_steering_node_injects_the_combined_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "first").await;
+    prompt(&server, id, "second").await;
+
+    let url = format!("/api/v1/conversations/{id}/queue/send-all-now");
+    let ((status, _), text) = tokio::join!(server.user.json(server.user.post(&url)), answer_steer(&mut link, "injected"));
+
+    assert_eq!((status, text.as_str()), (204, "first\n\nsecond"));
+    assert_eq!(user_message_texts(&server, id).await, vec!["long task", "first\n\nsecond"]);
+    assert!(queue(&server, id).await.is_empty());
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn send_now_whose_turn_had_just_ended_is_sent_as_a_normal_prompt() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let url = format!("/api/v1/conversations/{id}/queue/{urgent}/send-now");
+    let answering = async {
+        let ControlToNode::Steer { request_id, .. } = next_but_git(&mut link).await else {
+            panic!("expected a steer");
+        };
+        link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+        link.send(NodeToControl::Steered { request_id, outcome: "prompt_required".into(), error: None }).await;
+    };
+    let ((status, _), ()) = tokio::join!(server.user.json(server.user.post(&url)), answering);
+
+    assert_eq!(status, 204);
+    assert!(matches!(next_but_git(&mut link).await, ControlToNode::Prompt { text, .. } if text == "urgent"));
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn send_now_falls_back_to_stopping_the_turn_when_the_agent_cannot_be_steered() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let url = format!("/api/v1/conversations/{id}/queue/{urgent}/send-now");
+    let ((status, _), _) = tokio::join!(server.user.json(server.user.post(&url)), answer_steer(&mut link, "unsupported"));
+
+    assert_eq!(status, 204);
+    assert_eq!(queue(&server, id).await.len(), 1);
+    assert_eq!(next_but_git(&mut link).await, ControlToNode::Cancel { conversation_id: id });
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "cancelled".into(), usage: None }).await;
+    assert!(matches!(next_but_git(&mut link).await, ControlToNode::Prompt { text, .. } if text == "urgent"));
+}
+
+#[tokio::test]
+async fn send_now_on_a_node_older_than_steering_stops_the_turn_without_asking() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", "0.9.0").await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/{urgent}/send-now"))).await;
+
+    assert_eq!(status, 204);
+    assert_eq!(next_but_git(&mut link).await, ControlToNode::Cancel { conversation_id: id });
+}
+
 #[tokio::test]
 async fn send_all_now_on_an_empty_queue_is_not_found() {
     let server = Server::start().await;

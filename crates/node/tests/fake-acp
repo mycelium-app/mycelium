@@ -4,7 +4,8 @@
 A prompt containing "permission" asks for permission before answering, "readfile" asks the client to read a file and reports whether it was refused, "slow" waits until
 session/cancel arrives, "stuck" streams one update and never answers the prompt, not even a cancel, "chatty" streams an
 update every half second for twenty seconds and never answers the prompt, anything else streams three updates. Every turn is followed by one
-extra update after the prompt response.
+extra update after the prompt response. Unless started with --no-steering it advertises the steering extension: `_session/steering` answers "injected" and streams a
+"steered: <text>" update while a turn is running, and "promptRequired" when none is.
 """
 import json
 import queue
@@ -15,6 +16,8 @@ import time
 SESSION_ID = "fake-session-1"
 write_lock = threading.Lock()
 cancelled = threading.Event()
+turn_running = threading.Event()
+steering = "--no-steering" not in sys.argv[1:]
 permission_answers = queue.Queue()
 
 
@@ -47,7 +50,14 @@ def run_prompt(request_id, params):
     session_id = params.get("sessionId", SESSION_ID)
     text = prompt_text(params)
     cancelled.clear()
+    turn_running.set()
+    try:
+        run_turn(request_id, session_id, text)
+    finally:
+        turn_running.clear()
 
+
+def run_turn(request_id, session_id, text):
     if "slow" in text:
         update(session_id, "working")
         if cancelled.wait(30):
@@ -105,11 +115,14 @@ def handle(frame):
     if method is None and request_id in (9001, 9002):
         permission_answers.put(frame)
     elif method == "initialize":
-        respond(request_id, {
+        result = {
             "protocolVersion": 1,
             "agentCapabilities": {"loadSession": True},
             "authMethods": [],
-        })
+        }
+        if steering:
+            result["_meta"] = {"steering": {"supported": True}}
+        respond(request_id, result)
     elif method == "session/new":
         respond(request_id, {
             "sessionId": SESSION_ID,
@@ -125,6 +138,13 @@ def handle(frame):
         respond(request_id, {})
     elif method == "session/prompt":
         threading.Thread(target=run_prompt, args=(request_id, frame.get("params", {})), daemon=True).start()
+    elif method == "_session/steering" and steering:
+        params = frame.get("params", {})
+        if turn_running.is_set():
+            update(params.get("sessionId", SESSION_ID), "steered: " + prompt_text(params))
+            respond(request_id, {"outcome": "injected"})
+        else:
+            respond(request_id, {"outcome": "promptRequired", "reason": "noRunningTurn"})
     elif method == "session/cancel":
         cancelled.set()
         permission_answers.put({"result": {"outcome": {"outcome": "cancelled"}}})

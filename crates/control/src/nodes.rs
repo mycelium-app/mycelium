@@ -199,6 +199,8 @@ pub fn node_has(node_version: &str, since: (u64, u64, u64)) -> bool {
 
 pub const HEAD_AND_DIRECTORIES_SINCE: (u64, u64, u64) = (0, 10, 0);
 
+pub const STEERING_SINCE: (u64, u64, u64) = (0, 10, 1);
+
 pub fn node_offline() -> ApiError {
     ApiError::conflict("node_offline", "This node is offline. Start it, then try again.")
 }

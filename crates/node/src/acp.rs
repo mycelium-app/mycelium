@@ -20,6 +20,7 @@ enum Pending {
     NewSession,
     ResumeSession,
     Prompt,
+    Steer(Uuid),
     Other,
 }
 
@@ -33,6 +34,7 @@ pub enum Direction {
 pub enum Action {
     Emit(i64, NodeToControl),
     Started(NodeToControl),
+    Reply(NodeToControl),
     Send(Value),
     SaveAttachments { cwd: String, files: Vec<SavedFile> },
     PromptWritten(Uuid),
@@ -42,6 +44,7 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Prompt { prompt_id: Uuid, text: String, attachments: Vec<PromptAttachment> },
+    Steer { request_id: Uuid, text: String, attachments: Vec<PromptAttachment> },
     Cancel,
     PermissionResponse { request_id: String, outcome: Value },
     SetConfig { mode: Option<String>, model: Option<String>, config: Option<BTreeMap<String, Value>> },
@@ -77,6 +80,8 @@ pub struct SessionSnapshot {
     prompt_capabilities: PromptCapabilities,
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    steering: bool,
 }
 
 impl SessionSnapshot {
@@ -110,6 +115,7 @@ pub struct SessionState {
     permissions: HashMap<String, Value>,
     prompt_capabilities: PromptCapabilities,
     cwd: Option<String>,
+    steering: bool,
 }
 
 fn request_frame(id: i64, method: &str, params: Value) -> Value {
@@ -170,6 +176,7 @@ impl SessionState {
             unanswered_requests: HashMap::new(),
             permissions: HashMap::new(),
             prompt_capabilities: PromptCapabilities::default(),
+            steering: false,
         }
     }
 
@@ -191,6 +198,7 @@ impl SessionState {
         state.permissions = snapshot.permissions;
         state.prompt_capabilities = snapshot.prompt_capabilities;
         state.cwd = snapshot.cwd;
+        state.steering = snapshot.steering;
 
         state
     }
@@ -213,6 +221,7 @@ impl SessionState {
             permissions: self.permissions.clone(),
             prompt_capabilities: self.prompt_capabilities,
             cwd: self.cwd.clone(),
+            steering: self.steering,
         }
     }
 
@@ -302,6 +311,7 @@ impl SessionState {
 
                 self.advance()
             }
+            Command::Steer { request_id, text, attachments } => self.steer(request_id, text, attachments),
             Command::Cancel => self.cancel(),
             Command::PermissionResponse { request_id, outcome } => {
                 let Some(id) = self.permissions.get(&request_id).cloned() else {
@@ -317,6 +327,34 @@ impl SessionState {
                 vec![Action::CloseKeeper]
             }
         }
+    }
+
+    fn steer(&mut self, request_id: Uuid, text: String, attachments: Vec<PromptAttachment>) -> Vec<Action> {
+        let Some(session_id) = self.session_id.clone().filter(|_| self.steering && self.live) else {
+            return vec![Action::Reply(NodeToControl::Steered { request_id, outcome: "unsupported".into(), error: None })];
+        };
+
+        let (prompt, files) = self.render_prompt(request_id, &text, &attachments);
+        let mut actions = Vec::new();
+
+        if !files.is_empty() {
+            actions.push(Action::SaveAttachments { cwd: self.cwd.clone().unwrap_or_default(), files });
+        }
+
+        let params = json!({"sessionId": session_id, "prompt": prompt, "_meta": {"steering": {"idleBehavior": "promptRequired"}}});
+        let id = self.next_id;
+        actions.push(self.outgoing_request("_session/steering", params));
+        self.pending.insert(id.to_string(), Pending::Steer(request_id));
+
+        actions
+    }
+
+    fn render_prompt(&self, prompt_id: Uuid, text: &str, attachments: &[PromptAttachment]) -> (Vec<Value>, Vec<SavedFile>) {
+        let cwd = self.cwd.clone().unwrap_or_default();
+        let rendered = attachments::render(std::path::Path::new(&cwd), prompt_id, text, attachments, self.prompt_capabilities);
+        let prompt = if rendered.blocks.is_empty() { vec![json!({"type": "text", "text": text})] } else { rendered.blocks };
+
+        (prompt, rendered.files)
     }
 
     fn cancel(&mut self) -> Vec<Action> {
@@ -409,13 +447,11 @@ impl SessionState {
 
         if let Some(session_id) = self.session_id.clone() {
             while let Some((prompt_id, text, attachments)) = self.queued_prompts.pop_front() {
-                let cwd = self.cwd.clone().unwrap_or_default();
-                let rendered = attachments::render(std::path::Path::new(&cwd), prompt_id, &text, &attachments, self.prompt_capabilities);
-                let prompt = if rendered.blocks.is_empty() { vec![json!({"type": "text", "text": text})] } else { rendered.blocks };
+                let (prompt, files) = self.render_prompt(prompt_id, &text, &attachments);
                 let params = json!({"sessionId": session_id, "prompt": prompt});
 
-                if !rendered.files.is_empty() {
-                    actions.push(Action::SaveAttachments { cwd, files: rendered.files });
+                if !files.is_empty() {
+                    actions.push(Action::SaveAttachments { cwd: self.cwd.clone().unwrap_or_default(), files });
                 }
 
                 actions.push(self.outgoing_request("session/prompt", params));
@@ -570,6 +606,7 @@ impl SessionState {
                 self.initialized = true;
                 self.resume_kind = resume_kind_of(&result);
                 self.prompt_capabilities = PromptCapabilities::from_initialize(&result);
+                self.steering = result["_meta"]["steering"]["supported"].as_bool() == Some(true);
                 self.http_mcp = result["agentCapabilities"]["mcpCapabilities"]["http"].as_bool() == Some(true);
 
                 Vec::new()
@@ -601,6 +638,20 @@ impl SessionState {
                 let usage = result.get("usage").filter(|usage| usage.is_object()).cloned();
 
                 self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason, usage })
+            }
+            Pending::Steer(request_id) => {
+                if !self.live {
+                    return Vec::new();
+                }
+
+                let outcome = match (&error_message, result.get("outcome").and_then(Value::as_str)) {
+                    (Some(_), _) => "unsupported",
+                    (None, Some("injected")) => "injected",
+                    (None, Some("promptRequired")) => "prompt_required",
+                    (None, _) => "unsupported",
+                };
+
+                vec![Action::Reply(NodeToControl::Steered { request_id, outcome: outcome.into(), error: error_message })]
             }
             Pending::Other => Vec::new(),
         }

@@ -6,7 +6,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer};
+use crate::state::{AppState, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -335,6 +335,15 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::GitResult { request_id, ok, output, error } => {
             state.hub.answer_git(node_id, request_id, GitAnswer { ok, output, error });
+
+            Ok(())
+        }
+        NodeToControl::Steered { request_id, outcome, error } => {
+            if let Some(error) = error {
+                tracing::warn!("node {node_id} could not steer the turn: {error}");
+            }
+
+            state.hub.answer_steer(node_id, request_id, SteerAnswer { outcome });
 
             Ok(())
         }

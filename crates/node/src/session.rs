@@ -386,6 +386,9 @@ impl Actor {
                         let _ = self.out.send(message);
                     }
                 }
+                Action::Reply(message) => {
+                    let _ = self.out.send(message);
+                }
                 Action::Send(frame) => write_to_keeper(connection, json!({"send": frame})).await,
                 Action::PromptWritten(prompt_id) => {
                     if connection.writer.is_some() && !self.handle.ended() {

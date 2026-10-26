@@ -269,6 +269,7 @@ impl Daemon {
             ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, env),
             ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
+            ControlToNode::Steer { conversation_id, request_id, text, attachments } => self.steer(conversation_id, request_id, text, attachments),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
             ControlToNode::PermissionResponse { conversation_id, request_id, outcome } => self.with_session(conversation_id, |session| session.command(Command::PermissionResponse { request_id, outcome })),
             ControlToNode::SetConfig { conversation_id, mode, model, config } => self.with_session(conversation_id, |session| session.command(Command::SetConfig { mode, model, config })),
@@ -445,6 +446,17 @@ impl Daemon {
         match handle {
             Some(handle) if !handle.ended() => handle.command(Command::Prompt { prompt_id, text, attachments }),
             _ => self.refuse(conversation_id, "The agent for this conversation is not running on this node.".to_string()),
+        }
+    }
+
+    fn steer(&self, conversation_id: Uuid, request_id: Uuid, text: String, attachments: Vec<mycelium_proto::link::PromptAttachment>) {
+        let handle = self.sessions.lock().ok().and_then(|sessions| sessions.get(&conversation_id).cloned());
+
+        match handle {
+            Some(handle) if !handle.ended() => handle.command(Command::Steer { request_id, text, attachments }),
+            _ => {
+                let _ = self.out.send(NodeToControl::Steered { request_id, outcome: "unsupported".into(), error: None });
+            }
         }
     }
 

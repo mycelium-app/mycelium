@@ -365,6 +365,78 @@ async fn cancel_stops_a_running_turn() {
     assert!(matches!(&turn_end, NodeToControl::TurnEnd { stop_reason, .. } if stop_reason == "cancelled"));
 }
 
+fn steer(connection: &Connection, conversation: Uuid, request_id: Uuid, text: &str) {
+    connection.send(ControlToNode::Steer { conversation_id: conversation, request_id, text: text.into(), attachments: vec![] });
+}
+
+#[tokio::test]
+async fn steering_injects_into_a_running_turn_without_cancelling_it() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(3);
+    start_conversation(&mut connection, conversation).await;
+
+    prompt(&connection, conversation, "do something slow");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
+    let request_id = Uuid::from_u128(77);
+    steer(&connection, conversation, request_id, "change course");
+
+    connection.next_matching(|message| update_text(message).as_deref() == Some("steered: change course")).await;
+    let answer = connection.next_matching(|message| matches!(message, NodeToControl::Steered { .. })).await;
+    assert!(matches!(&answer, NodeToControl::Steered { request_id: answered, outcome, error: None } if *answered == request_id && outcome == "injected"));
+    assert!(!matches!(connection.nothing_more().await, Some(NodeToControl::TurnEnd { .. })));
+}
+
+#[tokio::test]
+async fn steering_an_idle_session_asks_the_host_to_send_a_normal_prompt() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(3);
+    start_conversation(&mut connection, conversation).await;
+
+    steer(&connection, conversation, Uuid::from_u128(78), "hello");
+
+    let answer = connection.next_matching(|message| matches!(message, NodeToControl::Steered { .. })).await;
+    assert!(matches!(&answer, NodeToControl::Steered { outcome, .. } if outcome == "prompt_required"));
+}
+
+#[tokio::test]
+async fn steering_an_agent_without_the_extension_is_unsupported_and_leaves_the_turn_running() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    let agent = fake_acp();
+    fixture.options.agent_commands = Arc::new(move |_| vec![agent.clone(), "--no-steering".to_string()]);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(3);
+    start_conversation(&mut connection, conversation).await;
+
+    prompt(&connection, conversation, "do something slow");
+    connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
+    steer(&connection, conversation, Uuid::from_u128(79), "change course");
+
+    let answer = connection.next_matching(|message| matches!(message, NodeToControl::Steered { .. })).await;
+    assert!(matches!(&answer, NodeToControl::Steered { outcome, .. } if outcome == "unsupported"));
+    assert!(!matches!(connection.nothing_more().await, Some(NodeToControl::TurnEnd { .. })));
+}
+
+#[tokio::test]
+async fn steering_a_conversation_the_node_does_not_run_is_unsupported() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+
+    steer(&connection, Uuid::from_u128(404), Uuid::from_u128(80), "hello");
+
+    let answer = connection.next_matching(|message| matches!(message, NodeToControl::Steered { .. })).await;
+    assert!(matches!(&answer, NodeToControl::Steered { outcome, .. } if outcome == "unsupported"));
+}
+
 #[tokio::test]
 async fn stop_ends_a_turn_the_agent_is_not_running_so_the_conversation_stops_working() {
     let mut control = ControlServer::start().await;

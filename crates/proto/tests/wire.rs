@@ -112,6 +112,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::ApiTokenSaved { conversation_id: id(), path: Some("/state/sessions/c/api-token".into()) }, "api_token_saved"),
         (NodeToControl::Resources { sample: sample() }, "resources"),
         (NodeToControl::ResetUsed { request_id: id(), outcome: Some("reset".into()), error: None }, "reset_used"),
+        (NodeToControl::Steered { request_id: id(), outcome: "injected".into(), error: None }, "steered"),
         (NodeToControl::Pong, "pong"),
     ];
 
@@ -130,6 +131,7 @@ fn every_control_message_round_trips_under_its_tag() {
         (ControlToNode::StartSession { conversation_id: id(), agent: AgentId::Claude, cwd: "/w".into(), resume: Some("s".into()), fork: false, account: None, instructions: None, env: vec![] }, "start_session"),
         (ControlToNode::Instructions { revision: "afad776".into(), global: Some("# Rules".into()), take_over: false }, "instructions"),
         (ControlToNode::Prompt { conversation_id: id(), prompt_id: id(), text: "go".into(), attachments: vec![] }, "prompt"),
+        (ControlToNode::Steer { conversation_id: id(), request_id: id(), text: "hi".into(), attachments: vec![] }, "steer"),
         (ControlToNode::Cancel { conversation_id: id() }, "cancel"),
         (ControlToNode::PermissionResponse { conversation_id: id(), request_id: "r".into(), outcome: json!({"outcome": "selected", "optionId": "allow"}) }, "permission_response"),
         (ControlToNode::SetConfig { conversation_id: id(), mode: Some("plan".into()), model: None, config: Some(config) }, "set_config"),

@@ -232,8 +232,8 @@ Conversations:
 - `GET /design/` and `/design/{artifact_id}` serve the Design editor single-page app from `MYCELIUM_EDITOR_DIR` to a signed-in browser (the same session cookie and API); artboard HTML renders in `<iframe sandbox="allow-scripts" srcdoc>`, never `allow-same-origin`.
 - MCP tools on `/api/v1/mcp`, tied to the calling conversation: `create_artifact {kind, title, content?, path?, media_type?}` (`path` is read from the conversation's folder on its node, 20 MB at most), `update_artifact {artifact, content? | path?, note?}`, `design_set_artboard {artifact, page?, artboard?, name?, x?, y?, w?, h?, html}` (loads the latest design, replaces the named artboard or adds one at the right of the others, 1440 by 900 unless sized, and saves a new version by the agent), `design_remove_item {artifact, item}`, `read_artifact {artifact, artboard?}` and `read_artifact_feedback {artifact}` (unresolved comments with anchors, and the data store). `artifact` is an id or a slug.
 - `GET /{id}/queue`, `PATCH /{id}/queue/{qid}` `{text}`, `DELETE /{id}/queue/{qid}`, `POST /{id}/queue/{qid}/send-now`
-  (cancels the current turn, then sends this one).
-- `POST /{id}/queue/send-all-now` (204, owner only) combines every queued message into one (texts joined by a blank line, attachments concatenated, in queue order) and sends it now, cancelling the current turn like send-now; 404 when the queue is empty. When a turn ends, the whole queue is likewise sent as one prompt.
+  (on a node of 0.10.1 or later, injects this one into the running turn with `steer` and does not stop it; when the agent cannot be steered, the node does not answer within five seconds or is older, it cancels the current turn and sends this one when the turn ends). When the agent answers `prompt_required` because no turn was running, the message is sent as a normal prompt.
+- `POST /{id}/queue/send-all-now` (204, owner only) combines every queued message into one (texts joined by a blank line, attachments concatenated, in queue order) and sends it now, steering or cancelling the current turn like send-now; 404 when the queue is empty. When a turn ends, the whole queue is likewise sent as one prompt.
 - `POST /{id}/cancel`.
 - `POST /{id}/close` (204, owner only) ends the agent process of a conversation that is `working` or waiting for input, even if the agent is not answering: the node is sent `close_session`, unacknowledged prompts for it are dropped, the conversation becomes `done` (not archived) and is streamed. A conversation that is idle, failed or a chat is left alone and the answer is still 204. 409 `node_offline` while the node is offline. A later message resumes the session from its transcript.
 - `POST /{id}/permission` `{request_id, option_id}`.
@@ -529,6 +529,7 @@ Node to control plane:
 | `session_closed` | `conversation_id` (the node closed an idle session to make room, so the next message starts it again with `session/load`) |
 | `session_failed` | `conversation_id, seq, message` |
 | `prompt_received` | `conversation_id, prompt_id` (sent once the node has written `session/prompt` to the keeper) |
+| `steered` | `request_id, outcome, error?` (`injected`: the running turn took the message; `prompt_required`: no turn was running, send it as a prompt; `unsupported`: the agent did not advertise `_meta.steering.supported` at initialize, there is no live session, or it refused) |
 | `logins` | `logins: [{agent, account?, method, state, usage_left?, windows?: [{name, used_percent, resets_at?}], usage_read_at?}]` |
 | `instructions_held` | `revision, unmanaged: [label]` |
 | `api_token_saved` | `conversation_id, path?` (answers `api_token`: the file the token was written to, or no path when it could not be written) |
@@ -556,6 +557,7 @@ Control plane to node:
 | `start_session` | `conversation_id, agent, cwd, resume?: acp_session_id, account?, instructions?` |
 | `instructions` | `revision, global?` |
 | `prompt` | `conversation_id, prompt_id, text, attachments?` (`[{name, media_type, data}]`, `data` base64). The node sends PNG, JPEG, GIF and WebP as ACP `image` blocks when the agent's `promptCapabilities.image` is true, other valid UTF-8 files as embedded `resource` blocks when `embeddedContext` is true, and writes the rest under `<cwd>/.mycelium/attachments/<prompt_id>/` (a `.gitignore` of `*` sits in `.mycelium/`) and names the path in the prompt. The node link accepts messages up to 64 MiB |
+| `steer` | `conversation_id, request_id, text, attachments?` (as `prompt`; the node calls the ACP extension `_session/steering` with `idleBehavior` `promptRequired`, which injects the message into the running turn, and answers `steered`. Sent only to nodes of 0.10.1 or later) |
 | `cancel` | `conversation_id` |
 | `permission_response` | `conversation_id, request_id, outcome` (ACP `RequestPermissionOutcome`) |
 | `set_config` | `conversation_id, mode?, model?, config?` |

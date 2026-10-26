@@ -5,7 +5,7 @@ use crate::continuation;
 use crate::error::{ApiError, ApiResult};
 use crate::conversations::derived_title;
 use crate::instructions;
-use crate::nodes::node_offline;
+use crate::nodes::{STEERING_SINCE, node_has, node_offline};
 use crate::state::{AppState, UnacknowledgedPrompt};
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, append_event, enqueue, merge_queue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
@@ -16,7 +16,10 @@ use mycelium_proto::conversation::{Attachment, ConversationStatus, EventKind, Qu
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
+use std::time::Duration;
 use uuid::Uuid;
+
+const STEER_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
     if state.hub.is_moving(conversation_id) {
@@ -256,6 +259,46 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     }
 
     if matches!(row.status.as_str(), "working" | "input") {
+        let node_version = sqlx::query_scalar::<_, String>("select version from nodes where id = $1").bind(row.node_id).fetch_optional(&state.pool).await?;
+        let steerable = node_version.is_some_and(|version| node_has(&version, STEERING_SINCE));
+        let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("select text, attachments from queued_prompts where id = $1 and conversation_id = $2").bind(queue_id).bind(id).fetch_optional(&state.pool).await?;
+
+        if let (true, Some((text, sqlx::types::Json(attachments)))) = (steerable, queued) {
+            let loaded = attachments::for_node(&state, &attachments).await?;
+            let requested = state.hub.request_steer(row.node_id, id, text.clone(), loaded);
+            let answer = match requested {
+                Some((request_id, answered)) => {
+                    let answer = tokio::time::timeout(STEER_TIMEOUT, answered).await.ok().and_then(Result::ok);
+                    state.hub.forget_steer_request(request_id);
+
+                    answer
+                }
+                None => None,
+            };
+
+            match answer.as_ref().map(|answer| answer.outcome.as_str()) {
+                Some("injected") => {
+                    let mut tx = state.pool.begin().await?;
+                    let taken = sqlx::query_scalar::<_, Uuid>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
+                    let event = match taken {
+                        Some(prompt_id) => append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?,
+                        None => None,
+                    };
+                    tx.commit().await?;
+
+                    if let Some(event) = event {
+                        state.publish(Some(user.id), StreamMessage::Event(event));
+                    }
+
+                    publish_queue(&state, user.id, id).await?;
+
+                    return Ok(StatusCode::NO_CONTENT);
+                }
+                Some("prompt_required") => return pump(&state, id, false).await.map(|()| StatusCode::NO_CONTENT),
+                _ => {}
+            }
+        }
+
         state.hub.expect_send_now(id, row.node_id);
 
         if !state.hub.send(row.node_id, ControlToNode::Cancel { conversation_id: id }) {
