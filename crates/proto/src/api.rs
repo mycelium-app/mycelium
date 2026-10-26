@@ -532,6 +532,8 @@ pub struct ModelProvider {
     pub favourites: Vec<String>,
     #[serde(default)]
     pub model_class: ModelClass,
+    #[serde(default)]
+    pub speech_model: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]

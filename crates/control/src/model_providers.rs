@@ -249,10 +249,23 @@ impl ProviderRow {
             created_at: self.created_at,
             favourites: self.favourite_models.clone(),
             model_class: parse_enum(&self.model_class)?,
+            speech_model: self.speech_model(),
         })
     }
 
-    fn authorised(&self, request: reqwest::RequestBuilder) -> ApiResult<reqwest::RequestBuilder> {
+    pub fn speech_model(&self) -> Option<String> {
+        if self.parsed_kind().ok()? != ModelProviderKind::OpenaiCompatible {
+            return None;
+        }
+
+        self.models.iter().find(|model| {
+            let lowered = model.to_lowercase();
+
+            lowered.contains("whisper") || lowered.contains("transcribe")
+        }).cloned()
+    }
+
+    pub(crate) fn authorised(&self, request: reqwest::RequestBuilder) -> ApiResult<reqwest::RequestBuilder> {
         let request = request.header("user-agent", "mycelium");
 
         Ok(match (self.parsed_kind()?, &self.api_key) {

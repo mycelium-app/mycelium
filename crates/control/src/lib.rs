@@ -61,6 +61,7 @@ mod stream;
 mod tasks;
 mod terminals;
 mod transcripts;
+mod transcriptions;
 mod usage_limits;
 mod versions;
 mod walkthrough_diff;
@@ -240,6 +241,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}", patch(projects::patch))
         .route("/api/v1/projects/{id}/find-icon", post(projects::find_icon))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
+        .route("/api/v1/transcriptions", post(transcriptions::create).layer(DefaultBodyLimit::max(transcriptions::MAX_AUDIO_BYTES + 1024)))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-provider-usage", get(provider_usage::list))
         .route("/api/v1/usage/resets", post(account_usage::use_reset))

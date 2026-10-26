@@ -493,6 +493,7 @@ data class ModelProvider(
     @SerialName("created_at") val createdAt: String,
     val favourites: List<String> = emptyList(),
     @SerialName("model_class") val modelClass: String = "cloud",
+    @SerialName("speech_model") val speechModel: String? = null,
 )
 
 @Serializable
@@ -707,6 +708,7 @@ data class Experiments(
     val assistants: Boolean = false,
     @SerialName("memory_banks") val memoryBanks: Boolean = false,
     @SerialName("chat_across_groups") val chatAcrossGroups: Boolean = false,
+    val voice: Boolean = false,
 )
 
 @Serializable
