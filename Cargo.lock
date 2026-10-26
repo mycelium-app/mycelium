@@ -2397,6 +2397,7 @@ dependencies = [
  "ignore",
  "lettre",
  "mail-parser",
+ "md-5",
  "mycelium-proto",
  "rand 0.10.3",
  "reqwest",

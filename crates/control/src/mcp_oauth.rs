@@ -193,7 +193,7 @@ pub struct CallbackQuery {
     state: Option<String>,
 }
 
-fn page(status: StatusCode, message: &str) -> Response {
+pub(crate) fn page(status: StatusCode, message: &str) -> Response {
     let escaped = message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
 
     (status, Html(format!("<!doctype html><html lang=\"en-GB\"><head><meta charset=\"utf-8\"><title>Mycelium</title></head><body><main><h1>Mycelium</h1><p>{escaped}</p></main></body></html>"))).into_response()

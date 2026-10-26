@@ -64,7 +64,7 @@ impl KnownApp {
 pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at, token_expires_at, last_used_at, last_error, policy";
+pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
@@ -86,6 +86,8 @@ pub struct ServerRow {
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_error: Option<String>,
     pub policy: sqlx::types::Json<IntegrationPolicy>,
+    pub session_key: Option<String>,
+    pub forge_id: Option<Uuid>,
     #[sqlx(skip)]
     pub groups: Vec<Uuid>,
 }
@@ -135,6 +137,8 @@ impl ServerRow {
             policy: self.policy.0.clone(),
             locked: self.integration() == Some(Integration::Zulip),
             groups: self.groups.clone(),
+            signed_in: self.session_key.is_some(),
+            forge_id: self.forge_id,
         }
     }
 }
@@ -269,11 +273,12 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         _ if app.is_some() => None,
         other => match Integration::parse(other) {
             Some(integration) => Some(integration),
-            None => return Err(ApiError::bad_request("kind_invalid", "Choose MCP or one of the built-in integrations, such as Zulip, Email or Stoat.")),
+            None => return Err(ApiError::bad_request("kind_invalid", "Choose MCP or one of the built-in integrations, such as Zulip, Email, Stoat or Last.fm.")),
         },
     };
     let address = match integration {
         Some(integration) if !integration.needs_address() => String::new(),
+        Some(integration) if entered.is_empty() && integration.default_address().is_some() => integration.default_address().unwrap_or_default().to_string(),
         _ => {
             let parsed = url::Url::parse(entered).ok().filter(|parsed| matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some());
             let Some(parsed) = parsed else {
@@ -307,7 +312,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
                 settings = Value::Object(Default::default());
             }
 
-            let credentials = Credentials { address: address.clone(), account: account.unwrap_or_default().to_string(), secret: secret.to_string(), settings: settings.clone() };
+            let credentials = Credentials { address: address.clone(), account: account.unwrap_or_default().to_string(), secret: secret.to_string(), settings: settings.clone(), session: None };
 
             integration.verify(&state.http, &credentials).await.map_err(|reason| ApiError::bad_request("tool_server_failed", reason))?;
 

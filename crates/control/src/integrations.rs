@@ -1,7 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::integration_policy::{self, Effective};
 use mycelium_proto::api::{IntegrationStatus, ToolKind};
-use crate::{email, stoat, zulip};
+use crate::{email, lastfm, stoat, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
 use serde_json::Value;
@@ -11,6 +11,7 @@ pub enum Integration {
     Zulip,
     Email,
     Stoat,
+    LastFm,
 }
 
 pub struct Credentials {
@@ -18,6 +19,7 @@ pub struct Credentials {
     pub account: String,
     pub secret: String,
     pub settings: Value,
+    pub session: Option<String>,
 }
 
 pub struct CallOutput {
@@ -40,6 +42,7 @@ impl Integration {
             "zulip" => Some(Integration::Zulip),
             "email" => Some(Integration::Email),
             "stoat" => Some(Integration::Stoat),
+            "lastfm" => Some(Integration::LastFm),
             _ => None,
         }
     }
@@ -48,11 +51,19 @@ impl Integration {
         self != Integration::Email
     }
 
+    pub fn default_address(self) -> Option<&'static str> {
+        match self {
+            Integration::LastFm => Some(lastfm::DEFAULT_ADDRESS),
+            _ => None,
+        }
+    }
+
     pub fn account_prompt(self) -> Option<&'static str> {
         match self {
             Integration::Zulip => Some("Enter the email address of your Zulip account."),
             Integration::Email => Some("Enter your email username, usually your full email address."),
             Integration::Stoat => None,
+            Integration::LastFm => Some("Enter your Last.fm username."),
         }
     }
 
@@ -61,6 +72,7 @@ impl Integration {
             Integration::Zulip => "Enter your Zulip API key.",
             Integration::Email => "Enter your email password, or an app password if your provider needs one.",
             Integration::Stoat => "Enter your Stoat token.",
+            Integration::LastFm => "Enter your Last.fm shared secret.",
         }
     }
 
@@ -69,6 +81,7 @@ impl Integration {
             Integration::Zulip => Ok(Value::Null),
             Integration::Email => email::normalise_settings(settings),
             Integration::Stoat => stoat::normalise_settings(settings),
+            Integration::LastFm => lastfm::normalise_settings(settings),
         }
     }
 
@@ -77,6 +90,7 @@ impl Integration {
             Integration::Zulip => zulip::tools(),
             Integration::Email => email::tools(),
             Integration::Stoat => stoat::tools(),
+            Integration::LastFm => lastfm::tools(),
         }
     }
 
@@ -85,6 +99,7 @@ impl Integration {
             Integration::Zulip => zulip::always_asks(tool),
             Integration::Email => email::always_asks(tool),
             Integration::Stoat => stoat::always_asks(tool),
+            Integration::LastFm => lastfm::always_asks(tool),
         }
     }
 
@@ -93,6 +108,7 @@ impl Integration {
             Integration::Zulip => zulip::verify(http, credentials).await,
             Integration::Email => email::verify(credentials).await,
             Integration::Stoat => stoat::verify(http, credentials).await,
+            Integration::LastFm => lastfm::verify(http, credentials).await,
         }
     }
 
@@ -103,6 +119,17 @@ impl Integration {
             Integration::Zulip => zulip::call(&state.http, &credentials, tool, arguments).await,
             Integration::Email => email::call(state, owner, server, &credentials, tool, arguments).await,
             Integration::Stoat => stoat::call(&state.http, &credentials, tool, arguments).await,
+            Integration::LastFm => {
+                let outcome = lastfm::call(&state.http, &credentials, tool, arguments).await;
+
+                if outcome.revoked && credentials.session.is_some() {
+                    let _ = sqlx::query("update chat_tool_servers set session_key = null where id = $1").bind(server.id).execute(&state.pool).await;
+                    state.hub.tools_changed(owner);
+                    state.publish(Some(owner), mycelium_proto::stream::StreamMessage::IntegrationsChanged);
+                }
+
+                outcome.output
+            }
         }
     }
 }
@@ -113,7 +140,7 @@ impl ServerRow {
     }
 
     pub fn credentials(&self) -> Credentials {
-        Credentials { address: self.url.clone(), account: self.account.clone().unwrap_or_default(), secret: self.bearer_token.clone().unwrap_or_default(), settings: self.settings.0.clone() }
+        Credentials { address: self.url.clone(), account: self.account.clone().unwrap_or_default(), secret: self.bearer_token.clone().unwrap_or_default(), settings: self.settings.0.clone(), session: self.session_key.clone() }
     }
 
     pub fn tool_kind(&self, tool: &str) -> ToolKind {

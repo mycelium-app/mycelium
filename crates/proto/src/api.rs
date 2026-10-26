@@ -670,6 +670,15 @@ pub struct ChatToolServer {
     pub locked: bool,
     #[serde(default)]
     pub groups: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_in: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forge_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LastFmSignIn {
+    pub authorize_url: String,
 }
 
 fn connected() -> IntegrationStatus {

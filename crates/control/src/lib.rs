@@ -73,6 +73,7 @@ mod wellness;
 mod web;
 mod worktrees;
 mod workflows;
+mod lastfm;
 mod stoat;
 mod zulip;
 
@@ -126,6 +127,7 @@ fn router(state: AppState) -> Router {
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/integrations/oauth/callback", get(mcp_oauth::callback))
+        .route("/integrations/lastfm/callback", get(lastfm::callback))
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
         .route("/api/v1/workflows", get(workflows::list).post(workflows::create))
@@ -259,6 +261,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chat-tool-servers/{id}", patch(chat_tool_servers::patch).delete(chat_tool_servers::delete))
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
         .route("/api/v1/chat-tool-servers/{id}/groups", put(chat_tool_servers::set_groups))
+        .route("/api/v1/chat-tool-servers/{id}/lastfm-sign-in", post(lastfm::start_sign_in).delete(lastfm::sign_out))
         .route("/api/v1/integration-calls", get(chat_tool_servers::calls))
         .route("/api/v1/chats", post(chats::create))
         .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))

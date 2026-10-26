@@ -82,6 +82,12 @@ pub struct PendingOAuth {
     pub created: std::time::Instant,
 }
 
+pub struct PendingLastFm {
+    pub owner: Uuid,
+    pub server: Uuid,
+    pub created: std::time::Instant,
+}
+
 pub struct ProcessAnswer {
     pub ok: bool,
     pub error: Option<String>,
@@ -119,6 +125,7 @@ pub struct Hub {
     workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
     backups: Mutex<std::collections::HashSet<Uuid>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
+    lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
     reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
@@ -593,6 +600,19 @@ impl Hub {
 
     pub fn take_oauth(&self, sign_in: &str) -> Option<PendingOAuth> {
         let pending = self.oauth_sign_ins.lock().ok()?.remove(sign_in)?;
+
+        (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
+    }
+
+    pub fn track_lastfm(&self, sign_in: String, pending: PendingLastFm) {
+        if let Ok(mut sign_ins) = self.lastfm_sign_ins.lock() {
+            sign_ins.retain(|_, held| held.created.elapsed() < OAUTH_SIGN_IN_LIFETIME);
+            sign_ins.insert(sign_in, pending);
+        }
+    }
+
+    pub fn take_lastfm(&self, sign_in: &str) -> Option<PendingLastFm> {
+        let pending = self.lastfm_sign_ins.lock().ok()?.remove(sign_in)?;
 
         (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
     }
