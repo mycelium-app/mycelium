@@ -437,6 +437,8 @@ pub struct ModelProvider {
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub favourites: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -458,6 +460,12 @@ impl std::fmt::Debug for CreateModelProviderRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateModelProviderRequest {
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetFavouriteModelRequest {
+    pub model: String,
+    pub favourite: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -272,6 +272,78 @@ async fn renaming_a_provider_trims_the_name_and_only_its_owner_can() {
 }
 
 #[tokio::test]
+async fn a_favourite_model_is_listed_with_its_provider_and_can_be_removed() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let path = format!("/api/v1/model-providers/{}/favourites", provider["id"].as_str().unwrap());
+
+    let (status, starred) = server.user.json(server.user.put(&path).json(&json!({"model": "qwen3:8b", "favourite": true}))).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/model-providers")).await;
+    server.user.json(server.user.put(&path).json(&json!({"model": "qwen3:8b", "favourite": false}))).await;
+    let (_, after) = server.user.json(server.user.get("/api/v1/model-providers")).await;
+
+    assert_eq!((status, starred["favourites"].clone(), listed[0]["favourites"].clone()), (200, json!(["qwen3:8b"]), json!(["qwen3:8b"])));
+    assert_eq!(after[0]["favourites"], json!([]));
+}
+
+#[tokio::test]
+async fn favouriting_a_model_twice_stores_it_once() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let path = format!("/api/v1/model-providers/{}/favourites", provider["id"].as_str().unwrap());
+
+    server.user.json(server.user.put(&path).json(&json!({"model": "llama3.2", "favourite": true}))).await;
+    let (_, twice) = server.user.json(server.user.put(&path).json(&json!({"model": "llama3.2", "favourite": true}))).await;
+
+    assert_eq!(twice["favourites"], json!(["llama3.2"]));
+}
+
+#[tokio::test]
+async fn a_model_the_provider_does_not_list_cannot_be_a_favourite() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let path = format!("/api/v1/model-providers/{}/favourites", provider["id"].as_str().unwrap());
+
+    let (status, rejected) = server.user.json(server.user.put(&path).json(&json!({"model": "gpt-9", "favourite": true}))).await;
+
+    assert_eq!((status, rejected["error"].clone()), (400, json!("model_unknown")));
+}
+
+#[tokio::test]
+async fn only_the_owner_can_favourite_a_providers_model() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let path = format!("/api/v1/model-providers/{}/favourites", provider["id"].as_str().unwrap());
+    let other = server.second_user("someone@example.com").await;
+
+    let (status, _) = other.json(other.put(&path).json(&json!({"model": "llama3.2", "favourite": true}))).await;
+
+    assert_eq!(status, 404);
+}
+
+#[tokio::test]
+async fn refreshing_a_provider_keeps_its_favourites() {
+    let server = Server::start().await;
+    let (router, _) = fake_openai(None);
+    let base = serve(router).await;
+    let provider = add_openai(&server, &base, None).await;
+    let id = provider["id"].as_str().unwrap();
+    server.user.json(server.user.put(&format!("/api/v1/model-providers/{id}/favourites")).json(&json!({"model": "llama3.2", "favourite": true}))).await;
+
+    let (_, refreshed) = server.user.json(server.user.post(&format!("/api/v1/model-providers/{id}/refresh"))).await;
+
+    assert_eq!(refreshed["favourites"], json!(["llama3.2"]));
+}
+
+#[tokio::test]
 async fn a_chat_streams_the_reply_token_by_token_as_conversation_events() {
     let server = Server::start().await;
     let (router, fake) = fake_openai(None);

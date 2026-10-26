@@ -6,7 +6,7 @@ use crate::store::{enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind, UpdateModelProviderRequest};
+use mycelium_proto::api::{CreateModelProviderRequest, ModelProvider, ModelProviderKind, SetFavouriteModelRequest, UpdateModelProviderRequest};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
@@ -18,7 +18,7 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 8192;
 const ANTHROPIC_PREFERRED: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
-const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at";
+const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, favourite_models";
 
 #[derive(sqlx::FromRow)]
 pub struct ProviderRow {
@@ -30,6 +30,7 @@ pub struct ProviderRow {
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub favourite_models: Vec<String>,
 }
 
 pub enum ProviderError {
@@ -245,6 +246,7 @@ impl ProviderRow {
             models: self.models.clone(),
             default_model: self.default_model.clone(),
             created_at: self.created_at,
+            favourites: self.favourite_models.clone(),
         })
     }
 
@@ -538,7 +540,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         }
         None => None,
     };
-    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(str::to_string), models: Vec::new(), default_model: None, created_at: chrono::Utc::now() };
+    let draft = ProviderRow { id: Uuid::nil(), kind: enum_text(&request.kind), name: name.to_string(), base_url: base_url.clone(), api_key: key.map(str::to_string), models: Vec::new(), default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![] };
     let mut models = draft.list_models(&state.http).await?.map_err(|error| error.into_api(name, &draft.address().unwrap_or_default()))?;
 
     if models.is_empty() && request.kind == ModelProviderKind::Anthropic {
@@ -598,6 +600,25 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     Ok(Json(row.to_proto()?))
 }
 
+pub async fn set_favourite(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SetFavouriteModelRequest>) -> ApiResult<Json<ModelProvider>> {
+    user.require_full_access()?;
+    let row = find_owned(&state, id, user.id).await?;
+
+    if !row.models.contains(&request.model) {
+        return Err(ApiError::bad_request("model_unknown", "Choose a model this provider lists."));
+    }
+
+    let updated = sqlx::query_as::<_, ProviderRow>(sqlx::AssertSqlSafe(format!("update model_providers set favourite_models = case when $3 then array_append(array_remove(favourite_models, $4), $4) else array_remove(favourite_models, $4) end where id = $1 and owner = $2 returning {PROVIDER_COLUMNS}")))
+        .bind(id)
+        .bind(user.id)
+        .bind(request.favourite)
+        .bind(&request.model)
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok(Json(updated.to_proto()?))
+}
+
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
     let deleted = sqlx::query("delete from model_providers where id = $1 and owner = $2").bind(id).bind(user.id).execute(&state.pool).await?;
 
@@ -613,7 +634,7 @@ mod tests {
     use super::*;
 
     fn provider(kind: ModelProviderKind, base_url: &str) -> ProviderRow {
-        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now() }
+        ProviderRow { id: Uuid::nil(), kind: enum_text(&kind), name: "p".into(), base_url: Some(base_url.into()), api_key: None, models: vec![], default_model: None, created_at: chrono::Utc::now(), favourite_models: vec![] }
     }
 
     fn user(text: &str) -> ChatMessage {
