@@ -97,6 +97,16 @@ class AssistantSettingsTest {
     }
 
     @Test
+    fun theBackButtonLeavesSettingsForTheAssistantsThread() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Back to Stand-up").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Back to Stand-up").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Stand-up").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
     fun modelPreferencesReorderWithMoveUpAndAreSavedInThatOrder() {
         shell()
 

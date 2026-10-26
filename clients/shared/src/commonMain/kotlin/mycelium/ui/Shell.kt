@@ -400,8 +400,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
             is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
-            Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) })
-            is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) })
+            Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistants) })
+            is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
         }

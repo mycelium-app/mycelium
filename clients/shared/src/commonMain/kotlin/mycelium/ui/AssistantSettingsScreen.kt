@@ -39,7 +39,7 @@ import mycelium.state.formatSize
 import mycelium.state.harnessModels
 
 @Composable
-fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?, onDone: () -> Unit) {
+fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?, onDone: () -> Unit, onBack: () -> Unit) {
     val colors = MyTheme.colors
     var failure by remember { mutableStateOf<String?>(null) }
     var loaded by remember(assistantId) { mutableStateOf<Assistant?>(null) }
@@ -79,6 +79,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            MyButton(onBack, icon = MyIcon.ChevronLeft, description = if (creating) "Back to assistants" else "Back to ${loaded?.name ?: "the assistant"}", muted = true)
             BarTitle(if (creating) "New assistant" else "${loaded?.name ?: "Assistant"} settings")
         }
 
