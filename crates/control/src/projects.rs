@@ -220,7 +220,14 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::bad_request("icon_invalid", "Choose an icon from the list."));
     }
 
-    let row = if changes_icon {
+    let row = if let Some(test_command) = request.test_command.as_deref() {
+        sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set test_command = nullif(btrim($3), '') where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
+            .bind(id)
+            .bind(user.id)
+            .bind(test_command)
+            .fetch_optional(&state.pool)
+            .await?
+    } else if changes_icon {
         sqlx::query_as::<_, ProjectRow>(sqlx::AssertSqlSafe(format!("update projects set icon = $3, avatar_sha256 = null, avatar_automatic = false where id = $1 and owner = $2 returning {PROJECT_COLUMNS}")))
             .bind(id)
             .bind(user.id)

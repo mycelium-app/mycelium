@@ -481,6 +481,24 @@ async fn not_now_hides_a_suggestion_until_tomorrow() {
 }
 
 #[tokio::test]
+async fn a_project_test_command_can_be_set_and_cleared() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    project_on(&server, &link).await;
+    let project: Uuid = sqlx::query_scalar("select id from projects").fetch_one(&server.pool).await.unwrap();
+    let path = format!("/api/v1/projects/{project}");
+    let stored = || async { sqlx::query_scalar::<_, Option<String>>("select test_command from projects").fetch_one(&server.pool).await.unwrap() };
+
+    let (status, body) = server.user.json(server.user.patch(&path).json(&json!({"test_command": " make check "}))).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(stored().await.as_deref(), Some("make check"));
+
+    let (status, body) = server.user.json(server.user.patch(&path).json(&json!({"test_command": ""}))).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(stored().await, None);
+}
+
+#[tokio::test]
 async fn run_tests_relays_the_project_test_command() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

@@ -830,6 +830,8 @@ pub struct PatchProjectRequest {
     pub icon: Option<String>,
     #[serde(default)]
     pub clear_icon: bool,
+    #[serde(default)]
+    pub test_command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -42,6 +42,7 @@ import mycelium.state.statusSectionName
 import mycelium.state.until
 
 private const val SkippedOutcome = "skipped"
+private const val HeldOutcome = "held"
 
 @Composable
 fun SchedulesScreen(store: Store, state: AppState) {
@@ -116,10 +117,12 @@ fun SchedulesScreen(store: Store, state: AppState) {
                         when (column) {
                             0 -> TableCell.Text(stamp(run.ranAt, true), color = colors.textMuted)
                             1 -> TableCell.Text(conversation?.title ?: state.schedules[run.scheduleId]?.prompt.orEmpty())
-                            else -> TableCell.Slot(if (run.outcome == SkippedOutcome) "Skipped: ${run.reason.orEmpty()}" else conversation?.let { statusSectionName(it.status) }.orEmpty(), Tokens.Size.IconSm + Tokens.Space.S1_5) {
+                            else -> TableCell.Slot(if (run.outcome == SkippedOutcome) "Skipped: ${run.reason.orEmpty()}" else if (run.outcome == HeldOutcome) "Held: ${run.reason.orEmpty()}" else conversation?.let { statusSectionName(it.status) }.orEmpty(), Tokens.Size.IconSm + Tokens.Space.S1_5) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
                                     if (run.outcome == SkippedOutcome) {
                                         StatusMark("Skipped: ${run.reason.orEmpty()}", Tone.Attention, MyIcon.Alert)
+                                    } else if (run.outcome == HeldOutcome) {
+                                        StatusMark("Held: ${run.reason.orEmpty()}", Tone.Attention, MyIcon.Alert)
                                     } else if (conversation != null) {
                                         StatusGlyph(conversation.status)
                                         Label(statusSectionName(conversation.status), color = colors.text, maxLines = 1)
