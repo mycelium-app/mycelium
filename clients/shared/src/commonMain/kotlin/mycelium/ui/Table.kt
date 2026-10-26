@@ -43,6 +43,7 @@ data class Col(
     val overflow: Overflow = Overflow.Truncate,
     val numeric: Boolean = false,
     val priority: Int = 0,
+    val rigid: Boolean = false,
 )
 
 sealed interface TableCell {
@@ -187,7 +188,7 @@ fun Table(
         }
 
         val outerNatural = visible.mapIndexed { position, column -> maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
-        val outerMin = visible.mapIndexed { position, column -> with(density) { columns[column].min.roundToPx() } + inset + if (position == visible.lastIndex) inset else 0 }
+        val outerMin = visible.mapIndexed { position, column -> (if (columns[column].rigid) maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) else with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
         val borderTotal = if (card) border * 2 else 0
         val available = if (constraints.hasBoundedWidth) constraints.maxWidth - borderTotal else outerNatural.sum()
         val resolved = resolveTable(outerMin, outerNatural, visible.map { columns[it].weight }, available, fill)

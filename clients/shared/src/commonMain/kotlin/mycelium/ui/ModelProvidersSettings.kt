@@ -96,70 +96,71 @@ fun ModelProvidersSettings(store: Store) {
                 MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
 
-            val columns = listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true)) + ColumnSpec() + ColumnSpec(max = 64.dp)
-
-            ContentTable(columns) {
-                ContentRow(header = true) {
-                    Label("Provider", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Key", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Models", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-
-                    Label("Data handling", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-
-                    Box(Modifier)
-                }
-
-                Hairline()
-
-                for (provider in providers) {
+            Table(
+                listOf(
+                    Col("Provider", 140.dp, max = 280.dp, weight = 1f),
+                    Col("Key", 88.dp, priority = 1),
+                    Col("Models", 120.dp, rigid = true),
+                    Col("Data handling", 150.dp, rigid = true, priority = 1),
+                    ActionColumn,
+                ),
+                providers.size,
+                { row, column ->
+                    val provider = providers[row]
                     val kindName = ProviderKinds.entries.firstOrNull { it.value == provider.kind }?.key ?: provider.kind
 
-                    ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
-                        Column {
-                            Label(provider.name, maxLines = 1)
-                            Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                    when (column) {
+                        0 -> TableCell.Slot(provider.baseUrl ?: kindName) {
+                            Column {
+                                Label(provider.name, maxLines = 1)
+                                Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+                            }
                         }
 
-                        Label(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted, maxLines = 1)
-                        MyButton(
-                            { expanded = if (expanded == provider.id) null else provider.id; search = "" },
-                            text = if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models",
-                            description = "${if (expanded == provider.id) "Hide" else "Browse"} models from ${provider.name}",
-                            trailingIcon = if (expanded == provider.id) MyIcon.ChevronDown else MyIcon.ChevronRight,
-                            muted = true,
-                            size = ButtonSize.Sm,
-                        )
+                        1 -> TableCell.Text(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted)
+                        2 -> TableCell.Slot(if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models", Tokens.Space.S8) {
+                            MyButton(
+                                { expanded = if (expanded == provider.id) null else provider.id; search = "" },
+                                text = if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models",
+                                description = "${if (expanded == provider.id) "Hide" else "Browse"} models from ${provider.name}",
+                                trailingIcon = if (expanded == provider.id) MyIcon.ChevronDown else MyIcon.ChevronRight,
+                                muted = true,
+                                size = ButtonSize.Sm,
+                            )
+                        }
 
-                        OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
-                            store.act {
-                                val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
-                                providers = providers.map { if (it.id == updated.id) updated else it }
-                            }
-                        }, size = ButtonSize.Sm)
-
-                        RowMenu(provider.name) { close ->
-                            MenuItem("Refresh models", onClick = {
-                                close()
-                                store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
-                            })
-                            MenuItem("Rename", onClick = {
-                                close()
-                                renamed = provider.name
-                                renaming = provider
-                            })
-                            MenuItem("Remove provider", onClick = {
-                                close()
+                        3 -> TableCell.Slot(DataHandling.maxBy { it.name.length }.name, Tokens.Space.S8) {
+                            OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
                                 store.act {
-                                    store.api.deleteModelProvider(provider.id)
-                                    providers = providers.filter { it.id != provider.id }
+                                    val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
+                                    providers = providers.map { if (it.id == updated.id) updated else it }
                                 }
-                            })
+                            }, size = ButtonSize.Sm)
+                        }
+
+                        else -> TableCell.Slot {
+                            RowMenu(provider.name) { close ->
+                                MenuItem("Refresh models", onClick = {
+                                    close()
+                                    store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
+                                })
+                                MenuItem("Rename", onClick = {
+                                    close()
+                                    renamed = provider.name
+                                    renaming = provider
+                                })
+                                MenuItem("Remove provider", onClick = {
+                                    close()
+                                    store.act {
+                                        store.api.deleteModelProvider(provider.id)
+                                        providers = providers.filter { it.id != provider.id }
+                                    }
+                                })
+                            }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
 
         renaming?.let { target ->
@@ -186,11 +187,13 @@ fun ModelProvidersSettings(store: Store) {
                 if (matches.isEmpty()) {
                     Label("No matching models", color = colors.textMuted)
                 } else {
-                    LazyColumn(Modifier.fillMaxWidth().height(minOf(280, matches.size * 32).dp)) {
-                        items(matches) { model ->
-                            Label(model, Modifier.padding(vertical = Tokens.Space.S1), Tokens.Type.Code)
-                        }
-                    }
+                    Table(
+                        listOf(Col("Model", 160.dp, weight = 1f, rigid = true)),
+                        matches.size,
+                        { row, _ -> TableCell.Text(matches[row], Tokens.Type.Code) },
+                        lazy = true,
+                        rowKey = { matches[it] },
+                    )
                 }
             }
         }

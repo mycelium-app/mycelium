@@ -60,31 +60,30 @@ fun MemoryBanksBlock(store: Store) {
         }
 
         if (banks.isNotEmpty()) {
-            ContentTable(listOf(ColumnSpec(max = 240.dp), ColumnSpec(flexible = true), ColumnSpec(max = 280.dp), ColumnSpec(max = 64.dp))) {
-                ContentRow(header = true) {
-                    Label("Name", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Models", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Label("Groups", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    Box(Modifier)
-                }
+            Table(
+                listOf(
+                    Col("Name", 120.dp, weight = 1f),
+                    Col("Models", 72.dp, rigid = true),
+                    Col("Groups", 100.dp, max = 280.dp, priority = 1),
+                    ActionColumn,
+                ),
+                banks.size,
+                { row, column ->
+                    val bank = banks[row]
 
-                Hairline()
-
-                for (bank in banks) {
-                    ContentRow(Modifier.padding(vertical = Tokens.Space.S1_5)) {
-                        Label(bank.name, maxLines = 1)
-                        Label(MemoryModelClasses.first { it.id == bank.modelClass }.name, color = colors.textMuted, maxLines = 1)
-                        Label(if (bank.groupIds.isEmpty()) "Every group" else bank.groupIds.mapNotNull { live.groups[it]?.name }.joinToString(", "), color = colors.textMuted, maxLines = 1)
-
-                        RowMenu("${bank.name} bank") { close ->
-                            MenuItem("Edit", onClick = { close(); failure = null; drafting = BankDraft(bank) })
-                            MenuItem("Delete", onClick = { close(); failure = null; deleting = bank })
+                    when (column) {
+                        0 -> TableCell.Text(bank.name)
+                        1 -> TableCell.Text(MemoryModelClasses.first { it.id == bank.modelClass }.name, color = colors.textMuted)
+                        2 -> TableCell.Text(if (bank.groupIds.isEmpty()) "Every group" else bank.groupIds.mapNotNull { live.groups[it]?.name }.joinToString(", "), color = colors.textMuted)
+                        else -> TableCell.Slot {
+                            RowMenu("${bank.name} bank") { close ->
+                                MenuItem("Edit", onClick = { close(); failure = null; drafting = BankDraft(bank) })
+                                MenuItem("Delete", onClick = { close(); failure = null; deleting = bank })
+                            }
                         }
                     }
-
-                    Hairline()
-                }
-            }
+                },
+            )
         }
     }
 

@@ -82,70 +82,76 @@ fun ImportSettings(store: Store) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label(agentName(agent), Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-                ContentTable(listOf(ColumnSpec(max = 320.dp, flexible = true), ColumnSpec(), ColumnSpec(), ColumnSpec(max = 300.dp, flexible = true), ColumnSpec(max = 64.dp))) {
-                    ContentRow(header = true) {
-                        Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Transcripts found", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Imported", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Label("Status", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                        Box(Modifier)
-                    }
+                val nodes = state.nodes.values.sortedBy { it.name }
 
-                    Hairline()
-
-                    for (node in state.nodes.values.sortedBy { it.name }) {
+                Table(
+                    listOf(
+                        Col("Node", 120.dp, weight = 1f),
+                        Col("Transcripts found", 88.dp, numeric = true, priority = 1),
+                        Col("Imported", 72.dp, numeric = true, priority = 1),
+                        Col("Status", 140.dp, max = 300.dp, weight = 1f, overflow = Overflow.Wrap),
+                        ActionColumn,
+                    ),
+                    nodes.size,
+                    { row, column ->
+                        val node = nodes[row]
                         val status = statuses.firstOrNull { it.nodeId == node.id && it.agent == agent }
                         val pending = pendingImports(status)
                         val job = jobs[node.id to agent]
 
-                        ContentRow {
-                            Label(node.name, maxLines = 1)
-                            Label((status?.found ?: 0).toString(), color = colors.textMuted)
-                            Label((status?.imported ?: 0).toString(), color = colors.textMuted)
-
-                            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                                if (job?.running == true) {
-                                    Label("Importing ${job.done} of ${job.total}", color = colors.textMuted)
-                                    DeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}", if (job.total == 0) 0f else job.done.toFloat() / job.total)
-                                } else if (job != null) {
-                                    Label(importOutcome(job), style = Tokens.Type.Meta, color = colors.textMuted)
-                                } else {
-                                    Label(if (pending > 0) "$pending ready to import" else "Up to date", color = colors.textMuted)
+                        when (column) {
+                            0 -> TableCell.Text(node.name)
+                            1 -> TableCell.Text((status?.found ?: 0).toString(), color = colors.textMuted)
+                            2 -> TableCell.Text((status?.imported ?: 0).toString(), color = colors.textMuted)
+                            3 -> TableCell.Slot(if (job?.running == true) "Importing ${job.done} of ${job.total}" else if (job != null) importOutcome(job) else if (pending > 0) "$pending ready to import" else "Up to date") {
+                                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                                    if (job?.running == true) {
+                                        Label("Importing ${job.done} of ${job.total}", color = colors.textMuted)
+                                        DeterminateProgress("Importing ${agentName(agent)} conversations from ${node.name}", if (job.total == 0) 0f else job.done.toFloat() / job.total)
+                                    } else if (job != null) {
+                                        Label(importOutcome(job), style = Tokens.Type.Meta, color = colors.textMuted)
+                                    } else {
+                                        Label(if (pending > 0) "$pending ready to import" else "Up to date", color = colors.textMuted)
+                                    }
                                 }
                             }
 
-                            RowMenu("${agentName(agent)} imports on ${node.name}") { close ->
-                                if (job?.running != true && pending > 0) {
-                                    MenuItem("Import $pending conversations", onClick = {
-                                        close()
-                                        store.act { jobs = jobs + ((node.id to agent) to store.api.startImport(ImportRequest(node.id, agent))) }
-                                    })
-                                }
+                            else -> TableCell.Slot {
+                                RowMenu("${agentName(agent)} imports on ${node.name}") { close ->
+                                    if (job?.running != true && pending > 0) {
+                                        MenuItem("Import $pending conversations", onClick = {
+                                            close()
+                                            store.act { jobs = jobs + ((node.id to agent) to store.api.startImport(ImportRequest(node.id, agent))) }
+                                        })
+                                    }
 
-                                if (job != null && !job.running && job.failed.isNotEmpty()) {
-                                    MenuItem(if (node.id to agent in showingProblems) "Hide unreadable conversations" else "Show unreadable conversations", onClick = {
-                                        close()
-                                        showingProblems = if (node.id to agent in showingProblems) showingProblems - (node.id to agent) else showingProblems + (node.id to agent)
-                                    })
-                                }
+                                    if (job != null && !job.running && job.failed.isNotEmpty()) {
+                                        MenuItem(if (node.id to agent in showingProblems) "Hide unreadable conversations" else "Show unreadable conversations", onClick = {
+                                            close()
+                                            showingProblems = if (node.id to agent in showingProblems) showingProblems - (node.id to agent) else showingProblems + (node.id to agent)
+                                        })
+                                    }
 
-                                if (job?.running == true || (pending == 0 && job?.failed.isNullOrEmpty())) {
-                                    MenuLabel(if (job?.running == true) "Import in progress" else "No imports waiting")
+                                    if (job?.running == true || (pending == 0 && job?.failed.isNullOrEmpty())) {
+                                        MenuLabel(if (job?.running == true) "Import in progress" else "No imports waiting")
+                                    }
                                 }
                             }
                         }
+                    },
+                    detail = { row ->
+                        val node = nodes[row]
+                        val job = jobs[node.id to agent]
 
                         if (job != null && !job.running && node.id to agent in showingProblems) {
-                            Column(Modifier.padding(vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                            Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                                 for (problem in job.failed) {
                                     Label("${problem.path.substringAfterLast('/')}: ${problem.reason}", color = colors.textMuted)
                                 }
                             }
                         }
-
-                        Hairline()
-                    }
-                }
+                    },
+                )
             }
         }
     }
