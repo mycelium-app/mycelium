@@ -61,13 +61,13 @@ fun recentModels(conversations: Collection<Conversation>, providers: List<ModelP
 fun List<ModelProvider>.withFavourite(providerId: String, model: String, favourite: Boolean): List<ModelProvider> =
     map { if (it.id == providerId) it.copy(favourites = it.favourites.filter { name -> name != model } + listOfNotNull(model.takeIf { favourite })) else it }
 
-fun Store.setFavouriteModel(providers: List<ModelProvider>, onChange: (List<ModelProvider>) -> Unit, provider: ModelProvider, model: String, favourite: Boolean) {
-    onChange(providers.withFavourite(provider.id, model, favourite))
+fun Store.setFavouriteModel(change: ((List<ModelProvider>) -> List<ModelProvider>) -> Unit, provider: ModelProvider, model: String, favourite: Boolean) {
+    change { it.withFavourite(provider.id, model, favourite) }
 
     act {
         val saved = api.setFavouriteModel(provider.id, model, favourite)
 
-        onChange(providers.map { if (it.id == saved.id) saved else it })
+        change { current -> current.map { if (it.id == saved.id) saved.copy(favourites = it.favourites) else it } }
     }
 }
 

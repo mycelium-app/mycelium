@@ -380,7 +380,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             conversation.providerId,
                             conversation.model,
                             recent = recentModels(state.conversations.values, providers),
-                            onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel(providers, { providers = it }, picked, favouriteModel, on) },
+                            onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = change(providers) }, picked, favouriteModel, on) },
                         ) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
                         onStop = { store.act { api.cancel(id) } },
                         onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },

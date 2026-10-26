@@ -111,7 +111,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                                 provider.id,
                                 chosenModel,
                                 recent = recentModels(state.conversations.values, loaded),
-                                onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel(loaded, { providers = it }, picked, favouriteModel, on) },
+                                onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = providers?.let(change) }, picked, favouriteModel, on) },
                             ) { picked, chosenPick -> providerId = picked.id; model = chosenPick },
                         )
                     },
