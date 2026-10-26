@@ -679,7 +679,17 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                                     ("tool_call", row.tool_call_id),
                                 ];
                                 let attributes: Vec<String> = attributes.into_iter().filter_map(|(name, value)| Some(format!("{name}=\"{}\"", value?.replace('"', "'").replace('<', "\u{2039}")))).collect();
-                                let text = row.text.replace("</memory", "<\\/memory");
+                                let lowered = row.text.to_ascii_lowercase();
+                                let mut text = String::new();
+                                let mut copied = 0;
+
+                                for (at, _) in lowered.match_indices("</memory") {
+                                    text.push_str(&row.text[copied..at]);
+                                    text.push_str("<\\/");
+                                    copied = at + 2;
+                                }
+
+                                text.push_str(&row.text[copied..]);
 
                                 format!("<memory {}>\n{text}\n</memory>", attributes.join(" "))
                             })
