@@ -26,6 +26,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/chats",
     "POST /api/v1/chats/import",
     "POST /api/v1/conversations/{id}/side",
+    "POST /api/v1/conversations/{id}/continue",
     "POST /api/v1/conversations/{id}/move",
     "DELETE /api/v1/conversations/{id}/move",
     "PUT /api/v1/conversations/{id}/goal",

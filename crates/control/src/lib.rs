@@ -14,6 +14,7 @@ mod chat_tool_servers;
 mod chat_tools;
 mod chats;
 mod config;
+mod continuation;
 mod conversations;
 mod git;
 mod goals;
@@ -157,6 +158,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/walkthroughs/{id}/reads", get(walkthroughs::reads))
         .route("/api/v1/walkthroughs/{id}/reads/{step}", put(walkthroughs::mark_read))
         .route("/api/v1/walkthroughs/{id}/dismissal", put(walkthroughs::dismiss).delete(walkthroughs::reopen))
+        .route("/api/v1/conversations/{id}/continue", post(continuation::request))
         .route("/api/v1/conversations/{id}/move-plan", get(moves::plan))
         .route("/api/v1/conversations/{id}/move", get(moves::current).post(moves::request).delete(moves::cancel))
         .route("/api/v1/conversations/{id}/events", get(conversations::events))

@@ -68,6 +68,7 @@ pub enum EventKind {
     Error,
     Workflow,
     ModelChanged,
+    Continued,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
