@@ -266,8 +266,6 @@ fun statusSectionName(status: ConversationStatus): String = when (status) {
 
 const val AllGroups = "all"
 const val NoGroup = "none"
-const val AllProjects = "all"
-const val NoProject = "none"
 const val PinnedName = "Pinned"
 const val SettledName = "Settled"
 
@@ -279,16 +277,10 @@ fun inGroup(groupId: String?, filter: String): Boolean = when (filter) {
 
 fun inGroupFilter(conversation: Conversation, filter: String): Boolean = inGroup(conversation.groupId, filter)
 
-fun inProjectFilter(conversation: Conversation, filter: String): Boolean = when (filter) {
-    AllProjects -> true
-    NoProject -> conversation.projectId == null
-    else -> conversation.projectId == filter
-}
-
 fun isWorktree(conversation: Conversation, project: Project?): Boolean = project != null && conversation.cwd.startsWith(project.path.trimEnd('/') + "-worktrees/")
 
-private fun topLevel(conversations: Collection<Conversation>, filter: String, projectFilter: String = AllProjects): List<Conversation> {
-    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) && inProjectFilter(it, projectFilter) }
+private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
+    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) }
     val activeIds = active.map { it.id }.toSet()
 
     return active.filter { it.parentId == null || it.parentId !in activeIds }
@@ -297,11 +289,11 @@ private fun topLevel(conversations: Collection<Conversation>, filter: String, pr
 fun needsInputIn(conversations: Collection<Conversation>, filter: String): Int =
     topLevel(conversations, filter).count { it.status == ConversationStatus.Input }
 
-fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups, projectFilter: String = AllProjects): List<Conversation> =
-    topLevel(conversations, filter, projectFilter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
+fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
+    topLevel(conversations, filter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
 
-fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups, projectFilter: String = AllProjects): List<SidebarSection> {
-    return topLevel(conversations, filter, projectFilter)
+fun sidebarSections(conversations: Collection<Conversation>, filter: String = AllGroups): List<SidebarSection> {
+    return topLevel(conversations, filter)
         .filter { it.pinnedAt == null }
         .groupBy { if (it.resumeAt != null) ConversationStatus.Working else it.status }
         .map { (status, rows) -> SidebarSection(status, if (status == ConversationStatus.Done) SettledName else statusSectionName(status), rows.sortedByDescending { it.updatedAt }) }

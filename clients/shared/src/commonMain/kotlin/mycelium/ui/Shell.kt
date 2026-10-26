@@ -113,8 +113,6 @@ import mycelium.state.isSubagent
 import mycelium.state.agentAccounts
 import mycelium.state.chatAccountFirst
 import mycelium.state.sidebarRows
-import mycelium.state.AllProjects
-import mycelium.state.NoProject
 import mycelium.state.isWorktree
 import mycelium.state.sidebarAssistants
 import mycelium.state.sidebarSections
@@ -437,10 +435,9 @@ private const val ChatsMode = "Chats"
 @Composable
 private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
-    val projectFilter = rememberProjectFilter(platform, state)
     var settledOpen by remember { mutableStateOf(platform.loadPreference(SettledOpenPreference) == true.toString()) }
-    val pinned = pinnedConversations(state.conversations.values, groupFilter.value, projectFilter.value)
-    val sections = sidebarSections(state.conversations.values, groupFilter.value, projectFilter.value)
+    val pinned = pinnedConversations(state.conversations.values, groupFilter.value)
+    val sections = sidebarSections(state.conversations.values, groupFilter.value)
     val pinnedChatRows = pinnedChats(state.conversations.values)
     val chats = chatSections(state.conversations.values)
 
@@ -546,12 +543,6 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 item(key = "label") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
-
-                        if (state.projects.isNotEmpty()) {
-                            val choices = listOf(Choice(AllProjects, "All projects")) + state.projects.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoProject, "No project")
-
-                            OptionMenu("Project", choices, projectFilter.value, projectFilter.choose, title = "Show", icon = MyIcon.Folder, size = ButtonSize.Sm)
-                        }
                     }
                 }
 
@@ -892,21 +883,11 @@ private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"
 
-private const val ProjectFilterPreference = "conversation-project-filter"
-
 private const val SettledOpenPreference = "settled-open"
 
 val LocalGroupFilter = staticCompositionLocalOf { AllGroups }
 
 private class GroupFilterChoice(val value: String, val choose: (String) -> Unit)
-
-@Composable
-private fun rememberProjectFilter(platform: Platform, state: AppState): GroupFilterChoice {
-    var saved by remember { mutableStateOf(platform.loadPreference(ProjectFilterPreference) ?: AllProjects) }
-    val known = saved == AllProjects || saved == NoProject || saved in state.projects
-
-    return GroupFilterChoice(if (known) saved else AllProjects) { chosen -> saved = chosen; platform.savePreference(ProjectFilterPreference, chosen) }
-}
 
 @Composable
 private fun rememberGroupFilter(platform: Platform, state: AppState): GroupFilterChoice {

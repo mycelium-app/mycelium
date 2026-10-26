@@ -18,8 +18,6 @@ import mycelium.state.projectsOfRepository
 import mycelium.state.reduce
 import mycelium.state.registeredFolders
 import mycelium.state.relativeTime
-import mycelium.state.AllProjects
-import mycelium.state.NoProject
 import mycelium.state.isWorktree
 import mycelium.state.sidebarSections
 import mycelium.state.setUpRepositories
@@ -72,27 +70,6 @@ class StateTest {
             listOf("Needs input", "Failed", "Ready to review", "Working", "Settled"),
             sections.map { it.name },
         )
-    }
-
-    @Test
-    fun the_project_filter_shows_only_that_projects_conversations() {
-        val inApp = conversation("in-app", ConversationStatus.Working).copy(projectId = "p1")
-        val inOther = conversation("in-other", ConversationStatus.Working).copy(projectId = "p2")
-
-        val shown = sidebarSections(listOf(inApp, inOther), projectFilter = "p1").flatMap { it.rows }
-
-        assertEquals(listOf("in-app"), shown.map { it.id })
-        assertEquals(2, sidebarSections(listOf(inApp, inOther), projectFilter = AllProjects).flatMap { it.rows }.size)
-    }
-
-    @Test
-    fun no_project_shows_only_conversations_without_one() {
-        val inApp = conversation("in-app", ConversationStatus.Working).copy(projectId = "p1")
-        val loose = conversation("loose", ConversationStatus.Working)
-
-        val shown = sidebarSections(listOf(inApp, loose), projectFilter = NoProject).flatMap { it.rows }
-
-        assertEquals(listOf("loose"), shown.map { it.id })
     }
 
     @Test

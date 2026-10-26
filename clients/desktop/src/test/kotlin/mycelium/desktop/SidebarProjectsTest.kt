@@ -4,8 +4,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.hasText
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -83,19 +81,6 @@ class SidebarProjectsTest {
         rule.waitForIdle()
 
         return rule.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().size
-    }
-
-    @Test
-    fun the_project_filter_narrows_the_conversation_list() {
-        show("${row("a1", "Fix login", "p1")},${row("b1", "Tidy docs", "p2")},${row("c1", "Loose end", null)}")
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Fix login", substring = true).fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithContentDescription("Project: All projects").performClick()
-        rule.onNode(hasText("beta") and hasClickAction()).performClick()
-
-        assertEquals(1, shown("Tidy docs"))
-        assertEquals(0, shown("Fix login"))
-        assertEquals(0, shown("Loose end"))
     }
 
     @Test
