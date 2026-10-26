@@ -25,6 +25,7 @@ pub enum Experiment {
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Copy, sqlx::FromRow)]
+#[serde(default)]
 pub struct Experiments {
     pub tasks: bool,
     pub workflows: bool,
@@ -33,17 +34,11 @@ pub struct Experiments {
     pub subagents: bool,
     pub walkthrough: bool,
     pub move_chats: bool,
-    #[serde(default)]
     pub groups: bool,
-    #[serde(default)]
     pub continue_elsewhere: bool,
-    #[serde(default)]
     pub assistants: bool,
-    #[serde(default)]
     pub memory_banks: bool,
-    #[serde(default)]
     pub chat_across_groups: bool,
-    #[serde(default)]
     pub voice: bool,
 }
 

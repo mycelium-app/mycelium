@@ -118,3 +118,14 @@ async fn standalone_subagents_can_start_and_be_read_without_enabling_workflows()
     let (status, disabled) = server.user.json(server.user.post("/api/v1/workflows").json(&json!({"title": "Disabled", "steps": [{"key": "gate", "title": "Gate", "gate": true}]}))).await;
     assert_eq!((status, disabled["error"].clone()), (403, json!("experiment_disabled")));
 }
+
+#[tokio::test]
+async fn experiments_left_out_of_a_save_are_turned_off() {
+    let server = fresh().await;
+
+    let (status, saved) = server.user.json(server.user.put("/api/v1/experiments").json(&json!({"workflows": true}))).await;
+
+    let mut expected = flags(false);
+    expected["workflows"] = json!(true);
+    assert_eq!((status, saved), (200, expected));
+}
