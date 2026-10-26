@@ -62,6 +62,10 @@ impl McpConnection {
         McpConnection { http: http.clone(), url: url.to_string(), token: token.map(str::to_string), key_header, era: Era::Unknown, next_id: 0 }
     }
 
+    pub fn set_token(&mut self, token: Option<&str>) {
+        self.token = token.map(str::to_string);
+    }
+
     pub async fn list_tools(&mut self) -> Result<Vec<McpTool>, McpError> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;

@@ -480,6 +480,7 @@ data class ChatToolServer(
     val account: String? = null,
     val settings: JsonObject? = null,
     @SerialName("token_hint") val tokenHint: String? = null,
+    val oauth: Boolean = false,
     val enabled: Boolean = true,
     @SerialName("always_allow") val alwaysAllow: Boolean = false,
     val tools: List<ChatToolInfo> = emptyList(),
@@ -488,6 +489,12 @@ data class ChatToolServer(
 
 @Serializable
 data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null)
+
+@Serializable
+data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null)
+
+@Serializable
+data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
 
 @Serializable
 data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null)
@@ -1210,6 +1217,8 @@ sealed interface StreamMessage {
 
     data class NodeRemoved(val nodeId: String) : StreamMessage
 
+    data object IntegrationsChanged : StreamMessage
+
     data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
 
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
@@ -1265,6 +1274,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "memory_removed" -> StreamMessage.MemoryRemoved(element.requireString("memory_id"))
         "node" -> StreamMessage.NodeChanged(MyceliumJson.decodeFromJsonElement(NodeSummary.serializer(), element))
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
+        "integrations_changed" -> StreamMessage.IntegrationsChanged
         "node_resources" -> StreamMessage.NodeResourcesSampled(
             element.requireString("node_id"),
             MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),

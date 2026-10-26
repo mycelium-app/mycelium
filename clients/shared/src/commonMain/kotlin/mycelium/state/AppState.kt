@@ -60,6 +60,7 @@ data class AppState(
     val memories: Map<String, Memory> = emptyMap(),
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
+    val integrationsRevision: Int = 0,
     val events: Map<String, List<Event>> = emptyMap(),
     val sessionUpdates: Map<String, List<JsonObject>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
@@ -167,6 +168,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     )
 
     is StreamMessage.NodeChanged -> state.copy(nodes = state.nodes + (message.node.id to message.node))
+
+    is StreamMessage.IntegrationsChanged -> state.copy(integrationsRevision = state.integrationsRevision + 1)
 
     is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId, resources = state.resources - message.nodeId)
 

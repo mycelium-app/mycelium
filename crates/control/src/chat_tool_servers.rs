@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 pub const OWN_SERVER: &str = "mycelium";
 
-const DEFAULT_KEY_HEADER: &str = "authorization";
+pub const DEFAULT_KEY_HEADER: &str = "authorization";
 
 pub struct KnownApp {
     pub id: &'static str,
@@ -47,7 +47,7 @@ pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
 }];
 
 impl KnownApp {
-    fn address(&self, parsed: &url::Url) -> String {
+    pub fn address(&self, parsed: &url::Url) -> String {
         if (self.keeps_path)(parsed.path()) {
             return parsed.as_str().to_string();
         }
@@ -61,10 +61,10 @@ impl KnownApp {
     }
 }
 
-fn known_app(id: &str) -> Option<&'static KnownApp> {
+pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, enabled, always_allow, tools, created_at";
+pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
@@ -75,6 +75,9 @@ pub struct ServerRow {
     pub account: Option<String>,
     pub settings: sqlx::types::Json<Value>,
     pub bearer_token: Option<String>,
+    pub oauth_refresh_token: Option<String>,
+    pub oauth_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub oauth: Option<sqlx::types::Json<Value>>,
     pub enabled: bool,
     pub always_allow: bool,
     pub tools: sqlx::types::Json<Vec<StoredTool>>,
@@ -112,6 +115,7 @@ impl ServerRow {
             account: self.account.clone(),
             settings: self.settings.0.clone(),
             token_hint: self.bearer_token.as_deref().map(token_hint),
+            oauth: self.oauth.is_some(),
             enabled: self.enabled,
             always_allow: self.always_allow,
             tools: self.tool_list().iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone() }).collect(),
@@ -124,7 +128,7 @@ fn stored(tools: Vec<McpTool>) -> Vec<StoredTool> {
     tools.into_iter().map(|tool| StoredTool { name: tool.name, description: tool.description, input_schema: tool.input_schema }).collect()
 }
 
-async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, key_header: &'static str, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
+pub async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str>, key_header: &'static str, app: Option<&KnownApp>) -> ApiResult<Vec<StoredTool>> {
     let mut connection = McpConnection::new(&state.http, url, token, key_header);
     let tools = connection.list_tools().await.map_err(|error| match (&error, app) {
         (McpError::Rejected, Some(app)) => ApiError::bad_request("tool_server_failed", app.refused),
@@ -134,13 +138,38 @@ async fn fetch_tools(state: &AppState, name: &str, url: &str, token: Option<&str
     Ok(stored(tools))
 }
 
+const REFRESH_MARGIN: chrono::Duration = chrono::Duration::seconds(60);
+
+pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {
+    if row.oauth.is_none() {
+        return Ok(row.bearer_token.clone());
+    }
+
+    let current = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1"))).bind(row.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That tool server"))?;
+    let expiring = current.oauth_expires_at.is_some_and(|expires_at| expires_at - chrono::Utc::now() < REFRESH_MARGIN);
+    let (true, Some(refresh_token), Some(oauth)) = (expiring, current.oauth_refresh_token.as_deref(), current.oauth.as_ref()) else {
+        return Ok(current.bearer_token);
+    };
+    let tokens = crate::mcp_oauth::refresh(state, &oauth.0, refresh_token).await.map_err(|_| ApiError::conflict("sign_in_again", format!("Sign in to {} again in Settings, Integrations.", current.name)))?;
+
+    sqlx::query("update chat_tool_servers set bearer_token = $2, oauth_refresh_token = coalesce($3, oauth_refresh_token), oauth_expires_at = $4 where id = $1")
+        .bind(current.id)
+        .bind(&tokens.access_token)
+        .bind(&tokens.refresh_token)
+        .bind(tokens.expires_at)
+        .execute(&state.pool)
+        .await?;
+
+    Ok(Some(tokens.access_token))
+}
+
 pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<ServerRow>> {
     let rows = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where owner = $1 order by created_at, id"))).bind(owner).fetch_all(&state.pool).await?;
 
     Ok(rows)
 }
 
-async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Option<Uuid>) -> ApiResult<()> {
+pub async fn check_name(state: &AppState, owner: Uuid, name: &str, except: Option<Uuid>) -> ApiResult<()> {
     if name.is_empty() || slug(name).is_empty() {
         return Err(ApiError::bad_request("name_required", "Enter a name for this server, using letters or numbers."));
     }
@@ -277,7 +306,7 @@ pub async fn refresh(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Ok(Json(row.to_proto()));
     }
 
-    let tools = fetch_tools(&state, &row.name, &row.url, row.bearer_token.as_deref(), row.key_header(), row.known_app()).await?;
+    let tools = fetch_tools(&state, &row.name, &row.url, bearer(&state, &row).await?.as_deref(), row.key_header(), row.known_app()).await?;
     let updated = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("update chat_tool_servers set tools = $2 where id = $1 returning {SERVER_COLUMNS}"))).bind(id).bind(sqlx::types::Json(tools)).fetch_one(&state.pool).await?;
     state.hub.tools_changed(user.id);
 

@@ -23,7 +23,13 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.util.concurrent.CopyOnWriteArrayList
+import androidx.compose.runtime.CompositionLocalProvider
+import mycelium.Connection
+import mycelium.DeviceInfo
+import mycelium.Platform
 import mycelium.api.MyceliumApi
+import mycelium.api.StreamMessage
+import mycelium.ui.LocalPlatform
 import mycelium.state.Store
 import mycelium.ui.ChatToolsSettings
 import mycelium.ui.MyceliumTheme
@@ -154,6 +160,44 @@ class ChatToolsSettingsTest {
         rule.onNodeWithText("Refresh tools").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/s7/refresh") } }
+    }
+
+    @Test
+    fun signInWithOutlineOpensTheBrowserAndTheIntegrationAppearsWhenTheSignInFinishes() {
+        val opened = CopyOnWriteArrayList<String>()
+        val platform = object : Platform {
+            override val originUrl: String? = null
+            override val signsInThroughTheBrowser = false
+            override fun loadConnection(): Connection? = null
+            override fun saveConnection(connection: Connection?) = Unit
+            override fun device() = DeviceInfo("Desktop", "host", "linux", "x86_64")
+            override fun approveCode(): String? = null
+            override fun currentPath() = "/"
+            override fun navigate(url: String) = Unit
+            override fun openUrl(url: String) { opened += url }
+            override fun copyToClipboard(text: String) = Unit
+        }
+        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://docs.test/authorize?state=s"}"""
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalPlatform provides platform) { ChatToolsSettings(store) } } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Outline").performClick()
+        rule.onNodeWithContentDescription("Name").performTextInput("Docs")
+        rule.onNodeWithContentDescription("Outline address").performTextInput("https://docs.test")
+        rule.onNodeWithText("Sign in with Outline").performClick()
+
+        rule.waitUntil(5_000) { opened.isNotEmpty() }
+        assertEquals(listOf("https://docs.test/authorize?state=s"), opened.toList())
+        assertEquals("""{"name":"Docs","url":"https://docs.test","kind":"outline"}""", bodies.last { it.isNotEmpty() })
+        rule.onNodeWithText("Finish signing in in your browser.").assertExists()
+
+        listed = """{"id":"s6","name":"Docs","url":"https://docs.test/mcp","settings":{"app":"outline"},"oauth":true,"enabled":true,"always_allow":false,"tools":[{"name":"search","description":"Search"}],"created_at":"2026-10-22T15:00:00Z"}"""
+        store.receive(StreamMessage.IntegrationsChanged)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Signed in with OAuth").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Finish signing in in your browser.").assertDoesNotExist()
+        rule.onNodeWithText("Connect integration").assertDoesNotExist()
     }
 
     @Test

@@ -253,6 +253,9 @@ class MyceliumApi(
     suspend fun createChatToolServer(request: CreateChatToolServerRequest): ChatToolServer =
         call("/chat-tool-servers") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun startChatToolServerOAuth(request: StartChatToolServerOAuthRequest): OAuthStart =
+        call("/chat-tool-servers/oauth") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun patchChatToolServer(id: String, request: PatchChatToolServerRequest): ChatToolServer =
         call("/chat-tool-servers/$id") { client.patch(it) { authorise(); json(request) } }.body()
 

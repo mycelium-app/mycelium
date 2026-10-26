@@ -393,6 +393,11 @@ fn permission_answer_and_login_bodies_round_trip() {
 }
 
 #[test]
+fn the_integrations_changed_stream_message_is_tagged_by_name() {
+    assert_eq!(round_trip(&StreamMessage::IntegrationsChanged)["type"], "integrations_changed");
+}
+
+#[test]
 fn device_stream_message_carries_state_and_a_null_result_until_consumed() {
     let pending = round_trip(&StreamMessage::Device { user_code: "WDJB-MJHT".into(), kind: DeviceKind::Node, label: "l".into(), hostname: "h".into(), state: DeviceState::Pending, result_id: None });
 

@@ -478,10 +478,25 @@ pub struct ChatToolServer {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub settings: Value,
     pub token_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oauth: bool,
     pub enabled: bool,
     pub always_allow: bool,
     pub tools: Vec<ChatToolInfo>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartChatToolServerOAuthRequest {
+    pub name: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthStart {
+    pub authorize_url: String,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]

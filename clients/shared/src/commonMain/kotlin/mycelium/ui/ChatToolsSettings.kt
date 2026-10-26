@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import mycelium.api.ApiException
 import mycelium.api.ChatToolServer
 import mycelium.api.CreateChatToolServerRequest
 import mycelium.api.PatchChatToolServerRequest
+import mycelium.api.StartChatToolServerOAuthRequest
 import mycelium.state.Store
 
 private const val McpType = "MCP"
@@ -73,9 +75,9 @@ fun ChatToolsSettings(store: Store) {
     var renamed by remember { mutableStateOf("") }
     var renameFailure by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        store.act { servers = store.api.chatToolServers() }
-    }
+    val live by store.state.collectAsState()
+    val platform = LocalPlatform.current
+    var signingIn by remember { mutableStateOf(false) }
 
     fun replace(updated: ChatToolServer) {
         servers = servers.map { if (it.id == updated.id) updated else it }
@@ -95,7 +97,16 @@ fun ChatToolsSettings(store: Store) {
         smtpSecurity = Tls
         sender = ""
         tokenType = UserSession
+        signingIn = false
         failure = null
+    }
+
+    LaunchedEffect(live.integrationsRevision) {
+        store.act { servers = store.api.chatToolServers() }
+
+        if (signingIn) {
+            resetForm()
+        }
     }
 
     fun emailSettings(): JsonObject? {
@@ -143,6 +154,23 @@ fun ChatToolsSettings(store: Store) {
                 val added = store.api.createChatToolServer(request)
                 servers = servers.filter { it.id != added.id } + added
                 resetForm()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (problem: ApiException) {
+                failure = problem.message
+            } catch (_: Exception) {
+                failure = "Could not reach the control plane. Check your connection and try again."
+            }
+        }
+    }
+
+    fun signIn() {
+        scope.launch {
+            try {
+                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(name.trim().ifEmpty { if (kind == OutlineType) OutlineType else "MCP server" }, url.trim(), if (kind == OutlineType) "outline" else null))
+                platform?.openUrl(started.authorizeUrl)
+                signingIn = true
+                failure = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (problem: ApiException) {
@@ -226,8 +254,17 @@ fun ChatToolsSettings(store: Store) {
 
                     failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
+                    if (signingIn) {
+                        Label("Finish signing in in your browser.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                         MyButton(::add, text = "Connect integration", variant = ButtonVariant.Outline)
+
+                        if (kind == McpType || kind == OutlineType) {
+                            MyButton(::signIn, text = if (kind == OutlineType) "Sign in with Outline" else "Sign in with OAuth", variant = ButtonVariant.Outline)
+                        }
+
                         MyButton(
                             ::resetForm,
                             text = "Cancel",
@@ -257,7 +294,7 @@ fun ChatToolsSettings(store: Store) {
                             }
 
                             server.account?.let { Label(it, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1) }
-                            Label(server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                            Label(if (server.oauth) "Signed in with OAuth" else server.tokenHint?.let { "Ends in $it" } ?: "No token", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                         }
 
                         Label(serverType(server), color = colors.textMuted, maxLines = 1)

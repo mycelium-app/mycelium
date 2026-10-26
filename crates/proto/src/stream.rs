@@ -69,6 +69,7 @@ pub enum StreamMessage {
     TerminalExited {
         terminal_id: Uuid,
     },
+    IntegrationsChanged,
     Device {
         user_code: String,
         kind: DeviceKind,

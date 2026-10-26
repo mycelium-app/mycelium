@@ -46,6 +46,14 @@ private fun conversation(
 
 class StateTest {
     @Test
+    fun anIntegrationsChangedMessageBumpsTheRevisionSoSettingsReloads() {
+        val message = parseStreamMessage("""{"type":"integrations_changed"}""")
+        val after = reduce(AppState(), assertIs<StreamMessage.IntegrationsChanged>(message))
+
+        assertEquals(1, after.integrationsRevision)
+    }
+
+    @Test
     fun sidebarOrdersByNeedsInputThenFailedThenReviewThenWorkingThenDone() {
         val sections = sidebarSections(
             listOf(

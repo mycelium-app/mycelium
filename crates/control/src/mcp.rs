@@ -3,7 +3,7 @@ use crate::artifacts;
 use crate::chat_tools;
 use crate::auth::AuthNode;
 use crate::experiments::{self, Experiment};
-use crate::chat_tool_servers::{list_owned, slug};
+use crate::chat_tool_servers::{bearer, list_owned, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search};
@@ -429,9 +429,11 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         "tools/list" => {
             let owner = node_owner(&state, node.id).await?;
             let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled).collect();
+            let held = &state;
             let http = &state.http;
             let listed = join_all(servers.iter().filter(|server| server.integration().is_none()).map(|server| async move {
-                let mut connection = McpConnection::new(http, &server.url, server.bearer_token.as_deref(), server.key_header());
+                let token = bearer(held, server).await.ok().flatten();
+                let mut connection = McpConnection::new(http, &server.url, token.as_deref(), server.key_header());
 
                 connection.list_tools().await.map(|tools| (server, tools))
             }))
@@ -891,7 +893,11 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         return Ok(reply(&id, tool_text(&output.text, output.is_error)));
                     }
 
-                    let mut connection = McpConnection::new(&state.http, &server.url, server.bearer_token.as_deref(), server.key_header());
+                    let token = match bearer(&state, server).await {
+                        Ok(token) => token,
+                        Err(error) => return Ok(reply(&id, tool_text(error.message(), true))),
+                    };
+                    let mut connection = McpConnection::new(&state.http, &server.url, token.as_deref(), server.key_header());
 
                     match connection.call_tool(tool, &arguments).await {
                         Ok(output) => reply(&id, tool_text(&output.text, output.is_error)),

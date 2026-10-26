@@ -33,6 +33,7 @@ mod issues;
 mod link;
 mod mcp;
 mod mcp_client;
+mod mcp_oauth;
 mod memories;
 mod message_proposals;
 mod conversation_connections;
@@ -115,6 +116,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/version", get(boot::version))
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
+        .route("/integrations/oauth/callback", get(mcp_oauth::callback))
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
         .route("/api/v1/workflows", get(workflows::list).post(workflows::create))
@@ -235,6 +237,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/chat-tool-servers", get(chat_tool_servers::list).post(chat_tool_servers::create))
+        .route("/api/v1/chat-tool-servers/oauth", post(mcp_oauth::start))
         .route("/api/v1/chat-tool-servers/{id}", patch(chat_tool_servers::patch).delete(chat_tool_servers::delete))
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
         .route("/api/v1/chats", post(chats::create))

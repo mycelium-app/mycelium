@@ -65,6 +65,19 @@ pub struct GitAnswer {
     pub error: Option<String>,
 }
 
+const OAUTH_SIGN_IN_LIFETIME: std::time::Duration = std::time::Duration::from_secs(600);
+
+pub struct PendingOAuth {
+    pub owner: Uuid,
+    pub name: String,
+    pub url: String,
+    pub settings: Value,
+    pub client_id: String,
+    pub token_endpoint: String,
+    pub verifier: String,
+    pub created: std::time::Instant,
+}
+
 pub struct ProcessAnswer {
     pub ok: bool,
     pub error: Option<String>,
@@ -85,6 +98,7 @@ pub struct Hub {
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
     stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
+    oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
@@ -437,6 +451,19 @@ impl Hub {
         };
 
         nodes.get_mut(&node_id).is_some_and(|connection| connection.sessions.remove(&conversation_id))
+    }
+
+    pub fn track_oauth(&self, sign_in: String, pending: PendingOAuth) {
+        if let Ok(mut sign_ins) = self.oauth_sign_ins.lock() {
+            sign_ins.retain(|_, held| held.created.elapsed() < OAUTH_SIGN_IN_LIFETIME);
+            sign_ins.insert(sign_in, pending);
+        }
+    }
+
+    pub fn take_oauth(&self, sign_in: &str) -> Option<PendingOAuth> {
+        let pending = self.oauth_sign_ins.lock().ok()?.remove(sign_in)?;
+
+        (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
     }
 
     pub fn track_login(&self, login_id: Uuid, node_id: Uuid, user_id: Uuid) {
