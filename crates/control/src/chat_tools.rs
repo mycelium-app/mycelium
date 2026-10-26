@@ -18,10 +18,10 @@ const SEARCH_RESULTS: usize = 5;
 const LISTED_TOOLS_PER_SERVER: usize = 40;
 const MAX_TOOL_NAME: usize = 64;
 const MAX_RESULT_CHARS: usize = 50_000;
-const ALLOW_ONCE: &str = "allow_once";
+pub const ALLOW_ONCE: &str = "allow_once";
 const ALLOW_ALWAYS: &str = "allow_always";
 const DECLINE: &str = "reject_once";
-const DECLINED_TEXT: &str = "The person declined this tool call.";
+pub const DECLINED_TEXT: &str = "The person declined this tool call.";
 
 #[derive(Clone)]
 enum Source {
@@ -201,7 +201,7 @@ impl Toolbox {
         !server_trusted && !self.always_allowed.contains(&tool.name)
     }
 
-    async fn call(&mut self, state: &AppState, conversation_id: Uuid, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
+    async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
         match &tool.source {
             Source::Own if tool.original == "walkthrough" => Ok(("A walkthrough is about the changes in a workspace, and this chat has no workspace. Open a conversation on a node to write one.".to_string(), true)),
             Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, &tool.original, input).await,
@@ -209,7 +209,7 @@ impl Toolbox {
                 let Some(integration) = server.integration() else {
                     return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
                 };
-                let output = integration.call(&state.http, &server.credentials(), &tool.original, input).await;
+                let output = integration.call(state, owner, server, &tool.original, input).await;
 
                 Ok((output.text, output.is_error))
             }
@@ -276,7 +276,7 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         }
     }
 
-    let (text, is_error) = match toolbox.call(state, id, &tool, &call.input).await {
+    let (text, is_error) = match toolbox.call(state, owner, id, &tool, &call.input).await {
         Ok(result) => result,
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };
@@ -285,15 +285,24 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
 }
 
 async fn ask(state: &AppState, owner: Uuid, id: Uuid, call: &ToolCall, tool: &Tool) -> ApiResult<String> {
-    let answer = state.hub.await_chat_approval(id, &call.id);
+    request_approval(state, owner, id, &call.id, &call.name, &call.input, &tool.server, true).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_id: &str, title: &str, input: &Value, server: &str, offer_always: bool) -> ApiResult<String> {
+    let answer = state.hub.await_chat_approval(id, request_id);
+    let mut options = vec![json!({"optionId": ALLOW_ONCE, "name": "Allow once", "kind": ALLOW_ONCE})];
+
+    if offer_always {
+        options.push(json!({"optionId": ALLOW_ALWAYS, "name": "Always allow this tool", "kind": ALLOW_ALWAYS}));
+    }
+
+    options.push(json!({"optionId": DECLINE, "name": "Deny", "kind": DECLINE}));
+
     let request = json!({
-        "request_id": call.id,
-        "toolCall": {"toolCallId": call.id, "title": call.name, "rawInput": call.input, "server": tool.server},
-        "options": [
-            {"optionId": ALLOW_ONCE, "name": "Allow once", "kind": ALLOW_ONCE},
-            {"optionId": ALLOW_ALWAYS, "name": "Always allow this tool", "kind": ALLOW_ALWAYS},
-            {"optionId": DECLINE, "name": "Deny", "kind": DECLINE},
-        ],
+        "request_id": request_id,
+        "toolCall": {"toolCallId": request_id, "title": title, "rawInput": input, "server": server},
+        "options": options,
     });
     let mut tx = state.pool.begin().await?;
     let event = append_event(&mut tx, id, EventKind::PermissionRequest, &request, None).await?;
@@ -308,7 +317,7 @@ async fn ask(state: &AppState, owner: Uuid, id: Uuid, call: &ToolCall, tool: &To
 
     let option_id = answer.await.unwrap_or_else(|_| DECLINE.to_string());
     let mut tx = state.pool.begin().await?;
-    let event = append_event(&mut tx, id, EventKind::PermissionResolved, &json!({"request_id": call.id, "option_id": option_id}), None).await?;
+    let event = append_event(&mut tx, id, EventKind::PermissionResolved, &json!({"request_id": request_id, "option_id": option_id}), None).await?;
     let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
     tx.commit().await?;
 

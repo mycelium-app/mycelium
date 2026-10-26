@@ -1,5 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::{email, stoat, zulip};
+use crate::state::AppState;
+use uuid::Uuid;
 use serde_json::Value;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -83,11 +85,13 @@ impl Integration {
         }
     }
 
-    pub async fn call(self, http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
+    pub async fn call(self, state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, arguments: &Value) -> CallOutput {
+        let credentials = server.credentials();
+
         match self {
-            Integration::Zulip => zulip::call(http, credentials, tool, arguments).await,
-            Integration::Email => email::call(credentials, tool, arguments).await,
-            Integration::Stoat => stoat::call(http, credentials, tool, arguments).await,
+            Integration::Zulip => zulip::call(&state.http, &credentials, tool, arguments).await,
+            Integration::Email => email::call(state, owner, server, &credentials, tool, arguments).await,
+            Integration::Stoat => stoat::call(&state.http, &credentials, tool, arguments).await,
         }
     }
 }

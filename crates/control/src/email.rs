@@ -1,6 +1,8 @@
-use crate::chat_tool_servers::StoredTool;
+use crate::chat_tool_servers::{StoredTool, ServerRow, list_owned};
+use crate::state::AppState;
 use crate::integrations::{CallOutput, Credentials};
 use async_imap::Client;
+use async_imap::types::Flag;
 use async_imap::imap_proto::{BodyStructure, MessageSection, SectionPath};
 use futures_util::TryStreamExt;
 use lettre::message::{Mailbox, MessageBuilder, header::ContentType};
@@ -9,6 +11,7 @@ use lettre::transport::smtp::client::{Certificate, Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use mail_parser::{HeaderValue, MessageParser};
 use serde_json::{Value, json};
+use uuid::Uuid;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -20,6 +23,9 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, pem::PemObject};
 use tokio_rustls::client::TlsStream;
 
 const SEND_MESSAGE: &str = "send_message";
+const DELETE_MESSAGE: &str = "delete_message";
+const MOVE_MESSAGE: &str = "move_message";
+const MAX_TRANSFER_BYTES: usize = 20 * 1024 * 1024;
 const DEFAULT_LIMIT: u64 = 20;
 const MAX_LIMIT: u64 = 100;
 const MAX_BODY_CHARACTERS: usize = 20_000;
@@ -120,6 +126,7 @@ pub fn tools() -> Vec<StoredTool> {
     let addresses = |description: &str| json!({"type": "array", "items": {"type": "string"}, "description": description});
 
     vec![
+        StoredTool { name: "list_accounts".to_string(), description: "List your enabled Email integrations with their ids, names and usernames. Use an id as destination_account when moving a message between accounts.".to_string(), input_schema: json!({"type": "object", "properties": {}}) },
         StoredTool { name: "list_folders".to_string(), description: "List the mailbox's folders.".to_string(), input_schema: json!({"type": "object", "properties": {}}) },
         StoredTool {
             name: "list_messages".to_string(),
@@ -137,6 +144,16 @@ pub fn tools() -> Vec<StoredTool> {
             input_schema: json!({"type": "object", "properties": {"folder": folder, "from": {"type": "string", "description": "Part of the sender's name or address."}, "subject": {"type": "string", "description": "Words in the subject."}, "text": {"type": "string", "description": "Words anywhere in the message."}, "since": {"type": "string", "description": "Only messages on or after this date, as YYYY-MM-DD."}, "limit": limit}}),
         },
         StoredTool {
+            name: DELETE_MESSAGE.to_string(),
+            description: "Permanently delete one message by UID from its folder. Always needs the person's approval in chats, even when Always allow is on. Requires UIDPLUS; other messages marked for deletion are left alone.".to_string(),
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID, from list_messages or search_messages."}}, "required": ["id"]}),
+        },
+        StoredTool {
+            name: MOVE_MESSAGE.to_string(),
+            description: "Move one message to destination_folder, optionally into another enabled Email integration identified by destination_account from list_accounts. Keeps full MIME including attachments; cross-account messages over 20 MB are refused. The destination gets a new UID: list its messages afterwards. Always needs the person's approval in chats, even when Always allow is on. Source is deleted only after copying succeeds.".to_string(),
+            input_schema: json!({"type": "object", "properties": {"folder": folder, "id": {"type": "string", "description": "The source message UID."}, "destination_account": {"type": "string", "description": "An enabled Email integration id from list_accounts. Omit to move within this account."}, "destination_folder": {"type": "string", "description": "An existing destination folder, as listed by that account's list_folders."}}, "required": ["id", "destination_folder"]}),
+        },
+        StoredTool {
             name: SEND_MESSAGE.to_string(),
             description: "Send an email, or a reply to a message. Always needs the person's approval in chats, even when Always allow is on. Give to, or reply_to_id to answer the sender of that message.".to_string(),
             input_schema: json!({"type": "object", "properties": {"to": addresses("Recipients' email addresses."), "cc": addresses("Copied recipients' email addresses."), "subject": {"type": "string", "description": "The subject. For a reply it defaults to the original subject with Re: in front."}, "body": {"type": "string", "description": "The message, in plain text."}, "reply_to_id": {"type": "string", "description": "The id of the message being answered. Sets In-Reply-To and References."}, "reply_to_folder": folder}, "required": ["body"]}),
@@ -145,43 +162,63 @@ pub fn tools() -> Vec<StoredTool> {
 }
 
 pub fn always_asks(tool: &str) -> bool {
-    tool == SEND_MESSAGE
+    matches!(tool, SEND_MESSAGE | DELETE_MESSAGE | MOVE_MESSAGE)
 }
 
 #[derive(Debug)]
 enum Transport {
-    Plain(TcpStream),
-    Tls(Box<TlsStream<TcpStream>>),
+    Plain(TcpStream, Option<usize>),
+    Tls(Box<TlsStream<TcpStream>>, Option<usize>),
 }
 
 impl AsyncRead for Transport {
     fn poll_read(self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            Transport::Plain(stream) => Pin::new(stream).poll_read(context, buffer),
-            Transport::Tls(stream) => Pin::new(stream.as_mut()).poll_read(context, buffer),
+        let (stream, budget): (&mut (dyn AsyncRead + Unpin + Send), &mut Option<usize>) = match self.get_mut() {
+            Transport::Plain(stream, budget) => (stream, budget),
+            Transport::Tls(stream, budget) => (stream.as_mut(), budget),
+        };
+
+        if let Some(remaining) = budget {
+            if *remaining == 0 {
+                return Poll::Ready(Err(std::io::Error::other("The mail response exceeded the transfer limit.")));
+            }
+
+            let mut bytes = [0; 8192];
+            let length = (*remaining).min(bytes.len()).min(buffer.remaining());
+            let mut bounded = ReadBuf::new(&mut bytes[..length]);
+            let result = Pin::new(stream).poll_read(context, &mut bounded);
+
+            if let Poll::Ready(Ok(())) = &result {
+                *remaining -= bounded.filled().len();
+                buffer.put_slice(bounded.filled());
+            }
+
+            return result;
         }
+
+        Pin::new(stream).poll_read(context, buffer)
     }
 }
 
 impl AsyncWrite for Transport {
     fn poll_write(self: Pin<&mut Self>, context: &mut Context<'_>, data: &[u8]) -> Poll<std::io::Result<usize>> {
         match self.get_mut() {
-            Transport::Plain(stream) => Pin::new(stream).poll_write(context, data),
-            Transport::Tls(stream) => Pin::new(stream.as_mut()).poll_write(context, data),
+            Transport::Plain(stream, _) => Pin::new(stream).poll_write(context, data),
+            Transport::Tls(stream, _) => Pin::new(stream.as_mut()).poll_write(context, data),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            Transport::Plain(stream) => Pin::new(stream).poll_flush(context),
-            Transport::Tls(stream) => Pin::new(stream.as_mut()).poll_flush(context),
+            Transport::Plain(stream, _) => Pin::new(stream).poll_flush(context),
+            Transport::Tls(stream, _) => Pin::new(stream.as_mut()).poll_flush(context),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            Transport::Plain(stream) => Pin::new(stream).poll_shutdown(context),
-            Transport::Tls(stream) => Pin::new(stream.as_mut()).poll_shutdown(context),
+            Transport::Plain(stream, _) => Pin::new(stream).poll_shutdown(context),
+            Transport::Tls(stream, _) => Pin::new(stream.as_mut()).poll_shutdown(context),
         }
     }
 }
@@ -210,7 +247,7 @@ async fn encrypt(stream: TcpStream, host: &str) -> Result<Transport, String> {
     let name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|_| format!("Enter {host} as a server name, for example imap.example.com."))?;
     let secured = TlsConnector::from(Arc::new(config)).connect(name, stream).await.map_err(|_| format!("Mycelium could not set up a secure connection to {host}. Check the security setting and that the server's certificate is valid, then try again."))?;
 
-    Ok(Transport::Tls(Box::new(secured)))
+    Ok(Transport::Tls(Box::new(secured), None))
 }
 
 async fn connect(settings: &Settings, credentials: &Credentials) -> Result<Session, String> {
@@ -218,7 +255,7 @@ async fn connect(settings: &Settings, credentials: &Credentials) -> Result<Sessi
     let tcp = TcpStream::connect((host, settings.imap_port)).await.map_err(|_| unreachable_server("IMAP", host))?;
     let transport = match settings.imap_encryption {
         Encryption::Tls => encrypt(tcp, host).await?,
-        _ => Transport::Plain(tcp),
+        _ => Transport::Plain(tcp, None),
     };
     let mut client = Client::new(transport);
     let greeting = client.read_response().await.map_err(|_| unreachable_server("IMAP", host))?;
@@ -230,7 +267,7 @@ async fn connect(settings: &Settings, credentials: &Credentials) -> Result<Sessi
     if settings.imap_encryption == Encryption::StartTls {
         client.run_command_and_check_ok("STARTTLS", None).await.map_err(|_| format!("The IMAP server {host} does not offer STARTTLS. Choose TLS or check the port, then try again."))?;
 
-        let Transport::Plain(plain) = client.into_inner() else {
+        let Transport::Plain(plain, _) = client.into_inner() else {
             return Err(unreachable_server("IMAP", host));
         };
         client = Client::new(encrypt(plain, host).await?);
@@ -358,6 +395,36 @@ fn newest_first(fetched: &[async_imap::types::Fetch]) -> Value {
 
 async fn open(session: &mut Session, name: &str) -> Result<async_imap::types::Mailbox, String> {
     session.examine(name).await.map_err(|_| format!("There is no folder called {name}. Use list_folders to see the folders."))
+}
+
+async fn delete_uid(session: &mut Session, id: u32, already_deleted: bool) -> Result<(), String> {
+    session.uid_store(id.to_string(), "+FLAGS.SILENT (\\Deleted)").await.map_err(|_| "The mail server did not allow this message to be marked for deletion.".to_string())?.try_collect::<Vec<_>>().await.map_err(|_| "The mail server did not allow this message to be marked for deletion.".to_string())?;
+    let removed = async {
+        session.uid_expunge(id.to_string()).await?.try_collect::<Vec<_>>().await?;
+        let remaining = session.uid_search(format!("UID {id}")).await?;
+
+        if remaining.contains(&id) {
+            return Err(async_imap::error::Error::Bad("message still present".to_string()));
+        }
+
+        Ok(())
+    }.await;
+
+    if removed.is_err() {
+        if !already_deleted {
+            let restored = async {
+                session.uid_store(id.to_string(), "-FLAGS.SILENT (\\Deleted)").await?.try_collect::<Vec<_>>().await
+            }.await;
+
+            if restored.is_err() {
+                return Err("The source could not be removed and may still be marked for deletion. Check the source folder before trying again.".to_string());
+            }
+        }
+
+        return Err("The mail server did not remove the source message. It remains in the source folder.".to_string());
+    }
+
+    Ok(())
 }
 
 async fn read_headers(session: &mut Session, name: &str, id: u32) -> Result<Vec<u8>, String> {
@@ -559,14 +626,126 @@ async fn send_tool(settings: &Settings, credentials: &Credentials, arguments: &V
     Ok(json!({"sent": true, "message_id": message_id}))
 }
 
-pub async fn call(credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
+pub async fn call(state: &AppState, owner: Uuid, source: &ServerRow, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
+    if tool == "list_accounts" {
+        return match list_owned(state, owner).await {
+            Ok(accounts) => {
+                let accounts: Vec<Value> = accounts.into_iter().filter(|account| account.kind == "email" && account.enabled).map(|account| json!({"id": account.id, "name": account.name, "account": account.account})).collect();
+
+                CallOutput { text: json!(accounts).to_string(), is_error: false }
+            }
+            Err(_) => failure("Mycelium could not list your email accounts. Try again in a moment."),
+        };
+    }
+
     let settings = match parse_settings(&credentials.settings) {
         Ok(settings) => settings,
         Err(reason) => return failure(reason),
     };
+    let mut destination_copied = false;
     let work = async {
         if tool == SEND_MESSAGE {
             return send_tool(&settings, credentials, arguments).await;
+        }
+
+        if matches!(tool, DELETE_MESSAGE | MOVE_MESSAGE) {
+            let id = uid(arguments, "id")?;
+            let name = match arguments.get("folder") {
+                None => INBOX.to_string(),
+                Some(Value::String(value)) if !value.trim().is_empty() => value.trim().to_string(),
+                _ => return Err("Give folder as an existing folder name, or omit it to use INBOX.".to_string()),
+            };
+            let destination_folder = if tool == MOVE_MESSAGE {
+                text(arguments, "destination_folder").ok_or_else(|| "Give an existing destination folder in destination_folder.".to_string())?
+            } else {
+                ""
+            };
+            let destination_id = match arguments.get("destination_account") {
+                None => source.id,
+                Some(Value::String(value)) => Uuid::parse_str(value.trim()).map_err(|_| "Give destination_account as an Email integration id from list_accounts.".to_string())?,
+                _ => return Err("Give destination_account as an Email integration id from list_accounts, or omit it to use this account.".to_string()),
+            };
+            let destination = if tool == MOVE_MESSAGE && destination_id != source.id {
+                let accounts = list_owned(state, owner).await.map_err(|_| "Mycelium could not check the destination account. Try again in a moment.".to_string())?;
+
+                Some(accounts.into_iter().find(|account| account.id == destination_id && account.kind == "email" && account.enabled).ok_or_else(|| "Choose a destination from your enabled Email integrations using list_accounts.".to_string())?)
+            } else {
+                None
+            };
+
+            if tool == MOVE_MESSAGE && destination.is_none() && destination_folder == name {
+                return Err("Choose a different destination folder, or another email account.".to_string());
+            }
+
+            let mut session = connect(&settings, credentials).await?;
+            let capabilities = session.capabilities().await.map_err(|_| "The mail server did not report its supported operations.".to_string())?;
+
+            if tool == DELETE_MESSAGE || destination.is_some() {
+                if !capabilities.has_str("UIDPLUS") {
+                    return Err("This mail server does not support UIDPLUS, which is needed to delete only this message safely. No messages were changed.".to_string());
+                }
+            } else if !capabilities.has_str("MOVE") {
+                return Err("This mail server does not support UID MOVE. Move the message in your mail app instead; no messages were changed.".to_string());
+            }
+
+            session.select(&name).await.map_err(|_| format!("The mail server did not allow changes in {name}. Check the folder and its permissions."))?;
+            let metadata: Vec<_> = session.uid_fetch(id.to_string(), "(UID FLAGS RFC822.SIZE INTERNALDATE)").await.map_err(|_| "The source message could not be checked.".to_string())?.try_collect().await.map_err(|_| "The source message could not be checked.".to_string())?;
+            let original = metadata.iter().find(|message| message.uid == Some(id)).ok_or_else(|| format!("There is no message with id {id} in {name}."))?;
+            let already_deleted = original.flags().any(|flag| flag == Flag::Deleted);
+
+            if tool == DELETE_MESSAGE {
+                delete_uid(&mut session, id, already_deleted).await?;
+                let _ = session.logout().await;
+
+                return Ok(json!({"deleted": true, "id": id.to_string(), "folder": name}));
+            }
+
+            if let Some(destination) = destination {
+                let size = original.size.ok_or_else(|| "The source server did not report the message size, so it cannot be moved safely between accounts.".to_string())? as usize;
+
+                if size > MAX_TRANSFER_BYTES {
+                    return Err("This message is larger than the 20 MB cross-account transfer limit. Move it in your mail app instead; the source was not changed.".to_string());
+                }
+
+                let flags: Vec<String> = original.flags().filter_map(|flag| match flag {
+                    Flag::Seen => Some("\\Seen".into()),
+                    Flag::Answered => Some("\\Answered".into()),
+                    Flag::Flagged => Some("\\Flagged".into()),
+                    Flag::Draft => Some("\\Draft".into()),
+                    Flag::Custom(value) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"_-$.".contains(&byte)) => Some(value.to_string()),
+                    _ => None,
+                }).collect();
+                let flags = format!("({})", flags.join(" "));
+                let date = original.internal_date().map(|date| format!("\"{}\"", date.format("%d-%b-%Y %H:%M:%S %z")));
+                match session.get_mut() {
+                    Transport::Plain(_, budget) | Transport::Tls(_, budget) => *budget = Some(MAX_TRANSFER_BYTES + 65536),
+                }
+
+                let query = format!("BODY.PEEK[]<0.{}>", MAX_TRANSFER_BYTES + 1);
+                let messages: Vec<_> = session.uid_fetch(id.to_string(), query).await.map_err(|_| "The source message could not be downloaded for transfer. The source was not changed.".to_string())?.try_collect().await.map_err(|_| "The source message could not be downloaded for transfer. The source was not changed.".to_string())?;
+                let bytes = messages.iter().find(|message| message.uid == Some(id)).and_then(|message| message.body()).ok_or_else(|| "The source message could not be downloaded for transfer. The source was not changed.".to_string())?;
+
+                if bytes.len() != size || bytes.len() > MAX_TRANSFER_BYTES {
+                    return Err("The source server returned an incomplete or oversized message. Nothing was copied or deleted.".to_string());
+                }
+
+                let destination_credentials = destination.credentials();
+                let destination_settings = parse_settings(&destination_credentials.settings)?;
+                let mut target = connect(&destination_settings, &destination_credentials).await?;
+                target.append(destination_folder, Some(&flags), date.as_deref(), bytes).await.map_err(|_| "The destination did not confirm the copy. The source was not changed; check the destination before trying again.".to_string())?;
+                destination_copied = true;
+                let _ = target.logout().await;
+
+                if let Err(reason) = delete_uid(&mut session, id, already_deleted).await {
+                    return Err(format!("A complete copy is retained in the destination account, but the move did not finish. {reason} Check both folders before trying again."));
+                }
+            } else {
+                session.uid_mv(id.to_string(), destination_folder).await.map_err(|_| "The server did not confirm the move. Check the source and destination folders before trying again.".to_string())?;
+            }
+
+            let _ = session.logout().await;
+
+            return Ok(json!({"moved": true, "source_id": id.to_string(), "source_folder": name, "destination_account": destination_id, "destination_folder": destination_folder}));
         }
 
         let mut session = connect(&settings, credentials).await?;
@@ -579,6 +758,8 @@ pub async fn call(credentials: &Credentials, tool: &str, arguments: &Value) -> C
     match tokio::time::timeout(TIMEOUT, work).await {
         Ok(Ok(value)) => CallOutput { text: value.to_string(), is_error: false },
         Ok(Err(reason)) => failure(reason),
+        Err(_) if destination_copied => failure("A complete copy is retained in the destination account, but source removal was not confirmed before the operation timed out. Check both folders before trying again."),
+        Err(_) if matches!(tool, DELETE_MESSAGE | MOVE_MESSAGE) => failure("The mail operation timed out. Source removal was not confirmed. Check the source and destination folders before trying again."),
         Err(_) => failure("The mail server took too long to answer. Try again in a moment."),
     }
 }

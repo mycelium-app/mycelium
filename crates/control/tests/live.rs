@@ -143,6 +143,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/projects/{id}/find-icon",
     "PUT /api/v1/instructions/{layer}",
     "PUT /api/v1/extensions",
+    "PUT /api/v1/experiments",
     "PUT /api/v1/usage-limit",
     "POST /api/v1/instructions/pull",
     "PUT /api/v1/instruction-source",

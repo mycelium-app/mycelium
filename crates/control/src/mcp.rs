@@ -1,6 +1,8 @@
 use crate::api_access;
 use crate::artifacts;
+use crate::chat_tools;
 use crate::auth::AuthNode;
+use crate::experiments::{self, Experiment};
 use crate::chat_tool_servers::{list_owned, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
@@ -45,6 +47,16 @@ fn failure(id: &Value, code: i64, message: &str) -> Response {
 
 fn tool_text(text: &str, is_error: bool) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": is_error})
+}
+
+fn experiment_of_tool(name: &str) -> Option<Experiment> {
+    match name {
+        "propose_task" | "ask_question" => Some(Experiment::Tasks),
+        "start_workflow" => Some(Experiment::Workflows),
+        "get_instructions" | "propose_instructions_edit" => Some(Experiment::Instructions),
+        "walkthrough" => Some(Experiment::Walkthrough),
+        _ => None,
+    }
 }
 
 pub fn tool_definitions() -> Value {
@@ -424,7 +436,9 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                 connection.list_tools().await.map(|tools| (server, tools))
             }))
             .await;
+            let enabled = experiments::of(&state, owner).await?;
             let mut tools = tool_definitions().as_array().cloned().unwrap_or_default();
+            tools.retain(|tool| tool["name"].as_str().and_then(experiment_of_tool).is_none_or(|experiment| enabled.allows(experiment)));
 
             for server in servers.iter().filter(|server| server.integration().is_some()) {
                 for tool in server.tool_list() {
@@ -442,6 +456,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         }
         "tools/call" => {
             let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+            let gated = params.get("name").and_then(Value::as_str).and_then(experiment_of_tool);
+
+            if let Some(experiment) = gated {
+                let owner = node_owner(&state, node.id).await?;
+                let enabled = experiments::of(&state, owner).await?;
+
+                if !enabled.allows(experiment) {
+                    return Ok(reply(&id, tool_text(experiments::disabled_message(experiment), true)));
+                }
+            }
 
             match params.get("name").and_then(Value::as_str) {
                 Some("start_workflow") | Some("start_subagent") | Some("get_workflow") => {
@@ -466,6 +490,11 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let user = crate::auth::AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
                     let Json(value) = crate::workflows::get(State(state.clone()), user, axum::extract::Path(workflow)).await?;
+
+                    if value["plan"]["steps"].as_array().is_none_or(|steps| steps.len() != 1 || steps[0]["key"] != "subagent") && !experiments::of(&state, owner).await?.workflows {
+                        return Ok(reply(&id, tool_text(experiments::disabled_message(Experiment::Workflows), true)));
+                    }
+
                     reply(&id, tool_text(&value.to_string(), false))
                 }
                 Some("recall") => {
@@ -629,7 +658,10 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                 }
                 Some("get_instructions") => {
                     let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
-                        return Ok(reply(&id, tool_text("The instructions belong to a person, and this call did not come from a conversation.", true)));
+                        let latest = sqlx::query_as::<_, (String, String)>("select id, text from instruction_versions where layer = 'global' order by seq desc limit 1").fetch_optional(&state.pool).await?;
+                        let (revision, text) = latest.unwrap_or_else(|| (instruction_proposals::NO_REVISION.to_string(), String::new()));
+
+                        return Ok(reply(&id, tool_text(&format!("Layer: Global\nRevision: {revision}\n\n{text}"), false)));
                     };
 
                     match instruction_proposals::layer_text(&state, conversation_id, arguments.get("layer").and_then(Value::as_str)).await? {
@@ -842,7 +874,19 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     }
 
                     if let Some(integration) = server.integration() {
-                        let output = integration.call(&state.http, &server.credentials(), tool, &arguments).await;
+                        if integration.always_asks(tool) {
+                            let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                                return Ok(reply(&id, tool_text("This tool needs a person's approval, and this call did not come from a conversation. Nothing was done.", true)));
+                            };
+                            let request_id = Uuid::new_v4().to_string();
+                            let answer = chat_tools::request_approval(&state, owner, conversation_id, &request_id, name, &arguments, &server.name, false).await?;
+
+                            if answer != chat_tools::ALLOW_ONCE {
+                                return Ok(reply(&id, tool_text(chat_tools::DECLINED_TEXT, true)));
+                            }
+                        }
+
+                        let output = integration.call(&state, owner, server, tool, &arguments).await;
 
                         return Ok(reply(&id, tool_text(&output.text, output.is_error)));
                     }

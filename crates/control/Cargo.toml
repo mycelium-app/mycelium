@@ -39,3 +39,4 @@ tokio-tungstenite.workspace = true
 [dev-dependencies]
 reqwest = { workspace = true, features = ["query"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

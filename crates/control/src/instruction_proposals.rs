@@ -10,7 +10,7 @@ use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
 const LISTED: i64 = 100;
-const NO_REVISION: &str = "none";
+pub const NO_REVISION: &str = "none";
 
 const PROPOSAL_COLUMNS: &str = "p.id, p.conversation_id, c.title as conversation_title, p.layer, p.layer_name, p.base_revision, p.base_text, p.text, p.reason, p.state, p.note, p.created_at, p.decided_at,
     coalesce((select v.id from instruction_versions v where v.layer = p.layer order by v.seq desc limit 1), '') as current_revision";

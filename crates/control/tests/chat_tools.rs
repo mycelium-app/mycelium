@@ -3,6 +3,9 @@ mod common;
 #[path = "common/fake_zulip.rs"]
 mod fake_zulip;
 
+#[path = "common/fake_email.rs"]
+mod fake_email;
+
 use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -804,4 +807,38 @@ async fn sending_a_zulip_message_asks_every_time_even_when_the_integration_is_al
     rig.turns_ended(&id, 2).await;
 
     assert_eq!(zulip.sent().len(), 1);
+}
+
+#[tokio::test]
+async fn email_send_delete_and_move_always_ask_even_for_a_trusted_integration_and_a_remembered_approval() {
+    for (name, arguments) in [
+        ("mcp__mail__send_message", json!({"to": ["grace@example.com"], "subject": "Lunch", "body": "Noon works."})),
+        ("mcp__mail__delete_message", json!({"id": "5"})),
+        ("mcp__mail__move_message", json!({"id": "5", "destination_folder": "Sent"})),
+    ] {
+        let replies = vec![Reply::Call(name, arguments.clone()), Reply::Say("Done."), Reply::Call(name, arguments), Reply::Say("Stopped.")];
+        let rig = rig(replies).await;
+        let (imap, smtp, mail) = fake_email::fake_mail().await;
+        let (_, account) = rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Mail", "kind": "email", "url": "", "account": fake_email::USERNAME, "bearer_token": fake_email::PASSWORD, "settings": {"imap_host": "127.0.0.1", "imap_port": imap, "smtp_host": "127.0.0.1", "smtp_port": smtp}}))).await;
+        rig.server.user.json(rig.server.user.patch(&format!("/api/v1/chat-tool-servers/{}", account["id"].as_str().unwrap())).json(&json!({"always_allow": true}))).await;
+        let id = rig.chat("Do the email action.").await;
+        let request = rig.request_waiting(&id).await;
+
+        assert_eq!(request["toolCall"]["title"], name);
+        assert!(mail.sent.lock().unwrap().is_empty());
+        assert!(mail.removed.lock().unwrap().is_empty());
+        rig.decide(&id, &request, "allow_always").await;
+        rig.turns_ended(&id, 1).await;
+        let sent = mail.sent.lock().unwrap().len();
+        let removed = mail.removed.lock().unwrap().len();
+        assert_eq!(sent + removed, 1);
+
+        rig.say(&id, "Do it again.").await;
+        let request = rig.request_waiting(&id).await;
+        rig.decide(&id, &request, "reject_once").await;
+        rig.turns_ended(&id, 2).await;
+
+        assert_eq!(mail.sent.lock().unwrap().len(), sent);
+        assert_eq!(mail.removed.lock().unwrap().len(), removed);
+    }
 }

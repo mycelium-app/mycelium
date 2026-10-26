@@ -21,7 +21,8 @@ async fn add_stoat(server: &Server, base: &str, name: &str, secret: &str, kind: 
 }
 
 async fn call(server: &Server, token: &str, id: u64, tool: &str, arguments: Value) -> Value {
-    let reply = mcp(server, token, json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": format!("stoat__{tool}"), "arguments": arguments}})).await;
+    let body = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": format!("stoat__{tool}"), "arguments": arguments}});
+    let reply = if tool == "send_message" { server.approved_agent_mcp(token, body).await } else { mcp(server, token, body).await };
 
     reply["result"].clone()
 }
@@ -59,7 +60,8 @@ async fn a_stoat_integration_is_verified_with_the_token_kind_and_stored_without_
 #[tokio::test]
 async fn stoat_tools_list_servers_read_search_and_send_messages() {
     let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
+    let _node = server.online_node("laptop").await;
+    let token = _node.token.clone();
     let (base, stoat) = fake_stoat().await;
     add_stoat(&server, &base, "Stoat", TOKEN, "bot").await;
 

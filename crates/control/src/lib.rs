@@ -21,6 +21,7 @@ mod live_usage;
 mod groups;
 mod device;
 mod error;
+mod experiments;
 mod forge_cache;
 mod forges;
 mod imports;
@@ -263,6 +264,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/nodes/{id}/ssh", get(ssh_access::connect))
         .route("/api/v1/instruction-source", put(instructions::set_source).delete(instructions::clear_source))
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
+        .route("/api/v1/experiments", get(experiments::get).put(experiments::save))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
@@ -288,6 +290,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/stream", get(stream::connect))
         .route("/api/v1/node/connect", get(link::connect))
         .route("/api/{*unknown}", any(web::unknown_api))
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), experiments::gate))
         .route_layer(axum::middleware::from_fn_with_state(state.clone(), api_access::gate_scoped_tokens))
         .fallback_service(web::single_page_app(&web_dir))
         .with_state(state)

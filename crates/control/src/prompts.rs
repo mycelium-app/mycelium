@@ -324,6 +324,10 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
         return Ok(StatusCode::NO_CONTENT);
     }
 
+    if state.hub.answer_chat_approval(id, &answer.request_id, answer.option_id.clone()) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
     let outcome = json!({"outcome": "selected", "optionId": answer.option_id});
 
     if !state.hub.send(row.node_id, ControlToNode::PermissionResponse { conversation_id: id, request_id: answer.request_id.clone(), outcome }) {

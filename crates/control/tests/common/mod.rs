@@ -287,8 +287,22 @@ impl Server {
 
     pub async fn start_with(configure: impl FnOnce(&mut Config)) -> Server {
         let database_url = create_database().await;
+        let server = Server::start_on(database_url, configure).await;
 
-        Server::start_on(database_url, configure).await
+        server.enable_experiments().await;
+
+        server
+    }
+
+    async fn enable_experiments(&self) {
+        sqlx::query(
+            "insert into user_settings (owner, experiment_tasks, experiment_workflows, experiment_instructions, experiment_details, experiment_subagents, experiment_walkthrough, experiment_move_chats)
+             select id, true, true, true, true, true, true, true from users
+             on conflict (owner) do update set experiment_tasks = true, experiment_workflows = true, experiment_instructions = true, experiment_details = true, experiment_subagents = true, experiment_walkthrough = true, experiment_move_chats = true",
+        )
+        .execute(&self.pool)
+        .await
+        .unwrap();
     }
 
     pub async fn start_on(database_url: String, configure: impl FnOnce(&mut Config)) -> Server {
@@ -352,6 +366,7 @@ impl Server {
         let token = Uuid::new_v4().to_string();
 
         sqlx::query("insert into web_sessions (user_id, token_hash, expires_at) values ($1, $2, now() + interval '1 day')").bind(user_id).bind(hash(&token)).execute(&self.pool).await.unwrap();
+        self.enable_experiments().await;
 
         Client { base: self.base.clone(), cookie: format!("myc_session={token}"), http: self.user.http.clone() }
     }
@@ -407,6 +422,47 @@ impl Server {
         assert_eq!(status, 201, "{body}");
 
         serde_json::from_value(body).unwrap()
+    }
+
+    pub async fn node_conversation(&self, token: &str) -> Uuid {
+        let node = sqlx::query_scalar::<_, Uuid>("select id from nodes where token_hash = $1").bind(hash(token.strip_prefix("myc_node_").unwrap())).fetch_one(&self.pool).await.unwrap();
+
+        self.create_conversation(node, None).await.id
+    }
+
+    pub async fn agent_mcp(&self, token: &str, conversation_id: Uuid, body: Value) -> Value {
+        let anonymous = self.anonymous();
+        let request = anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {token}")).header("x-mycelium-conversation", conversation_id.to_string()).json(&body);
+        let (status, body) = anonymous.json(request).await;
+        assert_eq!(status, 200, "{body}");
+
+        body
+    }
+
+    pub async fn open_request(&self, conversation_id: Uuid) -> Value {
+        eventually("a permission request", || async {
+            let events = self.events(conversation_id).await;
+            let open = events.iter().find(|event| event["kind"] == "permission_request" && !events.iter().any(|other| other["kind"] == "permission_resolved" && other["payload"]["request_id"] == event["payload"]["request_id"]));
+
+            open.map(|event| event["payload"].clone())
+        })
+        .await
+    }
+
+    pub async fn answer(&self, conversation_id: Uuid, request: &Value, option: &str) {
+        let (status, body) = self.user.json(self.user.post(&format!("/api/v1/conversations/{conversation_id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": option}))).await;
+        assert_eq!(status, 204, "{body}");
+    }
+
+    pub async fn approved_agent_mcp(&self, token: &str, body: Value) -> Value {
+        let conversation_id = self.node_conversation(token).await;
+        let (reply, ()) = tokio::join!(self.agent_mcp(token, conversation_id, body), async {
+            let request = self.open_request(conversation_id).await;
+
+            self.answer(conversation_id, &request, "allow_once").await;
+        });
+
+        reply
     }
 
     pub async fn events(&self, conversation_id: Uuid) -> Vec<Value> {

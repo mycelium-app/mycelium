@@ -52,7 +52,8 @@ async fn a_zulip_integration_is_added_listed_renamed_and_removed_without_returni
 #[tokio::test]
 async fn zulip_tools_are_listed_under_the_integrations_name_and_calls_reach_zulip_with_the_account_credentials() {
     let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
+    let _node = server.online_node("laptop").await;
+    let token = _node.token.clone();
     let (router, zulip) = fake_zulip();
     let base = serve(router).await;
     add_zulip(&server, &base, "Zulip").await;
@@ -74,9 +75,9 @@ async fn zulip_tools_are_listed_under_the_integrations_name_and_calls_reach_zuli
     assert_eq!(messages[0]["place"], json!({"channel": "general", "topic": "lunch"}));
 
     mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "zulip__search_messages", "arguments": {"query": "lunch plans"}}})).await;
-    let sent = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"channel": "general", "topic": "lunch", "content": "Yes, noon."}}})).await;
-    let direct = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"direct_to": ["grace@example.com"], "content": "Hi"}}})).await;
-    let neither = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"content": "Hi"}}})).await;
+    let sent = server.approved_agent_mcp(&token, json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"channel": "general", "topic": "lunch", "content": "Yes, noon."}}})).await;
+    let direct = server.approved_agent_mcp(&token, json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"direct_to": ["grace@example.com"], "content": "Hi"}}})).await;
+    let neither = server.approved_agent_mcp(&token, json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"content": "Hi"}}})).await;
 
     let seen = zulip.seen.lock().unwrap().clone();
     let fetched = seen.iter().filter(|(_, path, _)| path == "/api/v1/messages").map(|(_, _, body)| body.clone()).collect::<Vec<_>>();
@@ -92,7 +93,8 @@ async fn zulip_tools_are_listed_under_the_integrations_name_and_calls_reach_zuli
 #[tokio::test]
 async fn a_switched_off_zulip_integration_refuses_calls_and_stays_out_of_the_tool_list() {
     let server = Server::start().await;
-    let (_, token) = server.join("node", "laptop").await;
+    let _node = server.online_node("laptop").await;
+    let token = _node.token.clone();
     let (router, zulip) = fake_zulip();
     let base = serve(router).await;
     let (_, added) = add_zulip(&server, &base, "Zulip").await;
