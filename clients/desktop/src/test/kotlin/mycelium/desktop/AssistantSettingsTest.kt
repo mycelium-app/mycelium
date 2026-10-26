@@ -35,6 +35,8 @@ private const val Saved = """{"id":"a1","name":"Stand-up","description":"Daily s
 
 private const val Nodes = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.11.0","address":"10.0.0.5","online":true,"draining":false,"sessions":[],"agents":[{"agent":"claude","available":true}],"logins":[]}]"""
 
+private const val Secrets = """[{"name":"GITHUB_TOKEN","description":"Pushes","state":"waiting"}]"""
+
 private const val Files = """[{"path":"AGENTS.md","size":9,"updated_at":"2026-10-22T10:00:00Z"},{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}]"""
 
 private object SettingsPlatform : Platform {
@@ -68,6 +70,8 @@ class AssistantSettingsTest {
 
             val reply = when {
                 path.endsWith("/experiments") -> EnabledExperiments
+                path.endsWith("/assistants/a1/secrets") -> Secrets
+                path.endsWith("/secrets/GITHUB_TOKEN") && request.method == HttpMethod.Put -> """{"name":"GITHUB_TOKEN","state":"set","set_by":"person"}"""
                 path.endsWith("/assistants/a1/files") -> Files
                 path.endsWith("/files/notes/today.md") && request.method == HttpMethod.Get -> "Shipped v1"
                 path.endsWith("/files/notes/today.md") && request.method == HttpMethod.Put -> """{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}"""
@@ -135,5 +139,20 @@ class AssistantSettingsTest {
         val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
 
         assertEquals(true, """{"agent":"claude"}""" in sent && """"nodes":["n1"]""" in sent && """"chat_first":false""" in sent, sent)
+    }
+
+    @Test
+    fun aSecretIsSetFromItsRowWithoutShowingTheValue() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for GITHUB_TOKEN").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for GITHUB_TOKEN").performScrollTo().performClick()
+        rule.onNodeWithText("Set value").performClick()
+        rule.onNodeWithContentDescription("Value of GITHUB_TOKEN").performScrollTo().performTextInput("ghp_abcdef")
+        rule.onNodeWithContentDescription("Save secret GITHUB_TOKEN").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/GITHUB_TOKEN" } }
+        assertEquals("""{"value":"ghp_abcdef"}""", requests.last { it.first.startsWith("PUT") }.second)
+        assertEquals(0, rule.onAllNodesWithText("ghp_abcdef").fetchSemanticsNodes().size)
     }
 }

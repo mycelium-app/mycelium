@@ -14,7 +14,7 @@ use axum::body::Bytes;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
-use mycelium_proto::api::{Assistant, AssistantFile, AssistantPreferences, AssistantState, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
+use mycelium_proto::api::{Assistant, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
 use mycelium_proto::conversation::{AgentId, Conversation};
 use mycelium_proto::link::{ControlToNode, FolderFile};
 use mycelium_proto::stream::StreamMessage;
@@ -32,6 +32,7 @@ const DESCRIPTION_PREVIEW_BYTES: i32 = 400;
 const FOLDER_ROOT: &str = ".mycelium-assistants";
 const FOLDER_CHUNK_BYTES: usize = 1024 * 1024;
 const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const SECRET_NAME_LIMIT: usize = 100;
 const MODEL_ERROR_MINUTES: i64 = 10;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
 const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.pinned_at, a.archived_at, a.created_at,
@@ -86,6 +87,7 @@ impl AssistantRow {
             archived_at: self.archived_at,
             instructions: None,
             next_choice: None,
+            secrets: Vec::new(),
             created_at: self.created_at,
         }
     }
@@ -107,7 +109,11 @@ async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
     .fetch_optional(&state.pool)
     .await?;
 
-    row.map(AssistantRow::to_proto).ok_or_else(|| ApiError::not_found("That assistant"))
+    let mut assistant = row.map(AssistantRow::to_proto).ok_or_else(|| ApiError::not_found("That assistant"))?;
+
+    assistant.secrets = secrets_of(state, id).await?;
+
+    Ok(assistant)
 }
 
 pub async fn publish(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
@@ -265,7 +271,13 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(rows.into_iter().map(AssistantRow::to_proto).collect()))
+    let mut assistants: Vec<Assistant> = rows.into_iter().map(AssistantRow::to_proto).collect();
+
+    for assistant in &mut assistants {
+        assistant.secrets = secrets_of(&state, assistant.id).await?;
+    }
+
+    Ok(Json(assistants))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
@@ -455,6 +467,63 @@ pub async fn delete_file(State(state): State<AppState>, user: AuthUser, Path((id
 
     if deleted.rows_affected() == 0 {
         return Err(ApiError::not_found("That file"));
+    }
+
+    publish(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list_secrets(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<AssistantSecret>>> {
+    load(&state, user.id, id).await?;
+
+    Ok(Json(secrets_of(&state, id).await?))
+}
+
+pub async fn put_secret(State(state): State<AppState>, user: AuthUser, Path((id, name)): Path<(Uuid, String)>, Json(request): Json<PutAssistantSecretRequest>) -> ApiResult<Json<AssistantSecret>> {
+    load(&state, user.id, id).await?;
+
+    let name = valid_secret_name(&name)?;
+    let value = request.value.filter(|value| !value.is_empty());
+
+    if let Some(value) = &value {
+        sqlx::query(
+            "insert into assistant_secrets (assistant_id, name, value, description, set_by) values ($1, $2, $3, $4, 'person')
+             on conflict (assistant_id, name) do update set value = excluded.value, description = coalesce(excluded.description, assistant_secrets.description), set_by = 'person', updated_at = now()",
+        )
+        .bind(id)
+        .bind(&name)
+        .bind(value)
+        .bind(request.description.as_deref())
+        .execute(&state.pool)
+        .await?;
+        redact_stored(&state, id, value).await?;
+    } else {
+        sqlx::query(
+            "insert into assistant_secrets (assistant_id, name, description) values ($1, $2, $3)
+             on conflict (assistant_id, name) do update set description = coalesce(excluded.description, assistant_secrets.description), updated_at = now()",
+        )
+        .bind(id)
+        .bind(&name)
+        .bind(request.description.as_deref())
+        .execute(&state.pool)
+        .await?;
+    }
+
+    publish(&state, user.id, id).await?;
+
+    let saved = secrets_of(&state, id).await?.into_iter().find(|secret| secret.name == name);
+
+    saved.map(Json).ok_or_else(|| ApiError::not_found("That secret"))
+}
+
+pub async fn delete_secret(State(state): State<AppState>, user: AuthUser, Path((id, name)): Path<(Uuid, String)>) -> ApiResult<StatusCode> {
+    load(&state, user.id, id).await?;
+
+    let deleted = sqlx::query("delete from assistant_secrets where assistant_id = $1 and name = $2").bind(id).bind(&name).execute(&state.pool).await?;
+
+    if deleted.rows_affected() == 0 {
+        return Err(ApiError::not_found("That secret"));
     }
 
     publish(&state, user.id, id).await?;
@@ -744,6 +813,113 @@ async fn move_to_workspace(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult
     prompts::pump(state, id, false).await
 }
 
+pub fn valid_secret_name(name: &str) -> ApiResult<String> {
+    let name = name.trim();
+    let mut characters = name.chars();
+    let starts_well = characters.next().is_some_and(|first| first.is_ascii_uppercase() || first == '_');
+    let rest_well = characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_');
+
+    if !starts_well || !rest_well || name.len() > SECRET_NAME_LIMIT {
+        return Err(ApiError::bad_request("secret_name_invalid", "Name the secret like an environment variable: capital letters, digits and underscores, not starting with a digit, for example GITHUB_TOKEN."));
+    }
+
+    Ok(name.to_string())
+}
+
+async fn secrets_of(state: &AppState, id: Uuid) -> ApiResult<Vec<AssistantSecret>> {
+    let rows = sqlx::query_as::<_, (String, Option<String>, bool, Option<String>)>("select name, description, value is not null, set_by from assistant_secrets where assistant_id = $1 order by name").bind(id).fetch_all(&state.pool).await?;
+
+    Ok(rows.into_iter().map(|(name, description, set, set_by)| AssistantSecret { name, description, state: if set { AssistantSecretState::Set } else { AssistantSecretState::Waiting }, set_by }).collect())
+}
+
+pub async fn secret_env(state: &AppState, conversation_id: Uuid) -> ApiResult<Vec<(String, String)>> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "select s.name, s.value from conversations c join assistant_secrets s on s.assistant_id = c.assistant_id where c.id = $1 and c.agent <> $2 and s.value is not null order by s.name",
+    )
+    .bind(conversation_id)
+    .bind(chats::CHAT_AGENT)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(rows)
+}
+
+async fn redact_stored(state: &AppState, assistant_id: Uuid, value: &str) -> ApiResult<()> {
+    if value.len() < crate::store::MIN_REDACTED_SECRET as usize {
+        return Ok(());
+    }
+
+    let quoted = serde_json::to_string(value).unwrap_or_default();
+    let escaped = quoted.trim_matches('"');
+
+    sqlx::query(
+        "update events set payload = replace(payload::text, $2, '[redacted]')::jsonb
+         where conversation_id in (select id from conversations where assistant_id = $1) and position($2 in payload::text) > 0",
+    )
+    .bind(assistant_id)
+    .bind(escaped)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn secret_tool(state: &AppState, conversation_id: Option<Uuid>, tool: &str, arguments: &Value) -> ApiResult<(String, bool)> {
+    let session = match conversation_id {
+        Some(conversation_id) => sqlx::query_as::<_, (Option<Uuid>, Uuid)>("select assistant_id, owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?,
+        None => None,
+    };
+    let Some((Some(id), owner)) = session else {
+        return Ok(("This conversation does not belong to an assistant.".to_string(), true));
+    };
+    let text_of = |name: &str| arguments.get(name).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+    let name = match valid_secret_name(&text_of("name").unwrap_or_default()) {
+        Ok(name) => name,
+        Err(error) => return Ok((error.message().to_string(), true)),
+    };
+    let description = text_of("description");
+
+    if tool == "assistant_set_secret" {
+        let Some(value) = text_of("value") else {
+            return Ok(("Give the value of the secret.".to_string(), true));
+        };
+
+        sqlx::query(
+            "insert into assistant_secrets (assistant_id, name, value, description, set_by) values ($1, $2, $3, $4, 'assistant')
+             on conflict (assistant_id, name) do update set value = excluded.value, description = coalesce(excluded.description, assistant_secrets.description), set_by = 'assistant', updated_at = now()",
+        )
+        .bind(id)
+        .bind(&name)
+        .bind(&value)
+        .bind(description.as_deref())
+        .execute(&state.pool)
+        .await?;
+        redact_stored(state, id, &value).await?;
+        publish(state, owner, id).await?;
+
+        return Ok((format!("Stored {name}. It reaches working folder sessions as an environment variable when they start."), false));
+    }
+
+    let existing = sqlx::query_scalar::<_, bool>("select value is not null from assistant_secrets where assistant_id = $1 and name = $2").bind(id).bind(&name).fetch_optional(&state.pool).await?;
+
+    if existing == Some(true) {
+        return Ok((format!("{name} is already set."), false));
+    }
+
+    sqlx::query(
+        "insert into assistant_secrets (assistant_id, name, description) values ($1, $2, $3)
+         on conflict (assistant_id, name) do update set description = coalesce(excluded.description, assistant_secrets.description), updated_at = now()",
+    )
+    .bind(id)
+    .bind(&name)
+    .bind(description.as_deref())
+    .execute(&state.pool)
+    .await?;
+    publish(state, owner, id).await?;
+
+    Ok((format!("Asked the person for {name}. It stays blank until they fill it in; ask again later."), false))
+}
+
 pub async fn use_workspace_tool(state: &AppState, conversation_id: Option<Uuid>) -> ApiResult<(String, bool)> {
     let session = match conversation_id {
         Some(conversation_id) => sqlx::query_as::<_, (Option<Uuid>, String, Uuid)>("select assistant_id, agent, owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?,
@@ -930,6 +1106,16 @@ mod tests {
 
     fn preferences(models: Vec<ModelChoice>, nodes: Vec<u128>, chat_first: bool) -> AssistantPreferences {
         AssistantPreferences { models, nodes: nodes.into_iter().map(Uuid::from_u128).collect(), chat_first, ..AssistantPreferences::default() }
+    }
+
+    #[test]
+    fn secret_names_must_be_environment_variable_names() {
+        assert!(valid_secret_name("GITHUB_TOKEN").is_ok());
+        assert!(valid_secret_name("_X1").is_ok());
+        assert!(valid_secret_name("github_token").is_err());
+        assert!(valid_secret_name("1TOKEN").is_err());
+        assert!(valid_secret_name("A-B").is_err());
+        assert!(valid_secret_name("").is_err());
     }
 
     #[test]

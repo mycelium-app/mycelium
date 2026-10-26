@@ -26,7 +26,9 @@ import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
 import mycelium.api.CreateAssistantRequest
 import mycelium.api.InstructionLayer
+import mycelium.api.AssistantSecret
 import mycelium.api.PatchAssistantRequest
+import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.NoGroup
@@ -183,6 +185,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                     }
 
                     loaded?.let { StorageSection(store, it.id) }
+                    loaded?.let { SecretsSection(store, it.id) }
                 }
             }
         }
@@ -311,6 +314,84 @@ private fun StorageSection(store: Store, assistantId: String) {
                     }
                 },
                 text = "New file",
+                icon = MyIcon.Plus,
+                variant = ButtonVariant.Outline,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecretsSection(store: Store, assistantId: String) {
+    val colors = MyTheme.colors
+    var secrets by remember(assistantId) { mutableStateOf(emptyList<AssistantSecret>()) }
+    var failure by remember(assistantId) { mutableStateOf<String?>(null) }
+    var setting by remember(assistantId) { mutableStateOf<String?>(null) }
+    var newName by remember(assistantId) { mutableStateOf("") }
+    var newDescription by remember(assistantId) { mutableStateOf("") }
+    val attempt = rememberAttempt { failure = it }
+
+    suspend fun reload() {
+        secrets = store.api.assistantSecrets(assistantId)
+    }
+
+    LaunchedEffect(assistantId) {
+        attempt { reload() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label("Secrets", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        Label("Reach working folder sessions as environment variables when they start. Values are never shown again.", style = Tokens.Type.Meta, color = colors.textMuted)
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        if (secrets.isNotEmpty()) {
+            ContentTable(listOf(ColumnSpec(), ColumnSpec(flexible = true), ColumnSpec(max = 100.dp), ColumnSpec(max = 100.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
+                ContentRow(header = true) {
+                    Label("Name", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Description", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("State", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Label("Set by", style = Tokens.Type.MetaStrong, color = colors.textMuted)
+                    Box(Modifier)
+                }
+
+                Hairline()
+
+                for (secret in secrets) {
+                    ContentRow {
+                        Label(secret.name, style = Tokens.Type.Code, maxLines = 1)
+                        Label(secret.description.orEmpty(), color = colors.textMuted, maxLines = 1)
+                        Label(if (secret.state == "set") "Set" else "Waiting", color = colors.textMuted, maxLines = 1)
+                        Label(secret.setBy.orEmpty(), color = colors.textMuted, maxLines = 1)
+
+                        RowMenu(secret.name) { close ->
+                            MenuItem("Set value", onClick = { close(); setting = secret.name }, leading = MyIcon.Pencil)
+                            MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
+                        }
+                    }
+
+                    Hairline()
+                }
+            }
+        }
+
+        setting?.let { name ->
+            SecretValueForm(name, onSave = { value -> attempt { store.api.putAssistantSecret(assistantId, name, PutAssistantSecretRequest(value = value)); setting = null; reload() } }, onCancel = { setting = null })
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
+            TextInput(newName, { newName = it }, label = "New secret name", placeholder = "GITHUB_TOKEN", mono = true, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+            TextInput(newDescription, { newDescription = it }, label = "What it is for", placeholder = "Pushes to the repository", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+            MyButton(
+                {
+                    attempt {
+                        store.api.putAssistantSecret(assistantId, newName.trim(), PutAssistantSecretRequest(description = newDescription.ifBlank { null }))
+                        setting = newName.trim()
+                        newName = ""
+                        newDescription = ""
+                        reload()
+                    }
+                },
+                text = "Add secret",
                 icon = MyIcon.Plus,
                 variant = ButtonVariant.Outline,
             )

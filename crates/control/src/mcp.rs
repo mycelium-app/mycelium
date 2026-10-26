@@ -58,7 +58,7 @@ fn experiment_of_tool(name: &str) -> Option<Experiment> {
         "get_instructions" | "propose_instructions_edit" => Some(Experiment::Instructions),
         "walkthrough" => Some(Experiment::Walkthrough),
         "read_earlier_turns" => Some(Experiment::ContinueElsewhere),
-        "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_use_workspace" => Some(Experiment::Assistants),
+        "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_use_workspace" | "assistant_set_secret" | "assistant_request_secret" => Some(Experiment::Assistants),
         _ => None,
     }
 }
@@ -165,6 +165,16 @@ pub fn tool_definitions() -> Value {
             "name": "assistant_delete_file",
             "description": "Delete a file from this assistant's storage.",
             "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file."}}, "required": ["path"]},
+        },
+        {
+            "name": "assistant_set_secret",
+            "description": "Store a secret for this assistant, such as an API token the person gave you. Secrets are kept on the control plane, never shown again, and reach working folder sessions as environment variables when they start. Only an assistant's own conversation can use it.",
+            "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "The environment variable name, for example GITHUB_TOKEN."}, "value": {"type": "string", "description": "The secret value."}, "description": {"type": "string", "description": "What the secret is for."}}, "required": ["name", "value"]},
+        },
+        {
+            "name": "assistant_request_secret",
+            "description": "Ask the person for a secret you need. It appears blank for them to fill in; it is never sent through the conversation. Only an assistant's own conversation can use it.",
+            "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "The environment variable name, for example GITHUB_TOKEN."}, "description": {"type": "string", "description": "What the secret is for and where to find it."}}, "required": ["name"]},
         },
         {
             "name": "assistant_use_workspace",
@@ -691,6 +701,12 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                 Some(tool @ ("assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file")) => {
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
                     let (text, is_error) = assistants::file_tool(&state, conversation, tool, &arguments).await?;
+
+                    reply(&id, tool_text(&text, is_error))
+                }
+                Some(tool @ ("assistant_set_secret" | "assistant_request_secret")) => {
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
+                    let (text, is_error) = assistants::secret_tool(&state, conversation, tool, &arguments).await?;
 
                     reply(&id, tool_text(&text, is_error))
                 }

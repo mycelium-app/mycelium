@@ -208,6 +208,23 @@ fn has_nul(value: &Value) -> bool {
     }
 }
 
+pub const MIN_REDACTED_SECRET: i32 = 4;
+
+fn redact(value: &mut Value, secrets: &[String]) {
+    match value {
+        Value::String(text) => {
+            for secret in secrets {
+                if text.contains(secret.as_str()) {
+                    *text = text.replace(secret.as_str(), "[redacted]");
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| redact(item, secrets)),
+        Value::Object(fields) => fields.values_mut().for_each(|item| redact(item, secrets)),
+        _ => {}
+    }
+}
+
 pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKind, payload: &Value, node_seq: Option<i64>) -> sqlx::Result<Option<Event>> {
     let cleaned;
     let payload = if has_nul(payload) {
@@ -217,6 +234,22 @@ pub async fn append_event(tx: &mut Tx<'_>, conversation_id: Uuid, kind: EventKin
         &cleaned
     } else {
         payload
+    };
+    let secrets = sqlx::query_scalar::<_, String>(
+        "select s.value from conversations c join assistant_secrets s on s.assistant_id = c.assistant_id where c.id = $1 and s.value is not null and length(s.value) >= $2",
+    )
+    .bind(conversation_id)
+    .bind(MIN_REDACTED_SECRET)
+    .fetch_all(&mut **tx)
+    .await?;
+    let redacted;
+    let payload = if secrets.is_empty() {
+        payload
+    } else {
+        let mut copy = payload.clone();
+        redact(&mut copy, &secrets);
+        redacted = copy;
+        &redacted
     };
 
     let seq = sqlx::query_scalar::<_, i64>(

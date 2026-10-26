@@ -573,8 +573,15 @@ data class Assistant(
     @SerialName("archived_at") val archivedAt: String? = null,
     val instructions: String? = null,
     @SerialName("next_choice") val nextChoice: String? = null,
+    val secrets: List<AssistantSecret> = emptyList(),
     @SerialName("created_at") val createdAt: String,
 )
+
+@Serializable
+data class AssistantSecret(val name: String, val description: String? = null, val state: String, @SerialName("set_by") val setBy: String? = null)
+
+@Serializable
+data class PutAssistantSecretRequest(val value: String? = null, val description: String? = null)
 
 @Serializable
 data class AssistantFile(val path: String, val size: Long, @SerialName("updated_at") val updatedAt: String)

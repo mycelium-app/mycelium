@@ -252,6 +252,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/assistants/{id}/prompt", post(assistants::prompt))
         .route("/api/v1/assistants/{id}/clear", post(assistants::clear))
         .route("/api/v1/assistants/{id}/files", get(assistants::list_files))
+        .route("/api/v1/assistants/{id}/secrets", get(assistants::list_secrets))
+        .route("/api/v1/assistants/{id}/secrets/{name}", put(assistants::put_secret).delete(assistants::delete_secret))
         .route("/api/v1/assistants/{id}/files/{*path}", get(assistants::read_file).put(assistants::write_file).delete(assistants::delete_file))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))

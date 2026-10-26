@@ -25,6 +25,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import mycelium.api.Assistant
 import mycelium.api.Conversation
+import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
 import mycelium.state.Store
 import mycelium.state.ThreadBuilder
@@ -84,6 +85,10 @@ private fun AssistantHeader(store: Store, state: AppState, assistant: Assistant,
         }
     }
 
+    for (secret in assistant.secrets.filter { it.state == "waiting" }) {
+        WaitingSecret(store, assistant, secret.name, secret.description)
+    }
+
     if (earlier.isNotEmpty()) {
         val label = if (earlier.size == 1) "1 earlier session" else "${earlier.size} earlier sessions"
 
@@ -109,6 +114,43 @@ private fun AssistantHeader(store: Store, state: AppState, assistant: Assistant,
         }
 
         Hairline()
+    }
+}
+
+@Composable
+private fun WaitingSecret(store: Store, assistant: Assistant, name: String, description: String?) {
+    var setting by remember(name) { mutableStateOf(false) }
+    var failure by remember(name) { mutableStateOf<String?>(null) }
+    val attempt = rememberAttempt { failure = it }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Label("${assistant.name} needs $name${description?.let { ": $it" }.orEmpty()}", Modifier.weight(1f))
+
+            if (!setting) {
+                MyButton({ setting = true }, text = "Set secret", description = "Set secret $name", variant = ButtonVariant.Outline)
+            }
+        }
+
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        if (setting) {
+            SecretValueForm(name, onSave = { value -> attempt { store.api.putAssistantSecret(assistant.id, name, PutAssistantSecretRequest(value = value)); setting = false } }, onCancel = { setting = false })
+        }
+    }
+
+    Hairline()
+}
+
+@Composable
+internal fun SecretValueForm(name: String, onSave: (String) -> Unit, onCancel: () -> Unit) {
+    var value by remember(name) { mutableStateOf("") }
+    var missing by remember(name) { mutableStateOf<String?>(null) }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
+        TextInput(value, { value = it; missing = null }, label = "Value of $name", masked = true, error = missing, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+        MyButton({ if (value.isEmpty()) missing = "Enter the value of $name." else onSave(value) }, text = "Save secret", description = "Save secret $name")
+        MyButton(onCancel, text = "Cancel", muted = true)
     }
 }
 

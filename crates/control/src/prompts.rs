@@ -67,7 +67,8 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     if !state.hub.has_session(node_id, conversation_id) {
         state.add_session(node_id, conversation_id).await?;
         let instructions = instructions::session_layer(state, conversation_id).await?;
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, fork: false, account, instructions });
+        let env = crate::assistants::secret_env(state, conversation_id).await?;
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent: parse_enum(&agent)?, cwd, resume: acp_session_id, fork: false, account, instructions, env });
     }
 
     let text = match handoff_marker {
@@ -183,7 +184,8 @@ pub async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
     state.remove_session(row.node_id, id).await?;
     state.add_session(row.node_id, id).await?;
     let instructions = instructions::session_layer(state, id).await?;
-    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions });
+    let env = crate::assistants::secret_env(state, id).await?;
+    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions, env });
     state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
     pump(state, id, true).await?;
 

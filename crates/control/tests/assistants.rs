@@ -617,3 +617,90 @@ async fn a_session_whose_node_went_offline_moves_on_before_the_next_prompt() {
     let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
     assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("offline")));
 }
+
+fn events_text(events: &[Value]) -> String {
+    serde_json::to_string(events).unwrap()
+}
+
+#[tokio::test]
+async fn secrets_are_never_returned_reach_the_node_as_environment_and_are_redacted_from_events() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+
+    let (status, saved) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/secrets/GITHUB_TOKEN")).json(&json!({"value": "ghp_supersecret", "description": "Pushes"}))).await;
+    assert_eq!((status, saved["state"].clone(), saved["set_by"].clone()), (200, json!("set"), json!("person")));
+    let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/secrets"))).await;
+    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+    assert!(!listed.to_string().contains("supersecret") && !fetched.to_string().contains("supersecret"));
+    assert_eq!(fetched["secrets"][0]["name"], json!("GITHUB_TOKEN"));
+
+    let started = prompt(&server.user, id, "Push the branch").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    let env = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { env, .. } => Some(env.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(env, vec![("GITHUB_TOKEN".to_string(), "ghp_supersecret".to_string())]);
+
+    link.start_session(conversation, "acp-1").await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: conversation, seq: 2, update: json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Using ghp_supersecret now"}}) }).await;
+    link.barrier(conversation, 3).await;
+
+    let text = events_text(&server.events(conversation).await);
+    assert!(!text.contains("supersecret") && text.contains("Using [redacted] now"), "{text}");
+}
+
+#[tokio::test]
+async fn request_secret_creates_a_waiting_secret_the_person_can_fill() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let calls = vec![("mcp__mycelium__assistant_request_secret", json!({"name": "JELLYFIN_KEY", "description": "From Jellyfin, Dashboard, API keys"}))];
+    let (provider, _) = scripted_provider(&server, calls).await;
+    let assistant = create(&server.user, json!({"name": "Jellyfin", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let chat = prompt(&server.user, id, "Check the library").await["id"].as_str().unwrap().to_string();
+
+    allow_calls(&server, &chat, 1).await;
+    finished_turns(&server, &chat, 1).await;
+
+    let (_, waiting) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/secrets"))).await;
+    assert_eq!((waiting[0]["name"].clone(), waiting[0]["state"].clone(), waiting[0]["description"].clone()), (json!("JELLYFIN_KEY"), json!("waiting"), json!("From Jellyfin, Dashboard, API keys")));
+
+    let (status, filled) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/secrets/JELLYFIN_KEY")).json(&json!({"value": "abc123def"}))).await;
+    assert_eq!((status, filled["state"].clone(), filled["description"].clone()), (200, json!("set"), json!("From Jellyfin, Dashboard, API keys")));
+}
+
+#[tokio::test]
+async fn a_secret_the_assistant_stores_is_redacted_from_its_own_tool_call() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let calls = vec![("mcp__mycelium__assistant_set_secret", json!({"name": "API_KEY", "value": "sk-live-12345"}))];
+    let (provider, _) = scripted_provider(&server, calls).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let chat = prompt(&server.user, id, "Remember my key sk-live-12345").await["id"].as_str().unwrap().to_string();
+
+    allow_calls(&server, &chat, 1).await;
+    finished_turns(&server, &chat, 1).await;
+
+    let text = events_text(&server.events(chat.parse().unwrap()).await);
+    let (_, secrets) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/secrets"))).await;
+    assert!(!text.contains("sk-live-12345"), "{text}");
+    assert_eq!((secrets[0]["state"].clone(), secrets[0]["set_by"].clone()), (json!("set"), json!("assistant")));
+}
+
+#[tokio::test]
+async fn a_secret_name_that_is_not_an_environment_variable_is_refused_with_an_example() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up"})).await;
+
+    let (status, refused) = server.user.json(server.user.put(&format!("/api/v1/assistants/{}/secrets/github-token", assistant["id"].as_str().unwrap())).json(&json!({"value": "abcdefgh"}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (400, json!("secret_name_invalid")));
+    assert!(refused["message"].as_str().unwrap().contains("GITHUB_TOKEN"));
+}

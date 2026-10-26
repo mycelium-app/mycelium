@@ -266,7 +266,7 @@ impl Daemon {
     pub fn handle(&self, message: ControlToNode) {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
-            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions),
+            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, env),
             ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
             ControlToNode::Cancel { conversation_id } => self.with_session(conversation_id, |session| session.command(Command::Cancel)),
@@ -498,7 +498,7 @@ impl Daemon {
         }
     }
 
-    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>) {
+    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, secrets: Vec<(String, String)>) {
         let existing = self.session_handles();
         if existing.iter().any(|(id, handle)| *id == conversation_id && !handle.ended()) {
             return;
@@ -527,6 +527,7 @@ impl Daemon {
         }
 
         let mut env = agent_env(agent);
+        env.extend(secrets);
 
         if let (AgentId::Codex, Some(text)) = (agent, &instructions) {
             env = with_developer_instructions(env, text);

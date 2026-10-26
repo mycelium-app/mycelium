@@ -1489,6 +1489,31 @@ impl Default for AssistantPreferences {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantSecret {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub state: AssistantSecretState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantSecretState {
+    Set,
+    Waiting,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PutAssistantSecretRequest {
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assistant {
     pub id: Uuid,
     pub name: String,
@@ -1512,6 +1537,8 @@ pub struct Assistant {
     pub instructions: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_choice: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<AssistantSecret>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

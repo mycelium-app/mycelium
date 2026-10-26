@@ -32,7 +32,7 @@ private fun session(id: String, title: String) =
     """{"id":"$id","owner":"u","node_id":"n1","agent":"chat","cwd":"","title":"$title","status":"review","assistant_id":"a1","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
 private fun assistant(session: String?) =
-    """{"id":"a1","name":"Stand-up","preferences":{},"state":"idle","session_count":2,${session?.let { "\"conversation_id\":\"$it\"," }.orEmpty()}"created_at":"2026-10-22T10:00:00Z"}"""
+    """{"id":"a1","name":"Stand-up","preferences":{},"state":"idle","session_count":2,${session?.let { "\"conversation_id\":\"$it\"," }.orEmpty()}"secrets":[{"name":"JELLYFIN_KEY","description":"From the dashboard","state":"waiting"}],"created_at":"2026-10-22T10:00:00Z"}"""
 
 private fun said(conversation: String, text: String) =
     """[{"conversation_id":"$conversation","seq":1,"kind":"user_message","payload":{"text":"$text"},"created_at":"2026-10-22T10:00:00Z"}]"""
@@ -71,6 +71,7 @@ class AssistantThreadTest {
             val reply = when {
                 path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/assistants") -> "[$held]"
+                path.endsWith("/secrets/JELLYFIN_KEY") -> """{"name":"JELLYFIN_KEY","state":"set","set_by":"person"}"""
                 path.endsWith("/assistants/a1/clear") -> assistant(null).also { held = it }
                 path.endsWith("/assistants/a1/prompt") && request.method == HttpMethod.Post -> session("s2", "Today").also { held = assistant("s2") }
                 path.endsWith("/conversations") -> sessions.joinToString(prefix = "[", postfix = "]")
@@ -119,5 +120,20 @@ class AssistantThreadTest {
         rule.onNodeWithContentDescription("1 earlier session, collapsed").performClick()
 
         rule.waitUntil(5_000) { present("Old question") > 0 }
+    }
+
+    @Test
+    fun aWaitingSecretCardSetsTheSecretWithoutShowingItsValue() {
+        shell(current = null, withEarlier = false)
+
+        rule.waitUntil(5_000) { present("Stand-up needs JELLYFIN_KEY: From the dashboard") > 0 }
+        rule.onNodeWithContentDescription("Set secret JELLYFIN_KEY").performClick()
+        rule.onNodeWithContentDescription("Value of JELLYFIN_KEY").performTextInput("abc123def")
+        rule.onNodeWithContentDescription("Save secret JELLYFIN_KEY").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/JELLYFIN_KEY" } }
+        assertEquals("""{"value":"abc123def"}""", requests.last { it.first.startsWith("PUT") }.second)
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Save secret JELLYFIN_KEY").fetchSemanticsNodes().isEmpty() }
+        assertEquals(0, present("abc123def"))
     }
 }

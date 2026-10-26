@@ -361,6 +361,8 @@ pub enum ControlToNode {
         account: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         instructions: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        env: Vec<(String, String)>,
     },
     Instructions {
         revision: String,

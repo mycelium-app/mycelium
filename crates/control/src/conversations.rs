@@ -197,7 +197,8 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
     }
 
     let instructions = instructions::session_layer(state, row.id).await?;
-    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: fork_of.clone(), fork: fork_of.is_some(), account: account.map(str::to_string), instructions });
+    let env = assistants::secret_env(state, row.id).await?;
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: fork_of.clone(), fork: fork_of.is_some(), account: account.map(str::to_string), instructions, env });
 
     if !started {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
