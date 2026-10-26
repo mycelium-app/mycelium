@@ -6,6 +6,7 @@ use std::time::Duration;
 pub const DEVICE_CODE_LIFETIME: Duration = Duration::from_secs(600);
 pub const VERSION_CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 pub const SCHEDULER_TICK: Duration = Duration::from_secs(15);
+pub const STEER_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DATABASE_POOL_SIZE: u32 = 10;
 pub const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -74,6 +75,7 @@ pub struct Config {
     pub version_check_interval: Duration,
     pub scheduler_tick: Duration,
     pub forge_cache_ttl: Duration,
+    pub steer_timeout: Duration,
     pub database_pool_size: u32,
     pub database_acquire_timeout: Duration,
 }
@@ -144,6 +146,7 @@ impl Config {
             version_check_interval: VERSION_CHECK_INTERVAL,
             scheduler_tick: SCHEDULER_TICK,
             forge_cache_ttl: crate::forge_cache::FORGE_CACHE_TTL,
+            steer_timeout: STEER_TIMEOUT,
             database_pool_size: optional(lookup, "MYCELIUM_DATABASE_POOL_SIZE").map(|size| size.trim().parse()).transpose()?.unwrap_or(DATABASE_POOL_SIZE),
             database_acquire_timeout: optional(lookup, "MYCELIUM_DATABASE_ACQUIRE_TIMEOUT_SECONDS").map(|seconds| seconds.trim().parse().map(Duration::from_secs)).transpose()?.unwrap_or(DATABASE_ACQUIRE_TIMEOUT),
         })

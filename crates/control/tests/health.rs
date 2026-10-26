@@ -52,6 +52,7 @@ async fn readyz_is_503_and_healthz_stays_200_when_the_database_is_unreachable_at
         version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
         scheduler_tick: mycelium_control::SCHEDULER_TICK,
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
+            steer_timeout: mycelium_control::STEER_TIMEOUT,
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
         };
@@ -168,6 +169,7 @@ async fn a_failed_migration_keeps_the_process_up_and_reports_the_error() {
         version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
         scheduler_tick: mycelium_control::SCHEDULER_TICK,
             forge_cache_ttl: mycelium_control::FORGE_CACHE_TTL,
+            steer_timeout: mycelium_control::STEER_TIMEOUT,
             database_pool_size: 30,
             database_acquire_timeout: std::time::Duration::from_secs(30),
     };

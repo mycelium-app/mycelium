@@ -640,10 +640,6 @@ impl SessionState {
                 self.emit(seq, NodeToControl::TurnEnd { conversation_id: self.conversation_id, seq, stop_reason, usage })
             }
             Pending::Steer(request_id) => {
-                if !self.live {
-                    return Vec::new();
-                }
-
                 let outcome = match (&error_message, result.get("outcome").and_then(Value::as_str)) {
                     (Some(_), _) => "unsupported",
                     (None, Some("injected")) => "injected",

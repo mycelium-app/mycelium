@@ -630,6 +630,64 @@ async fn send_now_falls_back_to_stopping_the_turn_when_the_agent_cannot_be_steer
 }
 
 #[tokio::test]
+async fn send_now_whose_steer_goes_unanswered_leaves_the_message_queued_without_stopping_the_turn() {
+    let server = Server::start_with(|config| config.steer_timeout = std::time::Duration::from_millis(200)).await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/{urgent}/send-now"))).await;
+    let ControlToNode::Steer { request_id, .. } = next_but_git(&mut link).await else {
+        panic!("expected a steer");
+    };
+
+    assert_eq!(status, 204);
+    assert_eq!(queue(&server, id).await.len(), 1);
+
+    link.send(NodeToControl::Steered { request_id, outcome: "injected".into(), error: None }).await;
+
+    for _ in 0..100 {
+        if queue(&server, id).await.is_empty() {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    assert!(queue(&server, id).await.is_empty());
+    assert_eq!(user_message_texts(&server, id).await, vec!["long task", "urgent"]);
+    assert_turn_not_cancelled(&server, &mut link, id).await;
+}
+
+#[tokio::test]
+async fn send_now_injected_after_the_queue_row_was_already_sent_still_records_the_injection() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", STEERING_NODE).await;
+    let id = started_conversation(&server, &mut link, Some("long task")).await;
+    next_but_git(&mut link).await;
+
+    prompt(&server, id, "urgent").await;
+    let urgent = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+
+    let url = format!("/api/v1/conversations/{id}/queue/{urgent}/send-now");
+    let answering = async {
+        let ControlToNode::Steer { request_id, .. } = next_but_git(&mut link).await else {
+            panic!("expected a steer");
+        };
+        link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+        assert!(matches!(next_but_git(&mut link).await, ControlToNode::Prompt { text, .. } if text == "urgent"));
+        link.send(NodeToControl::Steered { request_id, outcome: "injected".into(), error: None }).await;
+    };
+    let ((status, _), ()) = tokio::join!(server.user.json(server.user.post(&url)), answering);
+
+    assert_eq!(status, 204);
+    assert_eq!(user_message_texts(&server, id).await, vec!["long task", "urgent", "urgent"]);
+}
+
+#[tokio::test]
 async fn send_now_on_a_node_older_than_steering_stops_the_turn_without_asking() {
     let server = Server::start().await;
     let mut link = server.online_node_as("laptop", "0.9.0").await;

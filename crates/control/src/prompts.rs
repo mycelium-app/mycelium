@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use uuid::Uuid;
 
-const STEER_TIMEOUT: Duration = Duration::from_secs(5);
+const LATE_STEER_WINDOW: Duration = Duration::from_secs(120);
 
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
     if state.hub.is_moving(conversation_id) {
@@ -267,30 +267,35 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
             let loaded = attachments::for_node(&state, &attachments).await?;
             let requested = state.hub.request_steer(row.node_id, id, text.clone(), loaded);
             let answer = match requested {
-                Some((request_id, answered)) => {
-                    let answer = tokio::time::timeout(STEER_TIMEOUT, answered).await.ok().and_then(Result::ok);
-                    state.hub.forget_steer_request(request_id);
+                Some((request_id, mut answered)) => match tokio::time::timeout(state.config.steer_timeout, &mut answered).await {
+                    Ok(answer) => {
+                        state.hub.forget_steer_request(request_id);
 
-                    answer
-                }
+                        answer.ok()
+                    }
+                    Err(_) => {
+                        let late_state = state.clone();
+                        tokio::spawn(async move {
+                            let late = tokio::time::timeout(LATE_STEER_WINDOW, answered).await;
+                            late_state.hub.forget_steer_request(request_id);
+
+                            if let Ok(Ok(answer)) = late
+                                && answer.outcome == "injected"
+                                && let Err(error) = record_injected(&late_state, user.id, id, queue_id, &text, &attachments).await
+                            {
+                                tracing::warn!("could not record a late steered message for {id}: {error:?}");
+                            }
+                        });
+
+                        return Ok(StatusCode::NO_CONTENT);
+                    }
+                },
                 None => None,
             };
 
             match answer.as_ref().map(|answer| answer.outcome.as_str()) {
                 Some("injected") => {
-                    let mut tx = state.pool.begin().await?;
-                    let taken = sqlx::query_scalar::<_, Uuid>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
-                    let event = match taken {
-                        Some(prompt_id) => append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?,
-                        None => None,
-                    };
-                    tx.commit().await?;
-
-                    if let Some(event) = event {
-                        state.publish(Some(user.id), StreamMessage::Event(event));
-                    }
-
-                    publish_queue(&state, user.id, id).await?;
+                    record_injected(&state, user.id, id, queue_id, &text, &attachments).await?;
 
                     return Ok(StatusCode::NO_CONTENT);
                 }
@@ -309,6 +314,20 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn record_injected(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid, text: &str, attachments: &[Attachment]) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let taken = sqlx::query_scalar::<_, Uuid>("delete from queued_prompts where id = $1 and conversation_id = $2 returning id").bind(queue_id).bind(id).fetch_optional(&mut *tx).await?;
+    let prompt_id = taken.unwrap_or_else(Uuid::new_v4);
+    let event = append_event(&mut tx, id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?;
+    tx.commit().await?;
+
+    if let Some(event) = event {
+        state.publish(Some(owner), StreamMessage::Event(event));
+    }
+
+    publish_queue(state, owner, id).await
 }
 
 pub async fn send_all_now(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

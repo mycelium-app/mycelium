@@ -73,7 +73,7 @@ mod stoat;
 mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
-pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, VERSION_CHECK_INTERVAL};
+pub use config::{Cidr, Config, DEVICE_CODE_LIFETIME, OidcConfig, SCHEDULER_TICK, STEER_TIMEOUT, VERSION_CHECK_INTERVAL};
 
 use anyhow::Result;
 use axum::Router;
