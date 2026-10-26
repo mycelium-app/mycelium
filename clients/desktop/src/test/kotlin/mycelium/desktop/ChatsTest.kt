@@ -117,14 +117,14 @@ class ChatsTest {
         shell()
 
         rule.onNodeWithText("New conversation").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Fix the build", substring = true).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Fix the build,", substring = true).assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("New chat").fetchSemanticsNodes().size)
 
         rule.onNodeWithText("Chats").performClick()
 
         rule.onAllNodesWithText("New chat").onFirst().assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("New conversation").fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithContentDescription("Fix the build", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Fix the build,", substring = true).fetchSemanticsNodes().size)
 
         rule.onNodeWithText("Workspaces").performClick()
 
@@ -148,9 +148,9 @@ class ChatsTest {
         rule.onNodeWithText("Today").assertIsDisplayed()
         rule.onNodeWithText("This week").assertIsDisplayed()
         rule.onNodeWithText("Older").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Trip to Lisbon", substring = true).assertIsDisplayed()
-        rule.onNodeWithContentDescription("Compare restore strategies", substring = true).assertIsDisplayed()
-        rule.onNodeWithContentDescription("Old recipe question", substring = true).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Trip to Lisbon,", substring = true).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Compare restore strategies,", substring = true).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Old recipe question,", substring = true).assertIsDisplayed()
     }
 
     @Test

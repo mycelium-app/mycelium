@@ -115,15 +115,15 @@ class SideChatsTest {
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, SidePlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Empty) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("What is the default delay", substring = true).assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay,", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("What is the default delay,", substring = true).assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Collapse side chats of Fix the build").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("What is the default delay").fetchSemanticsNodes().isEmpty() }
         assertEquals(0, rule.onAllNodesWithText("What is the default delay").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Expand side chats of Fix the build").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("What is the default delay", substring = true).assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("What is the default delay,", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("What is the default delay,", substring = true).assertIsDisplayed()
     }
 }
