@@ -455,7 +455,7 @@ fun Composer(
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f).horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                         attach()
                         dictate()
                         goal?.let { GoalButton(it) }
@@ -514,7 +514,7 @@ fun Composer(
                 dictate()
                 goal?.let { GoalButton(it) }
                 Row(
-                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    Modifier.weight(1f).horizontalScrollFaded(),
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

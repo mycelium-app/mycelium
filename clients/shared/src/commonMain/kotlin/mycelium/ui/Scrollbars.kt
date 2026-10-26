@@ -17,6 +17,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -70,6 +76,23 @@ private fun thumbFor(extent: Extent, viewport: Float, reverse: Boolean, minLengt
 @Composable
 fun Modifier.verticalScrollWithBar(state: ScrollState = rememberScrollState()): Modifier =
     scrollbar(state, reverse = false) { viewport -> Extent(state.maxValue + viewport, state.value.toFloat()) }.verticalScroll(state)
+
+@Composable
+fun Modifier.horizontalScrollFaded(state: ScrollState = rememberScrollState()): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val edge = minOf(Tokens.Space.S6.toPx(), size.width / 2)
+
+        if (state.canScrollForward) {
+            drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = size.width - edge, endX = size.width), Offset(size.width - edge, 0f), Size(edge, size.height), blendMode = BlendMode.DstOut)
+        }
+
+        if (state.canScrollBackward) {
+            drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = 0f, endX = edge), Offset.Zero, Size(edge, size.height), blendMode = BlendMode.DstOut)
+        }
+    }
+    .horizontalScroll(state)
 
 @Composable
 fun Modifier.scrollbar(state: LazyListState, reverse: Boolean = false): Modifier =
