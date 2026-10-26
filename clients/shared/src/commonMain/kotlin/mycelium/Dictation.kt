@@ -1,5 +1,6 @@
 package mycelium
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
@@ -39,13 +40,17 @@ class ProviderDictation(private val recorder: AudioRecorder, private val transcr
         val stopped = onStopped
 
         scope.launch {
-            val audio = recorder.stop()
-
             try {
+                val audio = recorder.stop()
+
                 heard(transcribe(audio))
                 stopped(null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (problem: ApiException) {
                 stopped(DictationProblem.Failed(problem.message))
+            } catch (_: Exception) {
+                stopped(DictationProblem.Failed("Could not reach the control plane. Check your connection and try again."))
             }
         }
     }
