@@ -275,20 +275,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshMemoryBanks() {
-        if (!state.value.experiments.memoryBanks) {
-            return
-        }
-
         val banks = orNull { api.memoryBanks() } ?: return
 
         mutableState.update { it.copy(memoryBanks = banks.associateBy { bank -> bank.id }) }
     }
 
     suspend fun refreshAssistants() {
-        if (!state.value.experiments.assistants) {
-            return
-        }
-
         val assistants = orNull { api.assistants() } ?: return
 
         mutableState.update { it.copy(assistants = assistants.associateBy { assistant -> assistant.id }) }
@@ -388,10 +380,6 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshBoard() {
-        if (!state.value.experiments.tasks) {
-            return
-        }
-
         val projects = api.projects()
         val worktrees = api.worktrees()
         val tasks = api.tasks()
@@ -434,10 +422,6 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshInstructionProposals() {
-        if (!state.value.experiments.instructions) {
-            return
-        }
-
         val proposals = api.instructionProposals()
 
         mutableState.update { it.copy(instructionProposals = proposals.associateBy { proposal -> proposal.id }) }
@@ -592,10 +576,6 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun refreshWorkflows() {
-        if (!state.value.experiments.workflows) {
-            return
-        }
-
         val workflows = api.workflows()
         mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.string("id").orEmpty() }) }
     }
@@ -723,12 +703,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val goal = orNull { api.goal(conversationId) }
         mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
 
-        if (state.value.experiments.walkthrough) {
-            val walkthrough = orNull { api.walkthrough(conversationId) }
-            mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
+        val walkthrough = orNull { api.walkthrough(conversationId) }
+        mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
 
-            walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
-        }
+        walkthrough?.let { loadWalkthroughNotes(conversationId, it.id) }
 
         val conversation = state.value.conversations[conversationId]
 
@@ -788,10 +766,6 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     fun withWalkthroughNotes(conversationId: String, message: String): String {
-        if (!state.value.experiments.walkthrough) {
-            return message
-        }
-
         val walkthrough = state.value.walkthroughs[conversationId] ?: return message
         val block = walkthroughNotesBlock(walkthrough, mutableWalkthroughNotes.value[conversationId].orEmpty()) ?: return message
 

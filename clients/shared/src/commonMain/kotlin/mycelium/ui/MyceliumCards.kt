@@ -48,11 +48,11 @@ val LocalQuestionAnswers = compositionLocalOf<QuestionAnswers?> { null }
 
 fun questionAnswers(store: Store, state: AppState) = QuestionAnswers(state.tasks, { store.refreshBoard() }, { task, text -> store.answerTask(task, text) })
 
-class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit, val connectGroups: suspend (MessageProposal) -> Unit, val acrossGroups: Boolean)
+class MessageProposals(val proposals: Map<String, MessageProposal>, val refresh: suspend () -> Unit, val approve: suspend (MessageProposal) -> Unit, val decline: suspend (MessageProposal) -> Unit, val connect: suspend (MessageProposal) -> Unit, val connectGroups: suspend (MessageProposal) -> Unit)
 
 val LocalMessageProposals = compositionLocalOf<MessageProposals?> { null }
 
-fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) }, state.experiments.chatAcrossGroups)
+fun messageProposals(store: Store, state: AppState) = MessageProposals(state.messageProposals, { store.refreshMessageProposals() }, { proposal -> store.approveMessageProposal(proposal) }, { proposal -> store.declineMessageProposal(proposal) }, { proposal -> store.approveAndConnectMessageProposal(proposal) }, { proposal -> store.approveAndConnectGroupsMessageProposal(proposal) })
 
 class ApiAccessRequests(val requests: Map<String, ApiAccessRequest>, val refresh: suspend () -> Unit, val approve: suspend (ApiAccessRequest, List<String>) -> Unit, val decline: suspend (ApiAccessRequest) -> Unit)
 
@@ -409,7 +409,7 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
     if (proposals != null && proposal != null && proposal.waiting) {
-        val betweenGroups = proposals.acrossGroups && proposal.sourceGroup != null && proposal.targetGroup != null && proposal.sourceGroup != proposal.targetGroup
+        val betweenGroups = proposal.sourceGroup != null && proposal.targetGroup != null && proposal.sourceGroup != proposal.targetGroup
 
         Label("Connecting allows messages in both directions until you revoke it in Settings.", style = Tokens.Type.Meta, color = colors.textMuted)
 

@@ -78,11 +78,10 @@ class MemoryBanksTest {
     }
 
     @Test
-    fun memoryBanksAreHiddenWhileTheExperimentIsOff() {
+    fun memoryBanksAreOfferedWithNoExperimentOn() {
         show("{}")
-        rule.onNodeWithText("New bank").assertDoesNotExist()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("New bank").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Staging listens on 5433").performClick()
-        rule.onNodeWithText("Move to bank").assertDoesNotExist()
-        assertTrue(calls.none { it.contains("memory-banks") })
+        rule.onNodeWithText("Move to bank").assertExists()
     }
 }

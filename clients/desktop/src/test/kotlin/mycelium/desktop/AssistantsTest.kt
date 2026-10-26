@@ -97,15 +97,6 @@ class AssistantsTest {
     }
 
     @Test
-    fun withTheExperimentOffTheSidebarHasNoAssistants() {
-        shell(mutableListOf(assistantJson("Stand-up", pinned = true)), experiments = EnabledExperiments.replace("\"assistants\":true", "\"assistants\":false"))
-
-        rule.waitForIdle()
-
-        assertEquals(0, present("Assistants"))
-    }
-
-    @Test
     fun creatingAnAssistantFromTheFormListsItOnThePage() {
         shell(mutableListOf(), Route.NewAssistant)
 

@@ -156,12 +156,10 @@ class UsageLimitTest {
     }
 
     @Test
-    fun continuingOnAnotherAccountIsOfferedOnlyWithTheExperimentOn() {
-        val off = store()
-        rule.setContent { MyceliumTheme(true) { AgentsSettings(off) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
-
-        assertEquals(0, rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().size)
+    fun continuingOnAnotherAccountIsOfferedWithNoExperimentOn() {
+        val plain = store()
+        rule.setContent { MyceliumTheme(true) { AgentsSettings(plain) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

@@ -148,7 +148,6 @@ class MessageProposalCardTest {
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Sent").fetchSemanticsNodes().isNotEmpty() }
     }
 
-
     @Test
     fun aMessageAcrossGroupsOffersSendAndConnectGroups() {
         show(AcrossGroups, EnabledExperiments)
@@ -169,11 +168,4 @@ class MessageProposalCardTest {
         rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
     }
 
-    @Test
-    fun aMessageAcrossGroupsOffersNoConnectGroupsWhileTheExperimentIsOff() {
-        show(AcrossGroups)
-        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
-    }
 }

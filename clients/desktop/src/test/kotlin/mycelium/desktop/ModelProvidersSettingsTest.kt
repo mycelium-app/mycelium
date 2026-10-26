@@ -89,9 +89,9 @@ class ModelProvidersSettingsTest {
     }
 
     @Test
-    fun dataHandlingIsHiddenWhileTheMemoryBanksExperimentIsOff() {
+    fun dataHandlingIsOfferedWithNoExperimentOn() {
         show()
-        rule.onNodeWithContentDescription("Data handling: Cloud").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Data handling: Cloud").assertExists()
     }
 
     @Test

@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -14,6 +15,7 @@ import mycelium.ui.ExperimentsSettings
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 class ExperimentsSettingsTest {
     @get:Rule
@@ -23,13 +25,14 @@ class ExperimentsSettingsTest {
     val scopes = TestScopes()
 
     @Test
-    fun eachExperimentSaysWhatItTurnsOn() {
+    fun onlyVoiceInputIsAnExperimentAndSaysWhatItTurnsOn() {
         val engine = MockEngine { respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         rule.setContent { MyceliumTheme(true) { ExperimentsSettings(store) } }
 
         rule.onNodeWithText("Voice input").assertIsDisplayed()
         rule.onNodeWithText("Dictate into the composer. On Android and the web, audio may go to Google.").assertIsDisplayed()
-        rule.onNodeWithText("Keep memories apart by model class and group.").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Keep memories apart by model class and group.").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
     }
 }

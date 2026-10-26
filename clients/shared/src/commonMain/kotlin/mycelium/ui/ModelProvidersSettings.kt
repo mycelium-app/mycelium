@@ -53,8 +53,6 @@ fun ModelProvidersSettings(store: Store) {
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
-    val live by store.state.collectAsState()
-    val handling = live.experiments.memoryBanks
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -98,7 +96,7 @@ fun ModelProvidersSettings(store: Store) {
                 MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
 
-            val columns = listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true)) + (if (handling) listOf(ColumnSpec()) else emptyList()) + ColumnSpec(max = 64.dp)
+            val columns = listOf(ColumnSpec(max = 280.dp), ColumnSpec(), ColumnSpec(flexible = true)) + ColumnSpec() + ColumnSpec(max = 64.dp)
 
             ContentTable(columns) {
                 ContentRow(header = true) {
@@ -106,9 +104,7 @@ fun ModelProvidersSettings(store: Store) {
                     Label("Key", style = Tokens.Type.MetaStrong, color = colors.textMuted)
                     Label("Models", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-                    if (handling) {
-                        Label("Data handling", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-                    }
+                    Label("Data handling", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
                     Box(Modifier)
                 }
@@ -134,14 +130,12 @@ fun ModelProvidersSettings(store: Store) {
                             size = ButtonSize.Sm,
                         )
 
-                        if (handling) {
-                            OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
-                                store.act {
-                                    val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
-                                    providers = providers.map { if (it.id == updated.id) updated else it }
-                                }
-                            }, size = ButtonSize.Sm)
-                        }
+                        OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
+                            store.act {
+                                val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
+                                providers = providers.map { if (it.id == updated.id) updated else it }
+                            }
+                        }, size = ButtonSize.Sm)
 
                         RowMenu(provider.name) { close ->
                             MenuItem("Refresh models", onClick = {

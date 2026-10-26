@@ -38,7 +38,6 @@ import mycelium.state.NotifySoundPreference
 import mycelium.state.Store
 import mycelium.ClientVersion
 import mycelium.Platform
-import mycelium.api.Experiments
 import mycelium.api.Me
 
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
@@ -59,12 +58,6 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Account("Account", MyIcon.Settings, "Sign out and version"),
 }
 
-private fun enabled(section: SettingsSection, experiments: Experiments): Boolean = when (section) {
-    SettingsSection.Groups -> experiments.groups
-    SettingsSection.Instructions -> experiments.instructions
-    else -> true
-}
-
 internal val SettingsGroups = listOf(
     "General" to listOf(SettingsSection.Appearance, SettingsSection.Experiments),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
@@ -80,22 +73,11 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
     var openGroup by remember { mutableStateOf<String?>(null) }
     val touch = LocalTouch.current
     val state by store.state.collectAsState()
-    val opened = section?.takeIf { enabled(it, state.experiments) }
-    val showGroup: ((String) -> Unit)? = if (state.experiments.groups) { id -> openGroup = id; section = SettingsSection.Groups } else null
+    val opened = section
+    val showGroup: ((String) -> Unit) = { id -> openGroup = id; section = SettingsSection.Groups }
     val waitingProposals = waitingInstructionProposals(state)
-    val groups = SettingsGroups.map { (name, entries) -> name to entries.filter { enabled(it, state.experiments) } }
 
-    LaunchedEffect(state.experiments) {
-        if (section?.let { enabled(it, state.experiments) } == false) {
-            section = null
-        }
-    }
-
-    LaunchedEffect(state.experiments.instructions) {
-        if (!state.experiments.instructions) {
-            return@LaunchedEffect
-        }
-
+    LaunchedEffect(Unit) {
         try {
             store.refreshInstructionProposals()
         } catch (cancelled: CancellationException) {
@@ -119,7 +101,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         if (touch) {
             if (opened == null) {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-                    for ((group, entries) in groups) {
+                    for ((group, entries) in SettingsGroups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {
@@ -158,7 +140,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    for ((group, entries) in groups) {
+                    for ((group, entries) in SettingsGroups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {

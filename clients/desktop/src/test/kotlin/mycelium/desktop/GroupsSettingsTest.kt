@@ -54,7 +54,6 @@ private const val GroupProposal = """[{"id":"p1","conversation_id":null,"convers
 
 private const val InstructionsDocument = """{"source":null,"revision":"abc","layers":[{"layer":"global","name":"Global","path":null,"text":"## Diffs","version":null}]}"""
 
-private const val GroupsOff = """{"tasks":true,"workflows":true,"instructions":true,"details":true,"subagents":true,"walkthrough":true,"move_chats":true,"groups":false}"""
 
 class GroupsSettingsTest {
     @get:Rule
@@ -124,13 +123,6 @@ class GroupsSettingsTest {
         settings(EnabledExperiments)
 
         rule.onNodeWithText("Groups").assertExists()
-    }
-
-    @Test
-    fun settingsDoesNotListGroupsWhileTheExperimentIsOff() {
-        settings(GroupsOff)
-
-        assertEquals(0, rule.onAllNodesWithText("Groups").fetchSemanticsNodes().size)
     }
 
     @Test

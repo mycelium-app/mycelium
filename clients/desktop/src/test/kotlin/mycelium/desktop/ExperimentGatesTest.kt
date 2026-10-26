@@ -27,7 +27,7 @@ import kotlin.test.assertTrue
 
 private const val Chat = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Backups","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 private const val Node = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.1.10","address":"10.0.0.5","online":true,"draining":false,"sessions":["c1"],"agents":[{"agent":"claude","available":true}],"logins":[]}]"""
-private const val AllOff = """{"tasks":false,"workflows":false,"instructions":false,"details":false,"subagents":false,"walkthrough":false,"move_chats":false,"groups":false}"""
+private const val AllOff = """{"voice":false}"""
 
 private object GatesPlatform : Platform {
     override val originUrl: String? = null
@@ -72,30 +72,30 @@ class ExperimentGatesTest {
     private fun present(description: String) = rule.onAllNodesWithContentDescription(description).fetchSemanticsNodes().size
 
     @Test
-    fun withEveryExperimentOffTheDetailsAndSubagentsPanelsAreNotOffered() {
+    fun withEveryExperimentOffTheDetailsAndSubagentsPanelsAreOffered() {
         shell(AllOff)
 
-        assertEquals(0, present("Open details"))
-        assertEquals(0, present("Open subagents"))
+        assertEquals(1, present("Open details"))
+        assertEquals(1, present("Open subagents"))
         assertEquals(1, present("Open git"))
     }
 
     @Test
-    fun withEveryExperimentOffTheNodeMenuOffersNoMove() {
+    fun withEveryExperimentOffTheNodeMenuOffersMove() {
         shell(AllOff)
 
         rule.onNodeWithContentDescription("Running on willow, open the node menu").performClick()
         rule.waitForIdle()
 
-        assertEquals(0, rule.onAllNodesWithText("Move").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithText("Move").fetchSemanticsNodes().size)
     }
 
     @Test
-    fun withEveryExperimentOffTheSidebarHasNoTasksOrWorkflows() {
+    fun withEveryExperimentOffTheSidebarHasTasksAndWorkflows() {
         shell(AllOff)
 
-        assertEquals(0, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
         assertEquals(1, rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().size)
     }
 
@@ -103,17 +103,7 @@ class ExperimentGatesTest {
     fun afterAFailedExperimentsFetchTheRestOfTheShellStillLoads() {
         shell(null)
 
-        assertEquals(0, present("Open details"))
-        assertTrue(rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().isNotEmpty())
-    }
-
-    @Test
-    fun withTheExperimentsOnThePanelsAndNavEntriesAppear() {
-        shell(EnabledExperiments)
-
         assertEquals(1, present("Open details"))
-        assertEquals(1, present("Open subagents"))
-        assertEquals(1, rule.onAllNodesWithText("Tasks").fetchSemanticsNodes().size)
-        assertEquals(1, rule.onAllNodesWithText("Workflows").fetchSemanticsNodes().size)
+        assertTrue(rule.onAllNodesWithText("Schedules").fetchSemanticsNodes().isNotEmpty())
     }
 }

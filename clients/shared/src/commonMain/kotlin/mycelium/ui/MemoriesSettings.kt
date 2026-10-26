@@ -74,9 +74,7 @@ fun MemoriesSettings(store: Store) {
                 modifier = if (touch) Modifier.fillMaxWidth() else Modifier.widthIn(max = Tokens.Size.FormColumn))
         }
 
-        if (live.experiments.memoryBanks) {
-            MemoryBanksBlock(store)
-        }
+        MemoryBanksBlock(store)
 
         failure?.let { message ->
             ErrorBanner(message, onDismiss = { failure = null })
@@ -119,13 +117,11 @@ fun MemoriesSettings(store: Store) {
                                     draft = memory.text
                                     deleting = null
                                 })
-                                if (live.experiments.memoryBanks) {
-                                    MenuItem("Move to bank", {
-                                        close()
-                                        moving = memory
-                                        destination = memory.bankId
-                                    })
-                                }
+                                MenuItem("Move to bank", {
+                                    close()
+                                    moving = memory
+                                    destination = memory.bankId
+                                })
                                 MenuItem("Delete", {
                                     close()
                                     deleting = memory

@@ -60,13 +60,6 @@ class GroupConnectionsTest {
     }
 
     @Test
-    fun agentConnectionsShowsGroupsOnlyWithTheExperimentOn() {
-        show("{}")
-        rule.onNodeWithText("Connect groups").assertDoesNotExist()
-        assertTrue(calls.none { it.contains("group-connections") })
-    }
-
-    @Test
     fun connectingTwoGroupsSendsThePair() {
         show(EnabledExperiments)
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect groups").fetchSemanticsNodes().isNotEmpty() }

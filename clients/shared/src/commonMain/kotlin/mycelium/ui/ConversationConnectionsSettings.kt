@@ -23,16 +23,12 @@ import mycelium.state.Store
 fun ConversationConnectionsSettings(store: Store) {
     val state by store.state.collectAsState()
     val connections = state.conversationConnections.values.sortedBy { it.createdAt }
-    val acrossGroups = state.experiments.chatAcrossGroups
 
-    LaunchedEffect(acrossGroups) {
+    LaunchedEffect(Unit) {
         store.act {
             store.refreshConversationConnections()
-
-            if (acrossGroups) {
-                store.refreshGroups()
-                store.refreshGroupConnections()
-            }
+            store.refreshGroups()
+            store.refreshGroupConnections()
         }
     }
 
@@ -52,9 +48,7 @@ fun ConversationConnectionsSettings(store: Store) {
             ) { store.act { store.revokeConversationConnection(connection.id) } }
         }
 
-        if (acrossGroups) {
-            GroupConnectionsBlock(store)
-        }
+        GroupConnectionsBlock(store)
     }
 }
 

@@ -63,7 +63,6 @@ import mycelium.state.agentName
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.isChat
-import mycelium.api.Experiments
 import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
 import mycelium.state.sessionOptions
@@ -99,8 +98,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
     }
-
-    val shownPanel = panel?.takeUnless { (it == SidePanel.Details && !state.experiments.details) || (it == SidePanel.Subagents && !state.experiments.subagents) }
 
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
@@ -170,10 +167,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val chat = conversation.isChat
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
-    LaunchedEffect(chat, state.experiments.continueElsewhere, state.experiments.voice) {
-        if (chat || state.experiments.continueElsewhere || state.experiments.voice) {
-            store.act { providers = api.modelProviders() }
-        }
+    LaunchedEffect(Unit) {
+        store.act { providers = api.modelProviders() }
     }
 
     val scope = rememberCoroutineScope()
@@ -244,8 +239,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
-                    moveChats = state.experiments.moveChats,
-                    details = state.experiments.details,
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
@@ -392,12 +385,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onSearchFiles = { query -> api.files(id, query) },
                         accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                         accountLocked = conversation.acpSessionId != null,
-                        continueOn = if (state.experiments.continueElsewhere) {
+                        continueOn = run {
                             val events = state.events[id].orEmpty()
                             val choices = remember(conversation, node, providers, events) { continueChoices(conversation, node, providers, events) }
 
                             ContinueControls(choices) { choice -> store.act { store.continueOn(id, choice) } }
-                        } else null,
+                        },
                         onSetAccount = { account ->
                             store.act {
                                 when {
@@ -424,11 +417,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
 
             if (!compact && !chat && panels) {
-                if (shownPanel != null) {
+                if (panel != null) {
                     ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
 
                     Box(Modifier.width(panelWidth).fillMaxHeight()) {
-                        when (shownPanel) {
+                        when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
                             SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
@@ -439,14 +432,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(shownPanel, state.experiments) { chosen -> openPanel(if (panel == chosen) null else chosen) }
+                Rail(panel) { chosen -> openPanel(if (panel == chosen) null else chosen) }
             }
         }
     }
 
-    if (compact && !chat && panels && shownPanel != null) {
+    if (compact && !chat && panels && panel != null) {
         BottomSheet(onDismiss = { openPanel(null) }) {
-            when (shownPanel) {
+            when (panel) {
                 SidePanel.Details -> InspectorContent(conversation, node, groupName)
                 SidePanel.Subagents -> SubagentsList(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation)
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
@@ -460,7 +453,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 
     if (compact && nodeSheetOpen) {
-        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true }.takeIf { state.experiments.moveChats })
+        NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true })
     }
 
     if (compact && moveOpen) {
@@ -476,8 +469,6 @@ private fun ConversationHeader(
     chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
-    moveChats: Boolean,
-    details: Boolean,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
@@ -547,9 +538,7 @@ private fun ConversationHeader(
             MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
             MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
 
-            if (details) {
-                MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
-            }
+            MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             if (chat) {
                 Label(conversation.model.orEmpty(), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
@@ -561,7 +550,7 @@ private fun ConversationHeader(
                 Box {
                     MyButton({ nodeMenuOpen = true }, text = node.name, icon = nodeIcon(node), trailingIcon = MyIcon.ChevronDown, description = "Running on ${node.name}, open the node menu", size = ButtonSize.Sm, muted = true)
 
-                    if (nodeMenuOpen && moveChats) {
+                    if (nodeMenuOpen) {
                         MenuPopup(onDismiss = { nodeMenuOpen = false }) {
                             MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
                         }
@@ -650,7 +639,7 @@ private const val WalkthroughTab = "Walkthrough"
 private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts }
 
 @Composable
-private fun Rail(open: SidePanel?, experiments: Experiments, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -660,14 +649,8 @@ private fun Rail(open: SidePanel?, experiments: Experiments, onToggle: (SidePane
             Modifier.width(Tokens.Size.Rail).fillMaxHeight().background(colors.bgChrome).padding(top = Tokens.Space.S1),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-
-            if (experiments.details) {
-                MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
-            }
-
-            if (experiments.subagents) {
-                MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
-            }
+            MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
+            MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)

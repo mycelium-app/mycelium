@@ -24,7 +24,7 @@ private val SwitchChoice = "Continue on another account" to "switch"
 fun AgentsSettings(store: Store) {
     var onUsageLimit by remember { mutableStateOf<String?>(null) }
     val state by store.state.collectAsState()
-    val choices = if (state.experiments.continueElsewhere) UsageLimitChoices + SwitchChoice else UsageLimitChoices
+    val choices = UsageLimitChoices + SwitchChoice
 
     LaunchedEffect(Unit) {
         store.act { onUsageLimit = store.api.usageLimitSetting().onUsageLimit }

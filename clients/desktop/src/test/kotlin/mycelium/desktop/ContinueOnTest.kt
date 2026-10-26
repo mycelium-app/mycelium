@@ -119,12 +119,4 @@ class ContinueOnTest {
         rule.onNodeWithText("Moved to willow").assertIsDisplayed()
     }
 
-    @Test
-    fun withTheExperimentOffTheAccountStaysFixedAndThereIsNoContinueButton() {
-        shell(EnabledExperiments.replace("\"continue_elsewhere\":true", "\"continue_elsewhere\":false"))
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: sam@example.com, fixed once the conversation has started").fetchSemanticsNodes().isNotEmpty() }
-
-        assertEquals(0, rule.onAllNodesWithContentDescription("Continue on…: sam@example.com").fetchSemanticsNodes().size)
-    }
 }

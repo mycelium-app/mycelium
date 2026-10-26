@@ -453,7 +453,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         store.act { store.refreshProjects() }
     }
 
-    LaunchedEffect(state.experiments.assistants) {
+    LaunchedEffect(Unit) {
         store.act { store.refreshAssistants() }
     }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
@@ -519,13 +519,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
 
-                if (state.experiments.tasks) {
-                    SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
-                }
-
-                if (state.experiments.workflows) {
-                    SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
-                }
+                SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+                SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
 
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
             }
@@ -536,9 +531,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         val list = rememberLazyListState()
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
-            if (state.experiments.assistants) {
-                sidebarAssistantItems(sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
-            }
+            sidebarAssistantItems(sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
 
             if (mode == ChatsMode) {
                 conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
