@@ -512,7 +512,7 @@ impl Daemon {
 
     fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, secrets: Vec<(String, String)>) {
         let existing = self.session_handles();
-        if existing.iter().any(|(id, handle)| *id == conversation_id && !handle.ended()) {
+        if existing.iter().any(|(id, handle)| *id == conversation_id && handle.running()) {
             return;
         }
 

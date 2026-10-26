@@ -674,6 +674,24 @@ async fn closing_a_session_ends_the_agent_without_reporting_a_failure() {
 }
 
 #[tokio::test]
+async fn a_session_started_while_the_previous_one_is_closing_replaces_it_and_takes_the_prompt() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(18);
+    start_conversation(&mut connection, conversation).await;
+
+    connection.send(ControlToNode::CloseSession { conversation_id: conversation });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    prompt(&connection, conversation, "hello");
+
+    let reply = connection.next_matching(|message| update_text(message).is_some()).await;
+    assert_eq!(update_text(&reply).unwrap(), "one");
+}
+
+#[tokio::test]
 async fn after_a_reconnect_only_unacknowledged_messages_are_replayed_once() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);
