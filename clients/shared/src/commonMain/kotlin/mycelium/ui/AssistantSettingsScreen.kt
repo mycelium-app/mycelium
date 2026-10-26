@@ -33,6 +33,7 @@ import mycelium.state.NoGroup
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.formatSize
+import mycelium.state.harnessModels
 
 @Composable
 fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?, onDone: () -> Unit) {
@@ -43,6 +44,8 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
     var description by remember(assistantId) { mutableStateOf("") }
     var group by remember(assistantId) { mutableStateOf(NoGroup) }
     var models by remember(assistantId) { mutableStateOf(emptyList<ModelChoice>()) }
+    var nodes by remember(assistantId) { mutableStateOf(emptyList<String>()) }
+    var chatFirst by remember(assistantId) { mutableStateOf(true) }
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     val attempt = rememberAttempt { failure = it }
     val creating = assistantId == null
@@ -60,6 +63,8 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                 description = held.description.orEmpty()
                 group = held.groupId ?: NoGroup
                 models = held.preferences.models
+                nodes = held.preferences.nodes
+                chatFirst = held.preferences.chatFirst
                 loaded = held
             }
         }
@@ -90,35 +95,49 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                         Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                         Label("A new session starts on the first model.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-                        if (models.isNotEmpty()) {
-                            ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(min = 0.dp, max = 28.dp))) {
-                                models.forEachIndexed { index, choice ->
-                                    val name = modelName(choice, providers)
+                        OrderedRows(
+                            names = models.map { modelName(it, providers) },
+                            onMove = { from, to -> models = models.moved(from, to) },
+                            onRemove = { index -> models = models.filterIndexed { position, _ -> position != index } },
+                        ) { index ->
+                            val choice = models[index]
 
-                                    ContentRow {
-                                        Label(name, maxLines = 1)
+                            if (choice.agent != null) {
+                                val offered = listOf(Choice("", "Default model")) + harnessModels(state.conversations.values, choice.agent)
 
-                                        RowMenu(name) { close ->
-                                            if (index > 0) {
-                                                MenuItem("Move up", onClick = { close(); models = models.toMutableList().also { it.add(index - 1, it.removeAt(index)) } }, leading = MyIcon.ArrowUp)
-                                            }
-
-                                            if (index < models.lastIndex) {
-                                                MenuItem("Move down", onClick = { close(); models = models.toMutableList().also { it.add(index + 1, it.removeAt(index)) } }, leading = MyIcon.ArrowDown)
-                                            }
-
-                                            MenuItem("Remove", onClick = { close(); models = models.filterIndexed { position, _ -> position != index } }, leading = MyIcon.Close)
-                                        }
-                                    }
-
-                                    Hairline()
-                                }
+                                OptionMenu("Model for ${harnessName(choice.agent)}", offered, choice.model ?: "", { picked -> models = models.mapIndexed { position, held -> if (position == index) held.copy(model = picked.ifEmpty { null }) else held } }, title = "Model")
                             }
                         }
 
-                        Row {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                             ModelPicker(ModelPickerControls(providers, null, null) { provider, model -> models = models + ModelChoice(providerId = provider.id, model = model) })
+                            MyButton({ models = models + ModelChoice(agent = "claude") }, text = "Add Claude Code", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                            MyButton({ models = models + ModelChoice(agent = "codex") }, text = "Add Codex", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
                         }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Runs on, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                        Label("Used when a session needs files or commands. Leave empty to use any node that is online.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                        OrderedRows(
+                            names = nodes.map { state.nodes[it]?.name ?: "Removed node" },
+                            onMove = { from, to -> nodes = nodes.moved(from, to) },
+                            onRemove = { index -> nodes = nodes.filterIndexed { position, _ -> position != index } },
+                        )
+
+                        val addable = state.nodes.values.filter { it.id !in nodes }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }
+
+                        if (addable.isNotEmpty()) {
+                            Row {
+                                OptionMenu("Add node", addable, null, { nodes = nodes + it }, title = "Add node", icon = MyIcon.Plus)
+                            }
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(chatFirst, "Chat first when no files are needed", { chatFirst = !chatFirst }, checkedState = "On", uncheckedState = "Off")
+                        Label("Chat first when no files are needed")
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
@@ -136,9 +155,9 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                                     val held = loaded
 
                                     if (held == null) {
-                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models).takeIf { models.isNotEmpty() }))
+                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models, nodes = nodes, chatFirst = chatFirst).takeIf { models.isNotEmpty() }))
                                     } else {
-                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models)))
+                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst)))
                                     }
 
                                     onDone()
@@ -155,8 +174,44 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
     }
 }
 
-private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String =
-    "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
+private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String = when {
+    choice.agent != null -> harnessName(choice.agent)
+    else -> "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
+}
+
+private fun harnessName(agent: String): String = if (agent == "codex") "Codex" else "Claude Code"
+
+private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().also { it.add(to, it.removeAt(from)) }
+
+@Composable
+private fun OrderedRows(names: List<String>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, extra: @Composable (Int) -> Unit = {}) {
+    if (names.isEmpty()) {
+        return
+    }
+
+    ContentTable(listOf(ColumnSpec(flexible = true), ColumnSpec(max = 200.dp), ColumnSpec(min = 0.dp, max = 28.dp))) {
+        names.forEachIndexed { index, name ->
+            ContentRow {
+                Label(name, maxLines = 1)
+                Box { extra(index) }
+
+                RowMenu(name) { close ->
+                    if (index > 0) {
+                        MenuItem("Move up", onClick = { close(); onMove(index, index - 1) }, leading = MyIcon.ArrowUp)
+                    }
+
+                    if (index < names.lastIndex) {
+                        MenuItem("Move down", onClick = { close(); onMove(index, index + 1) }, leading = MyIcon.ArrowDown)
+                    }
+
+                    MenuItem("Remove", onClick = { close(); onRemove(index) }, leading = MyIcon.Close)
+                }
+            }
+
+            Hairline()
+        }
+    }
+}
 
 private const val InstructionsFile = "AGENTS.md"
 

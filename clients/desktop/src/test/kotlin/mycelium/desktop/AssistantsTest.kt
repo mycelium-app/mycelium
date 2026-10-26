@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -108,7 +109,7 @@ class AssistantsTest {
         shell(mutableListOf(), Route.NewAssistant)
 
         rule.onNodeWithContentDescription("Name").performTextInput("Stand-up")
-        rule.onNodeWithText("Create assistant").performClick()
+        rule.onNodeWithText("Create assistant").performScrollTo().performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Stand-up").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"name":"Stand-up","instructions":""}""", requests.last { it.first == "POST /api/v1/assistants" }.second)

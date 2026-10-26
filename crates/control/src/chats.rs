@@ -499,6 +499,10 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
 
     record_turn(state, id, reported.as_ref()).await?;
 
+    if crate::assistants::chat_turn_ended(state, owner, id, stop_reason).await {
+        return Ok(());
+    }
+
     let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 order by position limit 1 for update) returning text, attachments")
         .bind(id)
         .fetch_optional(&state.pool)

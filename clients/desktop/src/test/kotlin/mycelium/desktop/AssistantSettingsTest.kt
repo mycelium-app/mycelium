@@ -33,6 +33,8 @@ private const val Providers = """[{"id":"p1","kind":"openai_compatible","name":"
 
 private const val Saved = """{"id":"a1","name":"Stand-up","description":"Daily summary","preferences":{"models":[{"provider_id":"p1","model":"llama3.2"},{"provider_id":"p1","model":"qwen"}]},"state":"idle","session_count":0,"instructions":"Be brief.","created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val Nodes = """[{"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"v0.11.0","address":"10.0.0.5","online":true,"draining":false,"sessions":[],"agents":[{"agent":"claude","available":true}],"logins":[]}]"""
+
 private const val Files = """[{"path":"AGENTS.md","size":9,"updated_at":"2026-10-22T10:00:00Z"},{"path":"notes/today.md","size":10,"updated_at":"2026-10-22T10:00:00Z"}]"""
 
 private object SettingsPlatform : Platform {
@@ -73,7 +75,8 @@ class AssistantSettingsTest {
                 path.endsWith("/assistants/a1") -> Saved
                 path.endsWith("/assistants") -> "[$Saved]"
                 path.endsWith("/model-providers") -> Providers
-                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
+                path.endsWith("/nodes") -> Nodes
+                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/conversations") -> "[]"
                 else -> "{}"
             }
 
@@ -92,7 +95,7 @@ class AssistantSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Ollama · qwen").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Ollama · qwen").performClick()
         rule.onNodeWithText("Move up").performClick()
-        rule.onNodeWithText("Save").performClick()
+        rule.onNodeWithText("Save").performScrollTo().performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
         val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
@@ -115,5 +118,22 @@ class AssistantSettingsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/files/notes/today.md" } }
         assertEquals(true, requests.last { it.first.startsWith("PUT") }.second.contains("and v2"))
+    }
+
+    @Test
+    fun addingClaudeCodeAndANodeIsSavedAsPreferences() {
+        shell()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add Claude Code").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Add Claude Code").performScrollTo().performClick()
+        rule.onNodeWithText("Add node").performScrollTo().performClick()
+        rule.onNodeWithText("willow").performClick()
+        rule.onNodeWithContentDescription("Chat first when no files are needed").performScrollTo().performClick()
+        rule.onNodeWithText("Save").performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PATCH /api/v1/assistants/a1" } }
+        val sent = requests.last { it.first == "PATCH /api/v1/assistants/a1" }.second
+
+        assertEquals(true, """{"agent":"claude"}""" in sent && """"nodes":["n1"]""" in sent && """"chat_first":false""" in sent, sent)
     }
 }

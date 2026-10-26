@@ -660,6 +660,11 @@ private fun continuedText(payload: JsonObject): String {
         else -> agentName(agent)
     }
     val after = if (payload.string("reason") == "usage_limit") " after the usage limit" else ""
+    val node = payload.string("node_name")
+
+    if (node != null && payload.string("reason") == null) {
+        return "Moved to $node"
+    }
 
     return "Continued on $target$after"
 }

@@ -354,7 +354,13 @@ pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id):
 }
 
 pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<ConfigRequest>) -> ApiResult<StatusCode> {
-    let row = find_owned(&state.pool, id, user.id).await?;
+    set_config(&state, user.id, id, request).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: ConfigRequest) -> ApiResult<()> {
+    let row = find_owned(&state.pool, id, owner).await?;
 
     if row.acp_session_id.is_none() {
         return Err(ApiError::conflict("session_not_started", "The session is still starting. Try again in a moment."));
@@ -378,7 +384,52 @@ pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     .fetch_one(&state.pool)
     .await?;
 
-    state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+    state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
+}
+
+pub async fn apply_model(state: &AppState, owner: Uuid, conversation: Uuid, model: Option<&str>, difficulty: Option<&str>) -> ApiResult<()> {
+    let options: Option<Value> = sqlx::query_scalar("select options from conversations where id=$1").bind(conversation).fetch_one(&state.pool).await?;
+    let config_options = options.as_ref().and_then(|options| options.get("config_options")).and_then(Value::as_array);
+    let effort = config_options
+        .and_then(|options| {
+            options.iter().find(|option| {
+                option.get("category").and_then(Value::as_str) == Some("thought_level")
+                    || option.get("id").and_then(Value::as_str).is_some_and(|id| id.contains("effort") || id.contains("reasoning"))
+            })
+        })
+        .and_then(|option| option.get("id"))
+        .and_then(Value::as_str);
+
+    if let Some(model) = model {
+        let available = options.as_ref().and_then(|options| options.get("models")).and_then(|models| models.get("availableModels")).and_then(Value::as_array);
+
+        if !available.is_some_and(|models| models.iter().any(|entry| entry.get("modelId").and_then(Value::as_str) == Some(model))) {
+            return Err(ApiError::bad_request("workflow_model_unavailable", "The requested model is not offered by this agent. Choose one of its available models."));
+        }
+    }
+
+    if let Some(difficulty) = difficulty {
+        let option = config_options.and_then(|options| options.iter().find(|option| option.get("id").and_then(Value::as_str) == effort));
+        let values = option.and_then(|option| option.get("options")).and_then(Value::as_array);
+        let offered = values.is_some_and(|values| {
+            values.iter().any(|value| {
+                value.get("value").and_then(Value::as_str) == Some(difficulty)
+                    || value.get("options").and_then(Value::as_array).is_some_and(|group| group.iter().any(|value| value.get("value").and_then(Value::as_str) == Some(difficulty)))
+            })
+        });
+
+        if effort.is_none() || !offered {
+            return Err(ApiError::bad_request("workflow_difficulty_unavailable", "The requested difficulty is not offered by this agent. Choose an available difficulty or use the agent default."));
+        }
+    }
+
+    let config = difficulty.zip(effort).map(|(difficulty, key)| std::collections::BTreeMap::from([(key.to_string(), json!(difficulty))]));
+
+    if model.is_some() || config.is_some() {
+        set_config(state, owner, conversation, ConfigRequest { model: model.map(str::to_string), config, mode: None }).await?;
+    }
+
+    Ok(())
 }

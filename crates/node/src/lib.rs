@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod agents;
+pub mod assistant_folder;
 pub mod attachments;
 pub mod changes;
 pub mod codex_app_server;

@@ -92,7 +92,7 @@ fn git_with_env(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, Str
     Err(if stderr.is_empty() { stdout } else { stderr })
 }
 
-fn within(root: &Path, requested: &str) -> Result<PathBuf, String> {
+pub(crate) fn within(root: &Path, requested: &str) -> Result<PathBuf, String> {
     let joined = root.join(requested);
     let outside = || format!("{} is outside {}. Choose a folder inside it.", joined.display(), root.display());
 

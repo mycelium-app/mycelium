@@ -1,6 +1,7 @@
 package mycelium.state
 
 import mycelium.api.Assistant
+import mycelium.api.Conversation
 import mycelium.api.Group
 
 const val AllStates = "all"
@@ -18,6 +19,9 @@ fun sidebarAssistants(assistants: Collection<Assistant>, groupFilter: String): L
         .filter { it.archivedAt == null && inGroup(it.groupId, groupFilter) && (it.pinnedAt != null || it.state != "idle") }
         .sortedWith(compareByDescending<Assistant> { it.pinnedAt != null }.thenByDescending(::mostRecent))
         .take(SidebarAssistantLimit)
+
+fun harnessModels(conversations: Collection<Conversation>, agent: String): List<Choice> =
+    conversations.filter { it.agent == agent }.flatMap { sessionOptions(it, emptyList()).models }.distinctBy { it.id }
 
 fun assistantStateName(state: String): String = when (state) {
     "working" -> "Working"

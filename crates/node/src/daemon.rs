@@ -304,6 +304,23 @@ impl Daemon {
                     let _ = out.send(NodeToControl::Files { request_id, paths });
                 });
             }
+            ControlToNode::WriteFolder { root, files, replace } => {
+                if let Err(error) = crate::assistant_folder::write(&self.config.projects_root, &root, &files, replace) {
+                    tracing::warn!("could not write the assistant folder {root}: {error}");
+                }
+            }
+            ControlToNode::ReadFolder { request_id, root } => {
+                let out = self.out.clone();
+                let projects_root = self.config.projects_root.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    let message = match crate::assistant_folder::read(&projects_root, &root) {
+                        Ok(read) => NodeToControl::FolderFiles { request_id, files: read.files, truncated: read.truncated, error: None },
+                        Err(error) => NodeToControl::FolderFiles { request_id, files: Vec::new(), truncated: false, error: Some(error) },
+                    };
+                    let _ = out.send(message);
+                });
+            }
             ControlToNode::Git { request_id, cwd, command } => {
                 let out = self.out.clone();
                 let root = self.config.projects_root.clone();

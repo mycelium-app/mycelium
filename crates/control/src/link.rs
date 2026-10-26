@@ -6,7 +6,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, GitAnswer, ProcessAnswer, ResetAnswer};
+use crate::state::{AppState, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -306,6 +306,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::FolderFiles { request_id, files, truncated, error } => {
+            state.hub.answer_folder(node_id, request_id, FolderAnswer { files, truncated, error });
+
+            Ok(())
+        }
         NodeToControl::GitResult { request_id, ok, output, error } => {
             state.hub.answer_git(node_id, request_id, GitAnswer { ok, output, error });
 
@@ -457,6 +462,11 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     state.add_session(node_id, conversation_id).await?;
     state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
     crate::conversations::spawn_branch_refresh(state, conversation_id);
+
+    if before.acp_session_id.is_none() {
+        crate::assistants::session_started(state, updated.owner, conversation_id).await;
+    }
+
     pump(state, conversation_id, before.acp_session_id.is_none()).await
 }
 
@@ -738,6 +748,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     state.hub.forget_prompts_of(conversation_id);
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     crate::moves::turn_ended(state, owner, conversation_id).await;
+    crate::assistants::workspace_turn_ended(state, owner, node_id, conversation_id);
 
     if let Err(error) = crate::goals::turn_ended(state, conversation_id, &stop_reason).await {
         tracing::warn!("goal handling after a turn failed for {conversation_id}: {}", error.message());

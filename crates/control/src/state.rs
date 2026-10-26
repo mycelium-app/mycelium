@@ -6,7 +6,7 @@ use crate::store::publish_node;
 use crate::versions::LatestVersions;
 use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
 use mycelium_proto::conversation::AgentId;
-use mycelium_proto::link::{ControlToNode, GitCommand, ResourceSample};
+use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
@@ -83,6 +83,12 @@ pub struct ProcessAnswer {
     pub error: Option<String>,
 }
 
+pub struct FolderAnswer {
+    pub files: Vec<FolderFile>,
+    pub truncated: bool,
+    pub error: Option<String>,
+}
+
 pub struct ResetAnswer {
     pub outcome: Option<String>,
     pub error: Option<String>,
@@ -98,6 +104,8 @@ pub struct Hub {
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
     stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
+    folder_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<FolderAnswer>)>>,
+    workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
@@ -305,6 +313,49 @@ impl Hub {
         if let Ok(mut requests) = self.stop_requests.lock() {
             requests.remove(&request_id);
         }
+    }
+
+    pub fn request_folder(&self, node_id: Uuid, root: String) -> Option<(Uuid, oneshot::Receiver<FolderAnswer>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.folder_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::ReadFolder { request_id, root }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_folder_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_folder(&self, node_id: Uuid, request_id: Uuid, answer: FolderAnswer) {
+        let waiting = self.folder_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    pub fn forget_folder_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.folder_requests.lock() {
+            requests.remove(&request_id);
+        }
+    }
+
+    pub fn ask_workspace(&self, conversation_id: Uuid) {
+        if let Ok(mut asks) = self.workspace_asks.lock() {
+            asks.insert(conversation_id);
+        }
+    }
+
+    pub fn take_workspace_ask(&self, conversation_id: Uuid) -> bool {
+        self.workspace_asks.lock().is_ok_and(|mut asks| asks.remove(&conversation_id))
     }
 
     pub fn request_reset(&self, node_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) -> Option<(Uuid, oneshot::Receiver<ResetAnswer>)> {

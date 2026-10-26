@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State},
 };
 use mycelium_proto::api::{
-    ConfigRequest, CreateChatRequest, CreateConversationRequest, PromptRequest,
+    CreateChatRequest, CreateConversationRequest, PromptRequest,
 };
 use mycelium_proto::conversation::AgentId;
 use serde::{Deserialize, Serialize};
@@ -500,97 +500,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
             if !ready {
                 continue;
             }
-            let options: Option<Value> =
-                sqlx::query_scalar("select options from conversations where id=$1")
-                    .bind(conversation)
-                    .fetch_one(&state.pool)
-                    .await?;
-            let effort = options
-                .as_ref()
-                .and_then(|options| options.get("config_options"))
-                .and_then(Value::as_array)
-                .and_then(|options| {
-                    options.iter().find(|option| {
-                        option.get("category").and_then(Value::as_str) == Some("thought_level")
-                            || option
-                                .get("id")
-                                .and_then(Value::as_str)
-                                .is_some_and(|id| id.contains("effort") || id.contains("reasoning"))
-                    })
-                })
-                .and_then(|option| option.get("id"))
-                .and_then(Value::as_str);
-            if let Some(model) = &spec.model {
-                let available = options
-                    .as_ref()
-                    .and_then(|options| options.get("models"))
-                    .and_then(|models| models.get("availableModels"))
-                    .and_then(Value::as_array);
-                if !available.is_some_and(|models| {
-                    models
-                        .iter()
-                        .any(|entry| entry.get("modelId").and_then(Value::as_str) == Some(model))
-                }) {
-                    return Err(ApiError::bad_request(
-                        "workflow_model_unavailable",
-                        "The requested model is not offered by this agent. Choose one of its available models.",
-                    ));
-                }
-            }
-            if let Some(difficulty) = &spec.difficulty {
-                let option = options
-                    .as_ref()
-                    .and_then(|options| options.get("config_options"))
-                    .and_then(Value::as_array)
-                    .and_then(|options| {
-                        options
-                            .iter()
-                            .find(|option| option.get("id").and_then(Value::as_str) == effort)
-                    });
-                let values = option
-                    .and_then(|option| option.get("options"))
-                    .and_then(Value::as_array);
-                let offered = values.is_some_and(|values| {
-                    values.iter().any(|value| {
-                        value.get("value").and_then(Value::as_str) == Some(difficulty)
-                            || value
-                                .get("options")
-                                .and_then(Value::as_array)
-                                .is_some_and(|group| {
-                                    group.iter().any(|value| {
-                                        value.get("value").and_then(Value::as_str)
-                                            == Some(difficulty)
-                                    })
-                                })
-                    })
-                });
-                if effort.is_none() || !offered {
-                    return Err(ApiError::bad_request(
-                        "workflow_difficulty_unavailable",
-                        "The requested difficulty is not offered by this agent. Choose an available difficulty or use the agent default.",
-                    ));
-                }
-            }
-            let config = spec
-                .difficulty
-                .as_ref()
-                .zip(effort)
-                .map(|(difficulty, key)| {
-                    std::collections::BTreeMap::from([(key.to_string(), json!(difficulty))])
-                });
-            if spec.model.is_some() || config.is_some() {
-                prompts::config(
-                    State(state.clone()),
-                    user.clone(),
-                    Path(conversation),
-                    Json(ConfigRequest {
-                        model: spec.model.clone(),
-                        config,
-                        mode: None,
-                    }),
-                )
-                .await?;
-            }
+            prompts::apply_model(state, user.id, conversation, spec.model.as_deref(), spec.difficulty.as_deref()).await?;
 
             let text = render(&spec.prompt, &steps, &row.output);
             if claim(state, id, row.round, &spec.key, "prompt")

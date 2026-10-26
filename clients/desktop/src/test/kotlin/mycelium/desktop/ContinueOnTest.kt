@@ -104,6 +104,14 @@ class ContinueOnTest {
     }
 
     @Test
+    fun aMoveToAnotherNodeIsShownAsMovedToThatNode() {
+        shell(EnabledExperiments, Continued.replace("\"account\":\"codex@example.com\"", "\"node_id\":\"n1\",\"node_name\":\"willow\""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Moved to willow").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Moved to willow").assertIsDisplayed()
+    }
+
+    @Test
     fun withTheExperimentOffTheAccountStaysFixedAndThereIsNoContinueButton() {
         shell(EnabledExperiments.replace("\"continue_elsewhere\":true", "\"continue_elsewhere\":false"))
 

@@ -91,6 +91,14 @@ pub enum NodeToControl {
         request_id: Uuid,
         paths: Vec<String>,
     },
+    FolderFiles {
+        request_id: Uuid,
+        files: Vec<FolderFile>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        truncated: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     GitResult {
         request_id: Uuid,
         ok: bool,
@@ -322,6 +330,12 @@ pub enum GitCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FolderFile {
+    pub path: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptAttachment {
     pub name: String,
     pub media_type: String,
@@ -432,6 +446,16 @@ pub enum ControlToNode {
         request_id: Uuid,
         cwd: String,
         query: String,
+    },
+    WriteFolder {
+        root: String,
+        files: Vec<FolderFile>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replace: bool,
+    },
+    ReadFolder {
+        request_id: Uuid,
+        root: String,
     },
     Git {
         request_id: Uuid,

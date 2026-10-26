@@ -6,7 +6,9 @@ use axum::body::{Body, Bytes};
 use axum::extract::State;
 use axum::response::Response;
 use axum::routing::{get, post};
-use common::{Client, Server, serve};
+use base64::Engine;
+use common::{Client, NodeLink, Server, serve};
+use mycelium_proto::link::{ControlToNode, FolderFile, NodeToControl};
 use futures_util::stream;
 use serde_json::{Value, json};
 use std::convert::Infallible;
@@ -381,4 +383,130 @@ async fn paths_outside_the_storage_and_files_over_a_mebibyte_are_refused_with_a_
     let (status, large) = server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/big.bin")).body(vec![b'a'; 1024 * 1024 + 1])).await;
     assert_eq!((status, large["error"].clone()), (413, json!("file_too_large")));
     assert!(large["message"].as_str().unwrap().contains("split"));
+}
+
+fn encoded(text: &str) -> String {
+    base64::engine::general_purpose::STANDARD.encode(text)
+}
+
+async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> Option<T>) -> T {
+    loop {
+        let message = link.next().await;
+
+        if let Some(found) = pick(&message) {
+            return found;
+        }
+    }
+}
+
+async fn harness_assistant(server: &Server, nodes: Value) -> Value {
+    create(&server.user, json!({"name": "War room", "instructions": "Run the war room.", "preferences": {"models": [{"agent": "claude"}], "nodes": nodes}})).await
+}
+
+#[tokio::test]
+async fn a_workspace_turn_copies_storage_down_and_changes_back() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let mut link = server.online_node("laptop").await;
+    let assistant = harness_assistant(&server, json!([link.id])).await;
+    let id = assistant["id"].as_str().unwrap();
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/notes/old.md")).body("old")).await;
+
+    let started = prompt(&server.user, id, "Open the war room").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    let (root, files, replace) = next_matching(&mut link, |message| match message {
+        ControlToNode::WriteFolder { root, files, replace } => Some((root.clone(), files.clone(), *replace)),
+        _ => None,
+    })
+    .await;
+    let (cwd, instructions) = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { cwd, instructions, .. } => Some((cwd.clone(), instructions.clone())),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!((root.clone(), cwd), (format!(".mycelium-assistants/{id}"), root));
+    assert!(replace);
+    assert_eq!(files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(), vec!["AGENTS.md", "notes/old.md"]);
+    assert!(instructions.unwrap().contains("Run the war room."));
+
+    link.start_session(conversation, "acp-1").await;
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "Open the war room");
+
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    let request_id = next_matching(&mut link, |message| match message {
+        ControlToNode::ReadFolder { request_id, .. } => Some(*request_id),
+        _ => None,
+    })
+    .await;
+    let changed = vec![FolderFile { path: "AGENTS.md".into(), data_base64: encoded("Run the war room.") }, FolderFile { path: "notes/today.md".into(), data_base64: encoded("Shipped v1") }];
+    link.send(NodeToControl::FolderFiles { request_id, files: changed, truncated: false, error: None }).await;
+
+    common::eventually("storage to follow the folder", || async {
+        let (_, listed) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/files"))).await;
+        let paths: Vec<&str> = listed.as_array().unwrap().iter().map(|file| file["path"].as_str().unwrap()).collect();
+
+        (paths == ["AGENTS.md", "notes/today.md"]).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn use_workspace_moves_the_thread_to_the_first_online_node() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let mut link = server.online_node("laptop").await;
+    let (provider, _) = scripted_provider(&server, vec![("mcp__mycelium__assistant_use_workspace", json!({"reason": "Needs a repository"}))]).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "instructions": "Be brief.", "preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}, {"agent": "claude"}], "nodes": [link.id]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let started = prompt(&server.user, id, "Clone the repository").await;
+    let chat = started["id"].as_str().unwrap();
+
+    allow_calls(&server, chat, 1).await;
+
+    let folder = next_matching(&mut link, |message| match message {
+        ControlToNode::WriteFolder { root, .. } => Some(root.clone()),
+        _ => None,
+    })
+    .await;
+    let cwd = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { conversation_id, cwd, .. } if conversation_id.to_string() == chat => Some(cwd.clone()),
+        _ => None,
+    })
+    .await;
+    let (_, moved) = server.user.json(server.user.get(&format!("/api/v1/conversations/{chat}"))).await;
+
+    assert_eq!((folder.clone(), cwd), (format!(".mycelium-assistants/{id}"), folder));
+    assert_eq!((moved["agent"].clone(), moved["assistant_id"].clone()), (json!("claude"), json!(id)));
+    let events = server.events(chat.parse().unwrap()).await;
+    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
+    assert_eq!(continued["payload"]["node_id"], json!(link.id));
+}
+
+#[tokio::test]
+async fn an_offline_first_node_falls_back_to_the_next_node_before_starting() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let (offline, _) = server.join("node", "willow").await;
+    let mut link = server.online_node("orion").await;
+    let assistant = harness_assistant(&server, json!([offline, link.id])).await;
+
+    prompt(&server.user, assistant["id"].as_str().unwrap(), "Start").await;
+
+    let started = next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    assert_eq!(started, ());
+}
+
+#[tokio::test]
+async fn a_prompt_with_no_node_online_says_what_to_bring_online() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let (offline, _) = server.join("node", "willow").await;
+    let assistant = harness_assistant(&server, json!([offline])).await;
+
+    let (status, refused) = server.user.json(server.user.post(&format!("/api/v1/assistants/{}/prompt", assistant["id"].as_str().unwrap())).json(&json!({"text": "Start"}))).await;
+
+    assert_eq!((status, refused["error"].clone()), (409, json!("no_choice_available")));
 }

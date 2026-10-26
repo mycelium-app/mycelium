@@ -58,7 +58,7 @@ fn experiment_of_tool(name: &str) -> Option<Experiment> {
         "get_instructions" | "propose_instructions_edit" => Some(Experiment::Instructions),
         "walkthrough" => Some(Experiment::Walkthrough),
         "read_earlier_turns" => Some(Experiment::ContinueElsewhere),
-        "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" => Some(Experiment::Assistants),
+        "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_use_workspace" => Some(Experiment::Assistants),
         _ => None,
     }
 }
@@ -165,6 +165,11 @@ pub fn tool_definitions() -> Value {
             "name": "assistant_delete_file",
             "description": "Delete a file from this assistant's storage.",
             "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "The path of the file."}}, "required": ["path"]},
+        },
+        {
+            "name": "assistant_use_workspace",
+            "description": "Move this assistant's thread to a node when the work needs files on disk or commands, which a chat cannot do. Only an assistant's own chat can use it. The move happens when this reply ends, with the assistant's storage copied into the working folder, and the conversation carries on there.",
+            "inputSchema": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why a working folder is needed."}}},
         },
         {
             "name": "walkthrough",
@@ -686,6 +691,12 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                 Some(tool @ ("assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file")) => {
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
                     let (text, is_error) = assistants::file_tool(&state, conversation, tool, &arguments).await?;
+
+                    reply(&id, tool_text(&text, is_error))
+                }
+                Some("assistant_use_workspace") => {
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
+                    let (text, is_error) = assistants::use_workspace_tool(&state, conversation).await?;
 
                     reply(&id, tool_text(&text, is_error))
                 }
