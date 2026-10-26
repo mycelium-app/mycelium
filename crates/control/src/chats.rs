@@ -170,13 +170,33 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
     let conversation = working.to_proto()?;
     state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
 
+    spawn_turn(state, owner, id, provider_id, model).await?;
+
+    Ok(conversation)
+}
+
+pub async fn resume_turn(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let row = lock_owned(&mut tx, id, owner).await?;
+    let Some(provider_id) = row.provider_id else {
+        return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
+    };
+    let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
+    tx.commit().await?;
+
+    state.publish(Some(owner), StreamMessage::Conversation(working.to_proto()?));
+
+    spawn_turn(state, owner, id, provider_id, row.model.unwrap_or_default()).await
+}
+
+async fn spawn_turn(state: &AppState, owner: Uuid, id: Uuid, provider_id: Uuid, model: String) -> ApiResult<()> {
     let provider = model_providers::find_owned(state, provider_id, owner).await?;
     let messages = history(state, id).await?;
 
     let turn = tokio::spawn(run_turn(state.clone(), owner, id, provider, model, messages));
     state.hub.track_chat_turn(id, turn.abort_handle());
 
-    Ok(conversation)
+    Ok(())
 }
 
 pub async fn send_or_queue(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
@@ -379,6 +399,10 @@ fn run_turn(state: AppState, owner: Uuid, id: Uuid, provider: ProviderRow, model
 
         if let Err(cause) = finish(&state, owner, id, stop_reason, Some(usage)).await {
             tracing::warn!("could not finish the reply of chat {id}: {}", cause.message());
+        }
+
+        if stop_reason == "error" {
+            crate::assistants::fall_back_after_chat_error(&state, owner, id).await;
         }
     })
 }

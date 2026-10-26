@@ -104,6 +104,14 @@ class ContinueOnTest {
     }
 
     @Test
+    fun aFallbackDividerSaysWhyTheTurnMoved() {
+        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Usage limit reached · continued with Codex as codex@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Usage limit reached · continued with Codex as codex@example.com").assertIsDisplayed()
+    }
+
+    @Test
     fun aMoveToAnotherNodeIsShownAsMovedToThatNode() {
         shell(EnabledExperiments, Continued.replace("\"account\":\"codex@example.com\"", "\"node_id\":\"n1\",\"node_name\":\"willow\""))
 

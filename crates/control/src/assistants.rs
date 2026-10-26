@@ -7,7 +7,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::prompts;
 use crate::state::AppState;
-use crate::store::{enum_text, find_owned};
+use crate::store::{ConversationRow, enum_text, find_owned, parse_enum};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::body::Bytes;
@@ -32,6 +32,7 @@ const DESCRIPTION_PREVIEW_BYTES: i32 = 400;
 const FOLDER_ROOT: &str = ".mycelium-assistants";
 const FOLDER_CHUNK_BYTES: usize = 1024 * 1024;
 const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const MODEL_ERROR_MINUTES: i64 = 10;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
 const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.pinned_at, a.archived_at, a.created_at,
     c.status as current_status,
@@ -84,6 +85,7 @@ impl AssistantRow {
             pinned_at: self.pinned_at,
             archived_at: self.archived_at,
             instructions: None,
+            next_choice: None,
             created_at: self.created_at,
         }
     }
@@ -270,6 +272,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     let mut assistant = load(&state, user.id, id).await?;
 
     assistant.instructions = Some(instructions_of(&state, id).await?);
+    assistant.next_choice = next_choice_label(&state, user.id, &assistant).await?;
 
     Ok(Json(assistant))
 }
@@ -349,6 +352,10 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         }
         Some(row) if chats::is_chat(&row) => chats::send(&state, user.id, row.id, text, request.attachments).await?,
         Some(row) => {
+            if let Some(reason) = unavailable_reason(&state, &row).await? {
+                fall_back(&state, user.id, row.id, reason, None).await;
+            }
+
             prompts::prompt(State(state.clone()), user.clone(), Path(row.id), Json(request.clone())).await?;
 
             find_owned(&state.pool, row.id, user.id).await?.to_proto()?
@@ -782,6 +789,126 @@ pub async fn session_started(state: &AppState, owner: Uuid, conversation_id: Uui
     if let Some((_, choice)) = model && let Some(model) = &choice.model && let Err(error) = prompts::apply_model(state, owner, conversation_id, Some(model), None).await {
         tracing::warn!("could not set the model {model} for assistant {assistant_id}: {}", error.message());
     }
+}
+
+async fn unavailable_reason(state: &AppState, row: &ConversationRow) -> ApiResult<Option<&'static str>> {
+    if !state.hub.is_online(row.node_id) {
+        return Ok(Some("offline"));
+    }
+
+    let signed_in = match (&row.account, parse_enum::<AgentId>(&row.agent)) {
+        (Some(account), Ok(agent)) => sqlx::query_scalar::<_, bool>("select exists (select 1 from logins where node_id = $1 and agent = $2 and account = $3 and state = 'signed_in')").bind(row.node_id).bind(agent.as_str()).bind(account).fetch_one(&state.pool).await?,
+        _ => true,
+    };
+
+    Ok((!signed_in).then_some("signed_out"))
+}
+
+fn current_index(preferences: &AssistantPreferences, row: &ConversationRow) -> Option<usize> {
+    preferences.models.iter().position(|choice| match (choice.agent, choice.provider_id) {
+        (Some(agent), _) => agent.as_str() == row.agent && (choice.account.is_none() || choice.account == row.account),
+        (None, Some(provider_id)) => row.provider_id == Some(provider_id) && (choice.model.is_none() || choice.model == row.model),
+        _ => false,
+    })
+}
+
+async fn label_of(state: &AppState, choice: &Choice) -> ApiResult<String> {
+    match choice {
+        Choice::Chat { provider_id, model, .. } => {
+            let name = sqlx::query_scalar::<_, String>("select name from model_providers where id = $1").bind(provider_id).fetch_optional(&state.pool).await?;
+
+            Ok([name, model.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · "))
+        }
+        Choice::Workspace { agent, node_id, .. } => {
+            let name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+            let agent = if *agent == AgentId::Codex { "Codex" } else { "Claude Code" };
+
+            Ok(format!("{agent} on {name}"))
+        }
+    }
+}
+
+async fn next_choice_label(state: &AppState, owner: Uuid, assistant: &Assistant) -> ApiResult<Option<String>> {
+    let facts = facts_of(state, owner, assistant.id).await?;
+
+    match choose(&assistant.preferences, &facts, false) {
+        Some(choice) => Ok(Some(label_of(state, &choice).await?)),
+        None => Ok(None),
+    }
+}
+
+pub async fn fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, until: Option<chrono::DateTime<chrono::Utc>>) -> bool {
+    match try_fall_back(state, owner, conversation_id, reason, until).await {
+        Ok(moved) => moved,
+        Err(error) => {
+            tracing::warn!("could not move conversation {conversation_id} to the assistant's next choice ({reason}): {}", error.message());
+
+            false
+        }
+    }
+}
+
+async fn try_fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, until: Option<chrono::DateTime<chrono::Utc>>) -> ApiResult<bool> {
+    let row = find_owned(&state.pool, conversation_id, owner).await?;
+    let Some(assistant_id) = row.assistant_id else {
+        return Ok(false);
+    };
+    let assistant = load(state, owner, assistant_id).await?;
+
+    if !assistant.preferences.fall_back_on.iter().any(|condition| condition == reason) {
+        return Ok(false);
+    }
+
+    if let (Some(until), Some(index)) = (until, current_index(&assistant.preferences, &row)) {
+        sqlx::query("update assistants set limited = limited || jsonb_build_object($2::text, $3::text) where id = $1").bind(assistant_id).bind(index.to_string()).bind(until.to_rfc3339()).execute(&state.pool).await?;
+    }
+
+    let facts = facts_of(state, owner, assistant_id).await?;
+    let target = match choose(&assistant.preferences, &facts, false) {
+        Some(Choice::Chat { provider_id, model, .. }) => Target { agent: chats::CHAT_AGENT.to_string(), account: None, provider_id: Some(provider_id), model, node_id: None, cwd: None },
+        Some(Choice::Workspace { agent, account, node_id, .. }) => {
+            copy_down(state, node_id, assistant_id).await?;
+
+            Target { agent: enum_text(&agent), account, provider_id: None, model: None, node_id: Some(node_id), cwd: Some(folder_of(assistant_id)) }
+        }
+        None => return Ok(false),
+    };
+
+    continuation::continue_on(state, owner, conversation_id, target, Some(reason)).await?;
+    publish(state, owner, assistant_id).await?;
+
+    Ok(true)
+}
+
+pub async fn fall_back_after_chat_error(state: &AppState, owner: Uuid, id: Uuid) {
+    let until = chrono::Utc::now() + chrono::Duration::minutes(MODEL_ERROR_MINUTES);
+
+    if !fall_back(state, owner, id, "model_error", Some(until)).await {
+        return;
+    }
+
+    let resumed = match find_owned(&state.pool, id, owner).await {
+        Ok(row) if chats::is_chat(&row) => chats::resume_turn(state, owner, id).await,
+        Ok(_) => prompts::retry_failed(state, owner, id).await,
+        Err(error) => Err(error),
+    };
+
+    if let Err(error) = resumed {
+        tracing::warn!("could not carry on conversation {id} after its model failed: {}", error.message());
+    }
+}
+
+pub async fn carry_on_after_limit(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
+    let row = find_owned(&state.pool, id, owner).await?;
+
+    if chats::is_chat(&row) {
+        chats::send(state, owner, id, text, Vec::new()).await?;
+
+        return Ok(());
+    }
+
+    prompts::retry_failed(state, owner, id).await?;
+    prompts::continue_unless_queued(state, owner, id, text).await
 }
 
 #[cfg(test)]

@@ -510,3 +510,110 @@ async fn a_prompt_with_no_node_online_says_what_to_bring_online() {
 
     assert_eq!((status, refused["error"].clone()), (409, json!("no_choice_available")));
 }
+
+fn limit_message() -> String {
+    let resets = chrono::Utc::now() + chrono::Duration::hours(2);
+
+    format!("Internal error: You've hit your session limit · resets {} (UTC)", resets.format("%-I:%M%P"))
+}
+
+async fn named_provider(server: &Server, name: &str, router: Router) -> Value {
+    let base = serve(router).await;
+    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": name, "base_url": format!("{base}/v1")}))).await;
+    assert_eq!(status, 201, "{provider}");
+
+    provider
+}
+
+fn broken_openai() -> Router {
+    async fn models() -> Json<Value> {
+        Json(json!({"object": "list", "data": [{"id": "llama3.2"}]}))
+    }
+
+    async fn completions() -> (axum::http::StatusCode, &'static str) {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "model is down")
+    }
+
+    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions))
+}
+
+#[tokio::test]
+async fn a_usage_limit_moves_the_thread_to_the_next_model_and_records_why() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let mut link = server.online_node("laptop").await;
+    let (provider, fake) = chat_provider(&server).await;
+    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [link.id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let started = prompt(&server.user, id, "Open the war room").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::SessionFailed { conversation_id: conversation, seq: 3, message: limit_message() }).await;
+
+    finished_turns(&server, &conversation.to_string(), 1).await;
+    let moved = server.conversation(conversation).await;
+    let events = server.events(conversation).await;
+    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
+    let (_, fetched) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}"))).await;
+
+    assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("usage_limit")));
+    assert_eq!(fake.requests.lock().unwrap().len(), 1);
+    assert_eq!(fetched["next_choice"], json!("Ollama · llama3.2"));
+}
+
+#[tokio::test]
+async fn a_failing_chat_model_moves_the_turn_to_the_next_model() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let broken = named_provider(&server, "Broken", broken_openai()).await;
+    let (router, fake) = fake_openai(Vec::new());
+    let working = named_provider(&server, "Working", router).await;
+    let assistant = create(&server.user, json!({"name": "Stand-up", "preferences": {"fall_back_on": ["model_error"], "models": [{"provider_id": broken["id"], "model": "llama3.2"}, {"provider_id": working["id"], "model": "llama3.2"}]}})).await;
+
+    let started = prompt(&server.user, assistant["id"].as_str().unwrap(), "What did we ship?").await;
+    let chat = started["id"].as_str().unwrap();
+
+    common::eventually("the reply from the next model", || async { (!fake.requests.lock().unwrap().is_empty()).then_some(()) }).await;
+    let events = server.events(chat.parse().unwrap()).await;
+    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
+    let conversation = server.conversation(chat.parse().unwrap()).await;
+
+    assert_eq!((continued["payload"]["reason"].clone(), continued["payload"]["kind"].clone()), (json!("model_error"), json!("model")));
+    assert_eq!(conversation["provider_id"], working["id"]);
+}
+
+#[tokio::test]
+async fn a_session_whose_node_went_offline_moves_on_before_the_next_prompt() {
+    let server = Server::start().await;
+    enable(&server.user).await;
+    let mut link = server.online_node("laptop").await;
+    let node_id = link.id;
+    let (provider, _) = chat_provider(&server).await;
+    let assistant = create(&server.user, json!({"name": "War room", "preferences": {"chat_first": false, "nodes": [node_id], "models": [{"agent": "claude"}, {"provider_id": provider["id"], "model": "llama3.2"}]}})).await;
+    let id = assistant["id"].as_str().unwrap();
+    let started = prompt(&server.user, id, "Open the war room").await;
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+
+    next_matching(&mut link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    link.start_session(conversation, "acp-1").await;
+    link.expect_prompt().await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the turn to end", || async { (server.conversation(conversation).await["status"] == "review").then_some(()) }).await;
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(node_id) && node["online"] == false).then_some(())
+    })
+    .await;
+
+    prompt(&server.user, id, "Are you there?").await;
+
+    let moved = server.conversation(conversation).await;
+    let events = server.events(conversation).await;
+    let continued = events.iter().find(|event| event["kind"] == "continued").unwrap();
+    assert_eq!((moved["agent"].clone(), continued["payload"]["reason"].clone()), (json!("chat"), json!("offline")));
+}

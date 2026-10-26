@@ -572,6 +572,7 @@ data class Assistant(
     @SerialName("pinned_at") val pinnedAt: String? = null,
     @SerialName("archived_at") val archivedAt: String? = null,
     val instructions: String? = null,
+    @SerialName("next_choice") val nextChoice: String? = null,
     @SerialName("created_at") val createdAt: String,
 )
 

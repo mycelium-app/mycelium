@@ -46,6 +46,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
     var models by remember(assistantId) { mutableStateOf(emptyList<ModelChoice>()) }
     var nodes by remember(assistantId) { mutableStateOf(emptyList<String>()) }
     var chatFirst by remember(assistantId) { mutableStateOf(true) }
+    var fallBackOn by remember(assistantId) { mutableStateOf(AssistantPreferences().fallBackOn) }
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
     val attempt = rememberAttempt { failure = it }
     val creating = assistantId == null
@@ -65,6 +66,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                 models = held.preferences.models
                 nodes = held.preferences.nodes
                 chatFirst = held.preferences.chatFirst
+                fallBackOn = held.preferences.fallBackOn
                 loaded = held
             }
         }
@@ -141,6 +143,19 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Move to the next choice when", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+                        for ((condition, label) in FallBackConditions) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(condition in fallBackOn, label, { fallBackOn = if (condition in fallBackOn) fallBackOn - condition else fallBackOn + condition }, checkedState = "On", uncheckedState = "Off")
+                                Label(label)
+                            }
+                        }
+
+                        loaded?.nextChoice?.let { Label("Next turn: $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                         Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                         Label("Kept in the assistant's storage as AGENTS.md and added after the global and group instructions.", style = Tokens.Type.Meta, color = colors.textMuted)
 
@@ -155,9 +170,9 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?,
                                     val held = loaded
 
                                     if (held == null) {
-                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models, nodes = nodes, chatFirst = chatFirst).takeIf { models.isNotEmpty() }))
+                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn).takeIf { models.isNotEmpty() }))
                                     } else {
-                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst)))
+                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))
                                     }
 
                                     onDone()
@@ -178,6 +193,13 @@ private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): Stri
     choice.agent != null -> harnessName(choice.agent)
     else -> "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
 }
+
+private val FallBackConditions = listOf(
+    "usage_limit" to "A usage limit is reached",
+    "signed_out" to "The account is signed out",
+    "offline" to "The node is offline",
+    "model_error" to "The model fails",
+)
 
 private fun harnessName(agent: String): String = if (agent == "codex") "Codex" else "Claude Code"
 

@@ -659,14 +659,20 @@ private fun continuedText(payload: JsonObject): String {
         account != null -> "${agentName(agent)} as $account"
         else -> agentName(agent)
     }
-    val after = if (payload.string("reason") == "usage_limit") " after the usage limit" else ""
     val node = payload.string("node_name")
-
-    if (node != null && payload.string("reason") == null) {
-        return "Moved to $node"
+    val reason = when (payload.string("reason")) {
+        "usage_limit" -> "Usage limit reached"
+        "signed_out" -> "Signed out"
+        "offline" -> "Node offline"
+        "model_error" -> "The model failed"
+        else -> null
     }
 
-    return "Continued on $target$after"
+    return when {
+        reason != null -> "$reason · continued with ${node?.let { "$target on $it" } ?: target}"
+        node != null -> "Moved to $node"
+        else -> "Continued on $target"
+    }
 }
 
 internal fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

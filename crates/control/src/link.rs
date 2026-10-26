@@ -217,12 +217,26 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
             }
 
+            let hit_limit = limit.is_some();
             let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
             let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
 
             let mut switched = false;
 
-            if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded) {
+            if let Some(owner) = owner.filter(|_| recorded && hit_limit) {
+                let until = resume_at.unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
+
+                if crate::assistants::fall_back(state, owner, conversation_id, "usage_limit", Some(until)).await {
+                    let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
+
+                    match crate::assistants::carry_on_after_limit(state, owner, conversation_id, &text).await {
+                        Ok(()) => switched = true,
+                        Err(error) => tracing::warn!("carrying on {conversation_id} after its fallback failed: {}", error.message()),
+                    }
+                }
+            }
+
+            if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded && !switched) {
                 let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
                 let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
                 let moved = crate::continuation::continue_on(state, owner, conversation_id, target, Some("usage_limit")).await;

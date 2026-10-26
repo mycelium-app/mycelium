@@ -57,11 +57,11 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
     let from_chat = chats::is_chat(&before);
     let to_chat = target.agent == CHAT_AGENT;
 
-    if from_chat && to_chat {
+    if from_chat && to_chat && reason.is_none() {
         return Err(ApiError::bad_request("already_a_chat", "This is already a chat. Change its model in the message box."));
     }
 
-    let by_account = !from_chat && before.agent == target.agent;
+    let by_account = !from_chat && before.agent == target.agent && target.node_id.is_none_or(|node_id| node_id == before.node_id);
 
     if by_account && before.account == target.account {
         return Err(ApiError::conflict("same_target", "This conversation already runs there. Choose another account or model."));
@@ -118,7 +118,7 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
         .bind(chat_node)
         .fetch_one(&mut *tx)
         .await?;
-        payload = json!({"kind": "handoff", "agent": CHAT_AGENT, "provider_id": provider.id, "provider_name": provider.name, "model": model, "from": from, "reason": reason});
+        payload = json!({"kind": if from_chat { "model" } else { "handoff" }, "agent": CHAT_AGENT, "provider_id": provider.id, "provider_name": provider.name, "model": model, "from": from, "reason": reason});
     } else {
         let agent: AgentId = parse_enum(&target.agent).map_err(|_| ApiError::bad_request("agent_unknown", "Choose Claude Code, Codex or a chat model to continue on."))?;
         let earlier = if from_chat { earlier_workspace(&mut tx, id).await? } else { None };
