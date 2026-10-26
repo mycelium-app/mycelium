@@ -78,6 +78,10 @@ fn event_stream(lines: Vec<String>) -> Response {
 }
 
 fn openai_model(model: Arc<Model>) -> Router {
+    openai_model_at(model, "/v1")
+}
+
+fn openai_model_at(model: Arc<Model>, prefix: &str) -> Router {
     async fn completions(State(model): State<Arc<Model>>, Json(request): Json<Value>) -> Response {
         model.requests.lock().unwrap().push(request.clone());
 
@@ -109,7 +113,7 @@ fn openai_model(model: Arc<Model>) -> Router {
         Json(json!({"data": [{"id": "qwen3:8b"}]}))
     }
 
-    Router::new().route("/v1/models", get(models)).route("/v1/chat/completions", post(completions)).with_state(model)
+    Router::new().route(&format!("{prefix}/models"), get(models)).route(&format!("{prefix}/chat/completions"), post(completions)).with_state(model)
 }
 
 fn anthropic_model(model: Arc<Model>) -> Router {
@@ -845,6 +849,24 @@ async fn a_chat_calls_a_litellm_tool_with_the_key_in_its_own_header() {
     assert_eq!(allowed, 204);
     assert_eq!(rig.remote.calls().len(), 1);
     assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "Sunny in Paris");
+}
+
+#[tokio::test]
+async fn a_litellm_proxy_lists_its_models_and_streams_a_reply_from_its_root_address() {
+    let server = Server::start().await;
+    let model = script(vec![Reply::Say("Hello from the proxy.")], false);
+    let base = serve(openai_model_at(model.clone(), "")).await;
+    let (status, provider) = server.user.json(server.user.post("/api/v1/model-providers").json(&json!({"kind": "openai_compatible", "name": "LiteLLM", "base_url": base, "api_key": "sk-lite"}))).await;
+    assert_eq!(status, 201, "{provider}");
+    let (router, remote) = remote_server(false);
+    drop(router);
+    let rig = Rig { server, model, remote, provider };
+
+    let id = rig.chat("Hello?").await;
+    let events = rig.turns_ended(&id, 1).await;
+
+    assert_eq!(rig.provider["models"], json!(["qwen3:8b"]));
+    assert!(events.iter().any(|event| event["kind"] == "agent_message_chunk" || event.to_string().contains("Hello from the proxy.")));
 }
 
 #[tokio::test]

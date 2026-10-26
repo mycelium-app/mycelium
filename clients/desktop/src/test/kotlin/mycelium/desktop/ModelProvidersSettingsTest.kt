@@ -165,6 +165,20 @@ class ModelProvidersSettingsTest {
     }
 
     @Test
+    fun addingLiteLlmSendsItsAddressAsOpenAiCompatibleWithTheKey() {
+        show()
+
+        rule.onNodeWithText("Add a provider").performClick()
+        rule.onNodeWithText("LiteLLM").performClick()
+        rule.onNodeWithContentDescription("Base URL").performTextInput("http://proxy:4000")
+        rule.onNodeWithContentDescription("API key, if the proxy needs one").performTextInput("sk-1")
+        rule.onNodeWithText("Add provider").performClick()
+
+        rule.waitUntil(5_000) { bodies.any { it.contains("proxy:4000") } }
+        assertEquals("""{"kind":"openai_compatible","name":"LiteLLM","base_url":"http://proxy:4000","api_key":"sk-1"}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
     fun aServerErrorShowsItsMessageAndKeepsTheForm() {
         postAnswer = HttpStatusCode.BadRequest to """{"error":"provider_unreachable","message":"Mycelium could not reach http://box:11434/v1. Check the address and try again."}"""
         show()

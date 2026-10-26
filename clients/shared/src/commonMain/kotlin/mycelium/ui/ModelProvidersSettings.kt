@@ -30,7 +30,7 @@ import mycelium.api.ModelProvider
 import mycelium.api.UpdateModelProviderRequest
 import mycelium.state.Store
 
-private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic", "OpenRouter" to "openrouter")
+private val ProviderKinds = mapOf("OpenAI-compatible" to "openai_compatible", "Anthropic" to "anthropic", "OpenRouter" to "openrouter", "LiteLLM" to "litellm")
 
 private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 
@@ -65,6 +65,7 @@ fun ModelProvidersSettings(store: Store) {
             try {
                 val request = when (kind) {
                     "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
+                    "litellm" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "LiteLLM" }, baseUrl.trim(), apiKey.trim().ifEmpty { null })
                     else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null })
                 }
                 val added = store.api.createModelProvider(request)
@@ -189,6 +190,7 @@ fun ModelProvidersSettings(store: Store) {
                 TextInput(name, { name = it }, label = "Name", placeholder = when (kind) {
                     "anthropic" -> "Anthropic"
                     "openrouter" -> "OpenRouter"
+                    "litellm" -> "LiteLLM"
                     else -> "Ollama"
                 })
 
@@ -197,7 +199,16 @@ fun ModelProvidersSettings(store: Store) {
                     Label("Ollama serves this at http://<host>:11434/v1.", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
-                TextInput(apiKey, { apiKey = it }, label = if (kind == "openai_compatible") "API key, if the endpoint needs one" else "API key", mono = true, masked = true, onSubmit = ::add)
+                if (kind == "litellm") {
+                    TextInput(baseUrl, { baseUrl = it }, label = "Base URL", placeholder = "http://localhost:4000", mono = true)
+                    Label("LiteLLM serves this at http://<host>:4000.", style = Tokens.Type.Meta, color = colors.textMuted)
+                }
+
+                TextInput(apiKey, { apiKey = it }, label = when (kind) {
+                    "openai_compatible" -> "API key, if the endpoint needs one"
+                    "litellm" -> "API key, if the proxy needs one"
+                    else -> "API key"
+                }, mono = true, masked = true, onSubmit = ::add)
 
                 failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
