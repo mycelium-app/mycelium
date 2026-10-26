@@ -72,11 +72,11 @@ fun SchedulesScreen(store: Store, state: AppState) {
             if (schedules.isNotEmpty()) {
                 Table(
                     listOf(
-                        Col("Prompt", 140.dp, weight = 1f),
+                        Col("Prompt", 100.dp, weight = 1f),
                         Col("Project", 100.dp, max = 240.dp, priority = 1),
-                        Col("When", 100.dp, max = 240.dp),
+                        Col("When", 100.dp, max = 240.dp, priority = 1),
                         Col("Each run", 88.dp, priority = 1),
-                        Col("Next", 88.dp, max = 120.dp),
+                        Col("Next", 72.dp, max = 120.dp),
                         ActionColumn,
                     ),
                     schedules.size,
@@ -104,9 +104,9 @@ fun SchedulesScreen(store: Store, state: AppState) {
             if (runs.isNotEmpty()) {
                 Table(
                     listOf(
-                        Col("Last runs", 88.dp),
-                        Col("Conversation", 140.dp, weight = 1f),
-                        Col("Result", 100.dp, max = 240.dp),
+                        Col("Last runs", 72.dp),
+                        Col("Conversation", 96.dp, weight = 1f),
+                        Col("Result", 88.dp, max = 240.dp),
                     ),
                     runs.size,
                     { row, column ->

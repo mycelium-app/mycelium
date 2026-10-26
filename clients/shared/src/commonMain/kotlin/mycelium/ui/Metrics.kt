@@ -139,7 +139,7 @@ fun DataTable(
         }
 
         val tableColumns = columns.mapIndexed { position, column ->
-            Col(column.title, if (position == 0) 120.dp else if (column.numeric) 56.dp else 72.dp, weight = if (column.numeric) 0f else column.weight, numeric = column.numeric, rigid = column.rigid)
+            Col(column.title, if (position == 0) 100.dp else if (column.numeric) 56.dp else 64.dp, weight = if (column.numeric) 0f else column.weight, numeric = column.numeric, rigid = column.rigid)
         } + listOfNotNull(trailing?.let { Col("", TrailingWidth, preferred = TrailingWidth, align = ColumnAlign.End) })
 
         Table(

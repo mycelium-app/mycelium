@@ -44,7 +44,7 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
 
             Table(
                 listOf(
-                    Col("Client", 160.dp, weight = 1f, overflow = Overflow.Wrap),
+                    Col("Client", 120.dp, weight = 1f, overflow = Overflow.Wrap),
                     Col("Address", 100.dp, max = 240.dp, priority = 1),
                     Col("Last used", 88.dp),
                     ActionColumn,
@@ -114,7 +114,7 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
 
             Table(
                 listOf(
-                    Col("Node", 140.dp, weight = 1f),
+                    Col("Node", 120.dp, weight = 1f),
                     Col("Address", 100.dp, max = 240.dp, priority = 1),
                     Col("Last seen", 88.dp),
                     ActionColumn,

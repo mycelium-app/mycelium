@@ -98,9 +98,9 @@ fun ModelProvidersSettings(store: Store) {
 
             Table(
                 listOf(
-                    Col("Provider", 140.dp, max = 280.dp, weight = 1f),
+                    Col("Provider", 110.dp, max = 280.dp, weight = 1f),
                     Col("Key", 88.dp, priority = 1),
-                    Col("Models", 120.dp, rigid = true),
+                    Col("Models", 96.dp, rigid = true),
                     Col("Data handling", 150.dp, rigid = true, priority = 1),
                     ActionColumn,
                 ),

@@ -116,8 +116,8 @@ fun ForgesSettings(store: Store) {
 
             Table(
                 listOf(
-                    Col("Forge", 160.dp, weight = 1f),
-                    Col("Signed in as", 100.dp),
+                    Col("Forge", 120.dp, weight = 1f),
+                    Col("Signed in as", 80.dp),
                     Col("Organisations", 120.dp, max = 320.dp, overflow = Overflow.Wrap, priority = 1),
                     ActionColumn,
                 ),

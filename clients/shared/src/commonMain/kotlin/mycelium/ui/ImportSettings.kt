@@ -86,10 +86,10 @@ fun ImportSettings(store: Store) {
 
                 Table(
                     listOf(
-                        Col("Node", 120.dp, weight = 1f),
+                        Col("Node", 100.dp, weight = 1f),
                         Col("Transcripts found", 88.dp, numeric = true, priority = 1),
                         Col("Imported", 72.dp, numeric = true, priority = 1),
-                        Col("Status", 140.dp, max = 300.dp, weight = 1f, overflow = Overflow.Wrap),
+                        Col("Status", 110.dp, max = 300.dp, weight = 1f, overflow = Overflow.Wrap),
                         ActionColumn,
                     ),
                     nodes.size,

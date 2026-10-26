@@ -140,12 +140,12 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
 
                 Table(
                     listOf(
-                        Col("Name", 140.dp, rigid = true),
+                        Col("Name", 100.dp, weight = 1f),
                         Col("Description", 120.dp, weight = 1f, priority = 1),
                         Col("State", 110.dp, preferred = 110.dp),
                         Col("Wakes", 88.dp, max = 160.dp, priority = 1),
                         Col("Last active", 88.dp, max = 120.dp),
-                        Col("", 24.dp, preferred = 24.dp),
+                        Col("", 24.dp, preferred = 24.dp, priority = 1),
                         ActionColumn,
                     ),
                     assistants.size,

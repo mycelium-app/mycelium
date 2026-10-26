@@ -161,19 +161,19 @@ fun Table(
         val border = with(density) { Tokens.Size.Hairline.roundToPx() }
         val tnumStyle = { style: TextStyle, numeric: Boolean -> if (numeric) style.copy(fontFeatureSettings = "tnum") else style }
 
-        val natural = remember(columns, rows, cell, headerCell, header, rowSpan, visible, fonts, codeScale, density) {
-            val measure = { column: Int, source: TableCell ->
-                when (source) {
-                    is TableCell.Text -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
-                    is TableCell.Rich -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
-                    is TableCell.Slot -> {
-                        val text = requireNotNull(source.measureAs) { "A slot in column ${columns[column].title} needs measureAs, or the column needs preferred" }
+        val measure = { column: Int, source: TableCell ->
+            when (source) {
+                is TableCell.Text -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
+                is TableCell.Rich -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
+                is TableCell.Slot -> {
+                    val text = requireNotNull(source.measureAs) { "A slot in column ${columns[column].title} needs measureAs, or the column needs preferred" }
 
-                        measurer.measure(text, Tokens.Type.Ui.themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width + with(density) { source.extra.roundToPx() }
-                    }
+                    measurer.measure(text, Tokens.Type.Ui.themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width + with(density) { source.extra.roundToPx() }
                 }
             }
+        }
 
+        val natural = remember(columns, rows, cell, headerCell, header, rowSpan, visible, fonts, codeScale, density) {
             visible.map { column ->
                 val spec = columns[column]
                 val preferred = spec.preferred
@@ -194,8 +194,9 @@ fun Table(
             }
         }
 
+        val headerFloor = if (header) visible.map { measure(it, headerCell(it)) } else visible.map { 0 }
         val outerNatural = visible.mapIndexed { position, column -> maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
-        val outerMin = visible.mapIndexed { position, column -> (if (columns[column].rigid) maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) else with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
+        val outerMin = visible.mapIndexed { position, column -> maxOf(headerFloor[position], if (columns[column].rigid) maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) else with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
         val borderTotal = if (card) border * 2 else 0
         val available = if (constraints.hasBoundedWidth) constraints.maxWidth - borderTotal else outerNatural.sum()
         val resolved = resolveTable(outerMin, outerNatural, visible.map { columns[it].weight }, available, fill)

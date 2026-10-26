@@ -554,7 +554,7 @@ internal fun TableBlock(table: MarkdownBlock.Table) {
     val columns = table.header.indices.map { column ->
         val align = table.aligns.getOrElse(column) { ColumnAlign.Start }
 
-        Col("", if (align == ColumnAlign.End) 56.dp else 96.dp, weight = if (align == ColumnAlign.End) 0f else 1f, align = align, overflow = Overflow.Wrap, numeric = align == ColumnAlign.End)
+        Col("", if (align == ColumnAlign.End) 56.dp else 80.dp, weight = if (align == ColumnAlign.End) 0f else 1f, align = align, overflow = Overflow.Wrap, numeric = align == ColumnAlign.End)
     }
 
     Table(
