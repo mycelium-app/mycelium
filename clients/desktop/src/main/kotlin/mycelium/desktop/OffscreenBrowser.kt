@@ -57,6 +57,7 @@ fun browserMouseEvent(source: Component, native: MouseEvent, position: Offset, s
 
 class OffscreenBrowser : CefRenderHandler {
     val source: Component = Canvas()
+    val contextMenu = BrowserContextMenu()
 
     var browser: CefBrowser? = null
         set(value) {
@@ -108,11 +109,21 @@ class OffscreenBrowser : CefRenderHandler {
         browser?.zoomLevel = pageZoomLevel(scale)
     }
 
-    fun place(origin: Point) {
+    fun place(origin: Point, owner: Component? = null, screenScale: Double = 1.0) {
         screenOrigin = origin
+        contextMenu.origin = origin
+        contextMenu.owner = owner
+        contextMenu.screenScale = screenScale
     }
 
     fun mouse(native: MouseEvent, position: Offset) {
+        val window = SwingUtilities.getWindowAncestor(native.component)
+
+        if (window != null) {
+            contextMenu.owner = window
+            contextMenu.origin = Point(native.xOnScreen - (position.x / contextMenu.screenScale).toInt(), native.yOnScreen - (position.y / contextMenu.screenScale).toInt())
+        }
+
         val forwarded = browserMouseEvent(source, native, position, scale)
 
         if (forwarded is MouseWheelEvent) {
@@ -123,6 +134,7 @@ class OffscreenBrowser : CefRenderHandler {
     }
 
     fun key(native: KeyEvent) {
+        contextMenu.owner = SwingUtilities.getWindowAncestor(native.component) ?: contextMenu.owner
         browser?.sendKeyEvent(native)
     }
 

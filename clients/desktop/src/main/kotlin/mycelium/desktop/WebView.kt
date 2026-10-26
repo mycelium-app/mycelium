@@ -111,6 +111,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     val client = remember {
         Jcef.createClient().also {
             it.addLoadHandler(host.loaded)
+            it.addContextMenuHandler(host.contextMenu)
             it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
                 override fun onAfterCreated(browser: CefBrowser) {
                     SwingUtilities.invokeLater { browserCreated = true }
@@ -125,6 +126,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
 
     DisposableEffect(Unit) {
         onDispose {
+            host.contextMenu.close()
             browser?.close(true)
             client.dispose()
         }
@@ -165,7 +167,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
 
                 host.resize(coordinates.size.width, coordinates.size.height, density)
                 laidOut = coordinates.size.width > 0 && coordinates.size.height > 0
-                host.place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()))
+                host.place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()), window, screenScale)
             }
             .onKeyEvent { event ->
                 val native = event.awtEventOrNull ?: return@onKeyEvent false
