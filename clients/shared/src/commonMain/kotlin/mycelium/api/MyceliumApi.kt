@@ -699,6 +699,11 @@ class MyceliumApi(
 
     suspend fun walkthroughReads(id: String): List<Int> = call("/walkthroughs/$id/reads") { client.get(it) { authorise() } }.body()
 
+    suspend fun walkthroughAnswers(id: String): List<WalkthroughAnswer> = call("/walkthroughs/$id/answers") { client.get(it) { authorise() } }.body()
+
+    suspend fun answerWalkthroughCheck(id: String, step: Int, request: WalkthroughAnswerRequest): WalkthroughAnswer =
+        call("/walkthroughs/$id/answers/$step") { client.put(it) { authorise(); json(request) } }.body()
+
     suspend fun markWalkthroughRead(id: String, step: Int) {
         call("/walkthroughs/$id/reads/$step") { client.put(it) { authorise() } }
     }

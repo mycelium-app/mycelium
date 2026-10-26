@@ -73,7 +73,9 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     val allNotes by store.walkthroughNotes.collectAsState()
     val notes = allNotes[conversationId].orEmpty()
     var uncovered by remember(walkthrough.id) { mutableStateOf(emptyList<WalkthroughFile>()) }
-    val steps = walkthrough.steps + listOfNotNull(WalkthroughStep(NotCoveredTitle, section = "Not covered", explanation = "These changes are not in any step above.", files = uncovered).takeIf { uncovered.isNotEmpty() })
+    val steps = walkthrough.steps +
+        listOfNotNull(WalkthroughStep(NotCoveredTitle, section = "Not covered", explanation = "These changes are not in any step above.", files = uncovered).takeIf { uncovered.isNotEmpty() }) +
+        listOfNotNull(WalkthroughStep(CheckStepTitle, section = "Check").takeIf { walkthrough.checks.isNotEmpty() })
     val last = steps.lastIndex
     val index = selected.coerceIn(0, maxOf(last, 0))
 
@@ -125,7 +127,9 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
         }
     }
     val detail: @Composable () -> Unit = {
-        if (steps.isNotEmpty()) {
+        if (steps.isNotEmpty() && walkthrough.checks.isNotEmpty() && index == last) {
+            WalkthroughCheckStep(store, walkthrough, onBackToStep = ::move)
+        } else if (steps.isNotEmpty()) {
             walkthrough.note?.let { Label(it, color = MyTheme.colors.textMuted) }
             StepDetail(
                 step = steps[index],

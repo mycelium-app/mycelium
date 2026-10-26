@@ -1419,6 +1419,7 @@ data class Walkthrough(
     val dismissed: Boolean = false,
     val scope: String = "branch",
     val note: String? = null,
+    val checks: List<WalkthroughCheck> = emptyList(),
 )
 
 @Serializable
