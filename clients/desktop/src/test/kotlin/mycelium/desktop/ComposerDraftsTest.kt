@@ -31,7 +31,7 @@ import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private fun draftsConversation(id: String, title: String) = """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"$title","status":"done",
+private fun draftsConversation(id: String, title: String) = """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"$title","status":"review",
 "acp_session_id":"s","mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
 
 private class DraftFilePlatform : Platform by QuietPlatform {

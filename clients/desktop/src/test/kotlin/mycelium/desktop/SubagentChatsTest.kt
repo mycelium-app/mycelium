@@ -28,8 +28,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Review the change","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
-private const val Subagent = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Check the build","status":"done","created_at":"2026-10-22T10:01:00Z","updated_at":"2026-10-22T10:02:00Z","parent_id":"c1","side_kind":"subagent"}"""
+private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Review the change","status":"review","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+private const val Subagent = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Check the build","status":"review","created_at":"2026-10-22T10:01:00Z","updated_at":"2026-10-22T10:02:00Z","parent_id":"c1","side_kind":"subagent"}"""
 
 private object SubagentPlatform : Platform {
     override val originUrl: String? = null

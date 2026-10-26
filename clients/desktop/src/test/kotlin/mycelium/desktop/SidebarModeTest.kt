@@ -67,7 +67,7 @@ class SidebarModeTest {
 
     @Test
     fun switchingModesReopensWhatWasLastOpenInEach() {
-        val conversation = """{"id":"w1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"done",
+        val conversation = """{"id":"w1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"review",
 "acp_session_id":null,"mode":null,"model":null,"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null}"""
         val engine = MockEngine { request ->
             val path = request.url.encodedPath

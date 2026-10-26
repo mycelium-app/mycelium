@@ -35,8 +35,8 @@ import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"done","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
-private const val Side = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"What is the default delay","status":"done","acp_session_id":"t","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T09:00:00Z","parent_id":"c1","side_kind":"btw"}"""
+private const val Parent = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"Fix the build","status":"review","acp_session_id":"s","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
+private const val Side = """{"id":"c2","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/app","title":"What is the default delay","status":"review","acp_session_id":"t","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T09:00:00Z","parent_id":"c1","side_kind":"btw"}"""
 
 private object SidePlatform : Platform {
     override val originUrl: String? = null

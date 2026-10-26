@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type Tx<'a> = Transaction<'a, Postgres>;
 
-pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at";
+pub const CONVERSATION_COLUMNS: &str = "id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, conversation_group(cwd, node_id, project_id) as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, branch, pull_request_label, pull_request_url";
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -86,6 +86,9 @@ pub struct ConversationRow {
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
     pub pinned_at: Option<chrono::DateTime<chrono::Utc>>,
     pub resume_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub branch: Option<String>,
+    pub pull_request_label: Option<String>,
+    pub pull_request_url: Option<String>,
 }
 
 impl ConversationRow {
@@ -116,6 +119,9 @@ impl ConversationRow {
             archived_at: self.archived_at,
             pinned_at: self.pinned_at,
             resume_at: self.resume_at,
+            branch: self.branch.clone(),
+            pull_request_label: self.pull_request_label.clone(),
+            pull_request_url: self.pull_request_url.clone(),
         })
     }
 

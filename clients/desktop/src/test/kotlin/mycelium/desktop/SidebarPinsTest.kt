@@ -49,7 +49,7 @@ private class MemoryPlatform(val saved: MutableMap<String, String> = mutableMapO
     }
 }
 
-private fun conversation(id: String, title: String, group: String? = null, pinnedAt: String? = null, status: String = "done") = """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/$id","title":"$title","status":"$status",
+private fun conversation(id: String, title: String, group: String? = null, pinnedAt: String? = null, status: String = "review") = """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/$id","title":"$title","status":"$status",
 "acp_session_id":null,"mode":null,"model":null,"group_id":${group?.let { "\"$it\"" }},"created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null,"pinned_at":${pinnedAt?.let { "\"$it\"" }}}"""
 
 private const val GroupsJson = """[{"id":"g1","name":"slop","folders":[],"created_at":"2026-10-22T10:00:00Z"},{"id":"g2","name":"work","folders":[],"created_at":"2026-10-22T10:00:00Z"}]"""

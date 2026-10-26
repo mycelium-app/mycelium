@@ -167,7 +167,7 @@ pub async fn stack(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 async fn attach_pull_requests(state: &AppState, user: &AuthUser, project_id: Option<Uuid>, answer: &mut Value) {
-    let found = pull_requests_of(state, user, project_id).await;
+    let found = pull_requests_of(state, user.id, project_id).await;
     let available = found.is_ok();
     let requests = found.as_ref().ok();
 
@@ -184,13 +184,13 @@ async fn attach_pull_requests(state: &AppState, user: &AuthUser, project_id: Opt
     }
 }
 
-async fn pull_requests_of(state: &AppState, user: &AuthUser, project_id: Option<Uuid>) -> Result<std::collections::HashMap<String, forges::BranchPullRequest>, Option<String>> {
+pub(crate) async fn pull_requests_of(state: &AppState, owner: Uuid, project_id: Option<Uuid>) -> Result<std::collections::HashMap<String, forges::BranchPullRequest>, Option<String>> {
     let project_id = project_id.ok_or(None)?;
-    let project = projects::find_owned(state, project_id, user.id).await.map_err(|_| None)?;
+    let project = projects::find_owned(state, project_id, owner).await.map_err(|_| None)?;
     let (Some(forge_id), Some(repository)) = (project.forge_id, project.repository.as_deref()) else {
         return Err(None);
     };
-    let forge = forges::find_owned(state, forge_id, user.id).await.map_err(|_| None)?;
+    let forge = forges::find_owned(state, forge_id, owner).await.map_err(|_| None)?;
     let api = ForgeApi::from_row(&forge).map_err(|_| None)?.cached(&state.forge_cache);
 
     api.branch_pull_requests(&state.http, repository).await.map_err(|error| Some(error.into_api(api.kind, &api.base_url).message().to_string()))
@@ -203,7 +203,11 @@ pub async fn switch(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(ApiError::bad_request("branch_required", "Enter a branch name."));
     }
 
-    run(&state, &user, id, GitCommand::Switch { branch, create: request.create, track: request.track }).await
+    let switched = run(&state, &user, id, GitCommand::Switch { branch, create: request.create, track: request.track }).await?;
+
+    crate::conversations::spawn_branch_refresh(&state, id);
+
+    Ok(switched)
 }
 
 pub async fn diff(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<DiffQuery>) -> ApiResult<Json<Value>> {

@@ -56,7 +56,7 @@ private object ChatPlatform : Platform {
 }
 
 private fun conversation(id: String, title: String, agent: String, updatedAt: String, provider: String? = if (agent == "chat") "p1" else null) =
-    """{"id":"$id","owner":"u","node_id":"n1","agent":"$agent","cwd":"/work/app","title":"$title","status":"done","model":${if (provider == null) "null" else "\"llama3.2\""},${if (provider == null) "" else """"provider_id":"$provider","""}"created_at":"$updatedAt","updated_at":"$updatedAt"}"""
+    """{"id":"$id","owner":"u","node_id":"n1","agent":"$agent","cwd":"/work/app","title":"$title","status":"review","model":${if (provider == null) "null" else "\"llama3.2\""},${if (provider == null) "" else """"provider_id":"$provider","""}"created_at":"$updatedAt","updated_at":"$updatedAt"}"""
 
 private const val Anthropic = """{"id":"p2","kind":"anthropic","name":"Anthropic","models":["claude-sonnet-5-5"],"default_model":"claude-sonnet-5-5","created_at":"2026-10-22T10:00:00Z"}"""
 

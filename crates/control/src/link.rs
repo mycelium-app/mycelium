@@ -434,6 +434,7 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
     state.add_session(node_id, conversation_id).await?;
     state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
+    crate::conversations::spawn_branch_refresh(state, conversation_id);
     pump(state, conversation_id, before.acp_session_id.is_none()).await
 }
 
@@ -709,6 +710,7 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     }
 
     record_turn(state, conversation_id, usage.as_ref()).await?;
+    crate::conversations::spawn_branch_refresh(state, conversation_id);
 
     sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await?;
     state.hub.forget_prompts_of(conversation_id);

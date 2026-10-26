@@ -3,7 +3,8 @@ use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions;
 use crate::model_providers;
-use crate::nodes::node_offline;
+use crate::git::{pull_requests_of, relay};
+use crate::nodes::{HEAD_AND_DIRECTORIES_SINCE, node_has, node_offline};
 use crate::projects;
 use crate::state::AppState;
 use crate::worktrees;
@@ -13,7 +14,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{CreateChatRequest, CreateConversationRequest, EventsQuery, PatchConversationRequest, StartSideChatRequest};
 use mycelium_proto::conversation::{AgentId, Conversation, ConversationStatus, Event, EventKind, SideKind};
-use mycelium_proto::link::ControlToNode;
+use mycelium_proto::link::{ControlToNode, GitCommand};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -116,8 +117,13 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
         require_signed_in_account(state, request.node_id, request.agent, account).await?;
     }
 
+    let mut worktree_branch = None;
+
     if let (Some(project), Some(branch)) = (&project, &request.branch) {
-        cwd = worktrees::create(state, project, branch, None).await?.path;
+        let worktree = worktrees::create(state, project, branch, None).await?;
+
+        cwd = worktree.path;
+        worktree_branch = Some(worktree.branch);
     }
 
     if request.side_kind == Some(SideKind::Subagent) {
@@ -155,7 +161,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -171,6 +177,7 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversatio
     .bind(&predicted_title)
     .bind(request.parent_id)
     .bind(request.side_kind.as_ref().map(enum_text))
+    .bind(&worktree_branch)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -353,7 +360,9 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
              archived_at = case when $3::bool is null then archived_at when $3 then coalesce(archived_at, now()) else null end,
              agent_active = case when $3::bool is true then false else agent_active end,
              pinned_at = case when $9::bool is null then pinned_at when $9 then coalesce(pinned_at, now()) else null end,
-             project_id = case when $10 then null else coalesce($11, project_id) end
+             project_id = case when $10 then null else coalesce($11, project_id) end,
+             pull_request_label = case when $10 or $11 is not null then null else pull_request_label end,
+             pull_request_url = case when $10 or $11 is not null then null else pull_request_url end
          where id = $1
          returning {CONVERSATION_COLUMNS}",
     )),
@@ -395,7 +404,71 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let conversation = row.to_proto()?;
     state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
 
+    if request.project_id.is_some() || request.clear_project == Some(true) {
+        spawn_branch_refresh(&state, id);
+    }
+
     Ok(Json(conversation))
+}
+
+pub fn spawn_branch_refresh(state: &AppState, conversation_id: Uuid) {
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        if let Err(error) = refresh_branch(&state, conversation_id).await {
+            tracing::warn!("recording the branch of {conversation_id} failed: {}", error.message());
+        }
+    });
+}
+
+async fn refresh_branch(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where id = $1"))).bind(conversation_id).fetch_optional(&state.pool).await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+
+    if chats::is_chat(&row) || !state.hub.is_online(row.node_id) {
+        return Ok(());
+    }
+
+    let version = sqlx::query_scalar::<_, String>("select version from nodes where id = $1").bind(row.node_id).fetch_one(&state.pool).await?;
+
+    if !node_has(&version, HEAD_AND_DIRECTORIES_SINCE) {
+        return Ok(());
+    }
+
+    let Ok(answer) = relay(state, row.node_id, row.cwd.clone(), GitCommand::Head).await else {
+        return Ok(());
+    };
+    let branch = answer["branch"].as_str().map(str::to_string);
+    let lookup = match &branch {
+        Some(_) => pull_requests_of(state, row.owner, row.project_id).await,
+        None => Err(None),
+    };
+    let pull_request = match lookup {
+        Ok(found) => branch.as_ref().and_then(|name| found.get(name)).map(|request| (request.label.clone(), request.url.clone())),
+        Err(_) if row.branch == branch => row.pull_request_label.clone().zip(row.pull_request_url.clone()),
+        Err(_) => None,
+    };
+    let (label, url) = pull_request.unzip();
+
+    let changed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
+        "update conversations set branch = $2, pull_request_label = $3, pull_request_url = $4
+         where id = $1 and (branch, pull_request_label, pull_request_url) is distinct from ($2::text, $3::text, $4::text)
+         returning {CONVERSATION_COLUMNS}",
+    )))
+    .bind(conversation_id)
+    .bind(&branch)
+    .bind(&label)
+    .bind(&url)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if let Some(changed) = changed {
+        state.publish(Some(changed.owner), StreamMessage::Conversation(changed.to_proto()?));
+    }
+
+    Ok(())
 }
 
 pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {

@@ -83,7 +83,7 @@ class ConversationRowStatusTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {
-                path.endsWith("/conversations") -> "[${conversation("w1", "Fix close session", "done")}]"
+                path.endsWith("/conversations") -> "[${conversation("w1", "Fix close session", "review")}]"
                 path.endsWith("/projects") -> ProjectsJson.replace("\"icon\":\"folder\",", "")
                 path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/events") -> "[]"
                 else -> "{}"
@@ -103,7 +103,7 @@ class ConversationRowStatusTest {
     @Test
     fun aConversationInAProjectShowsTheProjectBeforeItsTitleAndOneWithoutShowsTheTitleAlone() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val rows = listOf(conversation("w1", "Fix close session", "done"), conversation("w2", "Loose end", "done").replace("\"project_id\":\"p1\",", ""))
+        val rows = listOf(conversation("w1", "Fix close session", "review"), conversation("w2", "Loose end", "review").replace("\"project_id\":\"p1\",", ""))
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val body = when {

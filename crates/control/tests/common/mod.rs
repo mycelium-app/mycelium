@@ -401,10 +401,14 @@ impl Server {
     }
 
     pub async fn online_node(&self, name: &str) -> NodeLink {
+        self.online_node_as(name, env!("CARGO_PKG_VERSION")).await
+    }
+
+    pub async fn online_node_as(&self, name: &str, version: &str) -> NodeLink {
         let (id, token) = self.join("node", name).await;
         let mut link = self.connect_node(id, &token).await;
 
-        link.hello(vec![]).await;
+        link.hello_as(version, vec![]).await;
 
         let user = self.user.clone();
         eventually("node agents", || async {

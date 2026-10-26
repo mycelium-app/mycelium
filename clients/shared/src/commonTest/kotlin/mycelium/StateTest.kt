@@ -18,6 +18,9 @@ import mycelium.state.projectsOfRepository
 import mycelium.state.reduce
 import mycelium.state.registeredFolders
 import mycelium.state.relativeTime
+import mycelium.state.AllProjects
+import mycelium.state.NoProject
+import mycelium.state.isWorktree
 import mycelium.state.sidebarSections
 import mycelium.state.setUpRepositories
 import kotlin.test.Test
@@ -66,9 +69,46 @@ class StateTest {
         )
 
         assertEquals(
-            listOf("Needs input", "Failed", "Ready to review", "Working", "Done"),
+            listOf("Needs input", "Failed", "Ready to review", "Working", "Settled"),
             sections.map { it.name },
         )
+    }
+
+    @Test
+    fun the_project_filter_shows_only_that_projects_conversations() {
+        val inApp = conversation("in-app", ConversationStatus.Working).copy(projectId = "p1")
+        val inOther = conversation("in-other", ConversationStatus.Working).copy(projectId = "p2")
+
+        val shown = sidebarSections(listOf(inApp, inOther), projectFilter = "p1").flatMap { it.rows }
+
+        assertEquals(listOf("in-app"), shown.map { it.id })
+        assertEquals(2, sidebarSections(listOf(inApp, inOther), projectFilter = AllProjects).flatMap { it.rows }.size)
+    }
+
+    @Test
+    fun no_project_shows_only_conversations_without_one() {
+        val inApp = conversation("in-app", ConversationStatus.Working).copy(projectId = "p1")
+        val loose = conversation("loose", ConversationStatus.Working)
+
+        val shown = sidebarSections(listOf(inApp, loose), projectFilter = NoProject).flatMap { it.rows }
+
+        assertEquals(listOf("loose"), shown.map { it.id })
+    }
+
+    @Test
+    fun settled_holds_the_done_conversations() {
+        val sections = sidebarSections(listOf(conversation("finished", ConversationStatus.Done), conversation("busy", ConversationStatus.Working)))
+
+        assertEquals(listOf("finished"), sections.single { it.name == "Settled" }.rows.map { it.id })
+    }
+
+    @Test
+    fun a_folder_under_the_projects_worktrees_folder_is_a_worktree() {
+        val project = Project("p1", "n", "app", "/work/app", createdAt = "2026-10-22T10:00:00Z")
+
+        assertEquals(true, isWorktree(conversation("a", ConversationStatus.Done).copy(cwd = "/work/app-worktrees/feature"), project))
+        assertEquals(false, isWorktree(conversation("b", ConversationStatus.Done).copy(cwd = "/work/app/crates"), project))
+        assertEquals(false, isWorktree(conversation("c", ConversationStatus.Done).copy(cwd = "/work/app-worktrees/feature"), null))
     }
 
     @Test

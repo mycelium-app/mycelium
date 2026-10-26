@@ -113,6 +113,9 @@ import mycelium.state.isSubagent
 import mycelium.state.agentAccounts
 import mycelium.state.chatAccountFirst
 import mycelium.state.sidebarRows
+import mycelium.state.AllProjects
+import mycelium.state.NoProject
+import mycelium.state.isWorktree
 import mycelium.state.sidebarSections
 import mycelium.state.statusSectionName
 
@@ -421,8 +424,10 @@ private const val ChatsMode = "Chats"
 @Composable
 private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
-    val pinned = pinnedConversations(state.conversations.values, groupFilter.value)
-    val sections = sidebarSections(state.conversations.values, groupFilter.value)
+    val projectFilter = rememberProjectFilter(platform, state)
+    var settledOpen by remember { mutableStateOf(platform.loadPreference(SettledOpenPreference) == true.toString()) }
+    val pinned = pinnedConversations(state.conversations.values, groupFilter.value, projectFilter.value)
+    val sections = sidebarSections(state.conversations.values, groupFilter.value, projectFilter.value)
     val pinnedChatRows = pinnedChats(state.conversations.values)
     val chats = chatSections(state.conversations.values)
 
@@ -519,17 +524,27 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 item(key = "label") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+
+                        if (state.projects.isNotEmpty()) {
+                            val choices = listOf(Choice(AllProjects, "All projects")) + state.projects.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoProject, "No project")
+
+                            OptionMenu("Project", choices, projectFilter.value, projectFilter.choose, title = "Show", icon = MyIcon.Folder, size = ButtonSize.Sm)
+                        }
                     }
                 }
 
                 conversationRows(PinnedName, pinned, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
 
                 for (section in sections) {
+                    val settled = section.status == ConversationStatus.Done
+
                     item(key = "section-${section.status}") {
-                        SectionHeading(section)
+                        SectionHeading(section, open = settledOpen.takeIf { settled }, onToggle = { settledOpen = !settledOpen; platform.savePreference(SettledOpenPreference, settledOpen.toString()) })
                     }
 
-                    conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
+                    if (!settled || settledOpen) {
+                        conversationRows(null, section.rows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = true)
+                    }
                 }
             }
         }
@@ -649,18 +664,25 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, onClick: 
 }
 
 @Composable
-private fun SectionHeading(section: SidebarSection) {
+private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: () -> Unit) {
+    val folding = if (open == null) Modifier else Modifier.pressable(onToggle, description = "${section.name}, ${section.rows.size} conversations, ${if (open) "expanded" else "collapsed"}", shape = BlockShape)
+
     Row(
         Modifier
             .fillMaxWidth()
             .padding(top = Tokens.Space.S2)
             .heightIn(min = rowHeight())
+            .then(folding)
             .padding(horizontal = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusGlyph(section.status, Tokens.Size.IconMd)
-        Label(section.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
+        Label(if (open == null) section.name else "${section.name} (${section.rows.size})", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong, MyTheme.colors.textMuted, maxLines = 1)
+
+        if (open != null) {
+            Icon(if (open) MyIcon.ChevronDown else MyIcon.ChevronRight, MyTheme.colors.textMuted, Tokens.Size.IconSm)
+        }
     }
 }
 
@@ -675,6 +697,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
     val indent = Tokens.Space.S3 * depth
     val projectName = project?.takeIf { !row.isChat }?.name
     val shownTitle = projectName?.let { "$it ${row.title}" } ?: row.title
+    val place = listOfNotNull(row.branch, row.pullRequestLabel).joinToString("  ")
 
     Box(
         Modifier
@@ -731,7 +754,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                     onClick,
                     selected = selected,
                     shape = BlockShape,
-                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}",
+                    description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, row.pullRequestLabel).joinToString(", ") else ""}",
                 )
                 .padding(start = Tokens.Space.S2 + (if (row.isChat && sideChats == 0) 0.dp else Tokens.Space.S3) + indent, end = Tokens.Space.S2, top = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -774,6 +797,16 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 
                 if (row.resumeAt != null) {
                     Label(WaitingForReset, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
+                }
+
+                if (!row.isChat && place.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                        if (isWorktree(row, project)) {
+                            Icon(MyIcon.Branch, colors.textMuted, Tokens.Size.IconSm)
+                        }
+
+                        Label(place, style = Tokens.Type.Meta, color = colors.textMuted)
+                    }
                 }
             }
 
@@ -837,9 +870,21 @@ private val FooterLabelsWidth = 360.dp
 
 private const val GroupFilterPreference = "conversation-group-filter"
 
+private const val ProjectFilterPreference = "conversation-project-filter"
+
+private const val SettledOpenPreference = "settled-open"
+
 val LocalGroupFilter = staticCompositionLocalOf { AllGroups }
 
 private class GroupFilterChoice(val value: String, val choose: (String) -> Unit)
+
+@Composable
+private fun rememberProjectFilter(platform: Platform, state: AppState): GroupFilterChoice {
+    var saved by remember { mutableStateOf(platform.loadPreference(ProjectFilterPreference) ?: AllProjects) }
+    val known = saved == AllProjects || saved == NoProject || saved in state.projects
+
+    return GroupFilterChoice(if (known) saved else AllProjects) { chosen -> saved = chosen; platform.savePreference(ProjectFilterPreference, chosen) }
+}
 
 @Composable
 private fun rememberGroupFilter(platform: Platform, state: AppState): GroupFilterChoice {

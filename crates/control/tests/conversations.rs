@@ -1456,3 +1456,103 @@ async fn a_conversation_that_has_had_no_session_updates_has_no_kept_state() {
 
     assert_eq!((status, kept), (200, json!([])));
 }
+
+async fn answer_head(link: &mut NodeLink, branch: Option<&str>) -> String {
+    loop {
+        match link.next().await {
+            ControlToNode::Git { request_id, cwd, command: mycelium_proto::link::GitCommand::Head } => {
+                link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"branch": branch}), error: None }).await;
+
+                return cwd;
+            }
+            _ => continue,
+        }
+    }
+}
+
+async fn branch_of(server: &Server, id: Uuid, wanted: Option<&str>) -> serde_json::Value {
+    common::eventually("the recorded branch", || async {
+        let conversation = server.conversation(id).await;
+
+        (conversation["branch"].as_str() == wanted).then_some(conversation)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_turn_end_records_the_branch_the_node_reports() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", "v0.10.0").await;
+    let id = started_conversation(&server, &mut link, None).await;
+
+    let cwd = answer_head(&mut link, Some("main")).await;
+    branch_of(&server, id, Some("main")).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+    answer_head(&mut link, Some("topic")).await;
+
+    assert_eq!(cwd, "/work/app");
+    branch_of(&server, id, Some("topic")).await;
+}
+
+#[tokio::test]
+async fn a_node_that_cannot_report_a_branch_is_not_asked() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", "v0.9.1").await;
+    let id = started_conversation(&server, &mut link, None).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+
+    common::eventually("the turn to end", || async { (status_of(&server, id).await == "review").then_some(()) }).await;
+
+    assert_eq!(server.conversation(id).await["branch"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn a_conversation_started_in_a_new_worktree_has_its_branch_straight_away() {
+    let server = Server::start().await;
+    let mut link = server.online_node_as("laptop", "v0.10.0").await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let project = sqlx::query_scalar::<_, Uuid>("insert into projects (owner, node_id, name, path) values ($1, $2, 'app', '/work/app') returning id").bind(owner).bind(link.id).fetch_one(&server.pool).await.unwrap();
+    let user = server.user.clone();
+    let node_id = link.id;
+    let starting = tokio::spawn(async move { user.json(user.post("/api/v1/conversations").json(&json!({"node_id": node_id, "agent": "claude", "project_id": project, "branch": "feature/login"}))).await });
+
+    let (request_id, cwd) = loop {
+        if let ControlToNode::Git { request_id, cwd, .. } = link.next().await {
+            break (request_id, cwd);
+        }
+    };
+    link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"path": "/work/app-worktrees/feature-login", "branch": "feature/login"}), error: None }).await;
+    let (status, conversation) = starting.await.unwrap();
+
+    assert_eq!((status, cwd.as_str()), (201, "/work/app"));
+    assert_eq!((conversation["cwd"].clone(), conversation["branch"].clone()), (json!("/work/app-worktrees/feature-login"), json!("feature/login")));
+}
+
+async fn fake_github() -> String {
+    use axum::Json;
+    use axum::routing::get;
+
+    let pulls = || async { Json(json!([{"number": 12, "title": "Rework", "state": "open", "draft": false, "merged_at": null, "html_url": "https://forge.example/acme-org/acme-backups/pull/12", "head": {"ref": "topic", "repo": {"full_name": "acme-org/acme-backups"}}}])) };
+    let router = axum::Router::new()
+        .route("/api/v3/user", get(|| async { Json(json!({"login": "samexample"})) }))
+        .route("/api/v3/user/orgs", get(|| async { Json(json!([])) }))
+        .route("/api/v3/repos/{owner}/{name}/pulls", get(pulls));
+
+    common::serve(router).await
+}
+
+#[tokio::test]
+async fn the_branch_of_a_project_conversation_carries_its_open_pull_request() {
+    let server = Server::start().await;
+    let github = fake_github().await;
+    let mut link = server.online_node_as("laptop", "v0.10.0").await;
+    let (_, forge) = server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": "github", "base_url": github, "token": "ghp_0123456789abcdefghijklmnopqrstuvwxyz"}))).await;
+    let owner = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
+    let forge_id: Uuid = forge["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("insert into projects (owner, node_id, name, path, forge_id, repository) values ($1, $2, 'backups', '/work/app', $3, 'acme-org/acme-backups')").bind(owner).bind(link.id).bind(forge_id).execute(&server.pool).await.unwrap();
+    let id = started_conversation(&server, &mut link, None).await;
+
+    answer_head(&mut link, Some("topic")).await;
+    let recorded = branch_of(&server, id, Some("topic")).await;
+    assert_eq!((recorded["pull_request_label"].clone(), recorded["pull_request_url"].clone()), (json!("PR #12"), json!("https://forge.example/acme-org/acme-backups/pull/12")));
+}
