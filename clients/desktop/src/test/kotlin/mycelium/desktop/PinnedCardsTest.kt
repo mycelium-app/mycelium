@@ -19,6 +19,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.WorkflowAgent
 import mycelium.state.WorkflowProgress
+import kotlin.time.Clock
 import androidx.compose.runtime.CompositionLocalProvider
 import kotlin.test.assertEquals
 import mycelium.ui.MyceliumTheme
@@ -85,7 +86,7 @@ class PinnedCardsTest {
 
     @Test
     fun aRunningWorkflowIsPinnedAndItsToolCallLineIsNotDrawn() {
-        val progress = WorkflowProgress("run", listOf(WorkflowAgent("a", "Survey", "Build", finished = false, tokens = 2_500, turns = 3, elapsedMs = 42_000)))
+        val progress = WorkflowProgress("run", listOf(WorkflowAgent("a", "Survey", "Build", finished = false, tokens = 2_500, turns = 3, elapsedMs = 42_000)), lastLineAt = Clock.System.now())
         items = listOf(
             ThreadItem.ToolCall("t", "call", "Workflow", "other", "Workflow", ToolStatus.Running, null, null),
             ThreadItem.Workflow("w", progress),
@@ -100,7 +101,7 @@ class PinnedCardsTest {
 
     @Test
     fun theWorkflowCardsCloseButtonSitsAtTheSameEdgeWhateverItsHeaderSays() {
-        fun run(id: String, agents: Int, tokens: Long) = ThreadItem.Workflow(id, WorkflowProgress(id, List(agents) { WorkflowAgent("$id$it", "Agent $it", "Build", finished = false, tokens = tokens) }))
+        fun run(id: String, agents: Int, tokens: Long) = ThreadItem.Workflow(id, WorkflowProgress(id, List(agents) { WorkflowAgent("$id$it", "Agent $it", "Build", finished = false, tokens = tokens) }, lastLineAt = Clock.System.now()))
         items = listOf(run("short", 1, 10), run("long", 9, 123_456_789))
         show(width = 900)
 

@@ -384,7 +384,9 @@ async fn every_workflow_line_becomes_an_event_with_the_line_as_a_json_object() {
     let events = server.events(conversation.id).await;
     let workflow: Vec<_> = events.iter().filter(|event| event["kind"] == "workflow").collect();
     assert_eq!(workflow.len(), 3);
-    assert_eq!(workflow[2]["payload"], json!({"run_id": "run-1", "line": {"type": "started", "key": "agent-3"}}));
+    assert_eq!(workflow[2]["payload"]["run_id"], "run-1");
+    assert_eq!(workflow[2]["payload"]["line"], json!({"type": "started", "key": "agent-3"}));
+    assert!(workflow[2]["payload"]["at"].as_str().is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok()));
 }
 
 #[tokio::test]

@@ -268,7 +268,7 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
-            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line}), None).await?;
+            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line, "at": chrono::Utc::now()}), None).await?;
 
             if !matches!(line["type"].as_str(), Some("result" | "failed")) {
                 return Ok(());

@@ -13,6 +13,9 @@ import mycelium.state.workflowPinKey
 import mycelium.state.workflowStats
 import mycelium.state.workflowTokens
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
@@ -57,14 +60,36 @@ class PinsTest {
     }
 
     @Test
-    fun aWorkflowIsPinnedOnlyWhileItRunsInAWorkingConversation() {
-        val running = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = false)))
-        val finished = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = true)))
+    fun aWorkflowStaysPinnedWhileItsJournalKeepsMovingEvenAfterTheTurnEnds() {
+        val now = Instant.parse("2026-10-26T12:00:00Z")
+        val running = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = false)), lastLineAt = now - 20.minutes)
 
-        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet(), working = true).map { it.key })
-        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", finished)), emptySet(), working = true))
-        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet(), working = false))
-        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", running), ThreadItem.Workflow("w2", finished)), emptySet(), working = true))
+        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", running)), emptySet(), now).map { it.key })
+    }
+
+    @Test
+    fun aWorkflowStaysPinnedBetweenOneStageFinishingAndTheNextStarting() {
+        val now = Instant.parse("2026-10-26T12:00:00Z")
+        val between = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = true)), lastLineAt = now - 30.seconds)
+
+        assertEquals(listOf(workflowPinKey("run")), pinnedCards(listOf(ThreadItem.Workflow("w", between)), emptySet(), now).map { it.key })
+    }
+
+    @Test
+    fun aFinishedWorkflowIsUnpinnedOnceNoNextStageStarts() {
+        val now = Instant.parse("2026-10-26T12:00:00Z")
+        val finished = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = true)), lastLineAt = now - 3.minutes)
+
+        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", finished)), emptySet(), now))
+    }
+
+    @Test
+    fun aWorkflowWhoseJournalWentQuietIsUnpinned() {
+        val now = Instant.parse("2026-10-26T12:00:00Z")
+        val stalled = WorkflowProgress("run", listOf(WorkflowAgent("a", "Agent", "Build", finished = false)), lastLineAt = now - 31.minutes)
+        val undated = WorkflowProgress("old", listOf(WorkflowAgent("a", "Agent", "Build", finished = false)))
+
+        assertEquals(emptyList(), pinnedCards(listOf(ThreadItem.Workflow("w", stalled), ThreadItem.Workflow("v", undated)), emptySet(), now))
     }
 
     @Test

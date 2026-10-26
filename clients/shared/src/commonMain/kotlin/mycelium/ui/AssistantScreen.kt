@@ -165,7 +165,7 @@ private fun EarlierSession(store: Store, state: AppState, session: Conversation)
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         Label("${session.title}, ${timestamp(session.createdAt, true)}", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted, maxLines = 1)
-        ThreadView(items = thread, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(Tokens.Size.EarlierThread), agent = session.agent, working = false)
+        ThreadView(items = thread, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.height(Tokens.Size.EarlierThread), agent = session.agent)
     }
 }
 
@@ -189,7 +189,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         message = TextFieldValue("", TextRange.Zero)
     }
 
-    ThreadView(items = waiting.mapIndexed { index, text -> ThreadItem.UserMessage("sending-$index", text) }, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f), working = false)
+    ThreadView(items = waiting.mapIndexed { index, text -> ThreadItem.UserMessage("sending-$index", text) }, onAnswer = { _, _ -> }, onStopWorkflow = {}, modifier = Modifier.weight(1f))
 
     Box(Modifier.fillMaxWidth().padding(Tokens.Space.S4), contentAlignment = Alignment.Center) {
         ComposerCard(

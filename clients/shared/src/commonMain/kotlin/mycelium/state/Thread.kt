@@ -10,6 +10,7 @@ import mycelium.api.Attachment
 import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.MyceliumJson
+import kotlin.time.Instant
 
 enum class ToolStatus { Pending, Running, Done, Failed }
 
@@ -40,7 +41,7 @@ data class WorkflowAgent(
     val failed: Boolean = false,
 )
 
-data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList()) {
+data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList(), val lastLineAt: Instant? = null) {
     val finishedCount: Int get() = agents.count { it.finished }
     val complete: Boolean get() = agents.isNotEmpty() && finishedCount == agents.size
     val phases: List<String> get() = (plannedPhases + agents.map { it.phase }).distinct()
@@ -561,7 +562,8 @@ private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, paylo
     val index = items.indexOfFirst { it is ThreadItem.Workflow && it.progress.runId == runId }
     val current = (items.getOrNull(index) as? ThreadItem.Workflow)?.progress ?: WorkflowProgress(runId, emptyList())
     val planned = (line["phases"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.takeIf { line.string("type") == "plan" }
-    val updated = if (planned != null) current.copy(plannedPhases = planned) else current.copy(agents = applyWorkflowJournal(current.agents, line))
+    val applied = if (planned != null) current.copy(plannedPhases = planned) else current.copy(agents = applyWorkflowJournal(current.agents, line))
+    val updated = applied.copy(lastLineAt = payload.string("at")?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: applied.lastLineAt)
 
     if (index < 0) {
         items += ThreadItem.Workflow(key, updated)
