@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -143,6 +144,8 @@ fun Table(
     narrowBreakpoint: Dp = 480.dp,
     headerCell: (Int) -> TableCell = { TableCell.Text(columns[it].title, Tokens.Type.MetaStrong) },
     detail: (@Composable (Int) -> Unit)? = null,
+    rowSpan: (Int) -> (@Composable () -> Unit)? = { null },
+    rowModifier: @Composable (Int) -> Modifier = { Modifier },
 ) {
     val colors = MyTheme.colors
     val density = LocalDensity.current
@@ -158,7 +161,7 @@ fun Table(
         val border = with(density) { Tokens.Size.Hairline.roundToPx() }
         val tnumStyle = { style: TextStyle, numeric: Boolean -> if (numeric) style.copy(fontFeatureSettings = "tnum") else style }
 
-        val natural = remember(columns, rows, cell, headerCell, header, visible, fonts, codeScale, density) {
+        val natural = remember(columns, rows, cell, headerCell, header, rowSpan, visible, fonts, codeScale, density) {
             val measure = { column: Int, source: TableCell ->
                 when (source) {
                     is TableCell.Text -> measurer.measure(source.text, tnumStyle(source.style, columns[column].numeric).themedWith(fonts, codeScale), softWrap = false, maxLines = 1).size.width
@@ -181,7 +184,9 @@ fun Table(
                     var widest = if (header) measure(column, headerCell(column)) else 0
 
                     for (row in 0 until rows) {
-                        widest = maxOf(widest, measure(column, cell(row, column)))
+                        if (rowSpan(row) == null) {
+                            widest = maxOf(widest, measure(column, cell(row, column)))
+                        }
                     }
 
                     spec.max?.let { minOf(widest, with(density) { it.roundToPx() }) } ?: widest
@@ -198,6 +203,7 @@ fun Table(
         val outerWidth = if (resolved.scroll) maxWidth else with(density) { (resolved.total + borderTotal).toDp() }
         val topAligned = visible.any { columns[it].overflow == Overflow.Wrap }
         val scroll = rememberScrollState()
+        val list = rememberLazyListState()
         val boundedHeight = constraints.hasBoundedHeight
         val hairline = Tokens.Size.Hairline
         val rowLine = colors.border
@@ -214,18 +220,24 @@ fun Table(
 
             val press = if (!head && onRow != null) Modifier.pressable({ onRow(index) }, description = rowDescription(index)) else Modifier
 
-            Column(Modifier.width(totalWidth).then(look)) {
-                TableRow(resolved.widths, minHeight, topAligned, press) {
-                    visible.forEachIndexed { position, column ->
-                        val spec = columns[column]
-                        val source = if (head) headerCell(column) else cell(index, column)
+            val spanned = if (head) null else rowSpan(index)
 
-                        CellBox(spec, source, wrapped = spec.overflow == Overflow.Wrap && !head, last = position == visible.lastIndex, muted = head)
+            Column(Modifier.width(totalWidth).then(if (head) Modifier else rowModifier(index)).then(look)) {
+                if (spanned != null) {
+                    spanned()
+                } else {
+                    TableRow(resolved.widths, minHeight, topAligned, press) {
+                        visible.forEachIndexed { position, column ->
+                            val spec = columns[column]
+                            val source = if (head) headerCell(column) else cell(index, column)
+
+                            CellBox(spec, source, wrapped = spec.overflow == Overflow.Wrap && !head, last = position == visible.lastIndex, muted = head)
+                        }
                     }
-                }
 
-                if (!head) {
-                    detail?.invoke(index)
+                    if (!head) {
+                        detail?.invoke(index)
+                    }
                 }
             }
         }
@@ -241,7 +253,7 @@ fun Table(
                 if (lazy) {
                     val bound = if (boundedHeight) Modifier else Modifier.heightIn(max = LazyMaxHeight)
 
-                    LazyColumn(bound.width(totalWidth)) {
+                    LazyColumn(bound.width(totalWidth).scrollbar(list), list) {
                         items(rows, key = rowKey) { index -> renderRow(index, false) }
                     }
                 } else {

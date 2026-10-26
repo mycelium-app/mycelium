@@ -34,6 +34,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import mycelium.api.Conversation
+import mycelium.state.ColumnAlign
 
 private val ActionWidth = 48.dp
 
@@ -43,7 +44,7 @@ private val MaxColumnWidth = 600.dp
 
 private val DefaultResizeStart = 120.dp
 
-private val TouchColumns = listOf(ColumnSpec(flexible = true), ColumnSpec(min = ActionWidth, max = ActionWidth))
+private val DefaultMaxColumnWidth = 240.dp
 
 private enum class Naming { Save, Rename }
 
@@ -206,7 +207,7 @@ fun HistoryToolbar(
 }
 
 @Composable
-private fun HeaderCell(column: HistoryColumn, sort: HistorySort, onSort: () -> Unit, onResize: (Dp) -> Unit, onWidth: (Dp) -> Unit) {
+private fun HeaderCell(column: HistoryColumn, sort: HistorySort, numeric: Boolean, onSort: () -> Unit, onResize: (Dp) -> Unit, onWidth: (Dp) -> Unit) {
     val colors = MyTheme.colors
     val density = LocalDensity.current
     val sorted = sort.column == column
@@ -223,7 +224,7 @@ private fun HeaderCell(column: HistoryColumn, sort: HistorySort, onSort: () -> U
                     shape = ControlShape,
                     stateDescription = if (!sorted) null else if (ascending) "Sorted ascending" else "Sorted descending",
                 ),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, if (numeric) Alignment.End else Alignment.Start),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Label(column.title, Modifier.weight(1f, fill = false), Tokens.Type.MetaStrong, colors.textMuted, maxLines = 1)
@@ -236,6 +237,14 @@ private fun HeaderCell(column: HistoryColumn, sort: HistorySort, onSort: () -> U
         ResizeHandle("Resize ${column.title} column", onResize)
     }
 }
+
+private sealed interface HistoryItem {
+    class Heading(val group: HistoryGroup, val collapsed: Boolean) : HistoryItem
+
+    class Row(val entry: HistoryEntry) : HistoryItem
+}
+
+private val NumericColumns = setOf(HistoryColumn.Turns, HistoryColumn.Tokens, HistoryColumn.Cost)
 
 @Composable
 fun HistoryTable(
@@ -251,149 +260,150 @@ fun HistoryTable(
 ) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val bodyStyle = Tokens.Type.Ui.themed()
-    val headerStyle = Tokens.Type.MetaStrong.themed()
     val shown = shownColumns(layout)
     val measured = remember { mutableStateMapOf<HistoryColumn, Dp>() }
     var collapsed by remember(layout.grouping) { mutableStateOf(emptySet<String>()) }
-    val flat = groups.flatMap { it.rows }
 
-    val specs = shown.map { column ->
-        val stored = widths[column]?.dp
+    val items = groups.flatMap { group ->
+        val isCollapsed = group.key in collapsed
+        val heading = if (layout.grouping != HistoryGrouping.None) listOf(HistoryItem.Heading(group, isCollapsed)) else emptyList()
 
-        when {
-            column == HistoryColumn.Title -> ColumnSpec(flexible = true, min = stored ?: MinColumnWidth)
-            stored != null -> ColumnSpec(min = stored, max = stored)
-            else -> ColumnSpec()
-        }
-    } + ColumnSpec(min = ActionWidth, max = ActionWidth)
-
-    val naturalWidths = remember(flat, shown, widths, touch, bodyStyle, headerStyle) {
-        if (touch) {
-            listOf(0.dp, ActionWidth)
-        } else {
-            val widest = { texts: List<String>, style: TextStyle -> with(density) { (texts.maxOfOrNull { measurer.measure(it, style).size.width } ?: 0).toDp() } }
-            val sortIcon = Tokens.Size.IconSm + Tokens.Space.S1
-
-            shown.map { column ->
-                when {
-                    column == HistoryColumn.Title -> 0.dp
-                    widths[column] != null -> widths.getValue(column).dp
-                    else -> (widest(listOf(column.title), headerStyle) + sortIcon).coerceAtLeast(widest(flat.map { cellText(it, column, stamp) }, bodyStyle))
-                }
-            } + ActionWidth
-        }
+        heading + if (isCollapsed) emptyList() else group.rows.map { HistoryItem.Row(it) }
     }
 
-    FixedWidthColumns(if (touch) TouchColumns else specs, naturalWidths, modifier) {
-        val list = rememberLazyListState()
+    val columns = if (touch) {
+        listOf(Col(HistoryColumn.Title.title, 120.dp, weight = 1f), ActionColumn)
+    } else {
+        shown.map { column ->
+            val stored = widths[column]?.dp
 
-        LazyColumn(Modifier.fillMaxWidth().scrollbar(list), list) {
-            if (!touch) {
-                item(key = "columns") {
-                    ContentRow(Modifier.fillMaxWidth().semantics { contentDescription = "Columns" }) {
-                        for (column in shown) {
-                            HeaderCell(
-                                column,
-                                layout.sort,
-                                onSort = { onLayout(layout.copy(sort = layout.sort.after(column))) },
-                                onResize = { delta ->
-                                    val current = widths[column] ?: (measured[column] ?: DefaultResizeStart).value
-                                    onWidths(widths + (column to (current + delta.value).coerceIn(MinColumnWidth.value, MaxColumnWidth.value)))
-                                },
-                                onWidth = { if (measured[column] != it) measured[column] = it },
-                            )
-                        }
-
-                        Box(Modifier)
-                    }
-
-                    Hairline()
-                }
+            when {
+                column == HistoryColumn.Title -> Col(column.title, stored ?: 120.dp, weight = 1f)
+                stored != null -> Col(column.title, stored, preferred = stored, numeric = column in NumericColumns)
+                else -> Col(column.title, MinColumnWidth, max = DefaultMaxColumnWidth, numeric = column in NumericColumns)
             }
+        } + Col("", ActionWidth, preferred = ActionWidth, align = ColumnAlign.End)
+    }
 
-            if (flat.isEmpty()) {
-                item(key = "empty") {
-                    Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
-                }
-            }
-
-            for (group in groups) {
-                val isCollapsed = group.key in collapsed
-
-                if (layout.grouping != HistoryGrouping.None) {
-                    item(key = "group:${group.key}") {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = rowHeight())
-                                .background(colors.bgPanel)
-                                .pressable(
-                                    { collapsed = if (isCollapsed) collapsed - group.key else collapsed + group.key },
-                                    description = "${if (isCollapsed) "Expand" else "Collapse"} ${group.label}",
-                                    shape = ControlShape,
-                                    stateDescription = if (isCollapsed) "Collapsed" else "Expanded",
-                                )
-                                .padding(horizontal = Tokens.Space.S3),
-                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(if (isCollapsed) MyIcon.ChevronRight else MyIcon.ChevronDown, colors.textMuted, Tokens.Size.IconSm)
-                            Label(group.label, style = Tokens.Type.UiStrong, maxLines = 1)
-
-                            if (group.rows.size > 1) {
-                                Label(group.rows.size.toString(), style = Tokens.Type.Meta, color = colors.textMuted)
-                            }
-                        }
-
-                        Hairline()
-                    }
-                }
-
-                if (!isCollapsed) {
-                    items(group.rows, key = { it.conversation.id }) { entry ->
+    Column(modifier) {
+        Table(
+            columns,
+            items.size,
+            { index, position ->
+                when (val item = items[index]) {
+                    is HistoryItem.Heading -> TableCell.Text("")
+                    is HistoryItem.Row -> {
+                        val entry = item.entry
                         val row = entry.conversation
 
-                        ContentRow(Modifier.fillMaxWidth().hoverHighlight()) {
-                            Column(
-                                Modifier
-                                    .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
-                                    .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                                    Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
+                        if (position == columns.lastIndex) {
+                            TableCell.Slot { rowMenu(row) }
+                        } else if (position == 0) {
+                            TableCell.Slot(if (row.archivedAt != null) "${row.title} Archived" else row.title) {
+                                Column(
+                                    Modifier
+                                        .pressable({ onOpen(row.id) }, role = Role.Button, description = "Open ${row.title}", shape = ControlShape)
+                                        .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                        Label(row.title, Modifier.weight(1f, fill = false), maxLines = 1)
 
-                                    if (row.archivedAt != null) {
-                                        Tag("Archived")
+                                        if (row.archivedAt != null) {
+                                            Tag("Archived")
+                                        }
+                                    }
+
+                                    if (touch) {
+                                        Label(
+                                            (listOf(entry.project, entry.agent, entry.node, stamp(row.updatedAt, false)) + usageCells(entry.usage).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
+                                            style = Tokens.Type.Meta,
+                                            color = colors.textMuted,
+                                            maxLines = 1,
+                                        )
                                     }
                                 }
-
-                                if (touch) {
-                                    Label(
-                                        (listOf(entry.project, entry.agent, entry.node, stamp(row.updatedAt, false)) + usageCells(entry.usage).drop(1)).filter { it.isNotEmpty() && it != "Not reported" }.joinToString("  ·  "),
-                                        style = Tokens.Type.Meta,
-                                        color = colors.textMuted,
-                                        maxLines = 1,
-                                    )
-                                }
                             }
-
-                            if (!touch) {
-                                for (column in shown.drop(1)) {
-                                    Label(cellText(entry, column, stamp), color = colors.textMuted, maxLines = 1)
-                                }
-                            }
-
-                            rowMenu(row)
+                        } else {
+                            TableCell.Text(cellText(entry, shown[position], stamp), color = colors.textMuted)
                         }
-
-                        Hairline()
                     }
                 }
-            }
+            },
+            modifier = Modifier.weight(1f, fill = false),
+            header = !touch,
+            lazy = true,
+            fill = true,
+            card = false,
+            rowKey = { index ->
+                when (val item = items[index]) {
+                    is HistoryItem.Heading -> "group:${item.group.key}"
+                    is HistoryItem.Row -> item.entry.conversation.id
+                }
+            },
+            headerCell = { position ->
+                val column = shown.getOrNull(position)
+
+                if (column == null) {
+                    TableCell.Text("")
+                } else {
+                    TableCell.Slot(column.title, Tokens.Size.IconSm + Tokens.Space.S1 + Tokens.Space.S2) {
+                        HeaderCell(
+                            column,
+                            layout.sort,
+                            numeric = column in NumericColumns,
+                            onSort = { onLayout(layout.copy(sort = layout.sort.after(column))) },
+                            onResize = { delta ->
+                                val current = widths[column] ?: (measured[column] ?: DefaultResizeStart).value
+                                onWidths(widths + (column to (current + delta.value).coerceIn(MinColumnWidth.value, MaxColumnWidth.value)))
+                            },
+                            onWidth = { if (measured[column] != it) measured[column] = it },
+                        )
+                    }
+                }
+            },
+            rowSpan = { index ->
+                val item = items[index]
+
+                if (item is HistoryItem.Heading) {
+                    @Composable { GroupHeading(item.group, item.collapsed) { collapsed = if (item.collapsed) collapsed - item.group.key else collapsed + item.group.key } }
+                } else {
+                    null
+                }
+            },
+            rowModifier = { index -> if (items[index] is HistoryItem.Row) Modifier.hoverHighlight() else Modifier },
+        )
+
+        if (items.isEmpty()) {
+            Label("No past conversations match.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+        }
+    }
+}
+
+@Composable
+private fun GroupHeading(group: HistoryGroup, isCollapsed: Boolean, onToggle: () -> Unit) {
+    val colors = MyTheme.colors
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = rowHeight())
+            .background(colors.bgPanel)
+            .pressable(
+                onToggle,
+                description = "${if (isCollapsed) "Expand" else "Collapse"} ${group.label}",
+                shape = ControlShape,
+                stateDescription = if (isCollapsed) "Collapsed" else "Expanded",
+            )
+            .padding(horizontal = Tokens.Space.S3),
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(if (isCollapsed) MyIcon.ChevronRight else MyIcon.ChevronDown, colors.textMuted, Tokens.Size.IconSm)
+        Label(group.label, style = Tokens.Type.UiStrong, maxLines = 1)
+
+        if (group.rows.size > 1) {
+            Label(group.rows.size.toString(), style = Tokens.Type.Meta, color = colors.textMuted)
         }
     }
 }
