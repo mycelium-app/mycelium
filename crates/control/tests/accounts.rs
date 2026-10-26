@@ -303,3 +303,69 @@ async fn banked_resets_a_node_reports_appear_on_its_login() {
     })
     .await;
 }
+
+fn codex_login(account: &str, banked: u32) -> LoginInfo {
+    let reset_credits = Some(mycelium_proto::conversation::ResetCredits { available_count: banked, credits: None });
+
+    LoginInfo { agent: AgentId::Codex, method: "device_auth".into(), reset_credits, ..login(account, LoginState::SignedIn) }
+}
+
+async fn use_reset(server: &Server, account: &str, key: &str) -> (u16, serde_json::Value) {
+    server.user.json(server.user.post("/api/v1/usage/resets").json(&json!({"agent": "codex", "account": account, "idempotency_key": key}))).await
+}
+
+async fn answer_reset(link: &mut common::NodeLink, outcome: &str) -> (Option<String>, String) {
+    loop {
+        if let ControlToNode::UseReset { request_id, account, idempotency_key, .. } = link.next().await {
+            link.send(NodeToControl::ResetUsed { request_id, outcome: Some(outcome.into()), error: None }).await;
+
+            return (account, idempotency_key);
+        }
+    }
+}
+
+#[tokio::test]
+async fn using_a_reset_asks_the_node_holding_the_account_and_returns_its_outcome() {
+    let server = Server::start().await;
+    let mut link = node_with_accounts(&server, vec![codex_login("sam@example.com", 2)]).await;
+
+    let ((status, body), asked) = tokio::join!(use_reset(&server, "sam@example.com", "key-1"), answer_reset(&mut link, "reset"));
+
+    assert_eq!((status, body["outcome"].as_str()), (200, Some("reset")), "{body}");
+    assert_eq!(asked, (Some("sam@example.com".to_string()), "key-1".to_string()));
+}
+
+#[tokio::test]
+async fn using_a_reset_on_an_account_without_banked_resets_is_refused() {
+    let server = Server::start().await;
+    let _link = node_with_accounts(&server, vec![codex_login("sam@example.com", 0)]).await;
+
+    let (status, body) = use_reset(&server, "sam@example.com", "key-1").await;
+
+    assert_eq!((status, body["error"].as_str(), body["message"].as_str()), (409, Some("no_reset"), Some("This account has no banked resets.")));
+}
+
+#[tokio::test]
+async fn using_a_reset_on_a_claude_account_is_refused() {
+    let server = Server::start().await;
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/usage/resets").json(&json!({"agent": "claude", "account": "sam@example.com", "idempotency_key": "key-1"}))).await;
+
+    assert_eq!((status, body["error"].as_str()), (400, Some("reset_unsupported")));
+}
+
+#[tokio::test]
+async fn using_a_reset_when_the_accounts_node_is_offline_says_so() {
+    let server = Server::start().await;
+    let link = node_with_accounts(&server, vec![codex_login("sam@example.com", 1)]).await;
+    drop(link);
+
+    let offline = common::eventually("the node going offline", || async {
+        let (status, body) = use_reset(&server, "sam@example.com", "key-1").await;
+
+        (status == 409 && body["error"] == json!("node_offline")).then_some(body)
+    })
+    .await;
+
+    assert!(offline["message"].is_string());
+}

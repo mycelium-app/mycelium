@@ -107,6 +107,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec!["Claude Code: /h/.claude/CLAUDE.md".into()] }, "instructions_held"),
         (NodeToControl::ApiTokenSaved { conversation_id: id(), path: Some("/state/sessions/c/api-token".into()) }, "api_token_saved"),
         (NodeToControl::Resources { sample: sample() }, "resources"),
+        (NodeToControl::ResetUsed { request_id: id(), outcome: Some("reset".into()), error: None }, "reset_used"),
         (NodeToControl::Pong, "pong"),
     ];
 

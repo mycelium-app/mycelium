@@ -27,6 +27,10 @@ impl LoginManager {
         LoginManager { out, report_state, running: Arc::new(Mutex::new(HashMap::new())) }
     }
 
+    pub fn report_state(&self) -> StateReport {
+        self.report_state.clone()
+    }
+
     pub fn start(&self, login_id: Uuid, command: Vec<String>, env: Vec<(String, String)>, discard_on_failure: Option<PathBuf>) {
         if let Err(error) = self.try_start(login_id, &command, &env, discard_on_failure.clone()) {
             discard(discard_on_failure);

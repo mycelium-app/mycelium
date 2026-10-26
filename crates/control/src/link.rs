@@ -6,7 +6,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, GitAnswer, ProcessAnswer};
+use crate::state::{AppState, GitAnswer, ProcessAnswer, ResetAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -292,6 +292,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         NodeToControl::UpdateResult { message, .. } => crate::node_updates::record_result(state, node_id, message).await,
         NodeToControl::ProcessStopped { request_id, ok, error } => {
             state.hub.answer_stop(node_id, request_id, ProcessAnswer { ok, error });
+
+            Ok(())
+        }
+        NodeToControl::ResetUsed { request_id, outcome, error } => {
+            state.hub.answer_reset(node_id, request_id, ResetAnswer { outcome, error });
 
             Ok(())
         }

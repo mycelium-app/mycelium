@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import mycelium.api.ModelProviderUsage
+import mycelium.api.UseResetRequest
 import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -63,6 +64,7 @@ import mycelium.api.PatchConversationRequest
 import mycelium.api.Project
 import androidx.compose.foundation.shape.CircleShape
 import mycelium.state.AllGroups
+import mycelium.state.UnnamedAccount
 import mycelium.state.Choice
 import mycelium.state.AppState
 import mycelium.state.NoGroup
@@ -535,7 +537,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (usageOpen) {
             val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
 
-            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId)
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onUseReset = { account, key -> store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome })
         }
 
         Hairline()

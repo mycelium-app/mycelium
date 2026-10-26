@@ -19,6 +19,8 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -173,6 +175,64 @@ class UsageCardTest {
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
 
         rule.onNodeWithText("banked", substring = true).assertDoesNotExist()
+    }
+
+    private fun codexWithBankedResets() = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(2))
+
+    @Test
+    fun anAccountWithNoBankedResetsHasNoUseResetButton() {
+        val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(0))
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false), onUseReset = { _, _ -> "reset" }) } }
+
+        rule.onNodeWithText("Use reset").assertDoesNotExist()
+    }
+
+    @Test
+    fun useResetAsksFirstAndCancelSpendsNothing() {
+        val calls = mutableListOf<String>()
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> calls.add(key); "reset" }) } }
+        rule.onNodeWithText("Use reset").performClick()
+
+        rule.onNodeWithText("Use a banked reset?").assertIsDisplayed()
+        rule.onNodeWithText("Codex resets the current usage limits for work@example.com. You have 2 banked. This cannot be undone.").assertIsDisplayed()
+        rule.onNodeWithText("Cancel").performClick()
+
+        rule.onNodeWithText("Use a banked reset?").assertDoesNotExist()
+        assertEquals(emptyList(), calls)
+    }
+
+    @Test
+    fun confirmingUseResetCallsItOnceAndShowsTheOutcome() {
+        val calls = mutableListOf<String>()
+
+        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> calls.add(key); "reset" }) } }
+        rule.onNodeWithText("Use reset").performClick()
+        rule.onAllNodesWithText("Use reset").onLast().performClick()
+        rule.waitUntil { rule.onAllNodesWithText("Reset used.").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(1, calls.size)
+        rule.onNodeWithText("Use a banked reset?").assertDoesNotExist()
+    }
+
+    @Test
+    fun aFailedUseResetShowsWhyAndRetriesWithTheSameKey() {
+        val keys = mutableListOf<String>()
+
+        rule.setContent {
+            MyceliumTheme(true) {
+                UsageCard(listOf(codexWithBankedResets() to false), onUseReset = { _, key -> keys.add(key); if (keys.size == 1) error("Codex did not answer.") else "reset" })
+            }
+        }
+        rule.onNodeWithText("Use reset").performClick()
+        rule.onAllNodesWithText("Use reset").onLast().performClick()
+        rule.waitUntil { rule.onAllNodesWithText("Codex did not answer.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("Use reset").onLast().performClick()
+        rule.waitUntil { rule.onAllNodesWithText("Reset used.").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(2, keys.size)
+        assertEquals(keys[0], keys[1])
     }
 
     @Test

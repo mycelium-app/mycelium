@@ -1,8 +1,13 @@
-use crate::error::ApiResult;
+use crate::auth::AuthUser;
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::store::enum_text;
+use axum::Json as AxumJson;
+use axum::extract::State;
+use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
-use mycelium_proto::conversation::{AgentId, LoginInfo, UsageWindow};
+use mycelium_proto::api::{UseResetRequest, UseResetResponse};
+use mycelium_proto::conversation::{AgentId, LoginInfo, ResetCredits, UsageWindow};
 use sqlx::types::Json;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -119,4 +124,43 @@ pub async fn windows_of(state: &AppState, node_id: Uuid, agent: AgentId, account
     let now = Utc::now();
 
     Ok(windows.map(|windows| windows.0.into_iter().filter(|window| window.resets_at.is_none_or(|reset| reset > now)).collect()).unwrap_or_default())
+}
+
+const RESET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+pub async fn use_reset(State(state): State<AppState>, _user: AuthUser, AxumJson(request): AxumJson<UseResetRequest>) -> ApiResult<AxumJson<UseResetResponse>> {
+    if request.agent != AgentId::Codex {
+        return Err(ApiError::bad_request("reset_unsupported", "Only Codex accounts have banked resets."));
+    }
+
+    let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).map(str::to_string);
+    let holders = sqlx::query_as::<_, (Uuid, Option<Json<ResetCredits>>)>(
+        "select l.node_id, l.reset_credits from logins l join nodes n on n.id = l.node_id where l.agent = $1 and coalesce(l.account, '') = coalesce($2, '') and l.state = 'signed_in' and n.revoked_at is null",
+    )
+    .bind(enum_text(&request.agent))
+    .bind(&account)
+    .fetch_all(&state.pool)
+    .await?;
+    let with_credits: Vec<Uuid> = holders.into_iter().filter(|(_, credits)| credits.as_ref().is_some_and(|credits| credits.0.available_count > 0)).map(|(node_id, _)| node_id).collect();
+
+    if with_credits.is_empty() {
+        return Err(ApiError::conflict("no_reset", "This account has no banked resets."));
+    }
+
+    let asked = with_credits.into_iter().filter(|node_id| state.hub.is_online(*node_id)).find_map(|node_id| state.hub.request_reset(node_id, request.agent, account.clone(), request.idempotency_key.clone()));
+    let Some((request_id, answered)) = asked else {
+        return Err(crate::nodes::node_offline());
+    };
+
+    let answer = tokio::time::timeout(RESET_TIMEOUT, answered).await.ok().and_then(Result::ok);
+    state.hub.forget_reset_request(request_id);
+
+    let Some(answer) = answer else {
+        return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "reset_timeout", "Codex did not answer. Check the account's usage before trying again."));
+    };
+
+    match answer.outcome {
+        Some(outcome) => Ok(AxumJson(UseResetResponse { outcome })),
+        None => Err(ApiError::conflict("reset_failed", answer.error.unwrap_or_else(|| "Codex could not use the reset.".into()))),
+    }
 }

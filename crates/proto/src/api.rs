@@ -122,6 +122,19 @@ pub struct StartLoginRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UseResetRequest {
+    pub agent: AgentId,
+    #[serde(default)]
+    pub account: Option<String>,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UseResetResponse {
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartLoginResponse {
     pub login_id: Uuid,
 }

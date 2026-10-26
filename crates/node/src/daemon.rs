@@ -208,6 +208,36 @@ impl Daemon {
         NodeToControl::Logins { logins: self.logins_for(&agents) }
     }
 
+    fn use_reset(&self, request_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) {
+        let accounts = accounts_dir(&self.config.state_dir);
+        let found = match &account {
+            Some(label) => find_account(&self.options.home, &accounts, agent, label),
+            None => account_homes(&self.options.home, &accounts, agent).into_iter().find(|home| home.profile.is_none()),
+        };
+        let out = self.out.clone();
+        let usage = self.usage.clone();
+        let report = self.logins.report_state();
+        let codex = self.options.codex_command.clone();
+
+        tokio::spawn(async move {
+            let (Some(found), AgentId::Codex) = (found, agent) else {
+                let _ = out.send(NodeToControl::ResetUsed { request_id, outcome: None, error: Some("That account is not signed in to Codex on this node.".to_string()) });
+
+                return;
+            };
+
+            let used = crate::codex_app_server::use_reset(&codex, &found.dir, &idempotency_key).await;
+            usage.invalidate(&found.dir);
+            usage.refresh(std::slice::from_ref(&found.dir)).await;
+            let _ = out.send(report());
+            let (outcome, error) = match used {
+                Ok(outcome) => (Some(outcome), None),
+                Err(error) => (None, Some(error)),
+            };
+            let _ = out.send(NodeToControl::ResetUsed { request_id, outcome, error });
+        });
+    }
+
     pub fn on_connected(&self) {
         self.connected.store(true, Ordering::SeqCst);
         self.write_status();
@@ -310,6 +340,7 @@ impl Daemon {
                     let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
                 });
             }
+            ControlToNode::UseReset { request_id, agent, account, idempotency_key } => self.use_reset(request_id, agent, account, idempotency_key),
             ControlToNode::ApiToken { conversation_id, token } => {
                 let saved = self.config.save_api_token(conversation_id, &token);
 

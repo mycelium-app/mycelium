@@ -128,6 +128,13 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    ResetUsed {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     UpdateResult {
         ok: bool,
         message: String,
@@ -436,6 +443,13 @@ pub enum ControlToNode {
         request_id: Uuid,
         pid: u32,
         name: String,
+    },
+    UseReset {
+        request_id: Uuid,
+        agent: AgentId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        idempotency_key: String,
     },
     ApiToken {
         conversation_id: Uuid,

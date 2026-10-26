@@ -32,6 +32,11 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import mycelium.api.ModelProviderUsage
 import mycelium.api.OpenRouterSpend
+import mycelium.api.ResetCredits
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import mycelium.state.AgentAccount
 import mycelium.state.ago
 import mycelium.state.bankedResetsSummary
@@ -44,6 +49,7 @@ fun UsageCard(
     modifier: Modifier = Modifier,
     providers: List<ModelProviderUsage> = emptyList(),
     currentProviderId: String? = null,
+    onUseReset: (suspend (AgentAccount, String) -> String)? = null,
 ) {
     val colors = MyTheme.colors
 
@@ -69,7 +75,7 @@ fun UsageCard(
                 for ((account, thisChat) in reported) {
                     Hairline()
 
-                    UsageBlock(account, thisChat)
+                    UsageBlock(account, thisChat, onUseReset)
                 }
             }
             val providerBlocks: @Composable () -> Unit = {
@@ -118,7 +124,7 @@ private fun UsageLine(name: String, note: String?, value: String) {
 }
 
 @Composable
-private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
+private fun UsageBlock(account: AgentAccount, thisChat: Boolean, onUseReset: (suspend (AgentAccount, String) -> String)?) {
     val platform = LocalPlatform.current
     val localDateTime: (Long) -> String? = { millis -> platform?.localDateTime(millis) }
     var now by remember { mutableStateOf(Clock.System.now()) }
@@ -153,9 +159,66 @@ private fun UsageBlock(account: AgentAccount, thisChat: Boolean) {
         val banked = account.resetCredits?.takeIf { it.availableCount > 0 }
 
         if (banked != null) {
-            Label(bankedResetsSummary(banked, localDateTime), style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            BankedResets(account, banked, localDateTime, onUseReset)
         }
     }
+}
+
+@OptIn(ExperimentalUuidApi::class)
+@Composable
+private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateTime: (Long) -> String?, onUseReset: (suspend (AgentAccount, String) -> String)?) {
+    val scope = rememberCoroutineScope()
+    var key by remember { mutableStateOf<String?>(null) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var outcome by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        Label(bankedResetsSummary(banked, localDateTime), Modifier.weight(1f), Tokens.Type.Meta, MyTheme.colors.textMuted)
+
+        if (onUseReset != null) {
+            MyButton({ key = Uuid.random().toString() }, text = "Use reset", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        }
+    }
+
+    outcome?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+
+    val attempt = key
+
+    if (onUseReset != null && attempt != null) {
+        Dialog(onDismiss = { key = null; failure = null }) {
+            Label("Use a banked reset?", Modifier.semantics { heading() }, Tokens.Type.Title)
+            Label("Codex resets the current usage limits for ${account.label}. You have ${banked.availableCount} banked. This cannot be undone.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+            failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                MyButton({ key = null; failure = null }, text = "Cancel", muted = true)
+                MyButton(
+                    {
+                        if (!working) {
+                            working = true
+                            failure = null
+                            scope.launch {
+                                runCatching { onUseReset(account, attempt) }
+                                    .onSuccess { outcome = resetOutcomeMessage(it); key = null }
+                                    .onFailure { failure = it.message ?: "Codex could not use the reset. Try again." }
+                                working = false
+                            }
+                        }
+                    },
+                    text = "Use reset",
+                    variant = ButtonVariant.Primary,
+                )
+            }
+        }
+    }
+}
+
+private fun resetOutcomeMessage(outcome: String): String = when (outcome) {
+    "reset", "alreadyRedeemed" -> "Reset used."
+    "nothingToReset" -> "Nothing to reset yet. Your reset is still banked."
+    "noCredit" -> "No banked resets are left."
+    else -> "Codex answered $outcome."
 }
 
 @Composable

@@ -5,6 +5,7 @@ use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
 use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
+use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, GitCommand, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
@@ -69,6 +70,11 @@ pub struct ProcessAnswer {
     pub error: Option<String>,
 }
 
+pub struct ResetAnswer {
+    pub outcome: Option<String>,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -79,6 +85,7 @@ pub struct Hub {
     file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
     git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
     stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
+    reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
@@ -282,6 +289,39 @@ impl Hub {
 
     pub fn forget_stop_request(&self, request_id: Uuid) {
         if let Ok(mut requests) = self.stop_requests.lock() {
+            requests.remove(&request_id);
+        }
+    }
+
+    pub fn request_reset(&self, node_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) -> Option<(Uuid, oneshot::Receiver<ResetAnswer>)> {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut requests) = self.reset_requests.lock() {
+            requests.insert(request_id, (node_id, answer));
+        }
+
+        if self.send(node_id, ControlToNode::UseReset { request_id, agent, account, idempotency_key }) {
+            Some((request_id, answered))
+        } else {
+            self.forget_reset_request(request_id);
+            None
+        }
+    }
+
+    pub fn answer_reset(&self, node_id: Uuid, request_id: Uuid, answer: ResetAnswer) {
+        let waiting = self.reset_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    pub fn forget_reset_request(&self, request_id: Uuid) {
+        if let Ok(mut requests) = self.reset_requests.lock() {
             requests.remove(&request_id);
         }
     }

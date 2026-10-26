@@ -231,6 +231,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-provider-usage", get(provider_usage::list))
+        .route("/api/v1/usage/resets", post(account_usage::use_reset))
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/chat-tool-servers", get(chat_tool_servers::list).post(chat_tool_servers::create))

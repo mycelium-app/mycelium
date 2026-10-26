@@ -148,6 +148,16 @@ data class ResetCredit(
 )
 
 @Serializable
+data class UseResetRequest(
+    val agent: String,
+    val account: String? = null,
+    @SerialName("idempotency_key") val idempotencyKey: String,
+)
+
+@Serializable
+data class UseResetResponse(val outcome: String)
+
+@Serializable
 data class UsageWindow(
     val name: String,
     @SerialName("used_percent") val usedPercent: Double,
