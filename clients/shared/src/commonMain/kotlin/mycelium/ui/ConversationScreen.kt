@@ -28,6 +28,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.Dp
@@ -107,8 +109,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
+    var chatWidth by remember { mutableStateOf(Dp.Unspecified) }
+
     fun resizePanel(width: Dp) {
-        panelWidth = width.coerceIn(Tokens.Size.SidePanelMin, Tokens.Size.SidePanelMax)
+        val panelMax = if (chatWidth == Dp.Unspecified) Tokens.Size.SidePanelMax else maxOf(Tokens.Size.SidePanelMin, panelWidth + chatWidth - Tokens.Size.ChatMin)
+        panelWidth = width.coerceIn(Tokens.Size.SidePanelMin, panelMax)
         platform?.savePreference(SidePanelWidthPreference, panelWidth.value.toString())
 
         if (workspace != null) {
@@ -230,8 +235,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
+        val density = LocalDensity.current
+
         Row(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f).fillMaxHeight()) {
+            Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { chatWidth = with(density) { it.width.toDp() } }) {
                 ConversationHeader(
                     custom = header,
                     conversation = conversation,

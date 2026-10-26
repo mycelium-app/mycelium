@@ -29,6 +29,12 @@ import mycelium.api.MyceliumApi
 import mycelium.state.Store
 import mycelium.ui.ConversationScreen
 import mycelium.ui.MyceliumTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlin.test.assertTrue
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -67,7 +73,7 @@ class SidePanelMemoryTest {
     private val platform = PreferencesPlatform()
     private var shown by mutableStateOf("a1")
 
-    private fun show() {
+    private fun show(width: Dp = Dp.Unspecified) {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val id = Conversations.keys.firstOrNull { path.endsWith("/conversations/$it") }
@@ -88,7 +94,9 @@ class SidePanelMemoryTest {
                 MyceliumTheme(true) {
                     val state by store.state.collectAsState()
 
-                    ConversationScreen(store, state, shown, onArchived = {})
+                    Box(if (width == Dp.Unspecified) Modifier else Modifier.width(width)) {
+                        ConversationScreen(store, state, shown, onArchived = {})
+                    }
                 }
             }
         }
@@ -136,5 +144,22 @@ class SidePanelMemoryTest {
         assertNotEquals(before, widened)
         assertNotEquals(widened, elsewhere)
         assertEquals(widened, back)
+    }
+
+    @Test
+    fun theSidePanelWidensPastItsOldLimitUntilTheChatReachesItsMinimum() {
+        platform.preferences["side-panel-width"] = "700"
+        show(1600.dp)
+        rule.onNodeWithContentDescription("Open details").performClick()
+        val handle = rule.onNodeWithContentDescription("Resize the side panel")
+        handle.onChildren().onFirst().requestFocus()
+
+        handle.onChildren().onFirst().performKeyInput { repeat(10) { pressKey(Key.DirectionLeft) } }
+        rule.waitForIdle()
+        assertTrue(1600.dp - handle.getBoundsInRoot().left > 800.dp, "${handle.getBoundsInRoot().left}")
+
+        handle.onChildren().onFirst().performKeyInput { repeat(80) { pressKey(Key.DirectionLeft) } }
+        rule.waitForIdle()
+        assertTrue(handle.getBoundsInRoot().left >= 430.dp, "${handle.getBoundsInRoot().left}")
     }
 }
