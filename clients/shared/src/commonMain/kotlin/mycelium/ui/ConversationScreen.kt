@@ -57,6 +57,7 @@ import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
+import mycelium.state.isWorktree
 import mycelium.state.switchableAccounts
 import mycelium.state.isLaptop
 import mycelium.state.isChat
@@ -401,6 +402,25 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onClear = { store.act { store.clearGoal(id) } },
                         ),
                     )
+
+                    val project = state.projects[conversation.projectId]
+                    val kind = if (project == null) null else if (isWorktree(conversation, project)) "Worktree" else "Local"
+                    val pullRequestUrl = conversation.pullRequestUrl
+
+                    if (!chat && (kind != null || conversation.branch != null || conversation.pullRequestLabel != null)) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                            kind?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+                            conversation.branch?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+
+                            conversation.pullRequestLabel?.let { label ->
+                                if (pullRequestUrl != null && platform != null) {
+                                    Label(label, Modifier.heightIn(min = touchMin(0.dp)).pressable({ platform.openUrl(pullRequestUrl) }, description = "Open $label", shape = ControlShape), Tokens.Type.Meta, MyTheme.colors.accent)
+                                } else {
+                                    Label(label, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
