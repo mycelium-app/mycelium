@@ -515,14 +515,33 @@ impl Daemon {
             env = with_developer_instructions(env, text);
         }
 
+        let accounts = accounts_dir(&self.config.state_dir);
+        let mut chosen = None;
+
         if let Some(label) = account {
-            let Some(found) = find_account(&self.options.home, &accounts_dir(&self.config.state_dir), agent, &label) else {
+            let Some(found) = find_account(&self.options.home, &accounts, agent, &label) else {
                 self.refuse(conversation_id, format!("{label} is not signed in on this node. Sign in to it there, or start the conversation with another account."));
 
                 return;
             };
 
             env.extend(account_env(agent, &found));
+            chosen = Some((label, found));
+        }
+
+        if let Some(session_id) = &resume {
+            let (label, home) = match chosen {
+                Some((label, found)) => (label, found),
+                None => ("the default account".to_string(), crate::agents::account_homes(&self.options.home, &accounts, agent).remove(0)),
+            };
+            let roots = crate::agents::transcript_roots(&self.options.home, &accounts, &self.options.transcript_roots);
+            let target = crate::agents::transcript_root(agent, &home);
+
+            if let Err(error) = crate::transcripts::adopt(&self.options.home, &roots, &target, session_id) {
+                self.refuse(conversation_id, format!("The conversation's transcript could not be copied to {label}: {error}"));
+
+                return;
+            }
         }
 
         let requested = self.config.projects_root.join(cwd);

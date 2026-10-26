@@ -138,6 +138,35 @@ pub fn locate(home: &Path, roots: &[PathBuf], session_id: &str) -> Option<(Strin
     })
 }
 
+pub fn adopt(home: &Path, roots: &[PathBuf], target_root: &Path, session_id: &str) -> Result<bool, String> {
+    let Some((relative, _)) = locate(home, roots, session_id) else {
+        return Ok(false);
+    };
+    let source = home.join(&relative);
+
+    if source.starts_with(target_root) {
+        return Ok(false);
+    }
+
+    let Some(root) = roots.iter().find(|root| source.starts_with(root)) else {
+        return Ok(false);
+    };
+    let inside_root = source.strip_prefix(root).map_err(|cause| cause.to_string())?;
+    let destination = target_root.join(inside_root);
+    let source_length = std::fs::metadata(&source).map_err(|cause| cause.to_string())?.len();
+    let existing_length = std::fs::metadata(&destination).map(|metadata| metadata.len()).unwrap_or(0);
+
+    if existing_length >= source_length {
+        return Ok(false);
+    }
+
+    let parent = destination.parent().ok_or_else(|| "The transcript has no parent folder.".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|cause| cause.to_string())?;
+    std::fs::copy(&source, &destination).map_err(|cause| cause.to_string())?;
+
+    Ok(true)
+}
+
 pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &str) -> Result<(), String> {
     let relative = Path::new(path);
     let plain = relative.components().all(|component| matches!(component, std::path::Component::Normal(_)));
@@ -448,6 +477,43 @@ mod tests {
         assert_eq!(locate(dir.path(), &roots, "abc-123"), Some((".claude/projects/-work-app/abc-123.jsonl".to_string(), 4)));
         assert_eq!(locate(dir.path(), &roots, "def-456"), Some((".codex/sessions/2026/10/23/rollout-2026-10-23T10-00-00-def-456.jsonl".to_string(), 5)));
         assert_eq!(locate(dir.path(), &roots, "missing"), None);
+    }
+
+    #[test]
+    fn adopting_copies_a_claude_transcript_into_the_other_accounts_projects_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join(".claude/projects");
+        let second = dir.path().join("accounts/claude/work/projects");
+        append(&first.join("-work-app").join("abc-123.jsonl"), "one\n");
+        let roots = [first, second.clone()];
+
+        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123"), Ok(true));
+        assert_eq!(std::fs::read_to_string(second.join("-work-app/abc-123.jsonl")).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn adopting_keeps_the_codex_date_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join(".codex/sessions");
+        let second = dir.path().join("accounts/codex/work/sessions");
+        append(&first.join("2026/10/23").join("rollout-2026-10-23T10-00-00-def-456.jsonl"), "four\n");
+        let roots = [first, second.clone()];
+
+        assert_eq!(adopt(dir.path(), &roots, &second, "def-456"), Ok(true));
+        assert!(second.join("2026/10/23/rollout-2026-10-23T10-00-00-def-456.jsonl").is_file());
+    }
+
+    #[test]
+    fn adopting_a_transcript_already_in_the_account_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join(".claude/projects");
+        let second = dir.path().join("accounts/claude/work/projects");
+        append(&first.join("-work-app").join("abc-123.jsonl"), "one\n");
+        append(&second.join("-work-app").join("abc-123.jsonl"), "one\ntwo\n");
+        let roots = [first, second.clone()];
+
+        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123"), Ok(false));
+        assert_eq!(std::fs::read_to_string(second.join("-work-app/abc-123.jsonl")).unwrap(), "one\ntwo\n");
     }
 
     #[test]

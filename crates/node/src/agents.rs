@@ -94,17 +94,19 @@ pub fn account_homes(home: &Path, accounts_dir: &Path, agent: AgentId) -> Vec<Ac
     homes
 }
 
+pub fn transcript_root(agent: AgentId, account: &AccountHome) -> PathBuf {
+    match agent {
+        AgentId::Claude => account.dir.join("projects"),
+        AgentId::Codex => account.dir.join("sessions"),
+    }
+}
+
 pub fn transcript_roots(home: &Path, accounts: &Path, configured: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots = configured.to_vec();
 
     for agent in [AgentId::Claude, AgentId::Codex] {
-        let folder = match agent {
-            AgentId::Claude => "projects",
-            AgentId::Codex => "sessions",
-        };
-
         for account in account_homes(home, accounts, agent) {
-            let root = account.dir.join(folder);
+            let root = transcript_root(agent, &account);
 
             if !roots.contains(&root) {
                 roots.push(root);
