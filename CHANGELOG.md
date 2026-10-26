@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.1
+
+- Experiments can be switched on again. Ticking a box no longer fails with a server error.
+- Each experiment has a short description.
+- Send now adds your message to the turn that is running, without stopping it. Agents that cannot take a message mid-turn, and nodes older than v0.10.1, still stop the turn first.
+- Uploaded project logos show in the sidebar, the project menus and Projects.
+- The project menu in a conversation shows each project's icon, and names the node only when projects are on several nodes.
+- The group selector fills the width of the sidebar.
+- The composer's picker row fades out where it is cut off.
+- The sidebar no longer has a project filter.
+
 ## v0.10.0
 
 Several features are new experiments, off until you turn them on in Settings, Experiments.
