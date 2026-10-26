@@ -207,8 +207,11 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             let limit = crate::usage_limits::inspect(state, node_id, conversation_id, &message).await?;
             let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
+            let switch_to = limit.as_ref().and_then(|limit| limit.switch_to.clone());
+            let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
 
             if resume_at.is_none()
+                && switch_to.is_none()
                 && let Err(error) = crate::goals::session_failed(state, conversation_id).await
             {
                 tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
@@ -217,7 +220,26 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
             let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
 
-            if let Some(at) = resume_at.filter(|_| recorded) {
+            let mut switched = false;
+
+            if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded) {
+                let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+                let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
+                let moved = crate::continuation::continue_on(state, owner, conversation_id, target, Some("usage_limit")).await;
+
+                match moved {
+                    Ok(_) => {
+                        let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
+
+                        crate::prompts::retry_failed(state, owner, conversation_id).await?;
+                        crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
+                        switched = true;
+                    }
+                    Err(error) => tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message()),
+                }
+            }
+
+            if let Some(at) = resume_at.filter(|_| recorded && !switched) {
                 crate::usage_limits::schedule(state, conversation_id, at).await?;
             }
 

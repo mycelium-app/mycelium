@@ -373,3 +373,83 @@ async fn read_earlier_turns_is_refused_while_the_experiment_is_off() {
     assert_eq!(reply["result"]["isError"], true);
     assert!(answer_text(&reply).contains("Continue elsewhere"));
 }
+
+fn limit_message() -> String {
+    let resets = chrono::Utc::now() + chrono::Duration::hours(2);
+
+    format!("Internal error: You've hit your session limit · resets {} (UTC)", resets.format("%-I:%M%P"))
+}
+
+async fn switch_on_usage_limit(server: &Server) {
+    let (status, _) = server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "switch"}))).await;
+    assert_eq!(status, 200);
+}
+
+fn with_usage(account: &str, left: u8) -> LoginInfo {
+    LoginInfo { usage_left: Some(left), ..login(account, LoginState::SignedIn) }
+}
+
+async fn working_on(server: &Server, link: &mut NodeLink, account: &str) -> Uuid {
+    let (_, created) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "account": account, "prompt": "Build it"}))).await;
+    let id: Uuid = serde_json::from_value(created["id"].clone()).unwrap();
+    next_command(link).await;
+    link.start_session(id, "acp-1").await;
+    expect_prompt(link).await;
+
+    id
+}
+
+#[tokio::test]
+async fn a_full_window_switches_to_the_account_with_most_usage_left() {
+    let server = Server::start().await;
+    enable(&server).await;
+    switch_on_usage_limit(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 30), with_usage("spare@example.org", 80)]).await;
+    let id = working_on(&server, &mut link, "sam@example.com").await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+
+    match next_command(&mut link).await {
+        ControlToNode::CloseSession { conversation_id } => assert_eq!(conversation_id, id),
+        other => panic!("expected close_session, got {other:?}"),
+    }
+    match next_command(&mut link).await {
+        ControlToNode::StartSession { resume, account, .. } => assert_eq!((resume.as_deref(), account.as_deref()), (Some("acp-1"), Some("spare@example.org"))),
+        other => panic!("expected start_session, got {other:?}"),
+    }
+    assert_eq!(expect_prompt(&mut link).await, "The usage limit was reached on sam@example.com. Continue from where you stopped.");
+
+    let events = server.events(id).await;
+    let continued = events.iter().find(|event| event["kind"] == "continued").expect("a continued event");
+    assert_eq!((continued["payload"]["reason"].clone(), continued["payload"]["account"].clone()), (json!("usage_limit"), json!("spare@example.org")));
+    assert!(server.conversation(id).await["resume_at"].is_null());
+}
+
+#[tokio::test]
+async fn a_full_window_with_no_other_account_waits_for_the_reset() {
+    let server = Server::start().await;
+    enable(&server).await;
+    switch_on_usage_limit(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 0)]).await;
+    let id = working_on(&server, &mut link, "sam@example.com").await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+    let user = server.user.clone();
+    common::eventually("the resume to be scheduled", || async { (!user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["resume_at"].is_null()).then_some(()) }).await;
+
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "continued"));
+}
+
+#[tokio::test]
+async fn with_the_experiment_off_switching_waits_for_the_reset_like_resuming() {
+    let server = Server::start().await;
+    switch_on_usage_limit(&server).await;
+    let mut link = node_with_accounts(&server, "v0.11.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
+    let id = working_on(&server, &mut link, "sam@example.com").await;
+
+    link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: limit_message() }).await;
+    let user = server.user.clone();
+    common::eventually("the resume to be scheduled", || async { (!user.json(user.get(&format!("/api/v1/conversations/{id}"))).await.1["resume_at"].is_null()).then_some(()) }).await;
+
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "continued"));
+}

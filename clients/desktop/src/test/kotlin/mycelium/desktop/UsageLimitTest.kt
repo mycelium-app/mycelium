@@ -43,7 +43,7 @@ class UsageLimitTest {
     private val calls = CopyOnWriteArrayList<String>()
     private val bodies = CopyOnWriteArrayList<String>()
 
-    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask"): Store {
+    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask", experiments: String = "{}"): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -60,6 +60,7 @@ class UsageLimitTest {
                 path.endsWith("/conversations/c1") -> failedJson(resumeAt)
                 path.endsWith("/events") -> limitEvent(resetsAt)
                 path.endsWith("/usage-limit") -> """{"on_usage_limit":"$setting"}"""
+                path.endsWith("/experiments") -> experiments
                 path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
                 else -> "{}"
             }
@@ -152,5 +153,26 @@ class UsageLimitTest {
 
         assertEquals(listOf("PUT /api/v1/usage-limit"), calls.toList())
         assertEquals("""{"on_usage_limit":"resume"}""", bodies.single())
+    }
+
+    @Test
+    fun continuingOnAnotherAccountIsOfferedOnlyWithTheExperimentOn() {
+        val off = store()
+        rule.setContent { MyceliumTheme(true) { AgentsSettings(off) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
+
+        assertEquals(0, rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun theSettingCanBeChangedToContinueOnAnotherAccount() {
+        val store = store(experiments = EnabledExperiments)
+        rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continue on another account").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continue on another account").performClick()
+        rule.waitUntil(5_000) { calls.isNotEmpty() }
+
+        assertEquals("""{"on_usage_limit":"switch"}""", bodies.single())
     }
 }

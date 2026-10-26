@@ -1,6 +1,7 @@
 use crate::account_usage::windows_of;
 use crate::auth::AuthUser;
 use crate::boot::is_ready;
+use crate::chats::CHAT_AGENT;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::prompts::{continue_unless_queued, retry_failed};
@@ -128,18 +129,20 @@ fn zoned(zone: Tz, date: NaiveDate, time: NaiveTime) -> Option<DateTime<Utc>> {
 pub struct Detected {
     pub payload: Value,
     pub resume_at: Option<DateTime<Utc>>,
+    pub switch_to: Option<String>,
+    pub account: Option<String>,
 }
 
 pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, message: &str) -> ApiResult<Option<Detected>> {
-    let row = sqlx::query_as::<_, (String, Option<String>, i32, bool, Option<String>, String)>(
-        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null, u.time_zone, coalesce(s.on_usage_limit, 'ask')
+    let row = sqlx::query_as::<_, (String, Option<String>, i32, bool, Option<String>, String, bool)>(
+        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null, u.time_zone, coalesce(s.on_usage_limit, 'ask'), coalesce(s.experiment_continue_elsewhere, false)
          from conversations c join users u on u.id = c.owner left join user_settings s on s.owner = c.owner where c.id = $1",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some((agent, account, resumes, side_chat, time_zone, on_usage_limit)) = row else {
+    let Some((agent, account, resumes, side_chat, time_zone, on_usage_limit, continue_elsewhere)) = row else {
         return Ok(None);
     };
     let now = Utc::now();
@@ -156,10 +159,24 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
         limit.resets_at = wanted.filter(|at| *at > now).min().or_else(|| any.filter(|at| *at > now).min());
     }
 
-    let automatic = on_usage_limit == "resume" && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
+    let automatic = matches!(on_usage_limit.as_str(), "resume" | "switch") && !side_chat && resumes < AUTOMATIC_RESUME_CAP;
+    let switching = on_usage_limit == "switch" && continue_elsewhere && !side_chat && agent != CHAT_AGENT;
+    let switch_to = if switching {
+        sqlx::query_scalar::<_, String>(
+            "select account from logins where node_id = $1 and agent = $2 and state = 'signed_in' and account is not null and account is distinct from $3 and coalesce(usage_left, 0) > 0
+             order by usage_left desc, account limit 1",
+        )
+        .bind(node_id)
+        .bind(&agent)
+        .bind(&account)
+        .fetch_optional(&state.pool)
+        .await?
+    } else {
+        None
+    };
     let resume_at = limit.resets_at.filter(|_| automatic).map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS));
 
-    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at }))
+    Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, switch_to, account }))
 }
 
 pub async fn schedule(state: &AppState, conversation_id: Uuid, at: DateTime<Utc>) -> ApiResult<()> {
