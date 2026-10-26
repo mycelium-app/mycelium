@@ -763,11 +763,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableWalkthroughScopes.update { it + (conversationId to walkthroughScope) }
     }
 
-    fun regenerateWalkthrough(conversationId: String) {
+    fun iterateWalkthrough(conversationId: String, comment: String) {
         val scope = mutableWalkthroughScopes.value[conversationId] ?: WalkthroughScope.Branch
-        val revising = mutableWalkthroughNotes.value[conversationId].orEmpty().any { !it.sent }
+        val revising = comment.isNotEmpty() || mutableWalkthroughNotes.value[conversationId].orEmpty().any { !it.sent }
+        val prompt = listOf(iterateWalkthroughPrompt(scope, revising), comment).filter { it.isNotEmpty() }.joinToString("\n\n")
 
-        send(conversationId, withWalkthroughNotes(conversationId, regenerateWalkthroughPrompt(scope, revising)))
+        send(conversationId, withWalkthroughNotes(conversationId, prompt))
     }
 
     fun addWalkthroughNote(conversationId: String, walkthroughId: String, request: WalkthroughNoteRequest) {

@@ -149,7 +149,7 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
             onPrevious = index.takeIf { it > 0 }?.let { { move(index - 1) } },
             onNext = index.takeIf { it < last }?.let { { next() } },
             onScope = { store.chooseWalkthroughScope(conversationId, it) },
-            onRegenerate = { store.regenerateWalkthrough(conversationId) },
+            onIterate = { comment -> store.iterateWalkthrough(conversationId, comment) },
             onDismiss = { store.setWalkthroughDismissed(conversationId, true) }.takeIf { LocalTouch.current },
         )
     }
@@ -200,8 +200,10 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
 }
 
 @Composable
-private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onRegenerate: () -> Unit, onDismiss: (() -> Unit)?) {
+private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevious: (() -> Unit)?, onNext: (() -> Unit)?, onScope: (WalkthroughScope) -> Unit, onIterate: (String) -> Unit, onDismiss: (() -> Unit)?) {
     var open by remember { mutableStateOf(false) }
+    var iterating by remember { mutableStateOf(false) }
+    var comment by remember { mutableStateOf("") }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
         Box {
@@ -224,7 +226,26 @@ private fun WalkthroughHeader(scope: WalkthroughScope, position: String, onPrevi
 
         MyButton({ onPrevious?.invoke() }, icon = MyIcon.Back, description = "Previous step", muted = onPrevious == null, size = ButtonSize.Sm)
         MyButton({ onNext?.invoke() }, icon = MyIcon.Move, description = "Next step", muted = onNext == null, size = ButtonSize.Sm)
-        MyButton({ onRegenerate() }, text = "Regenerate", icon = MyIcon.Refresh, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        Box {
+            MyButton({ iterating = true }, text = "Iterate", icon = MyIcon.Refresh, variant = ButtonVariant.Outline, size = ButtonSize.Sm, selected = iterating)
+
+            if (iterating) {
+                MenuPopup(onDismiss = { iterating = false }, width = Tokens.Size.Popover) {
+                    fun iterate() {
+                        onIterate(comment.trim())
+                        comment = ""
+                        iterating = false
+                    }
+
+                    Column(Modifier.padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                        TextInput(comment, { comment = it }, label = "Comment for the agent (optional)", placeholder = "What should change", onSubmit = ::iterate)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            MyButton(::iterate, text = "Iterate", description = "Iterate with this comment", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+                        }
+                    }
+                }
+            }
+        }
 
         if (onDismiss != null) {
             MyButton({ onDismiss() }, text = "Dismiss", icon = MyIcon.Close, description = "Dismiss walkthrough", variant = ButtonVariant.Outline, size = ButtonSize.Sm)

@@ -227,7 +227,7 @@ class WalkthroughTest {
     }
 
     @Test
-    fun theScopePickerOffersThreeScopesAndRegenerateQueuesAPromptForTheChosenOne() {
+    fun theScopePickerOffersThreeScopesAndIterateQueuesAPromptForTheChosenOne() {
         show(Walkthrough)
         openWalkthrough()
 
@@ -235,7 +235,8 @@ class WalkthroughTest {
         rule.onNodeWithText("Uncommitted changes").assertIsDisplayed()
         rule.onNodeWithText("Last commit").assertIsDisplayed()
         rule.onNodeWithText("Last commit").performClick()
-        rule.onNodeWithText("Regenerate").performClick()
+        rule.onNodeWithText("Iterate").performClick()
+        rule.onNodeWithContentDescription("Iterate with this comment").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
         val prompt = requests.first { it.first == "POST /api/v1/conversations/c1/prompt" }.second
@@ -383,18 +384,33 @@ class WalkthroughTest {
     }
 
     @Test
-    fun regenerateSendsTheNotesAndAsksForARevision() {
+    fun iterateSendsTheNotesAndAsksForARevision() {
         show(Walkthrough)
         openWalkthrough()
         rule.onNodeWithContentDescription("Note on this step").performTextInput("Split this step in two")
         rule.onNodeWithText("Add note").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Note: Step 1 'Add the shared strings file': Split this step in two").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithText("Regenerate").performClick()
+        rule.onNodeWithText("Iterate").performClick()
+        rule.onNodeWithContentDescription("Iterate with this comment").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
         val prompt = requests.first { it.first == "POST /api/v1/conversations/c1/prompt" }.second
         assertTrue(prompt.contains("Split this step in two") && prompt.contains("Revise the current walkthrough"), prompt)
+    }
+
+    @Test
+    fun iterateWithACommentSendsItAndAsksForARevision() {
+        show(Walkthrough)
+        openWalkthrough()
+
+        rule.onNodeWithText("Iterate").performClick()
+        rule.onNodeWithContentDescription("Comment for the agent (optional)").performTextInput("Shorter steps please")
+        rule.onNodeWithContentDescription("Iterate with this comment").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/prompt" } }
+        val prompt = requests.first { it.first == "POST /api/v1/conversations/c1/prompt" }.second
+        assertTrue(prompt.contains("Shorter steps please") && prompt.contains("Revise the current walkthrough"), prompt)
     }
 
     @Test
