@@ -116,6 +116,27 @@ class SidebarPinsTest {
     }
 
     @Test
+    fun theGroupFilterSitsAboveNewConversation() {
+        show(listOf(conversation("w1", "Slop work", group = "g1")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Slop work").fetchSemanticsNodes().isNotEmpty() }
+
+        val filter = rule.onNodeWithContentDescription("Group: All groups").getUnclippedBoundsInRoot().top
+        val newConversation = rule.onNodeWithText("New conversation").getUnclippedBoundsInRoot().top
+        assertTrue(filter < newConversation, "filter $filter new conversation $newConversation")
+    }
+
+    @Test
+    fun aFilteredOutGroupSaysHowManyNeedInput() {
+        show(listOf(conversation("w1", "Slop work", group = "g1"), conversation("w2", "Office work", group = "g2", status = "input"), conversation("w3", "Office more", group = "g2", status = "input")))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Slop work").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Group: All groups").performClick()
+
+        rule.onNodeWithText("2 needs input").assertExists()
+    }
+
+    @Test
     fun aSavedGroupFilterIsAppliedWhenTheSidebarOpens() {
         show(listOf(conversation("w1", "Slop work", group = "g1"), conversation("w2", "Office work", group = "g2")), MemoryPlatform(mutableMapOf("conversation-group-filter" to "g2")))
 

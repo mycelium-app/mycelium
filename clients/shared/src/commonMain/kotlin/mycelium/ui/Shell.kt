@@ -67,6 +67,7 @@ import mycelium.state.AppState
 import mycelium.state.NoGroup
 import mycelium.state.PinnedName
 import mycelium.state.pinnedChats
+import mycelium.state.needsInputIn
 import mycelium.state.pinnedConversations
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.LazyListScope
@@ -462,6 +463,20 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     Column(modifier.background(colors.bgPanel)) {
         Segmented(listOf(WorkspacesMode, ChatsMode), mode, { chosen -> mode = chosen; lastOpened[chosen]?.let(onRoute) }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
 
+        if (mode == WorkspacesMode && state.groups.isNotEmpty()) {
+            val choices = listOf(Choice(AllGroups, "All groups")) +
+                state.groups.values.sortedBy { it.name.lowercase() }.map { group ->
+                    val waiting = if (group.id == groupFilter) 0 else needsInputIn(state.conversations.values, group.id)
+
+                    Choice(group.id, group.name, if (waiting > 0) "$waiting needs input" else null)
+                } +
+                Choice(NoGroup, "No group")
+
+            Box(Modifier.padding(horizontal = Tokens.Space.S1_5)) {
+                OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show", icon = MyIcon.Layers, size = ButtonSize.Sm)
+            }
+        }
+
         Hairline()
 
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
@@ -499,12 +514,6 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 item(key = "label") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
-
-                        if (state.groups.isNotEmpty()) {
-                            val choices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
-
-                            OptionMenu("Group", choices, groupFilter, { chosen -> savedGroupFilter = chosen; platform.savePreference(GroupFilterPreference, chosen) }, title = "Show conversations in", size = ButtonSize.Sm)
-                        }
                     }
                 }
 

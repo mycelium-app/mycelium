@@ -255,6 +255,9 @@ private fun topLevel(conversations: Collection<Conversation>, filter: String): L
     return active.filter { it.parentId == null || it.parentId !in activeIds }
 }
 
+fun needsInputIn(conversations: Collection<Conversation>, filter: String): Int =
+    topLevel(conversations, filter).count { it.status == ConversationStatus.Input }
+
 fun pinnedConversations(conversations: Collection<Conversation>, filter: String = AllGroups): List<Conversation> =
     topLevel(conversations, filter).filter { it.pinnedAt != null }.sortedBy { it.pinnedAt }
 

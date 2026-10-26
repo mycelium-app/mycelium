@@ -4,6 +4,7 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.state.chatSections
 import mycelium.state.isChat
+import mycelium.state.needsInputIn
 import mycelium.state.sidebarSections
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,5 +59,20 @@ class ChatsTest {
 
         assertEquals(listOf("work"), sidebarSections(all).flatMap { it.rows }.map { it.id })
         assertTrue(all[0].isChat)
+    }
+
+    @Test
+    fun needsInputCountsOnlyTopLevelConversationsWaitingInThatGroup() {
+        val waiting = conversation("a", agent = "claude").copy(status = ConversationStatus.Input, groupId = "g1")
+        val all = listOf(
+            waiting,
+            waiting.copy(id = "b"),
+            waiting.copy(id = "c", groupId = "g2"),
+            waiting.copy(id = "d", status = ConversationStatus.Done),
+            waiting.copy(id = "e", archivedAt = "2026-10-23T11:00:00Z"),
+            waiting.copy(id = "f", parentId = "a", sideKind = "side"),
+        )
+
+        assertEquals(2, needsInputIn(all, "g1"))
     }
 }
