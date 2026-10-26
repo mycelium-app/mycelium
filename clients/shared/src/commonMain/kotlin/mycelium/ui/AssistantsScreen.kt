@@ -32,6 +32,7 @@ import mycelium.api.PatchAssistantRequest
 import mycelium.api.ConversationStatus
 import mycelium.state.AllGroups
 import mycelium.state.AllStates
+import mycelium.state.ArchivedState
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.GroupByGroup
@@ -43,7 +44,7 @@ import mycelium.state.assistantRows
 import mycelium.state.assistantStateName
 import mycelium.state.ago
 
-private val StateChoices = listOf(Choice(AllStates, "All states"), Choice("working", "Working"), Choice("input", "Needs input"), Choice("idle", "Idle"))
+private val StateChoices = listOf(Choice(AllStates, "All states"), Choice("working", "Working"), Choice("input", "Needs input"), Choice("idle", "Idle"), Choice(ArchivedState, "Archived"))
 private val GroupByChoices = listOf(Choice(GroupByNone, "No grouping"), Choice(GroupByGroup, "Group"), Choice(GroupByState, "State"))
 
 @Composable
@@ -64,6 +65,12 @@ internal fun AssistantStateMark(state: String) {
 
 @Composable
 internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assistant, close: () -> Unit, onSettings: () -> Unit) {
+    if (assistant.archivedAt != null) {
+        MenuItem("Restore", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = false)) } }, leading = MyIcon.Archive)
+
+        return
+    }
+
     val conversation = assistant.conversationId?.let { state.conversations[it] }
 
     MenuItem(if (assistant.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(pinned = assistant.pinnedAt == null)) } }, leading = MyIcon.Pin)
@@ -135,12 +142,20 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
     var groupBy by remember { mutableStateOf(GroupByNone) }
     val menus = remember { mutableMapOf<String, RowMenuState>() }
 
+    var archived by remember { mutableStateOf(emptyList<Assistant>()) }
+
     LaunchedEffect(Unit) {
         store.act { store.refreshAssistants() }
     }
 
+    LaunchedEffect(showing) {
+        if (showing == ArchivedState) {
+            store.act { archived = store.api.assistants(archived = true) }
+        }
+    }
+
     val groupChoices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
-    val sections = assistantRows(state.assistants.values, state.groups, query, group, showing, groupBy)
+    val sections = assistantRows((archived.associateBy { it.id } + state.assistants).values, state.groups, query, group, showing, groupBy)
 
     Column(Modifier.fillMaxSize()) {
         Bar {

@@ -55,6 +55,8 @@ class AssistantsTest {
 
     private val requests = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
 
+    private val archivedAssistants = mutableListOf<String>()
+
     private fun shell(assistants: MutableList<String>, route: Route = Route.Empty, experiments: String = EnabledExperiments) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
@@ -66,6 +68,7 @@ class AssistantsTest {
             val reply = when {
                 path.endsWith("/experiments") -> experiments
                 path.endsWith("/assistants") && request.method == HttpMethod.Post -> assistantJson(Regex("\"name\":\"([^\"]*)\"").find(body)!!.groupValues[1]).also { assistants += it }
+                path.endsWith("/assistants") && request.url.parameters["archived"] == "true" -> archivedAssistants.joinToString(prefix = "[", postfix = "]")
                 path.endsWith("/assistants") -> assistants.joinToString(prefix = "[", postfix = "]")
                 path.contains("/assistants/") && request.method == HttpMethod.Patch -> assistantJson(path.substringAfterLast("/a-"), pinned = true).also { changed -> assistants.replaceAll { if (it.contains(path.substringAfterLast("/"))) changed else it } }
                 path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/conversations") -> "[]"
@@ -118,5 +121,22 @@ class AssistantsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Stand-up, Idle").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("""{"pinned":true}""", requests.last { it.first.startsWith("PATCH") }.second)
+    }
+
+    @Test
+    fun archivedAssistantsAreListedUnderArchivedAndCanBeRestored() {
+        archivedAssistants += assistantJson("Old helper").replace("\"created_at\"", "\"archived_at\":\"2026-10-26T10:00:00Z\",\"created_at\"")
+        shell(mutableListOf(assistantJson("Stand-up")), Route.Assistants)
+
+        rule.onNodeWithContentDescription("State: All states").performClick()
+        rule.onNodeWithText("Archived").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Old helper").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Open Stand-up").fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("More for Old helper").performClick()
+        rule.onNodeWithText("Restore").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first.startsWith("PATCH") } }
+        assertEquals("""{"archived":false}""", requests.last { it.first.startsWith("PATCH") }.second)
     }
 }
