@@ -34,6 +34,7 @@ import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.Extensions
 import mycelium.api.Forge
+import mycelium.api.InstructionLayer
 import mycelium.api.Instructions
 import mycelium.api.SetInstructionSourceRequest
 import mycelium.state.Store
@@ -59,6 +60,48 @@ private fun ExtensionSwitch(name: String, hint: String, on: Boolean, onToggle: (
 }
 
 @Composable
+internal fun InstructionsEditor(layer: InstructionLayer, file: String, saveLabel: String, onSave: (String) -> Unit, actions: @Composable () -> Unit = {}) {
+    val colors = MyTheme.colors
+    var draft by remember { mutableStateOf(layer.text) }
+    val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    val editorCap = maxOf(Tokens.Size.InstructionsEditorCap, viewportHeight * 0.6f)
+
+    LaunchedEffect(layer.layer, layer.version?.id) {
+        draft = layer.text
+    }
+
+    Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
+        Row(
+            Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Label(file, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
+            Label(layer.version?.let { "${shortVersion(it.id)} · ${timestamp(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
+        }
+
+        Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
+                cursorBrush = SolidColor(colors.text),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Tokens.Size.InstructionsEditor)
+                    .padding(Tokens.Space.S3)
+                    .semantics { contentDescription = "Edit ${layer.name} instructions" },
+            )
+        }
+    }
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
+        MyButton({ onSave(draft) }, text = saveLabel, variant = ButtonVariant.Outline)
+        actions()
+    }
+}
+
+@Composable
 fun InstructionsSettings(store: Store) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
@@ -67,7 +110,6 @@ fun InstructionsSettings(store: Store) {
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var extensions by remember { mutableStateOf<Extensions?>(null) }
     var selected by remember { mutableStateOf(GlobalLayer) }
-    var draft by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
     var naming by remember { mutableStateOf<String?>(null) }
     var newName by remember { mutableStateOf("") }
@@ -86,7 +128,6 @@ fun InstructionsSettings(store: Store) {
     val layers = document?.layers.orEmpty()
     val layer = layers.firstOrNull { it.layer == selected } ?: layers.firstOrNull()
     val source = document?.source
-    val saved = layer?.text.orEmpty()
 
     fun attempt(block: suspend () -> Unit) {
         scope.launch {
@@ -111,10 +152,6 @@ fun InstructionsSettings(store: Store) {
             store.refreshProjects()
             store.refreshGroups()
         }
-    }
-
-    LaunchedEffect(layer?.layer, layer?.version?.id) {
-        draft = saved
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
@@ -289,45 +326,17 @@ fun InstructionsSettings(store: Store) {
         }
 
         if (layer != null) {
-            val viewportHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
-            val editorCap = maxOf(Tokens.Size.InstructionsEditorCap, viewportHeight * 0.6f)
-
-            Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape)) {
-                Row(
-                    Modifier.fillMaxWidth().background(colors.bgPanel).padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Label(layerFile(layer, source?.repository), Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                    Label(layer.version?.let { "${shortVersion(it.id)} · ${timestamp(it.createdAt)}" } ?: "No version yet", style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                }
-
-                Box(Modifier.fillMaxWidth().heightIn(max = editorCap).verticalScrollWithBar()) {
-                    BasicTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        textStyle = Tokens.Type.Code.themed().copy(color = colors.text),
-                        cursorBrush = SolidColor(colors.text),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = Tokens.Size.InstructionsEditor)
-                            .padding(Tokens.Space.S3)
-                            .semantics { contentDescription = "Edit ${layer.name} instructions" },
-                    )
-                }
-            }
-
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2), itemVerticalAlignment = Alignment.CenterVertically) {
-                MyButton(
-                    { attempt { store.api.saveInstructions(layer.layer, draft); document = store.api.instructions() } },
-                    text = if (source != null) "Save and commit" else "Save",
-                    variant = ButtonVariant.Outline,
-                )
-
-                if (source != null) {
-                    MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
-                }
-            }
+            InstructionsEditor(
+                layer = layer,
+                file = layerFile(layer, source?.repository),
+                saveLabel = if (source != null) "Save and commit" else "Save",
+                onSave = { text -> attempt { store.api.saveInstructions(layer.layer, text); document = store.api.instructions() } },
+                actions = {
+                    if (source != null) {
+                        MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
+                    }
+                },
+            )
         }
 
         InstructionProposals(store)
