@@ -235,7 +235,7 @@ fun ThreadView(
                 }
 
                 if (!atNewest) {
-                    Box(Modifier.align(Alignment.BottomEnd).padding(end = Tokens.Space.S4, bottom = Tokens.Space.S3)) {
+                    Box(Modifier.align(Alignment.BottomEnd).padding(end = if (pinned.isNotEmpty() && beside) PinnedRailWidth + Tokens.Space.S8 else Tokens.Space.S4, bottom = Tokens.Space.S3)) {
                         MyButton(
                             onClick = {
                                 following = true
