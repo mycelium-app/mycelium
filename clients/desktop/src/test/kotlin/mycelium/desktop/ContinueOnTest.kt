@@ -87,12 +87,12 @@ class ContinueOnTest {
     fun continuingOnTheOtherHarnessSendsTheRequest() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Continue on…: sam@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Continue on…: Claude Code · sam@example.com").performClick()
         rule.onNodeWithText("Codex · codex@example.com").performClick()
 
-        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/continue" } }
-        assertEquals("""{"agent":"codex","account":"codex@example.com"}""", requests.last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
+        rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
+        assertEquals("""{"agent":"codex","account":"codex@example.com"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
     }
 
     @Test
