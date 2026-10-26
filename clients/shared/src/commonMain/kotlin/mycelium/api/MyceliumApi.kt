@@ -282,6 +282,17 @@ class MyceliumApi(
             }
         }.body()
 
+    suspend fun assistants(archived: Boolean = false): List<Assistant> =
+        call("/assistants") { client.get(it) { authorise(); if (archived) parameter("archived", true) } }.body()
+
+    suspend fun assistant(id: String): Assistant = call("/assistants/$id") { client.get(it) { authorise() } }.body()
+
+    suspend fun createAssistant(request: CreateAssistantRequest): Assistant =
+        call("/assistants") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun patchAssistant(id: String, request: PatchAssistantRequest): Assistant =
+        call("/assistants/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
     suspend fun groups(): List<Group> = call("/groups") { client.get(it) { authorise() } }.body()
 
     suspend fun groupInstructions(id: String): InstructionLayer =

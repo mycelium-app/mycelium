@@ -116,6 +116,7 @@ import mycelium.state.sidebarRows
 import mycelium.state.AllProjects
 import mycelium.state.NoProject
 import mycelium.state.isWorktree
+import mycelium.state.sidebarAssistants
 import mycelium.state.sidebarSections
 import mycelium.state.statusSectionName
 
@@ -150,6 +151,12 @@ sealed interface Route {
     data class Artefact(val id: String) : Route
 
     data object Activity : Route
+
+    data object Assistants : Route
+
+    data object NewAssistant : Route
+
+    data class AssistantSettings(val id: String) : Route
 
     data object Settings : Route
 }
@@ -384,6 +391,9 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
             Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
             is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
+            Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
+            Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) })
+            is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) })
             Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
             Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
         }
@@ -435,6 +445,10 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         store.act { store.refreshGroups() }
         store.act { store.refreshProjects() }
     }
+
+    LaunchedEffect(state.experiments.assistants) {
+        store.act { store.refreshAssistants() }
+    }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }
     var providerUsage by remember(store) { mutableStateOf(emptyList<ModelProviderUsage>()) }
@@ -460,6 +474,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         Route.NewChat -> ChatsMode
         is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
         Route.Settings, Route.Activity, Route.Empty -> null
+        Route.Assistants, Route.NewAssistant, is Route.AssistantSettings -> null
         else -> WorkspacesMode
     }
 
@@ -514,6 +529,10 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         val list = rememberLazyListState()
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
+            if (state.experiments.assistants) {
+                sidebarAssistantItems(sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
+            }
+
             if (mode == ChatsMode) {
                 conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
 

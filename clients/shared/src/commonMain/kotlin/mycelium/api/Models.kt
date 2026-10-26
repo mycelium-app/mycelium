@@ -543,6 +543,60 @@ data class PatchProjectRequest(
 data class Group(val id: String, val name: String, val folders: List<GroupFolder> = emptyList(), @SerialName("created_at") val createdAt: String)
 
 @Serializable
+data class ModelChoice(
+    val agent: String? = null,
+    @SerialName("provider_id") val providerId: String? = null,
+    val model: String? = null,
+    val account: String? = null,
+)
+
+@Serializable
+data class AssistantPreferences(
+    val models: List<ModelChoice> = emptyList(),
+    val nodes: List<String> = emptyList(),
+    @SerialName("chat_first") val chatFirst: Boolean = true,
+    @SerialName("fall_back_on") val fallBackOn: List<String> = listOf("usage_limit", "signed_out", "offline"),
+)
+
+@Serializable
+data class Assistant(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    val preferences: AssistantPreferences = AssistantPreferences(),
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val state: String = "idle",
+    @SerialName("last_active_at") val lastActiveAt: String? = null,
+    @SerialName("session_count") val sessionCount: Long = 0,
+    @SerialName("pinned_at") val pinnedAt: String? = null,
+    @SerialName("archived_at") val archivedAt: String? = null,
+    val instructions: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class CreateAssistantRequest(
+    val name: String,
+    val description: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    val instructions: String? = null,
+    val preferences: AssistantPreferences? = null,
+)
+
+@Serializable
+data class PatchAssistantRequest(
+    val name: String? = null,
+    val description: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    @SerialName("clear_group") val clearGroup: Boolean = false,
+    val instructions: String? = null,
+    val pinned: Boolean? = null,
+    val archived: Boolean? = null,
+    val preferences: AssistantPreferences? = null,
+)
+
+@Serializable
 data class GroupFolder(val id: String, @SerialName("node_id") val nodeId: String? = null, val prefix: String)
 
 @Serializable
@@ -569,6 +623,7 @@ data class Experiments(
     @SerialName("move_chats") val moveChats: Boolean = false,
     val groups: Boolean = false,
     @SerialName("continue_elsewhere") val continueElsewhere: Boolean = false,
+    val assistants: Boolean = false,
 )
 
 @Serializable
@@ -1220,6 +1275,8 @@ sealed interface StreamMessage {
 
     data class ScheduleChanged(val schedule: Schedule) : StreamMessage
 
+    data class AssistantChanged(val assistant: Assistant) : StreamMessage
+
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
     data class ArtifactChanged(val artifact: Artifact, val deleted: Boolean = false) : StreamMessage
@@ -1285,6 +1342,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
             ),
         )
         "workflow" -> StreamMessage.WorkflowChanged(element["workflow"]!!.jsonObject)
+        "assistant" -> StreamMessage.AssistantChanged(MyceliumJson.decodeFromJsonElement(Assistant.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "artifact" -> StreamMessage.ArtifactChanged(

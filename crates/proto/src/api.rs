@@ -1441,3 +1441,107 @@ pub struct CreateArtifactCommentRequest {
 pub struct PatchArtifactCommentRequest {
     pub resolved: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantState {
+    Working,
+    Input,
+    Idle,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelChoice {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+}
+
+fn chat_first_by_default() -> bool {
+    true
+}
+
+fn fall_back_by_default() -> Vec<String> {
+    vec!["usage_limit".into(), "signed_out".into(), "offline".into()]
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantPreferences {
+    #[serde(default)]
+    pub models: Vec<ModelChoice>,
+    #[serde(default)]
+    pub nodes: Vec<Uuid>,
+    #[serde(default = "chat_first_by_default")]
+    pub chat_first: bool,
+    #[serde(default = "fall_back_by_default")]
+    pub fall_back_on: Vec<String>,
+}
+
+impl Default for AssistantPreferences {
+    fn default() -> Self {
+        AssistantPreferences { models: Vec::new(), nodes: Vec::new(), chat_first: true, fall_back_on: fall_back_by_default() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Assistant {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
+    pub preferences: AssistantPreferences,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    pub state: AssistantState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub session_count: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateAssistantRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<Uuid>,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub preferences: Option<AssistantPreferences>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PatchAssistantRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<Uuid>,
+    #[serde(default)]
+    pub clear_group: bool,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub preferences: Option<AssistantPreferences>,
+}

@@ -51,6 +51,7 @@ data class AppState(
     val tasks: Map<String, Task> = emptyMap(),
     val workflows: Map<String, JsonObject> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
+    val assistants: Map<String, mycelium.api.Assistant> = emptyMap(),
     val artifacts: Map<String, Artifact> = emptyMap(),
     val artifactAccessRequests: Map<String, ArtifactAccessRequest> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
@@ -139,6 +140,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.WorkflowChanged -> state.copy(workflows = state.workflows + (message.workflow.string("id").orEmpty() to message.workflow))
 
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
+
+    is StreamMessage.AssistantChanged -> state.copy(assistants = state.assistants + (message.assistant.id to message.assistant))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
 

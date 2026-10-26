@@ -273,6 +273,32 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(groups = groups.associateBy { group -> group.id }) }
     }
 
+    suspend fun refreshAssistants() {
+        if (!state.value.experiments.assistants) {
+            return
+        }
+
+        val assistants = orNull { api.assistants() } ?: return
+
+        mutableState.update { it.copy(assistants = assistants.associateBy { assistant -> assistant.id }) }
+    }
+
+    suspend fun createAssistant(request: mycelium.api.CreateAssistantRequest): mycelium.api.Assistant {
+        val assistant = api.createAssistant(request)
+
+        mutableState.update { it.copy(assistants = it.assistants + (assistant.id to assistant)) }
+
+        return assistant
+    }
+
+    suspend fun patchAssistant(assistant: mycelium.api.Assistant, request: mycelium.api.PatchAssistantRequest): mycelium.api.Assistant {
+        val changed = api.patchAssistant(assistant.id, request)
+
+        mutableState.update { it.copy(assistants = it.assistants + (changed.id to changed)) }
+
+        return changed
+    }
+
     suspend fun createProject(request: CreateProjectRequest): Project {
         val project = api.createProject(request)
 
