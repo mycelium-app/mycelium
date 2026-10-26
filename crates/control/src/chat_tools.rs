@@ -8,7 +8,7 @@ use crate::mcp_client::{McpConnection, McpError};
 use crate::model_providers::{ToolCall, ToolDefinition, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_GROUP_SQL, append_event, set_status};
-use mycelium_proto::api::ToolKind;
+use mycelium_proto::api::{IntegrationStatus, ToolKind};
 use mycelium_proto::conversation::{ConversationStatus, EventKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
@@ -241,6 +241,10 @@ impl Toolbox {
     }
 
     async fn call(&mut self, state: &AppState, owner: Uuid, conversation_id: Uuid, tool_call: &str, tool: &Tool, input: &Value) -> ApiResult<(String, bool)> {
+        if let Some(server) = tool.server_row().filter(|server| server.status() == IntegrationStatus::Expired) {
+            return Ok((expired_text(&server.name), true));
+        }
+
         match &tool.source {
             Source::Own if tool.original == "walkthrough" => Ok(("A walkthrough is about the changes in a workspace, and this chat has no workspace. Open a conversation on a node to write one.".to_string(), true)),
             Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, Some(tool_call), &tool.original, input).await,
@@ -279,6 +283,10 @@ impl Toolbox {
             }
         }
     }
+}
+
+pub fn expired_text(name: &str) -> String {
+    format!("{name}'s token has expired. Ask the person to re-authenticate {name} in Settings, Integrations, then try again.")
 }
 
 pub async fn run_calls(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolbox, calls: &[ToolCall]) -> ApiResult<Vec<ToolResult>> {

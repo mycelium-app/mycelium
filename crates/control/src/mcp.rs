@@ -25,7 +25,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures_util::future::join_all;
-use mycelium_proto::api::{EachRun, ModelClass, TaskStatus};
+use mycelium_proto::api::{EachRun, IntegrationStatus, ModelClass, TaskStatus};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -1327,6 +1327,10 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     if !server.enabled {
                         return Ok(reply(&id, tool_text(&format!("{} is switched off in Mycelium. Switch it on in the tool server settings, then try again.", server.name), true)));
+                    }
+
+                    if server.status() == IntegrationStatus::Expired {
+                        return Ok(reply(&id, tool_text(&chat_tools::expired_text(&server.name), true)));
                     }
 
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);

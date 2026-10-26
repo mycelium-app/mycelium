@@ -1115,6 +1115,20 @@ async fn an_expiry_within_two_weeks_shows_expires_soon_and_clears() {
 }
 
 #[tokio::test]
+async fn a_call_with_an_expired_token_is_refused_and_asks_to_re_authenticate() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("It has expired.")]).await;
+    rig.patch_lab(json!({"policy": {"ask": {"all": false}}})).await;
+    sqlx::query("update chat_tool_servers set token_expires_at = now() - interval '1 day'").execute(&rig.server.pool).await.unwrap();
+    let id = rig.chat("Weather in Paris?").await;
+    rig.turns_ended(&id, 1).await;
+    let (_, listed) = rig.server.user.json(rig.server.user.get("/api/v1/chat-tool-servers")).await;
+
+    assert!(rig.remote.calls().is_empty());
+    assert_eq!(rig.model.request(1)["messages"].as_array().unwrap().last().unwrap()["content"], "Lab's token has expired. Ask the person to re-authenticate Lab in Settings, Integrations, then try again.");
+    assert_eq!(listed[0]["status"], "expired");
+}
+
+#[tokio::test]
 async fn a_chat_zulip_call_is_held_for_review_after_approval() {
     let rig = rig(vec![Reply::Call("mcp__zulip__get_messages", json!({"channel": "general", "topic": "lunch"})), Reply::Say("They suggested noon.")]).await;
     let (router, zulip) = fake_zulip();
