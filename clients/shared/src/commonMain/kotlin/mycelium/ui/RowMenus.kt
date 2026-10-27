@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -13,8 +14,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -24,10 +29,6 @@ import androidx.compose.ui.semantics.semantics
 @Stable
 class RowMenuState {
     var open by mutableStateOf(false)
-    var hovered by mutableStateOf(false)
-    var focused by mutableStateOf(false)
-
-    val revealed: Boolean get() = open || hovered || focused
 }
 
 @Composable
@@ -35,38 +36,42 @@ fun rememberRowMenuState(): RowMenuState = remember { RowMenuState() }
 
 fun Modifier.rowContextMenu(state: RowMenuState): Modifier =
     this
-        .onFocusChanged { state.focused = it.hasFocus }
+        .onKeyEvent { event ->
+            val opensMenu = event.type == KeyEventType.KeyDown && (event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed))
+
+            if (opensMenu) {
+                state.open = true
+            }
+
+            opensMenu
+        }
         .pointerInput(state) { detectTapGestures(onLongPress = { state.open = true }) }
         .pointerInput(state) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent()
 
-                    when (event.type) {
-                        PointerEventType.Enter -> state.hovered = true
-                        PointerEventType.Exit -> state.hovered = false
-                        PointerEventType.Press -> if (event.buttons.isSecondaryPressed) {
-                            state.open = true
-                        }
+                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                        state.open = true
                     }
                 }
             }
         }
 
 @Composable
-fun RowMenu(title: String, state: RowMenuState, revealOnHover: Boolean = false, content: @Composable (close: () -> Unit) -> Unit) {
-    val touch = LocalTouch.current
-
-    Box(Modifier.alpha(if (!revealOnHover || state.revealed) 1f else 0f)) {
-        if (!(revealOnHover && touch)) {
-            MyButton({ state.open = true }, icon = MyIcon.MoreVertical, description = if (revealOnHover) "Actions for $title" else "More for $title", size = ButtonSize.Sm, muted = true, selected = state.open)
+fun RowMenuPopup(state: RowMenuState, content: @Composable (close: () -> Unit) -> Unit) {
+    if (state.open) {
+        MenuPopup(onDismiss = { state.open = false }) {
+            content { state.open = false }
         }
+    }
+}
 
-        if (state.open) {
-            MenuPopup(onDismiss = { state.open = false }) {
-                content { state.open = false }
-            }
-        }
+@Composable
+fun RowMenu(title: String, state: RowMenuState, content: @Composable (close: () -> Unit) -> Unit) {
+    Box {
+        MyButton({ state.open = true }, icon = MyIcon.MoreVertical, description = "More for $title", size = ButtonSize.Sm, muted = true, selected = state.open)
+        RowMenuPopup(state, content)
     }
 }
 
@@ -81,7 +86,7 @@ fun ConfirmDialog(title: String, detail: String, confirm: String, onDismiss: () 
         Label(title, Modifier.semantics { heading() }, Tokens.Type.Title)
         Label(detail, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(onConfirm, text = confirm, variant = ButtonVariant.Danger)
         }

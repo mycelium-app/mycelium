@@ -748,7 +748,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 .fillMaxWidth()
                 .pressable(
                     onClick,
-                    selected = selected,
+                    selected = selected || menu.open,
                     shape = BlockShape,
                     description = "$shownTitle, $statusName, ${agentName(row.agent)}${node?.let { " on ${it.name}" }.orEmpty()}${if (notRunning) ", not running" else ""}${row.sideKind?.let { if (row.isSubagent) ", subagent" else ", side chat" }.orEmpty()}${if (!row.isChat && place.isNotEmpty()) ", " + listOfNotNull(row.branch?.let { "branch $it" }, row.pullRequestLabel).joinToString(", ") else ""}",
                 )
@@ -828,20 +828,16 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             }
         }
 
-        Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S1).background(colors.bgRaised, ControlShape)) {
-            RowMenu(row.title, menu, revealOnHover = true) { close ->
-                MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); onPin() }, leading = MyIcon.Pin)
-                MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
+        RowMenuPopup(menu) { close ->
+            MenuItem(if (row.pinnedAt == null) "Pin" else "Unpin", onClick = { close(); onPin() }, leading = MyIcon.Pin)
+            MenuItem("Rename", onClick = { close(); renaming = true }, leading = MyIcon.Pencil)
 
-                if (!row.isChat) {
-                    MenuItem("Close session", onClick = { close(); onCloseSession() }, leading = MyIcon.Stop)
-                }
+            if (!row.isChat) {
+                MenuItem("Close session", onClick = { close(); onCloseSession() }, leading = MyIcon.Stop)
+            }
 
-                if (row.status == ConversationStatus.Failed) {
-                    MenuItem("Dismiss", onClick = { close(); onDismiss() }, leading = MyIcon.Check)
-                }
-
-                MenuItem("Archive", onClick = { close(); onArchive() }, leading = MyIcon.Archive)
+            if (row.status == ConversationStatus.Failed) {
+                MenuItem("Dismiss", onClick = { close(); onDismiss() }, leading = MyIcon.Check)
             }
         }
 
@@ -854,6 +850,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
         if (sideChats > 0) {
             MyButton(
                 onToggle,
+
+            MenuItem("Archive", onClick = { close(); onArchive() }, leading = MyIcon.Archive)
                 modifier = Modifier.padding(start = indent),
                 icon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
                 description = if (expanded) "Collapse side chats of ${row.title}" else "Expand side chats of ${row.title}",

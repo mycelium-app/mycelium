@@ -539,17 +539,7 @@ fun rememberAttempt(onFailure: (String?) -> Unit): (suspend () -> Unit) -> Unit 
 
 @Composable
 fun RowMenu(title: String, content: @Composable (close: () -> Unit) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-
-    Box {
-        MyButton({ open = true }, icon = MyIcon.MoreVertical, description = "More for $title", size = ButtonSize.Sm, muted = true, selected = open)
-
-        if (open) {
-            MenuPopup(onDismiss = { open = false }) {
-                content { open = false }
-            }
-        }
-    }
+    RowMenu(title, rememberRowMenuState(), content)
 }
 
 @Composable

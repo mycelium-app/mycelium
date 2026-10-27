@@ -85,7 +85,7 @@ internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assist
     }
 
     if (assistant.conversationId != null) {
-        MenuItem("Clear", onClick = { close(); store.clearAssistant(assistant) }, leading = MyIcon.Close)
+        MenuItem("Clear", onClick = { close(); store.clearAssistant(assistant) }, leading = MyIcon.Refresh)
     }
 
     MenuItem("Settings", onClick = { close(); onSettings() }, leading = MyIcon.Sliders)
@@ -108,7 +108,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = rowHeight())
-                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id), shape = BlockShape)
+                    .pressable({ onRoute(Route.Assistant(assistant.id)) }, description = "${assistant.name}, ${assistantStateName(assistant.state)}", selected = route == Route.Assistant(assistant.id) || menu.open, shape = BlockShape)
                     .padding(horizontal = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
@@ -123,10 +123,8 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 }
             }
 
-            Box(Modifier.align(Alignment.CenterEnd).padding(end = Tokens.Space.S1).background(MyTheme.colors.bgRaised, ControlShape)) {
-                RowMenu(assistant.name, menu, revealOnHover = true) { close ->
-                    AssistantMenuItems(store, state, assistant, close, onSettings = { onRoute(Route.AssistantSettings(assistant.id)) })
-                }
+            RowMenuPopup(menu) { close ->
+                AssistantMenuItems(store, state, assistant, close, onSettings = { onRoute(Route.AssistantSettings(assistant.id)) })
             }
         }
     }

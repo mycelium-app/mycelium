@@ -1,6 +1,13 @@
 package mycelium.desktop
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -83,20 +90,48 @@ class UiConsistencyTest {
 
     private fun appears(description: String) = rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription(description).fetchSemanticsNodes().isNotEmpty() }
 
-    @Test
-    fun theSidebarAssistantRowMenuClosesItsSession() {
-        show("done", Route.Empty)
-        appears("Actions for Stand-up")
+    private fun assistantRow() = rule.onNode(hasContentDescription("Stand-up, ", substring = true))
 
-        rule.onNodeWithContentDescription("Actions for Stand-up").performClick()
-
+    private fun assertAssistantMenuItems() {
         for (item in listOf("Pin", "Close session", "Clear", "Settings", "Archive")) {
             assertEquals(1, rule.onAllNodesWithText(item).fetchSemanticsNodes().size, item)
         }
+    }
+
+    @Test
+    fun theSidebarAssistantRowMenuClosesItsSession() {
+        show("done", Route.Empty)
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Stand-up, ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+
+        assistantRow().performMouseInput { rightClick() }
+        assertAssistantMenuItems()
 
         rule.onNodeWithText("Close session").performClick()
 
         rule.waitUntil(5_000) { "/api/v1/conversations/c1/close" in posts }
+    }
+
+    @Test
+    fun shiftF10OnTheFocusedSidebarRowOpensTheSameMenu() {
+        show("done", Route.Empty)
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Stand-up, ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+
+        assistantRow().requestFocus()
+        assistantRow().performKeyInput {
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.F10)
+            keyUp(Key.ShiftLeft)
+        }
+
+        assertAssistantMenuItems()
+    }
+
+    @Test
+    fun theSidebarHasNoActionsButtonOnItsRows() {
+        show("done", Route.Empty)
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Stand-up, ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+
+        assertTrue(rule.onAllNodes(hasContentDescription("Actions for ", substring = true)).fetchSemanticsNodes().isEmpty())
     }
 
     @Test
