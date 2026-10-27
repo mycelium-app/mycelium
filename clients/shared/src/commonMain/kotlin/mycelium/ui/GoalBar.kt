@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -19,7 +18,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.delay
 import kotlin.time.Clock
 import mycelium.api.Goal
 import mycelium.api.GoalState
@@ -57,12 +55,7 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
         }
     }
     val message = goalMessage(goal)
-    val now by produceState(Clock.System.now(), goal.timeLimitSeconds) {
-        while (goal.timeLimitSeconds != null) {
-            delay(ClockTickMillis)
-            value = Clock.System.now()
-        }
-    }
+    val now = rememberNow(ClockTickMillis, ticking = goal.timeLimitSeconds != null)
     val progress = goalProgress(goal, now)
 
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Goal" }) {

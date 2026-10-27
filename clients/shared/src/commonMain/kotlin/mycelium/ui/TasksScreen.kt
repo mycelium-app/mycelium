@@ -31,8 +31,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import mycelium.Platform
 import mycelium.api.ConversationStatus
 import mycelium.api.CreateTaskRequest
@@ -91,7 +89,6 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
     var agentMenu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var answering by remember { mutableStateOf<Task?>(null) }
-    var now by remember { mutableStateOf(kotlin.time.Clock.System.now()) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshBoard() }
@@ -107,14 +104,8 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
         }
     }
 
-    if (claimed.any { it.conversation?.status == ConversationStatus.Working }) {
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(TickMillis)
-                now = kotlin.time.Clock.System.now()
-            }
-        }
-    }
+    val running = claimed.any { it.conversation?.status == ConversationStatus.Working }
+    val now = rememberNow(TickMillis, ticking = running)
 
     fun toggle(lane: Lane) {
         collapsed = if (lane in collapsed) collapsed - lane else collapsed + lane
@@ -438,10 +429,10 @@ private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
 
 @Composable
 internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp = Tokens.Space.S4, onCancel: (() -> Unit)? = null) {
-    val scope = rememberCoroutineScope()
     var answer by remember { mutableStateOf("") }
     var answerError by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
+    val run = rememberAttempt { failure = it }
     var running by remember { mutableStateOf(false) }
 
     fun submit(text: String) {
@@ -458,9 +449,12 @@ internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp 
         failure = null
         running = true
 
-        scope.launch {
-            failure = attempt { send(text.trim()) }
-            running = false
+        run {
+            try {
+                send(text.trim())
+            } finally {
+                running = false
+            }
         }
     }
 
@@ -486,7 +480,6 @@ internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp 
 
 @Composable
 private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
     val place = remember { Place() }
     var title by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
@@ -495,6 +488,7 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
     var titleError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
+    val run = rememberAttempt { failure = it }
     var running by remember { mutableStateOf(false) }
 
     fun submit() {
@@ -525,12 +519,13 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
         failure = null
         running = true
 
-        scope.launch {
-            failure = attempt {
+        run {
+            try {
                 store.createTask(request)
                 onDismiss()
+            } finally {
+                running = false
             }
-            running = false
         }
     }
 

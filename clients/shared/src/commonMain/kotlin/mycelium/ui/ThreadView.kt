@@ -58,10 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.produceState
-import kotlinx.coroutines.delay
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.seconds
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
@@ -121,12 +118,7 @@ fun ThreadView(
 ) {
     val state = rememberLazyListState()
     val loadOlder by rememberUpdatedState(onLoadOlder)
-    val now by produceState(Clock.System.now()) {
-        while (true) {
-            delay(30.seconds)
-            value = Clock.System.now()
-        }
-    }
+    val now = rememberNow(30_000L)
     val pinned = remember(items, dismissedPins, now) { pinnedCards(items, dismissedPins, now) }
     val pinnedKeys = remember(pinned) { pinned.map { it.key }.toSet() }
     val scope = rememberCoroutineScope()
