@@ -47,7 +47,9 @@ data class Col(
     val numeric: Boolean = false,
     val priority: Int = 0,
     val rigid: Boolean = false,
-)
+) {
+    val endAligned: Boolean get() = numeric || align == ColumnAlign.End
+}
 
 sealed interface TableCell {
     data class Text(val text: String, val style: TextStyle = Tokens.Type.Ui, val color: Color? = null) : TableCell
@@ -195,8 +197,8 @@ fun Table(
         }
 
         val headerFloor = if (header) visible.map { measure(it, headerCell(it)) } else visible.map { 0 }
-        val outerNatural = visible.mapIndexed { position, column -> maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
-        val outerMin = visible.mapIndexed { position, column -> maxOf(headerFloor[position], if (columns[column].rigid) maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) else with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex) inset else 0 }
+        val outerNatural = visible.mapIndexed { position, column -> maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex || columns[column].endAligned) inset else 0 }
+        val outerMin = visible.mapIndexed { position, column -> maxOf(headerFloor[position], if (columns[column].rigid) maxOf(natural[position], with(density) { columns[column].min.roundToPx() }) else with(density) { columns[column].min.roundToPx() }) + inset + if (position == visible.lastIndex || columns[column].endAligned) inset else 0 }
         val borderTotal = if (card) border * 2 else 0
         val available = if (constraints.hasBoundedWidth) constraints.maxWidth - borderTotal else outerNatural.sum()
         val resolved = resolveTable(outerMin, outerNatural, visible.map { columns[it].weight }, available, fill)
@@ -290,7 +292,7 @@ private fun TableRow(widths: List<Int>, minHeight: Dp, topAligned: Boolean, modi
 @Composable
 private fun CellBox(spec: Col, source: TableCell, wrapped: Boolean, last: Boolean, muted: Boolean) {
     val inset = Tokens.Space.S3
-    val align = if (spec.numeric) ColumnAlign.End else spec.align
+    val align = if (spec.endAligned) ColumnAlign.End else spec.align
 
     val alignment = when (align) {
         ColumnAlign.Start -> Alignment.CenterStart
@@ -304,7 +306,7 @@ private fun CellBox(spec: Col, source: TableCell, wrapped: Boolean, last: Boolea
         ColumnAlign.End -> TextAlign.End
     }
 
-    Box(Modifier.fillMaxWidth().padding(start = inset, end = if (last) inset else 0.dp), contentAlignment = alignment) {
+    Box(Modifier.fillMaxWidth().padding(start = inset, end = if (last || spec.endAligned) inset else 0.dp), contentAlignment = alignment) {
         when (source) {
             is TableCell.Text -> {
                 val style = if (spec.numeric) source.style.copy(fontFeatureSettings = "tnum") else source.style

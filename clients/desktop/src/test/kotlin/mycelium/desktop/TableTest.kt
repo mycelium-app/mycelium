@@ -111,6 +111,16 @@ class TableTest {
     }
 
     @Test
+    fun rightAlignedHeaderKeepsItsEndPaddingAtEveryWidth() {
+        show()
+
+        atEveryWidth { width ->
+            assertTrue(bounds("Status").left - bounds("Count").right >= 24.dp, "Count header and cells keep 12dp end padding at $width")
+            assertTrue(bounds("Status").left - bounds("12345").right >= 24.dp, "Count cells keep 12dp end padding at $width")
+        }
+    }
+
+    @Test
     fun headerScrollsWithBody() {
         available.value = 320.dp
         show()
