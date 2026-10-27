@@ -155,11 +155,15 @@ pub fn tools_instructions() -> String {
 }
 
 pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: HeaderMap, Json(request): Json<Value>) -> ApiResult<Response> {
+    respond(&state, node.id, &headers, request).await
+}
+
+pub async fn respond(state: &AppState, node_id: Uuid, headers: &HeaderMap, request: Value) -> ApiResult<Response> {
     let Some(id) = request.get("id").cloned() else {
         return Ok(StatusCode::ACCEPTED.into_response());
     };
     let params = request.get("params").cloned().unwrap_or(Value::Null);
-    let caller = Caller { state: &state, node_id: node.id, headers: &headers };
+    let caller = Caller { state, node_id, headers };
 
     let response = match request.get("method").and_then(Value::as_str).unwrap_or_default() {
         "initialize" => {
@@ -174,7 +178,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
         "tools/list" => {
             let mut tools = tool_definitions().as_array().cloned().unwrap_or_default();
             let learning = match caller.conversation().await? {
-                Some((conversation_id, _)) => learned::active_source(&state, conversation_id).await?.is_some(),
+                Some((conversation_id, _)) => learned::active_source(state, conversation_id).await?.is_some(),
                 None => false,
             };
 
@@ -242,7 +246,7 @@ pub async fn call_in_process(state: &AppState, node_id: Uuid, conversation_id: U
 
     headers.insert("x-mycelium-conversation", conversation_id.to_string().parse().map_err(crate::error::ApiError::internal)?);
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
-    let response = handle(State(state.clone()), AuthNode { id: node_id }, headers, Json(request)).await?;
+    let response = respond(state, node_id, &headers, request).await?;
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.map_err(crate::error::ApiError::internal)?;
     let answer: Value = serde_json::from_slice(&bytes).map_err(crate::error::ApiError::internal)?;
 

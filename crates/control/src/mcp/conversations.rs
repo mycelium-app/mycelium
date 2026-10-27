@@ -177,7 +177,6 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
             let Ok(agent) = crate::store::parse_enum(&agent) else {
                 return Ok(nothing("The agent is claude or codex.".to_string()));
             };
-            let user = crate::auth::AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
             let request = mycelium_proto::api::CreateConversationRequest {
                 node_id: place.0,
                 agent,
@@ -196,7 +195,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 Err(error) => return Ok(nothing(error.message().to_string())),
             };
 
-            conversation_connections::connect(state, &user, conversation_id, started.id).await?;
+            conversation_connections::connect(state, owner, conversation_id, started.id).await?;
             let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(started.node_id).fetch_one(&state.pool).await?;
 
             ToolReply::text(&format!("Started {} ({}) in {target_name} on {node_name}. The reason was: {reason}", message_proposals::label(started.id, &started.title), started.id), false)

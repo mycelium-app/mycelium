@@ -339,8 +339,7 @@ async fn link_native(
         let connect = sqlx::query_scalar::<_, bool>("select exists (select 1 from start_proposals where workflow_id = $1 and connect)").bind(workflow).fetch_one(&state.pool).await?;
 
         if connect {
-            let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
-            let connected = crate::conversation_connections::connect(state, &user, parent, conversation).await;
+            let connected = crate::conversation_connections::connect(state, owner, parent, conversation).await;
 
             if let Err(error) = connected {
                 tracing::warn!(%workflow, error = error.message(), "connecting the step conversation failed");

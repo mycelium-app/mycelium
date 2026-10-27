@@ -187,9 +187,9 @@ pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, 
     }
 
     let source = found.conversation_id.ok_or_else(|| ApiError::conflict("source_removed", "The source conversation has been removed."))?;
-    crate::conversation_connections::connect(&state, &user, source, found.target_id).await?;
+    crate::conversation_connections::connect(&state, user.id, source, found.target_id).await?;
 
-    approve(State(state), user, Path(id)).await
+    Ok(Json(approve_for(&state, user.id, id).await?))
 }
 
 pub async fn approve_and_connect_groups(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
@@ -211,7 +211,7 @@ pub async fn approve_and_connect_groups(State(state): State<AppState>, user: Aut
         return Err(ApiError::conflict("connection_same_group", "Both conversations are already in the same group, so there is nothing to connect. Approve the message without connecting groups."));
     }
 
-    crate::group_connections::connect(&state, &user, source_group, target_group).await?;
+    crate::group_connections::connect(&state, user.id, source_group, target_group).await?;
 
-    approve(State(state), user, Path(id)).await
+    Ok(Json(approve_for(&state, user.id, id).await?))
 }

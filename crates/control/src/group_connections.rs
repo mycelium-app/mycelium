@@ -77,20 +77,18 @@ async fn publish(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<GroupConn
     Ok(connection)
 }
 
-pub async fn connect(state: &AppState, user: &AuthUser, source: Uuid, target: Uuid) -> ApiResult<GroupConnection> {
-    user.require_full_access()?;
-
+pub async fn connect(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -> ApiResult<GroupConnection> {
     if source == target {
         return Err(ApiError::bad_request("connection_self", "Choose two different groups."));
     }
 
-    crate::groups::find_owned(state, source, user.id).await?;
-    crate::groups::find_owned(state, target, user.id).await?;
+    crate::groups::find_owned(state, source, owner).await?;
+    crate::groups::find_owned(state, target, owner).await?;
 
     let id = sqlx::query_scalar::<_, Uuid>("insert into group_connections (owner, source_group_id, target_group_id) values ($1, least($2, $3), greatest($2, $3)) on conflict (owner, source_group_id, target_group_id) do update set revoked_at = null returning id")
-        .bind(user.id).bind(source).bind(target).fetch_one(&state.pool).await?;
+        .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
 
-    publish(state, user.id, id).await
+    publish(state, owner, id).await
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<GroupConnection>>> {
@@ -104,7 +102,8 @@ pub async fn create(
     user: AuthUser,
     Json(request): Json<CreateGroupConnectionRequest>,
 ) -> ApiResult<(StatusCode, Json<GroupConnection>)> {
-    let connection = connect(&state, &user, request.source_group_id, request.target_group_id).await?;
+    user.require_full_access()?;
+    let connection = connect(&state, user.id, request.source_group_id, request.target_group_id).await?;
 
     Ok((StatusCode::CREATED, Json(connection)))
 }

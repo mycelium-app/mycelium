@@ -45,12 +45,10 @@ pub async fn active(state: &AppState, owner: Uuid, source: Uuid, target: Uuid) -
 
 pub async fn connect(
     state: &AppState,
-    user: &AuthUser,
+    owner: Uuid,
     source: Uuid,
     target: Uuid,
 ) -> ApiResult<ConversationConnection> {
-    user.require_full_access()?;
-
     if source == target {
         return Err(ApiError::bad_request(
             "connection_self",
@@ -63,7 +61,7 @@ pub async fn connect(
             "select archived_at from conversations where id = $1 and owner = $2",
         )
         .bind(id)
-        .bind(user.id)
+        .bind(owner)
         .fetch_optional(&state.pool)
         .await?;
 
@@ -80,17 +78,17 @@ pub async fn connect(
     }
 
     let id = sqlx::query_scalar::<_, Uuid>("insert into conversation_connections (owner, source_id, target_id) values ($1, least($2, $3), greatest($2, $3)) on conflict (owner, source_id, target_id) do update set revoked_at = null returning id")
-        .bind(user.id).bind(source).bind(target).fetch_one(&state.pool).await?;
+        .bind(owner).bind(source).bind(target).fetch_one(&state.pool).await?;
     let row = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
         "select {COLUMNS} from {JOINS} where c.id = $1 and c.owner = $2"
     )))
     .bind(id)
-    .bind(user.id)
+    .bind(owner)
     .fetch_one(&state.pool)
     .await?;
     let connection = row.to_proto();
     state.publish(
-        Some(user.id),
+        Some(owner),
         StreamMessage::ConversationConnection(connection.clone()),
     );
 
@@ -113,7 +111,8 @@ pub async fn create(
     user: AuthUser,
     Json(request): Json<CreateConversationConnectionRequest>,
 ) -> ApiResult<(StatusCode, Json<ConversationConnection>)> {
-    let connection = connect(&state, &user, request.source_id, request.target_id).await?;
+    user.require_full_access()?;
+    let connection = connect(&state, user.id, request.source_id, request.target_id).await?;
 
     Ok((StatusCode::CREATED, Json(connection)))
 }

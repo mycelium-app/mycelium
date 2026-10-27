@@ -186,7 +186,12 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<ApproveStartProposalRequest>>) -> ApiResult<Json<StartProposal>> {
     let request = request.map(|Json(request)| request).unwrap_or_default();
-    let found = find_owned(&state, id, user.id).await?;
+
+    Ok(Json(approve_for(&state, user.id, id, request).await?))
+}
+
+pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: ApproveStartProposalRequest) -> ApiResult<StartProposal> {
+    let found = find_owned(state, id, owner).await?;
 
     if found.state != "proposed" {
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
@@ -221,7 +226,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    let created = crate::workflows::create_owned(&state, user.id, None, found.conversation_id, plan).await;
+    let created = crate::workflows::create_owned(state, owner, None, found.conversation_id, plan).await;
 
     match created {
         Ok(workflow) => {
@@ -234,7 +239,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         }
     }
 
-    Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?).await?))
+    publish(state, owner, find_owned(state, id, owner).await?).await
 }
 
 pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<ApproveStartProposalRequest>>) -> ApiResult<Json<StartProposal>> {
@@ -250,13 +255,13 @@ pub async fn approve_and_connect(State(state): State<AppState>, user: AuthUser, 
     }
 
     sqlx::query("update start_proposals set connect = true where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?;
-    let approved = approve(State(state.clone()), user, Path(id), request).await;
+    let approved = approve_for(&state, user.id, id, request.map(|Json(request)| request).unwrap_or_default()).await;
 
     if approved.is_err() {
         sqlx::query("update start_proposals set connect = false where id = $1 and state = 'proposed'").bind(id).execute(&state.pool).await?;
     }
 
-    approved
+    Ok(Json(approved?))
 }
 
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<StartProposal>> {
