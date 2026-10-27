@@ -51,7 +51,6 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Instructions("Instructions", MyIcon.File, "The AGENTS.md every conversation starts with"),
     Memories("Memories", MyIcon.Info),
     Sessions("Sessions", MyIcon.Key, "Clients and nodes signed in to your account"),
-    ChatModels("Chat models", MyIcon.Chip),
     Connections("Agent connections", MyIcon.Send, "Permissions for conversations to message each other"),
     ChatTools("Integrations", MyIcon.Sliders, "Services and tools available to conversations"),
     Forges("Forges", MyIcon.Forge),
@@ -72,7 +71,7 @@ private class GroupLinks(val tab: String?, val openHours: (String) -> Unit, val 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, onSignOut: () -> Unit) {
-    var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
+    var section by remember { mutableStateOf(startOn) }
     var openGroup by remember { mutableStateOf(startGroup) }
     var groupTab by remember { mutableStateOf(startGroupTab) }
     val touch = LocalTouch.current
@@ -186,7 +185,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
             SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store, links.openHours)
             SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
-            SettingsSection.Accounts, SettingsSection.ChatModels -> {
+            SettingsSection.Accounts -> {
                 AccountsSettings(store)
                 ModelProvidersSettings(store)
                 DecisionsSettings(store)

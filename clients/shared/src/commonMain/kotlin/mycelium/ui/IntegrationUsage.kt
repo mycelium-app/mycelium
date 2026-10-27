@@ -24,6 +24,7 @@ import mycelium.api.IntegrationCall
 import mycelium.state.ColumnAlign
 import mycelium.state.Store
 import mycelium.state.agentName
+import mycelium.state.instantOrNull
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
@@ -82,7 +83,7 @@ fun inRange(call: IntegrationCall, days: Int, now: Instant = Clock.System.now())
         return true
     }
 
-    val at = runCatching { Instant.parse(call.at) }.getOrNull() ?: return true
+    val at = instantOrNull(call.at) ?: return true
 
     return at >= now - days.days
 }

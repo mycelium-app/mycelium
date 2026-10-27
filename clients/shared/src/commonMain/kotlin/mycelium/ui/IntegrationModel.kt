@@ -2,6 +2,7 @@ package mycelium.ui
 
 import kotlinx.serialization.json.jsonPrimitive
 import mycelium.api.ChatToolServer
+import mycelium.state.instantOrNull
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Instant
@@ -172,7 +173,7 @@ fun expiryNote(server: ChatToolServer): String? {
 }
 
 fun daysUntil(iso: String, now: Instant = Clock.System.now()): Int? {
-    val at = runCatching { Instant.parse(iso) }.getOrNull() ?: return null
+    val at = instantOrNull(iso) ?: return null
 
     return (at - now).inWholeDays.toInt()
 }
@@ -218,5 +219,5 @@ fun expiryIn(days: Int, now: Instant = Clock.System.now()): String = (now + days
 fun expiryOn(date: String): String? {
     val trimmed = date.trim()
 
-    return runCatching { Instant.parse("${trimmed}T00:00:00Z") }.getOrNull()?.toString()
+    return instantOrNull("${trimmed}T00:00:00Z")?.toString()
 }

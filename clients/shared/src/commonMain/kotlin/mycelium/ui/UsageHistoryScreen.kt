@@ -33,6 +33,7 @@ import mycelium.state.approximateDollars
 import mycelium.state.approximateTokens
 import mycelium.state.dateTimeLabel
 import mycelium.state.dayLabel
+import mycelium.state.instantOrNull
 import mycelium.state.planName
 import mycelium.state.priceRatio
 import mycelium.state.readingsNote
@@ -145,8 +146,9 @@ private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) 
             )
         }
 
-        val from = account.readings.minOfOrNull { Instant.parse(it.at).toEpochMilliseconds() } ?: 0L
-        val until = account.readings.maxOfOrNull { Instant.parse(it.at).toEpochMilliseconds() } ?: 0L
+        val readingTimes = account.readings.mapNotNull { instantOrNull(it.at)?.toEpochMilliseconds() }
+        val from = readingTimes.minOrNull() ?: 0L
+        val until = readingTimes.maxOrNull() ?: 0L
 
         val fromLabel = dayLabel(Instant.fromEpochMilliseconds(from).toString().take(10))
         val untilLabel = dayLabel(Instant.fromEpochMilliseconds(until).toString().take(10))
@@ -162,7 +164,7 @@ private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) 
                     if (readings.isEmpty()) {
                         Label("No readings in this period.", style = Tokens.Type.Meta, color = colors.textMuted)
                     } else {
-                        PercentLineChart(readings.map { Instant.parse(it.at).toEpochMilliseconds() to it.percent }, from, until, "$title for $name. Peak ${peak?.percent?.toInt()}% on ${peak?.let { dateTimeLabel(it.at, local) }}, ${readings.size} readings.", fromLabel, untilLabel)
+                        PercentLineChart(readings.mapNotNull { reading -> instantOrNull(reading.at)?.let { it.toEpochMilliseconds() to reading.percent } }, from, until, "$title for $name. Peak ${peak?.percent?.toInt()}% on ${peak?.let { dateTimeLabel(it.at, local) }}, ${readings.size} readings.", fromLabel, untilLabel)
                     }
                 }
             }

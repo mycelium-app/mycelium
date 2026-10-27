@@ -12,14 +12,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.jsonPrimitive
 import mycelium.api.CalendarAccess
 import mycelium.api.ChatToolServer
@@ -48,14 +46,13 @@ private fun resolveExpiry(choice: String, customDate: String): String? = when (c
 @Composable
 fun AccountPage(store: Store, integration: Integration, account: ChatToolServer, actions: PageActions, onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
+    val rename = rememberAction()
     val live by store.state.collectAsState()
     var tab by remember { mutableStateOf(Overview) }
     var grants by remember(account.id) { mutableStateOf<List<IntegrationApiGrant>>(emptyList()) }
     var changing by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf(false) }
     var renamed by remember { mutableStateOf<String?>(null) }
-    var renameFailure by remember { mutableStateOf<String?>(null) }
     val title = accountTitle(account)
     val reauthenticates = account.oauth || account.kind == "lastfm"
     val calendar = account.kind == "caldav"
@@ -149,7 +146,7 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
                 Hairline()
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                    MyButton({ renamed = account.name; renameFailure = null }, text = "Rename account", variant = ButtonVariant.Outline)
+                    MyButton({ renamed = account.name; rename.failure = null }, text = "Rename account", variant = ButtonVariant.Outline)
 
                     if (account.kind == "mcp" || account.kind == "litellm") {
                         MyButton({ store.act { actions.onReplace(store.api.refreshChatToolServer(account.id)) } }, text = "Refresh tools", icon = MyIcon.Refresh, variant = ButtonVariant.Outline)
@@ -204,13 +201,11 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
 
     renamed?.let { name ->
         RenameDialog("Rename account", "Account name", name, { renamed = it }, {
-            scope.launch {
-                renameFailure = attempt {
-                    actions.onReplace(store.api.patchChatToolServer(account.id, PatchChatToolServerRequest(name = name.trim())))
-                    renamed = null
-                }
+            rename {
+                actions.onReplace(store.api.patchChatToolServer(account.id, PatchChatToolServerRequest(name = name.trim())))
+                renamed = null
             }
-        }, { renamed = null }, renameFailure, { renameFailure = null })
+        }, { renamed = null }, rename.failure, { rename.failure = null })
     }
 
     if (removing) {
