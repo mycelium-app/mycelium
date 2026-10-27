@@ -4,7 +4,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
 use crate::snapshots;
 use crate::state::AppState;
-use crate::store::find_owned;
+use crate::store;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{FromRequestParts, Path, Query, Request, State};
@@ -210,7 +210,7 @@ pub(crate) async fn republish(state: &AppState, id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-async fn owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
+async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That artefact"))
@@ -364,7 +364,7 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
     let media_type = media_type_of(new.kind, new.media_type)?;
 
     if let Some(conversation_id) = new.conversation_id {
-        find_owned(&state.pool, conversation_id, new.owner).await?;
+        store::find_owned(&state.pool, conversation_id, new.owner).await?;
     }
 
     let (sha256, _, _) = attachments::store(state, new.owner, &bytes, &media_type).await?;
@@ -386,7 +386,7 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
 
     tx.commit().await?;
 
-    let row = owned(state, row.id, new.owner).await?;
+    let row = find_owned(state, row.id, new.owner).await?;
     let artifact = full(state, row).await?;
     announce(state, &artifact);
     snapshots::spawn(state, &artifact);
@@ -436,7 +436,7 @@ async fn add_version(state: &AppState, row: &ArtifactRow, author: ArtifactAuthor
 }
 
 pub async fn create_version(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<AddArtifactVersionRequest>) -> ApiResult<(StatusCode, Json<Artifact>)> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let content = decode(request.content, request.content_base64)?.ok_or_else(|| ApiError::bad_request("content_required", "Give the content of the new version."))?;
     let artifact = add_version(&state, &row, ArtifactAuthor::Person, &content, request.note.as_deref()).await?;
 
@@ -467,7 +467,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Artifact>> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
 
     Ok(Json(full(&state, row).await?))
 }
@@ -494,7 +494,7 @@ fn content_response(kind: &str, media_type: &str, sha256: &str, bytes: Vec<u8>) 
 }
 
 pub async fn content(State(state): State<AppState>, user: AuthUser, Path((id, version)): Path<(Uuid, i32)>) -> ApiResult<Response> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let stored = sqlx::query_as::<_, (String, String)>("select media_type, sha256 from artifact_versions where artifact_id = $1 and version = $2").bind(row.id).bind(version).fetch_optional(&state.pool).await?;
     let Some((media_type, sha256)) = stored else {
         return Err(ApiError::not_found("That version"));
@@ -505,7 +505,7 @@ pub async fn content(State(state): State<AppState>, user: AuthUser, Path((id, ve
 }
 
 pub async fn thumbnail(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Response> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let sha256 = sqlx::query_scalar::<_, String>("select thumbnail_sha256 from artifact_versions where artifact_id = $1 and thumbnail_sha256 is not null order by version desc limit 1").bind(row.id).fetch_optional(&state.pool).await?;
     let Some(sha256) = sha256 else {
         return Err(ApiError::not_found("That snapshot"));
@@ -526,7 +526,7 @@ pub async fn thumbnail(State(state): State<AppState>, user: AuthUser, Path(id): 
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchArtifactRequest>) -> ApiResult<Json<Artifact>> {
-    owned(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let title = request.title.as_deref().map(clean_title).transpose()?;
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("update artifacts set title = coalesce($2, title), public = coalesce($3, public), updated_at = now() where id = $1 returning {COLUMNS}")))
@@ -543,7 +543,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
 
     sqlx::query("delete from artifacts where id = $1").bind(id).execute(&state.pool).await?;
 
@@ -556,7 +556,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 }
 
 pub async fn create_comment(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<CreateArtifactCommentRequest>) -> ApiResult<(StatusCode, Json<ArtifactComment>)> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let body = request.body.trim();
 
     if body.is_empty() {
@@ -583,14 +583,14 @@ pub async fn create_comment(State(state): State<AppState>, user: AuthUser, Path(
 }
 
 pub async fn comments(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<ArtifactComment>>> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let rows = sqlx::query_as::<_, CommentRow>(sqlx::AssertSqlSafe(format!("select {COMMENT_COLUMNS} from artifact_comments where artifact_id = $1 order by created_at, id"))).bind(row.id).fetch_all(&state.pool).await?;
 
     Ok(Json(rows.into_iter().map(CommentRow::to_proto).collect()))
 }
 
 pub async fn patch_comment(State(state): State<AppState>, user: AuthUser, Path((id, comment_id)): Path<(Uuid, Uuid)>, Json(request): Json<PatchArtifactCommentRequest>) -> ApiResult<Json<ArtifactComment>> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let comment = sqlx::query_as::<_, CommentRow>(sqlx::AssertSqlSafe(format!("update artifact_comments set resolved = $3 where id = $2 and artifact_id = $1 returning {COMMENT_COLUMNS}")))
         .bind(row.id)
         .bind(comment_id)
@@ -638,13 +638,13 @@ async fn data_of(state: &AppState, artifact_id: Uuid) -> ApiResult<Vec<ArtifactD
 }
 
 pub async fn replace_data(State(state): State<AppState>, user: AuthUser, Path((id, key)): Path<(Uuid, String)>, Json(value): Json<Value>) -> ApiResult<Json<ArtifactDataEntry>> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
 
     Ok(Json(put_data(&state, row.id, &key, value).await?))
 }
 
 pub async fn data(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<ArtifactDataEntry>>> {
-    let row = owned(&state, id, user.id).await?;
+    let row = find_owned(&state, id, user.id).await?;
 
     Ok(Json(data_of(&state, row.id).await?))
 }
@@ -735,7 +735,7 @@ async fn resolve(state: &AppState, owner: Uuid, arguments: &Value) -> ApiResult<
     };
 
     match Uuid::parse_str(reference) {
-        Ok(id) => owned(state, id, owner).await,
+        Ok(id) => find_owned(state, id, owner).await,
         Err(_) => {
             let row = with_slug(state, reference).await?;
 
@@ -756,7 +756,7 @@ async fn content_from(state: &AppState, owner: Uuid, conversation_id: Uuid, argu
         (Some(_), Some(_)) => Err(ApiError::bad_request("content_ambiguous", "Give content or path, not both.")),
         (Some(text), None) => Ok(Some(text.as_bytes().to_vec())),
         (None, Some(path)) => {
-            let conversation = find_owned(&state.pool, conversation_id, owner).await?;
+            let conversation = store::find_owned(&state.pool, conversation_id, owner).await?;
             let answer = relay(state, conversation.node_id, conversation.cwd, GitCommand::ReadFile { path: path.to_string() }).await?;
             let encoded = answer["data"].as_str().unwrap_or_default();
             let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(ApiError::internal)?;

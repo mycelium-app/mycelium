@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -39,12 +39,16 @@ impl ForgeCache {
         ForgeCache { ttl, inner: Mutex::new(Inner::default()) }
     }
 
+    fn guard(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn key(forge: Uuid, url: &str) -> String {
         format!("{forge} GET {url}")
     }
 
     pub fn lookup(&self, key: &str) -> Cached {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.guard();
 
         inner.ticks += 1;
         let ticks = inner.ticks;
@@ -63,11 +67,11 @@ impl ForgeCache {
     }
 
     pub fn epoch(&self, forge: Uuid) -> u64 {
-        self.inner.lock().unwrap().epochs.get(&forge).copied().unwrap_or(0)
+        self.guard().epochs.get(&forge).copied().unwrap_or(0)
     }
 
     pub fn store(&self, forge: Uuid, key: String, value: Value, epoch: u64) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.guard();
 
         if inner.epochs.get(&forge).copied().unwrap_or(0) != epoch {
             return;
@@ -85,17 +89,17 @@ impl ForgeCache {
     }
 
     pub fn invalidate(&self, forge: Uuid) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.guard();
 
         *inner.epochs.entry(forge).or_insert(0) += 1;
         inner.entries.retain(|_, entry| entry.forge != forge);
     }
 
     pub fn claim_refresh(&self, key: &str) -> bool {
-        self.inner.lock().unwrap().refreshing.insert(key.to_string())
+        self.guard().refreshing.insert(key.to_string())
     }
 
     pub fn finish_refresh(&self, key: &str) {
-        self.inner.lock().unwrap().refreshing.remove(key);
+        self.guard().refreshing.remove(key);
     }
 }

@@ -198,14 +198,14 @@ pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str,
     }
 }
 
-async fn owned(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ServerRow> {
+async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ServerRow> {
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!("select {SERVER_COLUMNS} from chat_tool_servers where id = $1 and owner = $2 and kind = 'lastfm'"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That Last.fm integration"))
 }
 
 pub async fn start_sign_in(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<LastFmSignIn>> {
-    let row = owned(&state, user.id, id).await?;
+    let row = find_owned(&state, id, user.id).await?;
     let sign_in = new_token();
     let callback = format!("{}/integrations/lastfm/callback?sign_in={sign_in}", state.config.public_url);
     let mut authorise = url::Url::parse(AUTHORISE_ADDRESS).map_err(ApiError::internal)?;
@@ -229,7 +229,7 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
     let Some(token) = query.token else {
         return page(StatusCode::BAD_REQUEST, "Last.fm did not sign you in. Start it again from Settings, Integrations.");
     };
-    let Ok(row) = owned(&state, pending.owner, pending.server).await else {
+    let Ok(row) = find_owned(&state, pending.server, pending.owner).await else {
         return page(StatusCode::BAD_REQUEST, "This Last.fm integration no longer exists.");
     };
     let session = send(&state.http, &row.credentials(), "auth.getSession", &[("token", token)], true, false).await;
@@ -250,7 +250,7 @@ pub async fn callback(State(state): State<AppState>, Query(query): Query<Callbac
 }
 
 pub async fn sign_out(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    owned(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
     sqlx::query("update chat_tool_servers set session_key = null where id = $1").bind(id).execute(&state.pool).await?;
     state.hub.tools_changed(user.id);
     state.publish(Some(user.id), StreamMessage::IntegrationsChanged);
