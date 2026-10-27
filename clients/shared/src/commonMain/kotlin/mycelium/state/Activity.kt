@@ -4,7 +4,7 @@ import mycelium.api.Activity
 import mycelium.api.ActivityRow
 import kotlin.math.roundToInt
 
-val ActivityRanges = listOf("Today" to "today", "7 days" to "7d", "30 days" to "30d")
+val ActivityRanges = listOf("Today" to "today", "7 days" to "7d", "30 days" to "30d", "All time" to "all")
 
 private val Months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
@@ -58,6 +58,16 @@ fun usageNotice(activity: Activity): String? {
 }
 
 fun tokensPerHourSummary(activity: Activity): String {
+    if (activity.range == "all") {
+        val busiest = activity.days.maxByOrNull { it.tokens }
+
+        if (busiest == null || busiest.tokens == 0L) {
+            return "No tokens were reported on these days."
+        }
+
+        return "Peak ${formatTokens(busiest.tokens)} on ${dayLabel(busiest.key)}, ${formatTokens(activity.totals.tokens)} in total."
+    }
+
     val peak = activity.hours.maxByOrNull { it.tokens }
 
     if (peak == null || peak.tokens == 0L) {
@@ -67,7 +77,7 @@ fun tokensPerHourSummary(activity: Activity): String {
     return "Peak ${formatTokens(peak.tokens)} in the hour from ${dayLabel(peak.key.take(10))} ${peak.key.takeLast(2)}:00, ${formatTokens(activity.totals.tokens)} in total."
 }
 
-fun tokensPerHourTitle(range: String): String = if (range == "today") "Tokens per hour, today" else "Tokens per hour, last ${ActivityRanges.first { it.second == range }.first}"
+fun tokensPerHourTitle(range: String): String = if (range == "all") "Tokens per day, all time" else if (range == "today") "Tokens per hour, today" else "Tokens per hour, last ${ActivityRanges.first { it.second == range }.first}"
 
 const val WhPerThousandOutputTokens = 0.6
 const val WhPerThousandInputTokens = 0.2

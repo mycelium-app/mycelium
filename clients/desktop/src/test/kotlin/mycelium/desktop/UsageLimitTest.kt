@@ -81,15 +81,16 @@ class UsageLimitTest {
     fun aUsageLimitIsExplainedInPlaceOfAnInternalError() {
         show(store())
 
-        rule.onNodeWithText("Claude Code's 5-hour limit is reached. It resets at 15:30.").assertExists()
+        rule.onNodeWithText("Paused until Claude Code's 5-hour limit resets at 15:30.").assertExists()
         rule.onNodeWithContentDescription("Error: Internal error: You've hit your session limit").assertDoesNotExist()
+        rule.onNodeWithText("Claude Code said: You've hit your session limit", substring = true).assertExists()
     }
 
     @Test
     fun aLimitWithoutAResetTimeOffersOnlyToRetry() {
         show(store(resetsAt = null))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Claude Code's 5-hour limit is reached. Mycelium does not know when it resets.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Paused at Claude Code's 5-hour limit. Mycelium does not know when it resets.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Retry this conversation now").assertExists()
         rule.onNodeWithText("Resume at", substring = true).assertDoesNotExist()
     }
@@ -120,7 +121,7 @@ class UsageLimitTest {
     fun aPendingResumeIsShownInTheThreadAndCanBeCancelledThere() {
         show(store(resumeAt = ResumesToday))
 
-        rule.onNodeWithText("Resumes at 15:31.").assertExists()
+        rule.onNodeWithText("Resumes automatically at 15:31.").assertExists()
         rule.onNodeWithContentDescription("Cancel the automatic resume").performClick()
 
         rule.waitUntil(5_000) { calls.isNotEmpty() }
@@ -132,7 +133,7 @@ class UsageLimitTest {
     fun aPendingResumeIsMarkedOnItsSidebarRowAndCanBeCancelledThere() {
         show(store(resumeAt = ResumesToday))
 
-        rule.onNodeWithText("Waiting for reset").assertExists()
+        rule.onNodeWithText("Paused until 15:30").assertExists()
         rule.onNodeWithContentDescription("Cancel the automatic resume of Plan the rollout, due at 15:31").performClick()
 
         rule.waitUntil(5_000) { calls.isNotEmpty() }

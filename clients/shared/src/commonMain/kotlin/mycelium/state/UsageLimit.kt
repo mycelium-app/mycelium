@@ -15,6 +15,8 @@ fun limitName(window: String): String = when (window) {
 
 fun resumeTimeAfter(resetsAt: String): String? = runCatching { (Instant.parse(resetsAt) + ResumeDelay).toString() }.getOrNull()
 
+fun resetBefore(resumeAt: String): String? = runCatching { (Instant.parse(resumeAt) - ResumeDelay).toString() }.getOrNull()
+
 fun clockTime(iso: String, now: Instant = Clock.System.now(), localDateTime: (Long) -> String?): String {
     val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
     val local = localDateTime(moment.toEpochMilliseconds()) ?: moment.toString().substringBefore('Z')

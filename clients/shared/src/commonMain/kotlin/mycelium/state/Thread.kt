@@ -4,12 +4,15 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import mycelium.api.Attachment
 import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.MyceliumJson
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 
 enum class ToolStatus { Pending, Running, Done, Failed }
@@ -39,11 +42,22 @@ data class WorkflowAgent(
     val elapsedMs: Long? = null,
     val agentId: String? = null,
     val failed: Boolean = false,
+    val paused: Boolean = false,
 )
 
-data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList(), val lastLineAt: Instant? = null) {
+data class WorkflowEnd(val state: String, val endedAt: Instant? = null, val reason: String? = null)
+
+val WorkflowStalledAfter = 15.minutes
+
+data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, val plannedPhases: List<String> = emptyList(), val lastLineAt: Instant? = null, val limit: UsageLimitNote? = null, val end: WorkflowEnd? = null) {
+    val ended: Boolean get() = end != null
+    val stopped: Boolean get() = end?.state == WorkflowStates.Stopped
+    val failed: Boolean get() = end?.state == WorkflowStates.Failed
+    val over: Boolean get() = complete || ended
+    val paused: Boolean get() = limit != null && !over
+    val pausedUntil: String? get() = limit?.resetsAt
     val finishedCount: Int get() = agents.count { it.finished }
-    val complete: Boolean get() = agents.isNotEmpty() && finishedCount == agents.size
+    val complete: Boolean get() = end?.state == WorkflowStates.Completed || (end == null && agents.isNotEmpty() && finishedCount == agents.size)
     val phases: List<String> get() = (plannedPhases + agents.map { it.phase }).distinct()
     val totals: WorkflowAgent get() = WorkflowAgent(
         key = runId,
@@ -55,6 +69,16 @@ data class WorkflowProgress(val runId: String, val agents: List<WorkflowAgent>, 
         elapsedMs = agents.mapNotNull { it.elapsedMs }.takeIf { it.isNotEmpty() }?.sum(),
     )
 }
+
+object WorkflowStates {
+    const val Completed = "completed"
+    const val Failed = "failed"
+    const val Stopped = "stopped"
+}
+
+fun WorkflowProgress.quietFor(now: Instant): Duration? = lastLineAt?.let { now - it }
+
+fun WorkflowProgress.stalled(now: Instant): Boolean = !over && !paused && (quietFor(now) ?: Duration.ZERO) >= WorkflowStalledAfter
 
 fun workflowStats(agent: WorkflowAgent): String? = listOfNotNull(
     agent.tokens?.let { "${tokenCount(it)} toks" },
@@ -121,19 +145,21 @@ sealed interface ThreadItem {
         val options: List<PermissionOption>,
         val resolved: Boolean,
         val server: String? = null,
+        val account: String? = null,
+        val filter: String? = null,
+        val editsByDefault: Boolean = false,
         val input: JsonObject? = null,
         val callId: String? = null,
     ) : ThreadItem
 
-    data class Review(
+    data class ResponseEdit(
         override val key: String,
         val requestId: String,
         val server: String,
+        val account: String?,
         val tool: String,
-        val count: Int,
         val resolved: Boolean = false,
-        val decision: String? = null,
-        val removedCount: Int = 0,
+        val outcome: String? = null,
     ) : ThreadItem
 
     data class Note(override val key: String, val text: String) : ThreadItem
@@ -226,6 +252,13 @@ class ThreadBuilder {
         return true
     }
 
+    private fun addFailure(key: String, payload: JsonObject) {
+        val limit = usageLimitFrom(payload)
+
+        items.removeAll { it is ThreadItem.Failure && limit != null && it.limit == limit }
+        items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", limit)
+    }
+
     private fun fold(event: Event) {
         val payload = event.payload as? JsonObject ?: JsonObject(emptyMap())
         val key = "e${event.seq}"
@@ -235,10 +268,10 @@ class ThreadBuilder {
             EventKinds.AcpUpdate -> applyUpdate(items, key, payload)
             EventKinds.PermissionRequest -> requestPermission(items, permissionFrom(key, payload))
             EventKinds.PermissionResolved -> resolvePermission(items, payload.string("request_id"))
-            EventKinds.ReviewRequest -> items += ThreadItem.Review(key, payload.string("request_id") ?: key, payload.string("server").orEmpty(), payload.string("tool").orEmpty(), payload.int("count") ?: 0)
-            EventKinds.ReviewResolved -> resolveReview(items, payload)
+            EventKinds.ReviewRequest -> items += ThreadItem.ResponseEdit(key, payload.string("request_id") ?: key, payload.string("server").orEmpty(), payload.string("account"), payload.string("tool").orEmpty())
+            EventKinds.ReviewResolved -> resolveResponseEdit(items, payload)
             EventKinds.TurnEnd -> items += ThreadItem.TurnEnd(key, payload.string("stop_reason") ?: "end_turn")
-            EventKinds.Error -> items += ThreadItem.Failure(key, payload.string("message") ?: "The agent stopped with an error.", usageLimitFrom(payload))
+            EventKinds.Error -> addFailure(key, payload)
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += ThreadItem.Continued(key, continuedText(payload))
@@ -544,6 +577,9 @@ private fun permissionFrom(key: String, payload: JsonObject): ThreadItem.Permiss
         options = options,
         resolved = false,
         server = toolCall?.string("server"),
+        account = toolCall?.string("account"),
+        filter = toolCall?.string("filter"),
+        editsByDefault = (toolCall?.get("edit") as? JsonPrimitive)?.booleanOrNull == true,
         input = toolCall?.get("rawInput") as? JsonObject,
         callId = toolCall?.string("toolCallId"),
     )
@@ -572,12 +608,18 @@ private fun resolvePermission(items: MutableList<ThreadItem>, requestId: String?
     }
 }
 
-private fun resolveReview(items: MutableList<ThreadItem>, payload: JsonObject) {
-    val index = items.indexOfLast { it is ThreadItem.Review && it.requestId == payload.string("request_id") }
+private fun resolveResponseEdit(items: MutableList<ThreadItem>, payload: JsonObject) {
+    val index = items.indexOfLast { it is ThreadItem.ResponseEdit && it.requestId == payload.string("request_id") }
 
     if (index >= 0) {
-        items[index] = (items[index] as ThreadItem.Review).copy(resolved = true, decision = payload.string("decision"), removedCount = payload.int("removed_count") ?: 0)
+        items[index] = (items[index] as ThreadItem.ResponseEdit).copy(resolved = true, outcome = payload.string("outcome") ?: legacyOutcome(payload.string("decision")))
     }
+}
+
+private fun legacyOutcome(decision: String?): String = when (decision) {
+    "share" -> "sent"
+    "remove" -> "edited"
+    else -> "nothing"
 }
 
 private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, payload: JsonObject) {
@@ -586,7 +628,17 @@ private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, paylo
     val index = items.indexOfFirst { it is ThreadItem.Workflow && it.progress.runId == runId }
     val current = (items.getOrNull(index) as? ThreadItem.Workflow)?.progress ?: WorkflowProgress(runId, emptyList())
     val planned = (line["phases"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.takeIf { line.string("type") == "plan" }
-    val applied = if (planned != null) current.copy(plannedPhases = planned) else current.copy(agents = applyWorkflowJournal(current.agents, line))
+    val ended = workflowEnd(line)
+    val limit = usageLimitFrom(payload)
+    val journaled = applyWorkflowJournal(current.agents, line, paused = limit != null)
+    val resumed = line.string("type") == "started"
+    val applied = when {
+        planned != null -> current.copy(plannedPhases = planned)
+        ended != null -> current.copy(end = ended)
+        limit != null -> current.copy(agents = journaled, limit = limit)
+        resumed -> current.copy(agents = journaled, limit = null)
+        else -> current.copy(agents = journaled)
+    }
     val updated = applied.copy(lastLineAt = payload.string("at")?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: applied.lastLineAt)
 
     if (index < 0) {
@@ -597,13 +649,23 @@ private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, paylo
     items[index] = (items[index] as ThreadItem.Workflow).copy(progress = updated)
 }
 
-fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject): List<WorkflowAgent> {
+private fun workflowEnd(line: JsonObject): WorkflowEnd? {
+    if (line.string("type") != "ended") {
+        return null
+    }
+
+    val state = line.string("state") ?: return null
+
+    return WorkflowEnd(state, line.string("ended_at")?.let { runCatching { Instant.parse(it) }.getOrNull() }, line.string("reason"))
+}
+
+fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject, paused: Boolean = false): List<WorkflowAgent> {
     val agentKey = line.string("key") ?: return agents
 
     return when (line.string("type")) {
         "started" -> {
             if (agents.any { it.key == agentKey }) {
-                agents.map { if (it.key == agentKey) it.withStats(line) else it }
+                agents.map { if (it.key == agentKey) it.copy(paused = false).withStats(line) else it }
             } else {
                 agents + WorkflowAgent(
                     key = agentKey,
@@ -614,8 +676,13 @@ fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject): List<Wo
                 ).withStats(line)
             }
         }
-        "result" -> agents.map { if (it.key == agentKey) it.copy(finished = true).withStats(line) else it }
-        "failed" -> agents.map { if (it.key == agentKey) it.copy(finished = true, failed = true).withStats(line) else it }
+        "result", "failed" -> if (paused) {
+            agents.map { if (it.key == agentKey) it.copy(paused = true).withStats(line) else it }
+        } else if (line.string("type") == "result") {
+            agents.map { if (it.key == agentKey) it.copy(finished = true, paused = false).withStats(line) else it }
+        } else {
+            agents.map { if (it.key == agentKey) it.copy(finished = true, failed = true, paused = false).withStats(line) else it }
+        }
         else -> agents.map { if (it.key == agentKey) it.withStats(line) else it }
     }
 }

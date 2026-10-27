@@ -174,6 +174,18 @@ class ActivityTest {
     }
 
     @Test
+    fun allTimeAsksForTheWholeHistoryAndChartsTokensPerDay() {
+        showSidebar(Reported.replace("\"range\":\"7d\"", "\"range\":\"all\""))
+
+        rule.onNodeWithText("All time").performClick()
+        rule.waitForIdle()
+
+        assertEquals("range=all", asked.last())
+        rule.onNodeWithText("Tokens per day, all time").assertExists()
+        rule.onNodeWithText("Peak 181M on 2 Oct, 182M in total.").assertExists()
+    }
+
+    @Test
     fun aRangeWithNoTurnsSaysSoInsteadOfShowingZeros() {
         showSidebar(Empty)
 

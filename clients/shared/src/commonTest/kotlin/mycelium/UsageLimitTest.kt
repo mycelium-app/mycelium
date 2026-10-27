@@ -7,6 +7,7 @@ import mycelium.state.ThreadItem
 import mycelium.state.buildThread
 import mycelium.state.clockTime
 import mycelium.state.limitName
+import mycelium.state.resetBefore
 import mycelium.state.resumeTimeAfter
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -42,6 +43,34 @@ class UsageLimitTest {
     @Test
     fun windowsAreNamedForThePerson() {
         assertEquals(listOf("5-hour limit", "weekly limit", "weekly Opus limit", "usage limit"), listOf("five_hour", "seven_day", "seven_day_opus", "usage").map(::limitName))
+    }
+
+    @Test
+    fun theResetIsAMinuteBeforeTheResume() {
+        assertEquals("2026-10-23T15:30:00Z", resetBefore("2026-10-23T15:31:00Z"))
+    }
+
+    @Test
+    fun aSecondLimitReplyForTheSameResetReplacesTheFirstCard() {
+        val limit = """{"message":"x","usage_limit":{"window":"five_hour","resets_at":"2026-10-23T15:30:00Z"}}"""
+        val thread = buildThread(listOf(error(limit), Event("c1", 2, EventKinds.UserMessage, Json.parseToJsonElement("""{"text":"cont."}""")), Event("c1", 3, EventKinds.Error, Json.parseToJsonElement(limit))))
+
+        assertEquals(listOf("e2", "e3"), thread.map { it.key })
+    }
+
+    @Test
+    fun aWorkflowAgentStoppedByTheLimitIsPausedNotFailedAndResumesWhenItStartsAgain() {
+        val started = """{"type":"started","key":"k1","label":"Build","phase":"Implement"}"""
+        val failed = """{"type":"failed","key":"k1","reason":"You've hit your session limit"}"""
+        val limit = ""","usage_limit":{"window":"five_hour","resets_at":"2026-10-23T15:30:00Z"}"""
+
+        fun line(seq: Long, body: String, extra: String = "") = Event("c1", seq, EventKinds.Workflow, Json.parseToJsonElement("""{"run_id":"r1","line":$body$extra}"""))
+
+        val paused = assertIs<ThreadItem.Workflow>(buildThread(listOf(line(1, started), line(2, failed, limit))).single()).progress
+        val resumed = assertIs<ThreadItem.Workflow>(buildThread(listOf(line(1, started), line(2, failed, limit), line(3, started))).single()).progress
+
+        assertEquals(listOf(true, false, "2026-10-23T15:30:00Z"), listOf(paused.paused, paused.agents.single().failed, paused.pausedUntil))
+        assertEquals(listOf(false, false), listOf(resumed.paused, resumed.agents.single().paused))
     }
 
     @Test

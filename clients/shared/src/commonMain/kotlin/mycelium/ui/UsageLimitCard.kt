@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -25,14 +26,13 @@ data class LimitActions(
     val onCancelResume: () -> Unit,
 )
 
+internal class PausedWorkflow(val agent: String, val actions: LimitActions)
+
+internal val LocalPausedWorkflow = compositionLocalOf<PausedWorkflow?> { null }
+
 @Composable
-fun UsageLimitCard(limit: UsageLimitNote, agent: String, actions: LimitActions?) {
+fun UsageLimitCard(limit: UsageLimitNote, agent: String, actions: LimitActions?, said: String? = null) {
     val colors = MyTheme.colors
-    val platform = LocalPlatform.current
-    val time: (String) -> String = { iso -> clockTime(iso) { millis -> platform?.localDateTime(millis) } }
-    val reset = limit.resetsAt?.let(time)
-    val headline = "${agentName(agent).ifEmpty { "The agent" }}'s ${limitName(limit.window)} is reached." + (if (reset != null) " It resets at $reset." else " Mycelium does not know when it resets.")
-    val resumeTime = limit.resetsAt?.let(::resumeTimeAfter)?.let(time)
 
     Column(
         Modifier
@@ -40,12 +40,30 @@ fun UsageLimitCard(limit: UsageLimitNote, agent: String, actions: LimitActions?)
             .background(colors.bgRaised, FloatShape)
             .border(Tokens.Size.Hairline, colors.border, FloatShape)
             .padding(Tokens.Space.S3)
-            .semantics { contentDescription = "Usage limit reached" },
-        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            .semantics { contentDescription = "Paused at a usage limit" },
     ) {
+        LimitNote(limit, agent, actions, said)
+    }
+}
+
+@Composable
+internal fun LimitNote(limit: UsageLimitNote, agent: String, actions: LimitActions?, said: String? = null) {
+    val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    val time: (String) -> String = { iso -> clockTime(iso) { millis -> platform?.localDateTime(millis) } }
+    val reset = limit.resetsAt?.let(time)
+    val name = "${agentName(agent).ifEmpty { "The agent" }}'s ${limitName(limit.window)}"
+    val headline = if (reset != null) "Paused until $name resets at $reset." else "Paused at $name. Mycelium does not know when it resets."
+    val resumeTime = limit.resetsAt?.let(::resumeTimeAfter)?.let(time)
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
             Icon(MyIcon.Clock, colors.statusAttention, Tokens.Size.IconSm)
             Label(headline)
+        }
+
+        if (said != null) {
+            Label("${agentName(agent).ifEmpty { "The agent" }} said: $said", style = Tokens.Type.Meta, color = colors.textMuted)
         }
 
         if (actions != null) {
@@ -53,7 +71,7 @@ fun UsageLimitCard(limit: UsageLimitNote, agent: String, actions: LimitActions?)
 
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                 if (pending != null) {
-                    Label("Resumes at $pending.", color = colors.textMuted)
+                    Label("Resumes automatically at $pending.", color = colors.textMuted)
                     MyButton(actions.onCancelResume, text = "Cancel", description = "Cancel the automatic resume", size = ButtonSize.Sm, muted = true)
                 } else if (resumeTime != null) {
                     MyButton(actions.onResume, text = "Resume at $resumeTime", description = "Resume this conversation at $resumeTime", size = ButtonSize.Sm, variant = ButtonVariant.Outline)

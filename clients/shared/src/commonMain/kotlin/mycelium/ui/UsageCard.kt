@@ -50,6 +50,7 @@ fun UsageCard(
     modifier: Modifier = Modifier,
     providers: List<ModelProviderUsage> = emptyList(),
     currentProviderId: String? = null,
+    onOpenHistory: (() -> Unit)? = null,
     onUseReset: (suspend (AgentAccount, String) -> String)? = null,
 ) {
     val colors = MyTheme.colors
@@ -63,7 +64,13 @@ fun UsageCard(
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Label("Usage", Modifier.padding(Tokens.Space.S1_5).semantics { heading() }, Tokens.Type.UiStrong)
+            Row(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                Label("Usage", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+
+                if (onOpenHistory != null) {
+                    MyButton(onOpenHistory, icon = MyIcon.Move, description = "Usage history", size = ButtonSize.Sm, muted = true)
+                }
+            }
 
             val reported = accounts.filter { (account, _) -> account.windows.isNotEmpty() }
 

@@ -120,7 +120,7 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
 
             Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, BlockShape).background(colors.bgPanel, BlockShape).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Label(tokensPerHourTitle(loaded.range), Modifier.semantics { heading() }, Tokens.Type.Meta, colors.textMuted)
-                BarChart(loaded.hours.map { it.tokens }, "${tokensPerHourTitle(loaded.range)}. ${tokensPerHourSummary(loaded)}")
+                BarChart((if (loaded.range == "all") loaded.days else loaded.hours).map { it.tokens }, "${tokensPerHourTitle(loaded.range)}. ${tokensPerHourSummary(loaded)}")
                 Label(tokensPerHourSummary(loaded), style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
