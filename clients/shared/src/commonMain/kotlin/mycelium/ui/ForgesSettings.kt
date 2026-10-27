@@ -13,16 +13,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.ConnectForgeRequest
 import mycelium.api.Forge
 import mycelium.api.StartChatToolServerOAuthRequest
@@ -45,7 +41,6 @@ private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind == "gitlab
 @Composable
 fun ForgesSettings(store: Store) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var connecting by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("github") }
@@ -56,46 +51,30 @@ fun ForgesSettings(store: Store) {
     var refusedMcp by remember { mutableStateOf<Forge?>(null) }
     var disconnecting by remember { mutableStateOf<Forge?>(null) }
     val platform = LocalPlatform.current
+    val attempt = rememberAttempt { failure = it }
 
     LaunchedEffect(Unit) {
         store.act { forges = store.api.forges() }
     }
 
     fun connect() {
-        scope.launch {
-            try {
-                val offered = mcpOffered(kind, baseUrl)
-                val connected = store.api.connectForge(ConnectForgeRequest(kind, baseUrl.trim().ifEmpty { null }, token.trim(), addMcp = if (offered) addMcp else null))
-                forges = forges.filter { it.id != connected.id } + connected
-                refusedMcp = connected.takeIf { it.mcpError != null }
-                connecting = false
-                baseUrl = ""
-                token = ""
-                failure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            }
+        attempt {
+            val offered = mcpOffered(kind, baseUrl)
+            val connected = store.api.connectForge(ConnectForgeRequest(kind, baseUrl.trim().ifEmpty { null }, token.trim(), addMcp = if (offered) addMcp else null))
+            forges = forges.filter { it.id != connected.id } + connected
+            refusedMcp = connected.takeIf { it.mcpError != null }
+            connecting = false
+            baseUrl = ""
+            token = ""
         }
     }
 
     fun signInToMcp(forge: Forge) {
-        scope.launch {
-            try {
-                val product = forgeName(forge)
-                val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(product, mcpAddress(forge), forgeId = forge.id))
-                platform?.openUrl(started.authorizeUrl)
-                refusedMcp = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            }
+        attempt {
+            val product = forgeName(forge)
+            val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(product, mcpAddress(forge), forgeId = forge.id))
+            platform?.openUrl(started.authorizeUrl)
+            refusedMcp = null
         }
     }
 
@@ -160,23 +139,11 @@ fun ForgesSettings(store: Store) {
         }
 
         disconnecting?.let { forge ->
-            Dialog(onDismiss = { disconnecting = null }) {
-                Label("Disconnect ${forgeName(forge)} account ${forge.account}?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("This also removes the ${forgeName(forge)} MCP integration.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                    MyButton(
-                        {
-                            disconnecting = null
-                            store.act {
-                                store.api.disconnectForge(forge.id)
-                                forges = forges.filter { it.id != forge.id }
-                            }
-                        },
-                        text = "Disconnect",
-                        variant = ButtonVariant.Outline,
-                    )
-                    MyButton({ disconnecting = null }, text = "Cancel", muted = true)
+            ConfirmDialog("Disconnect ${forgeName(forge)} account ${forge.account}?", "This also removes the ${forgeName(forge)} MCP integration.", "Disconnect", { disconnecting = null }) {
+                disconnecting = null
+                store.act {
+                    store.api.disconnectForge(forge.id)
+                    forges = forges.filter { it.id != forge.id }
                 }
             }
         }

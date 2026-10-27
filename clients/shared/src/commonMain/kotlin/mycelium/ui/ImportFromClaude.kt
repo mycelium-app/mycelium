@@ -13,9 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.ImportResult
 import mycelium.state.PickedFile
 import mycelium.state.Store
@@ -39,20 +37,17 @@ fun ImportFromClaude(store: Store) {
     var failed by remember { mutableStateOf(false) }
 
     suspend fun import(files: List<PickedFile>) {
-        try {
+        val problem = attempt {
             val results = files.map { store.api.importClaudeChats(it.bytes) }
 
             outcome = importedChatsMessage(ImportResult(results.sumOf { it.imported }, results.sumOf { it.skipped }))
-            failed = false
             store.refresh()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: ApiException) {
-            outcome = failure.message
-            failed = true
-        } catch (_: Exception) {
-            outcome = "Could not reach the control plane. Check your connection and try again."
-            failed = true
+        }
+
+        failed = problem != null
+
+        if (problem != null) {
+            outcome = problem
         }
     }
 

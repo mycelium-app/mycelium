@@ -16,16 +16,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.CreateModelProviderRequest
 import mycelium.api.ModelProvider
 import mycelium.api.UpdateModelProviderRequest
@@ -41,7 +37,6 @@ private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 @Composable
 fun ModelProvidersSettings(store: Store) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var expanded by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<ModelProvider?>(null) }
@@ -53,6 +48,7 @@ fun ModelProvidersSettings(store: Store) {
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var failure by remember { mutableStateOf<String?>(null) }
+    val attempt = rememberAttempt { failure = it }
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -65,27 +61,18 @@ fun ModelProvidersSettings(store: Store) {
             return
         }
 
-        scope.launch {
-            try {
-                val request = when (kind) {
-                    "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
-                    "litellm" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "LiteLLM" }, baseUrl.trim(), apiKey.trim().ifEmpty { null })
-                    else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null })
-                }
-                val added = store.api.createModelProvider(request)
-                providers = providers.filter { it.id != added.id } + added
-                adding = false
-                name = ""
-                baseUrl = ""
-                apiKey = ""
-                failure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
+        attempt {
+            val request = when (kind) {
+                "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
+                "litellm" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "LiteLLM" }, baseUrl.trim(), apiKey.trim().ifEmpty { null })
+                else -> CreateModelProviderRequest(kind, name.trim(), baseUrl.trim().ifEmpty { null }.takeIf { kind == "openai_compatible" }, apiKey.trim().ifEmpty { null })
             }
+            val added = store.api.createModelProvider(request)
+            providers = providers.filter { it.id != added.id } + added
+            adding = false
+            name = ""
+            baseUrl = ""
+            apiKey = ""
         }
     }
 

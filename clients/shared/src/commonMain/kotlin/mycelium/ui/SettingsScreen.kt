@@ -17,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.Alignment
@@ -79,12 +78,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
     val waitingProposals = waitingInstructionProposals(state)
 
     LaunchedEffect(Unit) {
-        try {
-            store.refreshInstructionProposals()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-        }
+        attempt { store.refreshInstructionProposals() }
     }
 
     BackHandler(enabled = touch && opened != null) { section = null }
@@ -292,7 +286,7 @@ private fun AccountSettings(store: Store, me: Me, controlPlane: String, onSignOu
     var showingChanges by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        serverVersion = runCatching { store.api.version() }.getOrNull()
+        attempt { serverVersion = store.api.version() }
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {

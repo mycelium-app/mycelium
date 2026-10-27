@@ -15,8 +15,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import kotlinx.coroutines.CancellationException
-import mycelium.api.ApiException
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.Memory
@@ -52,15 +50,9 @@ fun MemoriesSettings(store: Store) {
     LaunchedEffect(query, if (searching) live.memoryRevision else 0, retry) {
         failure = null
 
-        try {
+        failure = attempt("Could not load memories. Check your connection and try again.") {
             memories = store.api.memories(query)
             loaded = true
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (problem: ApiException) {
-            failure = problem.message
-        } catch (_: Exception) {
-            failure = "Could not load memories. Check your connection and try again."
         }
     }
 
@@ -161,17 +153,11 @@ fun MemoriesSettings(store: Store) {
     }
 
     deleting?.let { memory ->
-        Dialog(onDismiss = { deleting = null }) {
-            Label("Delete this memory? Agents will no longer recall it.", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton({
-                    store.act {
-                        store.api.deleteMemory(memory.id)
-                        memories = memories.filter { it.id != memory.id }
-                        deleting = null
-                    }
-                }, text = "Delete memory", variant = ButtonVariant.Danger)
-                MyButton({ deleting = null }, text = "Cancel", muted = true)
+        ConfirmDialog("Delete this memory?", "Agents will no longer recall it.", "Delete memory", { deleting = null }) {
+            store.act {
+                store.api.deleteMemory(memory.id)
+                memories = memories.filter { it.id != memory.id }
+                deleting = null
             }
         }
     }

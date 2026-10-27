@@ -148,43 +148,19 @@ fun SessionsSettings(store: Store, onSignOut: () -> Unit) {
     }
 
     endingCurrent?.let { session ->
-        Dialog(onDismiss = { endingCurrent = null }) {
-            Label("Sign out of this session?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("This is the session you are using. Ending it signs you out here.", color = colors.textMuted)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton(
-                    {
-                        endingCurrent = null
-                        store.act {
-                            store.api.endSession(session.id, confirmCurrent = true)
-                            onSignOut()
-                        }
-                    },
-                    text = "Sign out",
-                    variant = ButtonVariant.Danger,
-                )
-                MyButton({ endingCurrent = null }, text = "Cancel", muted = true)
+        ConfirmDialog("Sign out of this session?", "This is the session you are using. Ending it signs you out here.", "Sign out", { endingCurrent = null }) {
+            endingCurrent = null
+            store.act {
+                store.api.endSession(session.id, confirmCurrent = true)
+                onSignOut()
             }
         }
     }
 
     revoking?.let { node ->
-        Dialog(onDismiss = { revoking = null }) {
-            Label("Revoke ${node.name}?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("It disconnects now and must join again to come back.", color = colors.textMuted)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton(
-                    {
-                        revoking = null
-                        store.act { store.api.revokeNode(node.id) }
-                    },
-                    text = "Revoke ${node.name}",
-                    variant = ButtonVariant.Danger,
-                )
-                MyButton({ revoking = null }, text = "Cancel", muted = true)
-            }
+        ConfirmDialog("Revoke ${node.name}?", "It disconnects now and must join again to come back.", "Revoke ${node.name}", { revoking = null }) {
+            revoking = null
+            store.act { store.api.revokeNode(node.id) }
         }
     }
 }
