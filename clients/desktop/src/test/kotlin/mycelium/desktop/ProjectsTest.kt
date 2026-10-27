@@ -226,6 +226,7 @@ class ProjectsTest {
         var created: String? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A folder on a node").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Folder on the node").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Folder on the node").performTextInput("work/homelab")
@@ -266,6 +267,7 @@ class ProjectsTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("New repository").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("New repository").performTextInput("acme-org/restore-tool")
@@ -282,6 +284,7 @@ class ProjectsTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("New repository").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("New repository").performTextInput("restore-tool")
@@ -370,3 +373,4 @@ class ProjectsTest {
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden","prompt":"Fix the build"}""", posts.single().second)
     }
 }
+
