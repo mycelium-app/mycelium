@@ -22,11 +22,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.BasicText
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import mycelium.api.ActivityRow
-import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.PatchConversationRequest
@@ -121,16 +119,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
         delay(SearchDebounceMillis)
 
-        try {
-            hits = store.api.search(query.trim())
-            searchProblem = null
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: ApiException) {
-            searchProblem = failure.message
-        } catch (_: Exception) {
-            searchProblem = "Could not reach the control plane. Check your connection and try again."
-        }
+        searchProblem = attempt { hits = store.api.search(query.trim()) }
     }
 
     val filters = layout.filters

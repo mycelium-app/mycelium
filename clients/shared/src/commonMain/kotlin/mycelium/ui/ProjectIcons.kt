@@ -33,9 +33,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.Project
 import mycelium.state.PickedFile
 import mycelium.state.Store
@@ -162,7 +160,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
         running = true
 
         scope.launch {
-            try {
+            failure = attempt {
                 val chosenLogo = logo
 
                 for (project in projects) {
@@ -174,15 +172,8 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
                 }
 
                 onDismiss()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            } finally {
-                running = false
             }
+            running = false
         }
     }
 

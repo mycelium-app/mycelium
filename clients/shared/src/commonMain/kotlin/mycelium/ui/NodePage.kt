@@ -60,7 +60,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
     var controlVersion by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        controlVersion = runCatching { store.api.version() }.getOrNull()
+        attempt { controlVersion = store.api.version() }
     }
 
     LaunchedEffect(nodeId, node?.online) {
