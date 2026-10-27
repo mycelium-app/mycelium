@@ -43,7 +43,7 @@ class ApprovalFlowTest {
     private val sent = mutableListOf<JsonElement>()
 
     private fun showPermission(editsByDefault: Boolean) {
-        val item = ThreadItem.Permission("k", "r1", "zulip.get_messages", Options, false, "Zulip", "ada@example.com", null, editsByDefault)
+        val item = ThreadItem.Permission("k", "r1", "mcp__zulip__get_messages", Options, false, "Zulip", "ada@example.com", null, editsByDefault)
         rule.setContent { MyceliumTheme(true) { Box(Modifier.width(640.dp)) { ThreadView(listOf(item), onAnswer = { _, option -> answers += option }, onStopWorkflow = {}) } } }
     }
 
@@ -84,7 +84,7 @@ class ApprovalFlowTest {
     fun denyIsASeparateButton() {
         showPermission(editsByDefault = false)
 
-        rule.onNodeWithContentDescription("Deny zulip.get_messages").performClick()
+        rule.onNodeWithContentDescription("Deny mcp__zulip__get_messages").performClick()
 
         assertEquals(listOf("deny"), answers)
     }
