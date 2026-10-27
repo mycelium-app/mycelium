@@ -1,6 +1,9 @@
 package mycelium.desktop
 
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -43,7 +46,7 @@ class UsageLimitTest {
     private val calls = CopyOnWriteArrayList<String>()
     private val bodies = CopyOnWriteArrayList<String>()
 
-    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask", experiments: String = "{}"): Store {
+    private fun store(resumeAt: String? = null, resetsAt: String? = ResetsToday, setting: String = "ask", experiments: String = "{}", events: String? = null): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -58,7 +61,7 @@ class UsageLimitTest {
             val body = when {
                 path.endsWith("/conversations") -> "[${failedJson(resumeAt)}]"
                 path.endsWith("/conversations/c1") -> failedJson(resumeAt)
-                path.endsWith("/events") -> limitEvent(resetsAt)
+                path.endsWith("/events") -> events ?: limitEvent(resetsAt)
                 path.endsWith("/usage-limit") -> """{"on_usage_limit":"$setting"}"""
                 path.endsWith("/experiments") -> experiments
                 path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
@@ -84,6 +87,24 @@ class UsageLimitTest {
         rule.onNodeWithText("Paused until Claude Code's 5-hour limit resets at 15:30.").assertExists()
         rule.onNodeWithContentDescription("Error: Internal error: You've hit your session limit").assertDoesNotExist()
         rule.onNodeWithText("Claude Code said: You've hit your session limit", substring = true).assertExists()
+    }
+
+    @Test
+    fun aWorkflowStoppedByTheLimitSaysItIsPausedUntilTheResetAndResumesAutomatically() {
+        val line = { seq: Int, body: String, extra: String -> """{"conversation_id":"c1","seq":$seq,"kind":"workflow","payload":{"run_id":"r1","line":$body$extra}}""" }
+        val limit = ""","usage_limit":{"window":"five_hour","resets_at":"$ResetsToday"}"""
+        val events = "[" + line(1, """{"type":"started","key":"k1","label":"Build","phase":"Implement"}""", "") + "," + line(2, """{"type":"failed","key":"k1","reason":"You've hit your session limit"}""", limit) + "]"
+        show(store(resumeAt = ResumesToday, events = events))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Paused until Claude Code's 5-hour limit resets at 15:30.").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Resumes automatically at 15:31.").assertExists()
+        rule.onNodeWithContentDescription("Paused: Build").assertExists()
+        rule.onNodeWithContentDescription("Cancel the automatic resume").assertExists()
+
+        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/workflow-paused-dark.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
     }
 
     @Test

@@ -32,17 +32,17 @@ import mycelium.state.agentName
 import mycelium.state.approximateDollars
 import mycelium.state.approximateTokens
 import mycelium.state.dateTimeLabel
+import mycelium.state.dayLabel
 import mycelium.state.planName
 import mycelium.state.priceRatio
 import mycelium.state.readingsNote
+import mycelium.state.usageEstimateNote
 import mycelium.state.sampleCount
 import mycelium.state.usageAccountName
 
 private val WindowColumns = listOf(TableColumn("Window started", 1.4f), TableColumn("Used", 0.7f, numeric = true), TableColumn("Tokens", 0.9f, numeric = true), TableColumn("Tokens per 1%", 1f, numeric = true), TableColumn("API equivalent", 1.1f, numeric = true))
 
 private const val WindowRowLimit = 50
-private const val EstimateNote = "How this is estimated: percentages are the readings each provider reports for an account. Tokens per 1% divides the tokens recorded in a window by the points it rose, counting only windows that rose 5 points or more. API equivalent prices each turn at the provider's published API rates for its model, for input, output, cache reads and cache writes."
-
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 fun UsageHistoryScreen(store: Store) {
@@ -109,7 +109,7 @@ fun UsageHistoryScreen(store: Store) {
                 AccountHistory(account, platform?.let { it::localDateTime })
             }
 
-            Label(EstimateNote, style = Tokens.Type.Meta, color = colors.textMuted)
+            Label(usageEstimateNote(loaded.accounts), style = Tokens.Type.Meta, color = colors.textMuted)
         }
     }
 }
@@ -148,6 +148,9 @@ private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) 
         val from = account.readings.minOfOrNull { Instant.parse(it.at).toEpochMilliseconds() } ?: 0L
         val until = account.readings.maxOfOrNull { Instant.parse(it.at).toEpochMilliseconds() } ?: 0L
 
+        val fromLabel = dayLabel(Instant.fromEpochMilliseconds(from).toString().take(10))
+        val untilLabel = dayLabel(Instant.fromEpochMilliseconds(until).toString().take(10))
+
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             for ((window, title) in listOf("five_hour" to "5-hour window, % used", "seven_day" to "Weekly window, % used")) {
                 val readings: List<UsageReading> = account.readings.filter { it.window == window }
@@ -159,7 +162,7 @@ private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) 
                     if (readings.isEmpty()) {
                         Label("No readings in this period.", style = Tokens.Type.Meta, color = colors.textMuted)
                     } else {
-                        PercentLineChart(readings.map { Instant.parse(it.at).toEpochMilliseconds() to it.percent }, from, until, "$title for $name. Peak ${peak?.percent?.toInt()}% on ${peak?.let { dateTimeLabel(it.at, local) }}, ${readings.size} readings.")
+                        PercentLineChart(readings.map { Instant.parse(it.at).toEpochMilliseconds() to it.percent }, from, until, "$title for $name. Peak ${peak?.percent?.toInt()}% on ${peak?.let { dateTimeLabel(it.at, local) }}, ${readings.size} readings.", fromLabel, untilLabel)
                     }
                 }
             }

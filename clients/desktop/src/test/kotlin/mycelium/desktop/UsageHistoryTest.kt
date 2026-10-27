@@ -4,7 +4,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -69,13 +74,24 @@ class UsageHistoryTest {
         rule.onNodeWithText("example.com").assertExists()
         rule.onNodeWithText("Max 20x").assertExists()
         rule.onNodeWithText("readings since 3 Sep, before 14 Oct from orchestrator").assertExists()
-        rule.onNodeWithText("~1.9M").assertExists()
+        rule.onAllNodesWithText("~1.9M")[0].assertExists()
         rule.onNodeWithText("median of 41 windows").assertExists()
         rule.onNodeWithText("median of 7 weeks").assertExists()
         rule.onNodeWithText("~$1,310 this month").assertExists()
         rule.onNodeWithText("~$46 per 5-hour window").assertExists()
         rule.onNodeWithText("$200 a month").assertExists()
         rule.onNodeWithText("API equivalent is 6.6 times the price").assertExists()
+    }
+
+    @Test
+    fun theScreenRendersForComparisonWithTheArtboard() {
+        open()
+        val png = Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(EncodedImageFormat.PNG)!!.bytes
+        val out = java.io.File("build/screens/usage-history-dark.png")
+        out.parentFile.mkdirs()
+        out.writeBytes(png)
+
+        assertEquals(true, out.length() > 5_000)
     }
 
     @Test
@@ -90,7 +106,7 @@ class UsageHistoryTest {
     fun theFiveHourWindowsTableListsEachWindowWithItsUseTokensAndValue() {
         open()
 
-        rule.onNodeWithText("5-hour windows").assertExists()
+        rule.onAllNodesWithText("5-hour windows")[0].assertExists()
         rule.onNodeWithText("61%").assertExists()
         rule.onNodeWithText("118M").assertExists()
         rule.onNodeWithText("~$52").assertExists()

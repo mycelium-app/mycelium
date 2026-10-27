@@ -29,6 +29,15 @@ fun readingsNote(account: UsageHistoryAccount): String? {
     return "readings since $since$orchestrator"
 }
 
+fun usageEstimateNote(accounts: List<UsageHistoryAccount>): String {
+    val orchestratorUntil = accounts.mapNotNull { it.orchestratorUntil }.maxOrNull()
+    val publishedOn = accounts.mapNotNull { it.planPriceAsOf }.maxOrNull()
+    val imported = orchestratorUntil?.let { " Readings before ${dayLabel(it.take(10))} come from orchestrator's usage records, and tokens before then from imported conversations." }.orEmpty()
+    val published = publishedOn?.let { ", as published on ${dayLabel(it.take(10))} ${it.take(4)}" }.orEmpty()
+
+    return "How this is estimated: percentages are the readings each provider reports for an account. Tokens per 1% divides the tokens recorded in a window by the points it rose, counting only windows that rose 5 points or more.$imported API equivalent prices each turn at the provider's published API rates for its model, for input, output, cache reads and cache writes$published."
+}
+
 fun sampleCount(count: Long, one: String, many: String): String = "median of $count ${if (count == 1L) one else many}"
 
 fun priceRatio(account: UsageHistoryAccount): String? {
