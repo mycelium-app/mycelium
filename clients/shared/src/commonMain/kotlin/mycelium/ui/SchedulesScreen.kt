@@ -20,7 +20,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import mycelium.api.CreateScheduleRequest
@@ -29,9 +31,9 @@ import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.state.AppState
+import mycelium.state.Choice
 import mycelium.state.scheduleInGroup
 import mycelium.state.Store
-import mycelium.state.Choice
 import mycelium.state.Cadence
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
@@ -47,26 +49,23 @@ import mycelium.state.until
 private const val SkippedOutcome = "skipped"
 private const val HeldOutcome = "held"
 
-@Composable
-fun SchedulesScreen(store: Store, state: AppState) {
 private const val SchedulesList = "schedules"
 private const val RunsInProject = "Project"
 private const val RunsInAssistant = "Assistant"
 private const val RunsAction = "Runs an action"
 private const val SendsPrompt = "Sends a prompt"
 
+@Composable
+fun SchedulesScreen(store: Store, state: AppState) {
     val colors = MyTheme.colors
     val stamp = timestamper()
     var creating by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.conversations.size) {
-        store.act {
     val loadFailures by store.loadFailures.collectAsState()
     val load = { store.load(SchedulesList) { store.refreshProjects(); store.refreshSchedules() } }
 
-            store.refreshProjects()
-            store.refreshSchedules()
-        }
+    LaunchedEffect(state.conversations.size) {
+        load()
     }
 
     val group = LocalGroupFilter.current
@@ -83,6 +82,7 @@ private const val SendsPrompt = "Sends a prompt"
             Box(Modifier.weight(1f))
             MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
         }
+
         FlowRow(
             Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -94,7 +94,6 @@ private const val SendsPrompt = "Sends a prompt"
         }
 
         Hairline()
-
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
@@ -214,7 +213,7 @@ private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
 }
 
 @Composable
-private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = null, onDismiss: () -> Unit) {
+internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = null, assistantId: String? = null, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val place = remember { Place() }
     val timeZone = editing?.timeZone ?: LocalPlatform.current?.timeZone() ?: "UTC"
@@ -227,6 +226,19 @@ private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = n
     var weekday by remember { mutableStateOf(start.weekday) }
     var custom by remember { mutableStateOf(start.custom) }
     var eachRun by remember { mutableStateOf(editing?.eachRun ?: EachRun.New) }
+    var runsIn by remember { mutableStateOf(if (editing?.assistantId != null || assistantId != null) RunsInAssistant else RunsInProject) }
+    var chosenAssistant by remember { mutableStateOf(editing?.assistantId ?: assistantId ?: state.assistants.values.filter { it.archivedAt == null }.minByOrNull { it.name.lowercase() }?.id) }
+    var runsAction by remember { mutableStateOf(editing?.let { it.actionId != null } ?: true) }
+    var chosenAction by remember { mutableStateOf(editing?.actionId) }
+    var inputValues by remember { mutableStateOf(editing?.actionInputs.orEmpty()) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+    val forAssistant = runsIn == RunsInAssistant
+    val actions = chosenAssistant?.let { state.assistantActions[it] }.orEmpty()
+    val action = actions.firstOrNull { it.id == chosenAction } ?: actions.firstOrNull()
+
+    LaunchedEffect(chosenAssistant) {
+        chosenAssistant?.let { store.act { store.refreshAssistantActions(it) } }
+    }
     var promptError by remember { mutableStateOf<String?>(null) }
     var whenError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
@@ -249,14 +261,17 @@ private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = n
     fun submit() {
         val target = place.target(state)
 
-        if (running || (editing == null && target == null)) {
+        if (running || (editing == null && !forAssistant && target == null)) {
             return
         }
 
         val cron = cronFor(kind, every.trim().toIntOrNull() ?: 0, hours, at, weekday, custom)
 
-        promptError = if (prompt.isBlank()) "Enter the prompt to run on this schedule." else null
-        cwdError = if (editing == null && target?.project == null && place.cwd.isBlank()) "Enter the folder the agent should work in, for example /home/you/project." else null
+        val sendsAction = forAssistant && runsAction
+
+        promptError = if (!sendsAction && prompt.isBlank()) "Enter the prompt to run on this schedule." else null
+        actionError = if (sendsAction && action == null) "Choose an action to run, or send a prompt instead." else if (sendsAction && action != null && action.inputs.any { it.required && it.default == null && it.kind != "date" && inputValues[it.name].isNullOrBlank() }) "Enter a value for ${action.inputs.first { it.required && it.default == null && it.kind != "date" && inputValues[it.name].isNullOrBlank() }.name}." else null
+        cwdError = if (editing == null && !forAssistant && target?.project == null && place.cwd.isBlank()) "Enter the folder the agent should work in, for example /home/you/project." else null
         whenError = if (cron == null) {
             when (kind) {
                 WhenKind.Every -> "Enter how often, as a whole number above zero."
@@ -267,7 +282,27 @@ private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = n
             null
         }
 
-        if (cron == null || promptError != null || cwdError != null) {
+        if (cron == null || promptError != null || cwdError != null || actionError != null) {
+            return
+        }
+
+        if (editing == null && forAssistant) {
+            val chosen = chosenAssistant ?: return
+
+            finish {
+                store.createSchedule(
+                    CreateScheduleRequest(
+                        prompt = if (sendsAction) action?.name.orEmpty() else prompt.trim(),
+                        cron = cron,
+                        eachRun = EachRun.Same,
+                        timeZone = timeZone,
+                        assistantId = chosen,
+                        actionId = action?.id.takeIf { sendsAction },
+                        actionInputs = if (sendsAction) inputValues.filterValues { it.isNotBlank() } else emptyMap(),
+                    ),
+                )
+            }
+
             return
         }
 
@@ -305,15 +340,52 @@ private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = n
         Label(if (editing == null) "New schedule" else "Edit schedule", Modifier.semantics { heading() }, Tokens.Type.Title)
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            TextInput(prompt, { prompt = it }, label = "Prompt", placeholder = "Update and test dependencies", error = promptError)
+            if (editing == null && assistantId == null) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Runs in", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                    Segmented(listOf(RunsInProject, RunsInAssistant), runsIn, { runsIn = it }, groupLabel = "Runs in")
+                }
+            }
 
-            if (editing == null) {
+            if (forAssistant) {
+                if (editing == null && assistantId == null) {
+                    OptionMenu("Assistant", state.assistants.values.filter { it.archivedAt == null }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }, chosenAssistant, { chosenAssistant = it; chosenAction = null; inputValues = emptyMap() }, title = "Assistant")
+                }
+
+                if (editing == null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label("Each run", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                        Segmented(listOf(RunsAction, SendsPrompt), if (runsAction) RunsAction else SendsPrompt, { runsAction = it == RunsAction }, groupLabel = "Each run")
+                    }
+                }
+
+                if (runsAction && editing == null) {
+                    OptionMenu("Action", actions.map { Choice(it.id, it.name) }, action?.id, { chosenAction = it; inputValues = emptyMap() }, title = "Action")
+                    actionError?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
+
+                    if (action != null && action.inputs.isNotEmpty()) {
+                        Label("Actions that ask for inputs take fixed values here.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+                        for (input in action.inputs) {
+                            ActionInputField(input, inputValues[input.name].orEmpty(), { inputValues = inputValues + (input.name to it) })
+                        }
+                    }
+                }
+            }
+
+            if (!forAssistant || !runsAction || editing != null) {
+                TextInput(prompt, { prompt = it }, label = "Prompt", placeholder = "Update and test dependencies", error = promptError)
+            }
+
+            if (forAssistant) {
+                Unit
+            } else if (editing == null) {
                 PlacePicker(store, state, place, withBranch = false, cwdError = cwdError)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                     Label("Runs in", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
                     Label(state.projects[editing.projectId]?.name ?: editing.cwd)
-                    Label("${agentName(editing.agent)} on ${state.nodes[editing.nodeId]?.name.orEmpty()}", color = MyTheme.colors.textMuted)
+                    Label("${agentName(editing.agent.orEmpty())} on ${state.nodes[editing.nodeId]?.name.orEmpty()}", color = MyTheme.colors.textMuted)
                 }
             }
 
@@ -338,14 +410,16 @@ private fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = n
                 WhenKind.Cron -> TextInput(custom, { custom = it }, label = "Cron expression ($timeZone)", placeholder = "0 6 * * 1", mono = true, error = whenError)
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Each run", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
-                Segmented(
-                    listOf(eachRunName(EachRun.New), eachRunName(EachRun.Same)),
-                    eachRunName(eachRun),
-                    { picked -> eachRun = if (picked == eachRunName(EachRun.Same)) EachRun.Same else EachRun.New },
-                    groupLabel = "Each run",
-                )
+            if (!forAssistant) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Each run", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                    Segmented(
+                        listOf(eachRunName(EachRun.New), eachRunName(EachRun.Same)),
+                        eachRunName(eachRun),
+                        { picked -> eachRun = if (picked == eachRunName(EachRun.Same)) EachRun.Same else EachRun.New },
+                        groupLabel = "Each run",
+                    )
+                }
             }
         }
 

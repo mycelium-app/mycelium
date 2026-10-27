@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import mycelium.api.Group
 import mycelium.api.InstructionProposal
 import mycelium.state.DiffEntry
 import mycelium.state.DiffLine
@@ -35,6 +36,16 @@ import mycelium.state.Store
 import mycelium.state.decidedProposals
 import mycelium.state.proposalDiff
 import mycelium.state.waitingProposals
+
+fun reviewedGroup(layer: String?, groups: Collection<Group>, conversationGroupId: String?): Group? {
+    val named = layer?.trim()?.takeIf { it.isNotEmpty() }
+
+    if (named == null) {
+        return groups.firstOrNull { it.id == conversationGroupId }
+    }
+
+    return groups.firstOrNull { it.id == named || it.name.equals(named, ignoreCase = true) }
+}
 
 val LocalReviewInstructions = staticCompositionLocalOf<((String?) -> Unit)?> { null }
 

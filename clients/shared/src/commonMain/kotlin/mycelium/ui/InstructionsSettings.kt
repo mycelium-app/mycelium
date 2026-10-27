@@ -121,12 +121,16 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
 
     val attempt = rememberAttempt { failure = it }
 
-    LaunchedEffect(Unit) {
-        store.act {
+    val load = {
+        store.load {
             document = store.api.instructions()
             forges = store.api.forges()
             extensions = store.api.extensions()
         }
+    }
+
+    LaunchedEffect(Unit) {
+        load()
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {

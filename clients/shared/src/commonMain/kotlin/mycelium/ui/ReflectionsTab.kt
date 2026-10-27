@@ -29,10 +29,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import mycelium.Platform
 import mycelium.api.Reflection
 import mycelium.state.LearningState
 import mycelium.state.ReflectionSection
 import mycelium.state.Store
+import mycelium.state.draftedLabel
 import mycelium.state.text
 import mycelium.state.wasEdited
 import mycelium.state.weekLabel
@@ -40,17 +42,23 @@ import mycelium.state.weekLabel
 private val SectionHeight = 72.dp
 
 @Composable
-fun ReflectionsTab(store: Store, onOpenAssistant: (String) -> Unit) {
+fun ReflectionsTab(store: Store, platform: Platform, onOpenAssistant: (String) -> Unit) {
     val learning by store.learning.state.collectAsState()
+    val app by store.state.collectAsState()
+    val wellnessWakes = app.assistants.values.firstOrNull { it.builtinKey == "wellness" }?.wakes
 
     LaunchedEffect(Unit) {
+        store.refreshAssistants()
         store.learning.load()
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
 
-        Label("The Wellness assistant drafts this every Friday at 16:00.", color = MyTheme.colors.textMuted)
+        Label(
+            wellnessWakes?.let { "The Wellness assistant drafts this. It wakes $it." } ?: "The Wellness assistant drafts this.",
+            color = MyTheme.colors.textMuted,
+        )
         MyButton({ store.act { onOpenAssistant(store.api.wellnessAssistant().id) } }, text = "Open the Wellness assistant", variant = ButtonVariant.Outline)
 
         if (learning.reflections.isNotEmpty()) {
@@ -58,13 +66,13 @@ fun ReflectionsTab(store: Store, onOpenAssistant: (String) -> Unit) {
         }
 
         for (reflection in learning.reflections) {
-            ReflectionCard(store, reflection, learning)
+            ReflectionCard(store, platform, reflection, learning)
         }
     }
 }
 
 @Composable
-private fun ReflectionCard(store: Store, reflection: Reflection, learning: LearningState) {
+private fun ReflectionCard(store: Store, platform: Platform, reflection: Reflection, learning: LearningState) {
     val colors = MyTheme.colors
     val heading = weekLabel(reflection.week)
     val drafting = reflection.id in learning.redrafting
@@ -73,6 +81,7 @@ private fun ReflectionCard(store: Store, reflection: Reflection, learning: Learn
     Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, ControlShape).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Label(heading, Modifier.weight(1f).semantics { this.heading() }, Tokens.Type.Title)
+            reflection.draftedAt?.let { drafted -> draftedLabel(drafted, platform::localDateTime)?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) } }
             MyButton(
                 { started = true; store.learning.redraft(reflection) },
                 text = if (drafting) "Drafting" else "Redraft",

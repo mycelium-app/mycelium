@@ -8,6 +8,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -24,6 +25,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import com.jetbrains.cef.JCefAppConfig
+import mycelium.PageReading
+import org.cef.browser.CefMessageRouter
+import org.cef.callback.CefQueryCallback
+import org.cef.handler.CefMessageRouterHandlerAdapter
 import org.cef.CefApp
 import org.cef.CefSettings
 import org.cef.CefClient
@@ -91,7 +96,7 @@ val jcefAvailable: Boolean by lazy {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
+fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null) {
     var ready by remember { mutableStateOf(CefApp.getState() == CefApp.CefAppState.INITIALIZED) }
 
     LaunchedEffect(Unit) {
@@ -107,11 +112,14 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     }
 
     val host = remember { OffscreenBrowser() }
+    val currentReading by rememberUpdatedState(reading)
+    val reader = remember { PageReader { currentReading } }
     var browserCreated by remember { mutableStateOf(false) }
     val client = remember {
         Jcef.createClient().also {
             it.addLoadHandler(host.loaded)
             it.addContextMenuHandler(host.contextMenu)
+            it.addMessageRouter(reader.router)
             it.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
                 override fun onAfterCreated(browser: CefBrowser) {
                     SwingUtilities.invokeLater { browserCreated = true }
@@ -127,6 +135,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
     DisposableEffect(Unit) {
         onDispose {
             host.contextMenu.close()
+            reader.router.dispose()
             browser?.close(true)
             client.dispose()
         }
@@ -155,6 +164,15 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         }
 
         created.loadURL(url)
+    }
+
+    LaunchedEffect(browser, browserCreated, reading != null) {
+        val created = browser ?: return@LaunchedEffect
+
+        while (reading != null && browserCreated) {
+            delay(ReadIntervalMillis)
+            reader.read(created)
+        }
     }
 
     Canvas(
@@ -201,5 +219,39 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier) {
         val frame = host.frame() ?: return@Canvas
 
         drawImage(frame)
+    }
+}
+
+private const val ReadIntervalMillis = 3000L
+
+private class PageReader(private val reading: () -> PageReading?) {
+    val router: CefMessageRouter = CefMessageRouter.create().also { router ->
+        router.addHandler(
+            object : CefMessageRouterHandlerAdapter() {
+                override fun onQuery(browser: CefBrowser, frame: org.cef.browser.CefFrame, queryId: Long, request: String, persistent: Boolean, callback: CefQueryCallback): Boolean {
+                    val current = reading() ?: return false
+
+                    if (!current.allowedUrl(browser.url)) {
+                        return false
+                    }
+
+                    current.onRead(request)
+                    callback.success("")
+
+                    return true
+                }
+            },
+            true,
+        )
+    }
+
+    fun read(browser: CefBrowser) {
+        val current = reading() ?: return
+
+        if (!current.allowedUrl(browser.url)) {
+            return
+        }
+
+        browser.executeJavaScript("window.cefQuery({request: ${current.script}, onSuccess: function(){}, onFailure: function(){}})", browser.url, 0)
     }
 }

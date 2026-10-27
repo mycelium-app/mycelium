@@ -140,7 +140,7 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
             } else if (tab == PuzzlesTabName) {
                 PuzzlesTab(store, platform) { playing = it }
             } else {
-                ReflectionsTab(store, onOpenAssistant)
+                ReflectionsTab(store, platform, onOpenAssistant)
             }
         }
     }

@@ -24,11 +24,11 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
-import kotlin.time.Instant
 import mycelium.Platform
 import mycelium.PageReading
 import mycelium.api.PuzzleResult
 import mycelium.api.PuzzleSummary
+import mycelium.state.GameReading
 import mycelium.state.Puzzle
 import mycelium.state.Puzzles
 import mycelium.state.Store
@@ -140,6 +140,7 @@ private fun PuzzleDetail(store: Store, puzzle: Puzzle, summary: PuzzleSummary?, 
     val colors = MyTheme.colors
     val stats = summary?.stats
     val history = summary?.history.orEmpty()
+    val now = summary?.day?.ifEmpty { null } ?: today()
     val unreadable = summary?.today == null && puzzle.id in wellness.unreadable
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
@@ -191,13 +192,13 @@ private fun PuzzleDetail(store: Store, puzzle: Puzzle, summary: PuzzleSummary?, 
                     val day = history[row]
 
                     when (column) {
-                        0 -> TableCell.Text(dayLabel(day.day, today()))
+                        0 -> TableCell.Text(dayLabel(day.day, now))
                         1 -> TableCell.Text(puzzleStatus(day.result))
                         else -> TableCell.Text(day.result.sourceLabel(), color = colors.textMuted)
                     }
                 },
                 rowKey = { history[it].day },
-                rowDescription = { dayLabel(history[it].day, today()) },
+                rowDescription = { dayLabel(history[it].day, now) },
             )
         }
     }
@@ -218,20 +219,40 @@ fun PuzzleBrowser(store: Store, platform: Platform, puzzle: Puzzle, onBack: () -
     val colors = MyTheme.colors
     var read by remember { mutableStateOf<PuzzleResult?>(null) }
     val shown = read ?: recorded
-    val status = if (shown == null) "Waiting for the game" else "${puzzleStatus(shown)}, recorded"
-    val reading = remember(puzzle) {
-        PageReading(
-            script = puzzle.readingScript(),
-            allowedUrl = { puzzle.isOnThisSite(it) },
-            onRead = { storage ->
-                val result = parseGameState(puzzle, storage) { playedAt -> Instant.fromEpochMilliseconds(playedAt).toString().take(10) == today() }
+    val today = wellness.puzzles.firstOrNull()?.day.orEmpty()
+    val status = when {
+        shown != null -> "${puzzleStatus(shown)}, recorded"
+        puzzle.id in wellness.unreadable -> UnreadableGame
+        else -> "Waiting for the game"
+    }
 
-                if (result != null && result != read) {
-                    read = result
-                    store.wellness.recordResult(puzzle.id, result)
-                }
-            },
-        )
+    LaunchedEffect(puzzle) {
+        store.wellness.loadPuzzles()
+    }
+
+    val reading = remember(puzzle, today) {
+        if (today.isEmpty()) {
+            null
+        } else {
+            PageReading(
+                script = puzzle.readingScript(),
+                allowedUrl = { puzzle.isOnThisSite(it) },
+                onRead = { storage ->
+                    when (val game = parseGameState(puzzle, storage, today)) {
+                        GameReading.NoStorage -> Unit
+                        GameReading.Unrecognised -> store.wellness.markUnreadable(puzzle.id)
+                        is GameReading.Read -> {
+                            store.wellness.markReadable(puzzle.id)
+
+                            if (game.result != null && game.result != read) {
+                                read = game.result
+                                store.wellness.recordResult(puzzle.id, game.result)
+                            }
+                        }
+                    }
+                },
+            )
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -240,7 +261,7 @@ fun PuzzleBrowser(store: Store, platform: Platform, puzzle: Puzzle, onBack: () -
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MyButton({ if (read == null && recorded == null) store.wellness.markUnreadable(puzzle.id); onBack() }, text = "Back to puzzles", icon = MyIcon.ChevronLeft, muted = true)
+            MyButton(onBack, text = "Back to puzzles", icon = MyIcon.ChevronLeft, muted = true)
             Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconMd)
             Label(puzzle.name, style = Tokens.Type.UiStrong)
             Label(puzzle.host + puzzle.pathPrefix.trimEnd('/'), Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)

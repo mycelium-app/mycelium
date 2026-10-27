@@ -117,7 +117,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
 
             problem?.let { ErrorBanner(it, onDismiss = { failure = null; requested = false }) }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 if (progress?.state == MoveState.Waiting) {
                     MyButton({ scope.launch { failure = attempt { store.cancelMove(conversation.id) } } }, text = "Cancel move", size = ButtonSize.Sm, muted = true)
                 } else if (!busy) {

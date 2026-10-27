@@ -30,7 +30,7 @@ fun MemoriesSettings(store: Store) {
     var memories by remember { mutableStateOf<List<Memory>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    var editing by remember { mutableStateOf<String?>(null) }
+    var editing by remember { mutableStateOf<Memory?>(null) }
     var draft by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<Memory?>(null) }
     var moving by remember { mutableStateOf<Memory?>(null) }
@@ -63,8 +63,7 @@ fun MemoriesSettings(store: Store) {
                 Label("Memories", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
             }
 
-            TextInput(query, { query = it }, label = "Search memories", placeholder = "Search memories", showLabel = false,
-                modifier = if (touch) Modifier.fillMaxWidth() else Modifier.widthIn(max = Tokens.Size.FormColumn))
+            ListSearch(query, { query = it }, "memories")
         }
 
         MemoryBanksBlock(store)
@@ -84,43 +83,25 @@ fun MemoriesSettings(store: Store) {
 
             for (memory in shown) {
                 Column(Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-                    if (editing == memory.id) {
-                        fun save() {
-                            val text = draft.trim()
-
-                            store.act {
-                                val saved = store.api.updateMemory(memory.id, text)
-                                memories = memories.map { if (it.id == saved.id) saved else it }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
+                        Label(memory.text, Modifier.weight(1f).padding(top = Tokens.Space.S1))
+                        RowMenu(memory.text) { close ->
+                            MenuItem("Edit", {
+                                close()
+                                editing = memory
+                                draft = memory.text
+                                deleting = null
+                            })
+                            MenuItem("Move to bank", {
+                                close()
+                                moving = memory
+                                destination = memory.bankId
+                            })
+                            MenuItem("Delete", {
+                                close()
+                                deleting = memory
                                 editing = null
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                            TextInput(draft, { draft = it }, label = "Memory text", showLabel = false, modifier = Modifier.weight(1f), onSubmit = ::save)
-                            MyButton(::save, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-                            MyButton({ editing = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
-                            Label(memory.text, Modifier.weight(1f).padding(top = Tokens.Space.S1))
-                            RowMenu(memory.text) { close ->
-                                MenuItem("Edit", {
-                                    close()
-                                    editing = memory.id
-                                    draft = memory.text
-                                    deleting = null
-                                })
-                                MenuItem("Move to bank", {
-                                    close()
-                                    moving = memory
-                                    destination = memory.bankId
-                                })
-                                MenuItem("Delete", {
-                                    close()
-                                    deleting = memory
-                                    editing = null
-                                })
-                            }
+                            })
                         }
                     }
 
@@ -151,6 +132,23 @@ fun MemoriesSettings(store: Store) {
                 Hairline()
             }
         }
+    }
+
+    editing?.let { memory ->
+        RenameDialog(
+            "Edit memory",
+            "Memory text",
+            draft,
+            { draft = it },
+            {
+                store.act {
+                    val saved = store.api.updateMemory(memory.id, draft.trim())
+                    memories = memories.map { if (it.id == saved.id) saved else it }
+                    editing = null
+                }
+            },
+            { editing = null },
+        )
     }
 
     deleting?.let { memory ->

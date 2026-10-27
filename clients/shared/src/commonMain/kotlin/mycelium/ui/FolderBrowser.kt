@@ -31,8 +31,9 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
     var requested by remember { mutableStateOf(start.trim()) }
     var failure by remember { mutableStateOf<String?>(null) }
     var fellBack by remember { mutableStateOf(false) }
+    var attempts by remember { mutableStateOf(0) }
 
-    LaunchedEffect(nodeId, requested) {
+    LaunchedEffect(nodeId, requested, attempts) {
         failure = null
 
         val problem = attempt { listing = store.directories(nodeId, requested) }
@@ -48,7 +49,7 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
     Dialog(onDismiss) {
         Label("Choose a folder on $nodeName", Modifier.semantics { heading() }, Tokens.Type.Title)
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, onRetry = { attempts += 1 }) }
 
         val shown = listing
 

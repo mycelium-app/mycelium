@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import mycelium.api.Repository
 import mycelium.state.AppState
 import mycelium.state.lastActivity
 import mycelium.state.Store
+import mycelium.state.inGroup
 import mycelium.state.projectsOfRepository
 import mycelium.state.registeredFolders
 import mycelium.state.setUpRepositories
@@ -52,6 +54,8 @@ private class RepositoryRow(val repository: Repository, override val at: Instant
 private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow {
     override val at = runCatching { Instant.parse(updatedAt) }.getOrNull()
 }
+
+private const val RepositoriesList = "repositories"
 
 @Composable
 fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit) {
@@ -76,8 +80,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
         store.load { store.refreshGroups() }
     }
 
+    val loadFailures by store.loadFailures.collectAsState()
+    val loadRepositories = { store.load(RepositoriesList) { store.refreshRepositories() } }
+
     LaunchedEffect(Unit) {
-        store.load { store.refreshRepositories() }
+        loadRepositories()
     }
 
     val filtering = forgeId != null || organisation != null || query.isNotBlank()
@@ -99,21 +106,23 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     }
 
     val forges = state.forges
+    val groupFilter = LocalGroupFilter.current
+    val visibleProjects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }
     val listing = if (filtering) filtered ?: state.repositoryListing else state.repositoryListing
     val connected = forges.orEmpty()
-    val folders = if (forgeId == null && organisation == null) registeredFolders(state.projects.values).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.nodeId == nodeFilter) } else emptyList()
+    val folders = if (forgeId == null && organisation == null) registeredFolders(visibleProjects).filter { it.name.contains(query.trim(), ignoreCase = true) && (nodeFilter == null || it.nodeId == nodeFilter) } else emptyList()
     val organisations = listing?.organisations.orEmpty().filter { forgeId == null || it.forgeId == forgeId }.map { it.name }.distinct()
-    val setUpListed = setUpRepositories(state.projects.values, listing?.repositories.orEmpty()).filter { repository ->
+    val setUpListed = setUpRepositories(visibleProjects, listing?.repositories.orEmpty()).filter { repository ->
         val matchesSearch = (forgeId == null || repository.forgeId == forgeId) && (organisation == null || repository.owner == organisation) && repository.fullName.contains(query.trim(), ignoreCase = true)
 
-        matchesSearch && (nodeFilter == null || projectsOfRepository(state.projects.values, repository).any { it.nodeId == nodeFilter })
+        matchesSearch && (nodeFilter == null || projectsOfRepository(visibleProjects, repository).any { it.nodeId == nodeFilter })
     }
     val notSetUp = listing?.repositories.orEmpty().filter { repository ->
-        (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(state.projects.values, repository).isEmpty()
+        (nodeFilter == null || nodeFilter == NotSetUpAnywhere) && projectsOfRepository(visibleProjects, repository).isEmpty()
     }
     val repositories = setUpListed + notSetUp
     val initialised = setUpListed.map { repository ->
-        val active = projectsOfRepository(state.projects.values, repository).mapNotNull { runCatching { Instant.parse(lastActivity(it, state.conversations.values)) }.getOrNull() }.maxOrNull()
+        val active = projectsOfRepository(visibleProjects, repository).mapNotNull { runCatching { Instant.parse(lastActivity(it, state.conversations.values)) }.getOrNull() }.maxOrNull()
 
         RepositoryRow(repository, active)
     } + folders.map { FolderRow(it, lastActivity(it, state.conversations.values)) }
@@ -137,7 +146,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            TextInput(query, { query = it }, label = "Search repositories", placeholder = "Search repositories", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn))
+            ListSearch(query, { query = it }, "repositories")
 
             Box {
                 val chosen = connected.firstOrNull { it.id == forgeId }
@@ -218,9 +227,17 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4)) {
-            if (forges != null && connected.isEmpty() && folders.isEmpty()) {
+            val repositoriesFailed = forges == null && RepositoriesList in loadFailures
+
+            if (repositoriesFailed && folders.isEmpty()) {
+                LoadFailedState("repositories", loadRepositories, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S4))
+            } else if (forges != null && connected.isEmpty() && folders.isEmpty()) {
                 Label("No forge is connected. Connect GitHub or GitLab in Settings, Forges, to list repositories here.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             } else {
+                if (repositoriesFailed) {
+                    LoadFailedState("repositories", loadRepositories, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S2))
+                }
+
                 Table(
                     listOf(
                         Col("Repository", 200.dp, weight = 1f),
@@ -234,7 +251,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                             is RepositoryRow -> {
                                 val repository = row.repository
                                 val key = "${repository.forgeId}/${repository.fullName}"
-                                val setUp = projectsOfRepository(state.projects.values, repository)
+                                val setUp = projectsOfRepository(visibleProjects, repository)
                                 val forge = connected.firstOrNull { it.id == repository.forgeId }
                                 val elsewhere = state.nodes.values.filter { node -> node.online && setUp.none { it.nodeId == node.id } }.sortedBy { it.name }
 

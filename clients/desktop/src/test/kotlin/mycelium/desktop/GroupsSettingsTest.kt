@@ -7,7 +7,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asSkiaBitmap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -255,5 +258,11 @@ class GroupsSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Proposed edit to the slop instructions").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("Proposed edit to the Global instructions").fetchSemanticsNodes().size)
         rule.onNodeWithText("You said: use British English.").assertExists()
+        rule.waitForIdle()
+
+        val screen = java.io.File("build/screens/group-instructions-9.19-dark.png")
+        screen.parentFile.mkdirs()
+        screen.writeBytes(org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData()!!.bytes)
+        assertEquals(true, screen.length() > 3_000)
     }
 }

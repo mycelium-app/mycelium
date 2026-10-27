@@ -93,7 +93,7 @@ class AssistantActionsTest {
         rule.onNodeWithContentDescription("Run Daily summary").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/assistants/a1/actions/x1/run" } }
-        assertEquals("""{"inputs":{}}""", requests.last { it.first.endsWith("/x1/run") }.second)
+        assertEquals("{}", requests.last { it.first.endsWith("/x1/run") }.second)
     }
 
     @Test
@@ -106,8 +106,9 @@ class AssistantActionsTest {
 
         rule.onNodeWithText("Run").performClick()
         assertEquals(0, requests.count { it.first.endsWith("/x2/run") })
+        rule.onNodeWithText("Enter a value for meeting.").assertExists()
 
-        rule.onNodeWithContentDescription("meeting").performTextInput("Planning")
+        rule.onNodeWithContentDescription("Meeting", substring = true).performTextInput("Planning")
         rule.onNodeWithText("Run").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/assistants/a1/actions/x2/run" } }

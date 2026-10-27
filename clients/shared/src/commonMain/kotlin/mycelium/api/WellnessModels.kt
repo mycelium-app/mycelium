@@ -123,6 +123,7 @@ data class PuzzleStats(
 @Serializable
 data class PuzzleSummary(
     val puzzle: String,
+    val day: String = "",
     val today: PuzzleResult? = null,
     val history: List<PuzzleDay> = emptyList(),
     val stats: PuzzleStats = PuzzleStats(),

@@ -52,7 +52,7 @@ class LearningRenderTest {
             for (phone in listOf(false, true)) {
                 val store = store()
 
-                assertTrue(renderAt("reflections", dark, phone) { Box(Modifier.fillMaxSize()) { ReflectionsTab(store) {} } }.length() > 2_000)
+                assertTrue(renderAt("reflections", dark, phone) { Box(Modifier.fillMaxSize()) { ReflectionsTab(store, OpeningPlatform()) {} } }.length() > 2_000)
                 assertTrue(renderAt("walkthrough-check", dark, phone) { Box(Modifier.fillMaxSize()) { WalkthroughCheckStep(store, walkthrough) {} } }.length() > 2_000)
             }
         }

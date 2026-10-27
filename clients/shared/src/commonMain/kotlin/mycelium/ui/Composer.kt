@@ -158,6 +158,7 @@ fun Composer(
     onTextChange: (TextFieldValue) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
     onTeachMe: ((Boolean) -> Unit)? = null,
+    assistantActions: AssistantActionControls? = null,
     usage: @Composable () -> Unit = {},
 ) {
     val colors = MyTheme.colors
@@ -351,6 +352,7 @@ fun Composer(
                     previews = display.badgeRanges().mapNotNull { (marker, range) -> images[marker]?.let { id -> drafts.firstOrNull { it.id == id } }?.takeIf { it.file.mediaType.startsWith("image/") }?.let { range to it.file.bytes } }.toMap(),
                     onTextChange = ::changeText,
                     onToggleTeachMe = onTeachMe?.let { change -> { change(!conversation.teachMe) } },
+                    onOpenActions = assistantActions?.let { { it.menu.open = true } },
                     onUndo = { history.undone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     onRedo = { history.redone(ComposerEdit(text, pastes, images))?.let { (rest, edit) -> history = rest; restore(edit) } },
                     source = source,
@@ -385,6 +387,17 @@ fun Composer(
                     Label(dictationProblemText(problem), style = Tokens.Type.Meta, color = colors.statusFailed)
                 }
             }
+        }
+    }
+
+    val actionsButton: @Composable () -> Unit = {
+        if (assistantActions != null) {
+            ActionsButton(assistantActions)
+        }
+    }
+    val actionChips: @Composable () -> Unit = {
+        if (assistantActions != null) {
+            ActionChips(assistantActions)
         }
     }
 
@@ -462,6 +475,7 @@ fun Composer(
                     QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
                 }
 
+                actionChips()
                 AnnotationChips(annotations, onRemoveAnnotation)
                 unmarked?.let { AttachmentChips(it) }
 
@@ -473,6 +487,7 @@ fun Composer(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     Row(Modifier.weight(1f).horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                         attach()
+                        actionsButton()
                         dictate()
                         teachMe()
                         goal?.let { GoalButton(it) }
@@ -513,6 +528,7 @@ fun Composer(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(measured.padding(horizontal = Tokens.Space.S2)) {
+                actionChips()
                 AnnotationChips(annotations, onRemoveAnnotation)
             }
 
@@ -528,6 +544,7 @@ fun Composer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 attach()
+                actionsButton()
                 dictate()
                 teachMe()
                 goal?.let { GoalButton(it) }
@@ -559,7 +576,7 @@ private fun dictationProblemText(problem: DictationProblem) = when (problem) {
 }
 
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onToggleTeachMe: (() -> Unit)? = null, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onToggleTeachMe: (() -> Unit)? = null, onOpenActions: (() -> Unit)? = null, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
     val colors = MyTheme.colors
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
@@ -581,6 +598,12 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
                 }
 
                 if (event.type == KeyEventType.KeyDown && event.key == Key.V && (event.isCtrlPressed || event.isMetaPressed) && onPaste()) {
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type == KeyEventType.KeyDown && event.key == Key.A && (event.isCtrlPressed || event.isMetaPressed) && event.isShiftPressed && onOpenActions != null) {
+                    onOpenActions()
+
                     return@onPreviewKeyEvent true
                 }
 
@@ -756,6 +779,8 @@ private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit
     )
 }
 
+class OptionFooter(val name: String, val hint: String, val icon: MyIcon, val onClick: () -> Unit)
+
 @Composable
 fun OptionMenu(
     name: String,
@@ -766,8 +791,10 @@ fun OptionMenu(
     icon: MyIcon? = null,
     size: ButtonSize = ButtonSize.Md,
     fill: Boolean = false,
+    label: String? = null,
+    footer: OptionFooter? = null,
 ) {
-    val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: current ?: name
+    val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: label ?: current ?: name
     var open by remember { mutableStateOf(false) }
     var search by remember(open) { mutableStateOf("") }
     val searchable = choices.size > SearchableChoices
@@ -792,6 +819,11 @@ fun OptionMenu(
 
                         MenuItem(choice.name, onClick = { onSelect(choice.id); open = false }, checked = choice.id == current, hint = choice.description, meter = choice.usedPercent)
                     }
+                }
+
+                if (footer != null) {
+                    Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                    MenuItem(footer.name, onClick = { footer.onClick(); open = false }, leading = footer.icon, hint = footer.hint)
                 }
             }
         }

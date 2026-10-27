@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.time.Instant
 import mycelium.api.Exercise
 import mycelium.api.LearnedItem
 import mycelium.api.PatchReflectionRequest
@@ -53,6 +54,13 @@ fun dayLabel(isoDate: String, today: String): String {
     val (_, month, day) = isoDate.split('-').map { it.toInt() }
 
     return "$day ${MonthNames[month - 1]}"
+}
+
+fun draftedLabel(iso: String, localDateTime: (Long) -> String?): String? {
+    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return null
+    val local = localDateTime(moment.toEpochMilliseconds()) ?: iso.take(16)
+
+    return "Drafted by the Wellness assistant, ${WeekdayNames[weekdayOf(local.substringBefore('T'))]} ${local.substringAfter('T').take(5)}"
 }
 
 fun weekLabel(isoDate: String): String {

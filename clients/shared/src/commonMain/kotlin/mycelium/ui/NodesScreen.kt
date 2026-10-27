@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,10 +64,14 @@ fun joinCommands(method: String, controlPlane: String): List<Pair<String, String
     )
 }
 
+private const val NodesList = "nodes"
+
 @Composable
 fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (String) -> Unit = {}) {
     val api = store.api
     val sessions = remember { mutableStateMapOf<String, LoginSession>() }
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(NodesList) { store.refreshNodes() } }
     var joinOpen by remember { mutableStateOf(false) }
     var revoking by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -73,6 +79,10 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
         .filter { it.name.contains(query.trim(), ignoreCase = true) || it.hostname.contains(query.trim(), ignoreCase = true) }
         .sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
     val touch = LocalTouch.current
+
+    LaunchedEffect(Unit) {
+        load()
+    }
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -97,7 +107,9 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
         }
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-            if (nodes.isEmpty()) {
+            if (NodesList in loadFailures && state.nodes.isEmpty()) {
+                LoadFailedState("nodes", load, Modifier.fillMaxSize())
+            } else if (nodes.isEmpty()) {
                 EmptyState(if (state.nodes.isEmpty()) "No nodes. Choose Join a node to connect the first one." else "No node matches.", Modifier.fillMaxSize())
             }
 

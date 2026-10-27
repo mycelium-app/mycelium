@@ -247,6 +247,10 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         mutableState.update { it.copy(unreadable = it.unreadable + puzzle) }
     }
 
+    fun markReadable(puzzle: String) {
+        mutableState.update { it.copy(unreadable = it.unreadable - puzzle) }
+    }
+
     fun setPlayed(puzzle: String, played: Boolean) {
         scope.launch {
             runCatching { api.setPuzzlePlayed(puzzle, played) }

@@ -63,19 +63,54 @@ internal fun ActionInputField(input: ActionInput, value: String, onChange: (Stri
     }
 }
 
+class ActionMenuState {
+    var open by mutableStateOf(false)
+    var asking by mutableStateOf<AssistantAction?>(null)
+}
+
+class AssistantActionControls(
+    val assistant: Assistant,
+    val actions: List<AssistantAction>,
+    val menu: ActionMenuState,
+    private val run: (AssistantAction, Map<String, String>) -> Unit,
+    val onManage: () -> Unit,
+) {
+    fun choose(action: AssistantAction) {
+        if (action.inputs.isEmpty()) {
+            run(action, emptyMap())
+        } else {
+            menu.asking = action
+        }
+    }
+
+    fun answer(action: AssistantAction, inputs: Map<String, String>) {
+        menu.asking = null
+        run(action, inputs)
+    }
+}
+
 @Composable
-internal fun ActionChips(actions: List<AssistantAction>, onRun: (AssistantAction) -> Unit) {
-    if (actions.isEmpty()) {
+fun rememberAssistantActionControls(assistant: Assistant, actions: List<AssistantAction>, onManage: () -> Unit, run: (AssistantAction, Map<String, String>) -> Unit): AssistantActionControls {
+    val menu = remember(assistant.id) { ActionMenuState() }
+
+    return AssistantActionControls(assistant, actions, menu, run, onManage)
+}
+
+@Composable
+internal fun ActionChips(controls: AssistantActionControls) {
+    val pinned = controls.actions.filter { it.pinned }
+
+    if (pinned.isEmpty()) {
         return
     }
 
     FlowRow(Modifier.fillMaxWidth().padding(bottom = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        for (action in actions) {
+        for (action in pinned) {
             Row(
                 Modifier
                     .heightIn(min = touchMin(Tokens.Size.ControlSm))
                     .border(Tokens.Size.Hairline, MyTheme.colors.borderControl, ChipShape)
-                    .pressable({ onRun(action) }, description = "Run ${action.name}", shape = ChipShape)
+                    .pressable({ controls.choose(action) }, description = "Run ${action.name}", shape = ChipShape)
                     .padding(horizontal = Tokens.Space.S2),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
                 verticalAlignment = Alignment.CenterVertically,
@@ -88,22 +123,23 @@ internal fun ActionChips(actions: List<AssistantAction>, onRun: (AssistantAction
 }
 
 @Composable
-internal fun ActionsButton(assistant: Assistant, actions: List<AssistantAction>, open: Boolean, onOpenChange: (Boolean) -> Unit, onRun: (AssistantAction) -> Unit, onManage: () -> Unit) {
-    var search by remember(open) { mutableStateOf("") }
-    val shown = actions.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) }
+internal fun ActionsButton(controls: AssistantActionControls) {
+    val menu = controls.menu
+    var search by remember(menu.open) { mutableStateOf("") }
+    val shown = controls.actions.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) }
 
     Box {
-        MyButton({ onOpenChange(true) }, icon = MyIcon.Zap, description = "Actions", muted = true, selected = open, tooltip = "Actions, Ctrl+Shift+A")
+        MyButton({ menu.open = true }, icon = MyIcon.Zap, description = "Actions", muted = true, selected = menu.open, tooltip = "Actions, Ctrl+Shift+A")
 
-        if (open) {
-            MenuPopup(onDismiss = { onOpenChange(false) }) {
+        if (menu.open) {
+            MenuPopup(onDismiss = { menu.open = false }) {
                 TextInput(search, { search = it }, label = "Search actions", showLabel = false, placeholder = "Search actions", leadingIcon = MyIcon.Search, modifier = Modifier.padding(Tokens.Space.S1))
-                MenuLabel("${assistant.name} actions")
+                MenuLabel("${controls.assistant.name} actions")
 
                 for (action in shown) {
                     MenuItem(
                         action.name,
-                        onClick = { onOpenChange(false); onRun(action) },
+                        onClick = { menu.open = false; controls.choose(action) },
                         hint = action.inputs.takeIf { it.isNotEmpty() }?.let { "Asks for ${it.joinToString(", ") { input -> input.name }}" },
                         leading = MyIcon.Zap,
                         trailing = if (action.pinned) ({ Icon(MyIcon.Pin, MyTheme.colors.textFaint, Tokens.Size.IconSm) }) else null,
@@ -115,9 +151,13 @@ internal fun ActionsButton(assistant: Assistant, actions: List<AssistantAction>,
                 }
 
                 Hairline()
-                MenuItem("Manage actions", onClick = { onOpenChange(false); onManage() }, leading = MyIcon.Sliders)
+                MenuItem("Manage actions", onClick = { menu.open = false; controls.onManage() }, leading = MyIcon.Sliders)
             }
         }
+    }
+
+    menu.asking?.let { action ->
+        RunActionDialog(action, onDismiss = { menu.asking = null }, onRun = { inputs -> controls.answer(action, inputs) })
     }
 }
 
@@ -308,13 +348,13 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 
             if (actions.isNotEmpty()) {
                 Table(
-                    listOf(Col("Action", 120.dp, weight = 1f), Col("Asks for", 88.dp, priority = 1), Col("Model", 120.dp, priority = 1), Col("Pinned", 64.dp), ActionColumn),
+                    listOf(Col("Action", 120.dp, weight = 1f), Col("Asks for", 88.dp, priority = 1), Col("Model", 120.dp, priority = 1), Col("Pinned", 64.dp, preferred = 64.dp), ActionColumn),
                     actions.size,
                     { row, column ->
                         val action = actions[row]
 
                         when (column) {
-                            0 -> TableCell.Slot(action.name) {
+                            0 -> TableCell.Slot(action.name, if (action.builtinKey != null) 72.dp else 0.dp) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                                     Label(action.name, maxLines = 1)
 

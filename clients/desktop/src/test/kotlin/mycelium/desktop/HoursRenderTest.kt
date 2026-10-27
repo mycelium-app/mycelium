@@ -8,6 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import mycelium.api.Hours
 import mycelium.api.Me
 import mycelium.state.Store
 import mycelium.ui.GroupsSettings
@@ -54,13 +56,23 @@ class HoursRenderTest {
     }
 
     @Test
-    fun theClosedGroupScreenRenders() {
-        shell("hours-1.14-group-closed", HoursServer(listOf(work, homelab, personal), conversations), "g-work")
+    fun theClosedGroupScreenRendersWhenTheSelectedGroupCloses() {
+        val closedAfterHours = """{"always_open":false,"days":${hoursDaysJson(closed = false, opens = clockIn(-240), closes = clockIn(-60))}}"""
+        val server = HoursServer(listOf(hoursGroupJson("g-work", "work"), homelab, personal), conversations)
+
+        server.savedHoursResponse = hoursGroupJson("g-work", "work", closedAfterHours)
+
+        val (store, platform) = storeFor(server, "g-work")
+        val file = renderAt("hours-1.14-group-closed", true, false, interact = { runBlocking { store.saveGroupHours("g-work", Hours(alwaysOpen = false, days = emptyList())) } }) {
+            Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1"))
+        }
+
+        assertTrue(file.length() > 5_000)
     }
 
     @Test
     fun theMyceliumClosedScreenRenders() {
-        val closed = WellnessSettingsJson.replace(Regex("\"closed\":false"), "\"closed\":true")
+        val closed = WellnessSettingsJson.replace(Regex("\"closed\":(true|false),\"opens\":\"09:00\",\"closes\":\"1[78]:00\""), "\"closed\":false,\"opens\":\"${clockIn(120)}\",\"closes\":\"${clockIn(240)}\"")
 
         shell("hours-1.15-mycelium-closed", HoursServer(listOf(work, homelab), conversations, closed), "all")
     }
@@ -86,7 +98,7 @@ class HoursRenderTest {
     fun theHoursSettingsAndGroupPagesRender() {
         val server = HoursServer(listOf(work, homelab, personal), conversations)
 
-        page("hours-9.2-time-and-focus", server) { TimeAndFocusSettings(it) }
+        page("hours-9.2-time-and-focus", HoursServer(listOf(work, homelab, personal), conversations, WellnessSettingsJson)) { TimeAndFocusSettings(it) }
         page("hours-9.21-group-hours", server) { GroupsSettings(it, "g-work", {}, "Hours") }
         page("hours-9.8-groups", server) { GroupsSettings(it, null, {}) }
     }

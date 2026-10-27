@@ -417,9 +417,19 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         }
     }
 
+    val reviewInstructions: (String?) -> Unit = { layer ->
+        val conversation = (route as? Route.Chat)?.let { state.conversations[it.id] }
+        val group = reviewedGroup(layer, state.groups.values, conversation?.groupId)
+
+        settingsStart = if (group != null) SettingsSection.Groups else SettingsSection.Instructions
+        settingsGroup = group?.id
+        settingsGroupTab = if (group != null) GroupInstructionsTab else null
+        onRoute(Route.Settings)
+    }
+
     val ides = if (platform.opensIdes) remember(platform) { IdeLauncher(store, platform) { settingsStart = SettingsSection.Ides; onRoute(Route.Settings) } } else null
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { layer -> val group = state.groups.values.firstOrNull { it.name == layer }; settingsStart = if (group != null) SettingsSection.Groups else SettingsSection.Instructions; settingsGroup = group?.id; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides) {
         val selected = routeGroup(route, state, groupFilter)
         val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
         val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)

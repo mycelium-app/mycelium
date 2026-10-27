@@ -187,6 +187,7 @@ fun ComposerCard(
     attachments: AttachmentControls,
     modifier: Modifier = Modifier,
     error: String? = null,
+    assistantActions: AssistantActionControls? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = MyTheme.colors
@@ -208,6 +209,7 @@ fun ComposerCard(
                 .border(Tokens.Size.Hairline, colors.border, shape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
         ) {
+            assistantActions?.let { ActionChips(it) }
             AttachmentChips(attachments)
 
             MessageField(
@@ -222,6 +224,7 @@ fun ComposerCard(
                     pasted.isNotEmpty()
                 },
                 onKey = { false },
+                onOpenActions = assistantActions?.let { { it.menu.open = true } },
                 modifier = Modifier.heightIn(min = 88.dp).padding(top = Tokens.Space.S1),
                 alignment = Alignment.TopStart,
                 placeholder = placeholder,
@@ -232,6 +235,7 @@ fun ComposerCard(
                     MyButton({ platform.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
                 }
 
+                assistantActions?.let { ActionsButton(it) }
                 Box(Modifier.weight(1f))
                 trailing()
                 MyButton(onSubmit, icon = MyIcon.Send, description = "Send", muted = true)

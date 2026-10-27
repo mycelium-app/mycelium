@@ -75,6 +75,17 @@ class HoursShellTest {
     }
 
     @Test
+    fun aClosedGroupsFoldersLeaveTheProjectsList() {
+        val folders = listOf(hoursFolderJson("p-work", "work-notes", "g-work"), hoursFolderJson("p-home", "home-notes", "g-personal"))
+
+        show(HoursServer(listOf(work, personal), conversations, projects = folders), route = Route.Projects)
+
+        waitFor("home-notes")
+
+        assertEquals(0, shown("work-notes"))
+    }
+
+    @Test
     fun theGroupSelectorOffersToOpenAClosedGroupInsteadOfListingIt() {
         show(HoursServer(listOf(work, personal), conversations))
 

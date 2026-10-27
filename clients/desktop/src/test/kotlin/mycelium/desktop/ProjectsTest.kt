@@ -227,6 +227,7 @@ class ProjectsTest {
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = { created = it.id }) } }
 
         rule.onNodeWithText("A folder on a node").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Folder on the node").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Folder on the node").performTextInput("work/homelab")
         rule.onNodeWithText("Register and open").performClick()
 
@@ -266,6 +267,7 @@ class ProjectsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("New repository").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("New repository").performTextInput("acme-org/restore-tool")
         rule.onNodeWithText("~/projects/acme-org/restore-tool").assertExists()
         rule.onNodeWithText("Create and open").performClick()
@@ -281,6 +283,7 @@ class ProjectsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set up on laptop").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("A new repository").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("New repository").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("New repository").performTextInput("restore-tool")
         rule.onNodeWithText("Create and open").performClick()
 
@@ -309,6 +312,7 @@ class ProjectsTest {
 
         rule.onNodeWithText("Clone and open").performClick()
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Choose the repository to clone.").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Choose the repository to clone.").assertExists()
         assertEquals(0, posts.size)
     }

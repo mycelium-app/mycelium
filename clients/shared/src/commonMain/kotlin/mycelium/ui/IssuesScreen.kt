@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,8 @@ import mycelium.state.projectsOfIssue
 import mycelium.state.pullRequestText
 import mycelium.state.worktreesOfIssue
 
+private const val IssuesList = "issues"
+
 @Composable
 fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit) {
     val colors = MyTheme.colors
@@ -54,8 +57,11 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
         store.act { worktrees = store.api.worktrees() }
     }
 
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(IssuesList) { listing = store.api.issues(query) } }
+
     LaunchedEffect(query) {
-        store.act { listing = store.api.issues(query) }
+        load()
     }
 
     val issues = listing?.issues.orEmpty()
@@ -98,17 +104,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            TextInput(
-                draft,
-                { draft = it },
-                label = "Search issues",
-                placeholder = "is:open assignee:@me",
-                showLabel = false,
-                mono = true,
-                modifier = Modifier.width(Tokens.Size.FormColumn),
-                leadingIcon = MyIcon.Search,
-                onSubmit = { query = draft },
-            )
+            ListSearch(draft, { draft = it }, "issues", placeholder = "is:open assignee:@me", mono = true, onSubmit = { query = draft })
 
             for (entry in issueCounts(issues)) {
                 val key = entry.forgeId to entry.repository
@@ -231,7 +227,9 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                 )
             }
 
-            if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
+            if (listing == null && IssuesList in loadFailures) {
+                LoadFailedState("issues", load, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S4))
+            } else if (listing != null && shown.isEmpty() && state.projects.values.any { it.forgeId != null }) {
                 Label("No open issues match.", Modifier.padding(Tokens.Space.S2), color = colors.textMuted)
             }
         }

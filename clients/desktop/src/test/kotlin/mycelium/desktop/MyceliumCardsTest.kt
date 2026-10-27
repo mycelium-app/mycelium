@@ -123,14 +123,14 @@ class MyceliumCardsTest {
 
     @Test
     fun aProposedInstructionsEditShowsTheReasonAndOpensTheReview() {
-        var reviewed = false
+        var reviewed: String? = null
         val items = buildThread(call("t10", 1, "mcp__mycelium__propose_instructions_edit", """{"text":"x","base_revision":"abc","reason":"You said: never commit unasked.","layer":"global"}""", "completed", "Proposal 88888888-8888-8888-8888-888888888888 made for the Global instructions. It waits for the person to approve it in Settings, Instructions."))
-        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalReviewInstructions provides { reviewed = true }) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } } } }
+        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalReviewInstructions provides { layer -> reviewed = layer }) { Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(items, onAnswer = { _, _ -> }, onStopWorkflow = {}) } } } }
 
         rule.onNodeWithContentDescription("Proposed an edit to the Global instructions").assertExists()
         rule.onNodeWithText("You said: never commit unasked.").assertExists()
         rule.onNodeWithContentDescription("Review the proposed instructions edit in Settings").performClick()
 
-        assertEquals(true, reviewed)
+        assertEquals("Global", reviewed)
     }
 }

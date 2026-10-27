@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -37,7 +38,14 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -248,8 +256,8 @@ fun MyButton(
     }
     val sized = when {
         text == null -> modifier.size(height)
-        fill -> modifier.fillMaxWidth().height(height)
-        else -> modifier.height(height)
+        fill -> modifier.fillMaxWidth().heightIn(min = height)
+        else -> modifier.heightIn(min = height)
     }
     val outlined = if (variant == ButtonVariant.Outline) sized.border(Tokens.Size.Hairline, colors.borderControl, ControlShape) else sized
 
@@ -274,7 +282,7 @@ fun MyButton(
             }
 
             if (text != null) {
-                Label(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle, color = contentColor, maxLines = 1, overflow = TextOverflow.Visible)
+                BasicText(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle.themed().copy(color = contentColor), softWrap = false, overflow = TextOverflow.Visible)
             }
 
             if (trailingIcon != null) {
@@ -461,6 +469,7 @@ fun TextInput(
     val height = touchMin(if (large) Tokens.Size.ControlLg else Tokens.Size.ControlMd)
     val borderColor = if (error != null) colors.statusFailed else colors.borderControl
     val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
+    var revealed by remember { mutableStateOf(false) }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
         if (showLabel) {
@@ -471,7 +480,7 @@ fun TextInput(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            visualTransformation = if (masked) PasswordVisualTransformation() else VisualTransformation.None,
+            visualTransformation = if (masked && !revealed) PasswordVisualTransformation() else VisualTransformation.None,
             textStyle = base.themed().copy(color = colors.text),
             cursorBrush = SolidColor(colors.text),
             interactionSource = source,
@@ -498,6 +507,10 @@ fun TextInput(
                         }
 
                         inner()
+                    }
+
+                    if (masked) {
+                        MyButton({ revealed = !revealed }, text = if (revealed) "Hide" else "Show", description = "${if (revealed) "Hide" else "Show"} $label", size = ButtonSize.Sm, muted = true)
                     }
                 }
             },
@@ -756,17 +769,36 @@ fun Dialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
         return
     }
 
+    val focus = remember { FocusRequester() }
+
     Popup(popupPositionProvider = ScreenPopup, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        LaunchedEffect(Unit) {
+            runCatching { focus.requestFocus() }
+        }
+
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.35f))
-                .dismissOnTap(onDismiss),
+                .dismissOnTap(onDismiss)
+                .padding(Tokens.Space.S3),
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 Modifier
-                    .width(Tokens.Size.Dialog)
+                    .widthIn(max = Tokens.Size.Dialog)
+                    .fillMaxWidth()
+                    .focusRequester(focus)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        val escape = event.type == KeyEventType.KeyDown && event.key == Key.Escape
+
+                        if (escape) {
+                            onDismiss()
+                        }
+
+                        escape
+                    }
                     .pointerInput(Unit) { detectTapGestures { } }
                     .background(colors.bgRaised, FloatShape)
                     .border(Tokens.Size.Hairline, colors.border, FloatShape)

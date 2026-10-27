@@ -33,7 +33,7 @@ import mycelium.state.ThreadBuilder
 import mycelium.state.ThreadItem
 
 @Composable
-fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: () -> Unit, onBack: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}) {
+fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: () -> Unit, onManageActions: () -> Unit = onOpenSettings, onBack: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}) {
     val assistant = state.assistants[id]
 
     LaunchedEffect(id) {
@@ -55,7 +55,7 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     val notices: @Composable () -> Unit = { AssistantNotices(store, state, assistant, earlier) }
 
     if (conversationId != null) {
-        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices))
+        ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
     } else {
         Column(Modifier.fillMaxSize()) {
             Bar {
@@ -72,7 +72,7 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
             }
 
             notices()
-            StartSession(store, state, assistant)
+            StartSession(store, state, assistant, onManageActions)
         }
     }
 }
@@ -179,11 +179,21 @@ private fun EarlierSession(store: Store, state: AppState, session: Conversation)
 }
 
 @Composable
-private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: Assistant) {
+private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: Assistant, onManageActions: () -> Unit) {
     var message by remember(assistant.id) { mutableStateOf(TextFieldValue("")) }
     var problem by remember(assistant.id) { mutableStateOf<String?>(null) }
     var missing by remember(assistant.id) { mutableStateOf<String?>(null) }
     val waiting = state.sending[assistant.id].orEmpty()
+    val actions = rememberAssistantActionControls(assistant, state.assistantActions[assistant.id].orEmpty(), onManageActions) { action, inputs ->
+        store.act {
+            store.api.runAssistantAction(assistant.id, action.id, inputs)
+            store.refreshAssistants()
+        }
+    }
+
+    LaunchedEffect(assistant.id) {
+        store.act { store.refreshAssistantActions(assistant.id) }
+    }
 
     fun send() {
         val text = message.text.trim()
@@ -209,6 +219,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
             attachments = AttachmentControls(emptyList(), problem, { problem = "Send your first message, then attach files to the next one." }, {}),
             modifier = Modifier.widthIn(max = readingMeasure()),
             error = missing,
+            assistantActions = actions,
         )
     }
 }

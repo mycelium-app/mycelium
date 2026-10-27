@@ -153,7 +153,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, onRetry = { run { refresh() } }) }
 
         val open = viewing
         val shown = diff
@@ -449,6 +449,8 @@ private fun ChangeItem(row: ChangeRow.Change, shown: Boolean, onOpen: () -> Unit
     }
 }
 
+private const val InheritedAlpha = 0.45f
+
 @Composable
 fun Checkbox(
     checked: Boolean,
@@ -457,10 +459,12 @@ fun Checkbox(
     checkedState: String = "Staged",
     uncheckedState: String = "Not staged",
     partly: Boolean = false,
+    inherited: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val target = touchMin(Tokens.Size.ControlMd)
     val filled = checked || partly
+    val fill = if (inherited) colors.accent.copy(alpha = InheritedAlpha) else colors.accent
 
     Box(
         Modifier
@@ -475,8 +479,8 @@ fun Checkbox(
         Box(
             Modifier
                 .size(Tokens.Size.IconMd)
-                .background(if (filled) colors.accent else colors.bgContent, ControlShape)
-                .border(Tokens.Size.Hairline, if (filled) colors.accent else colors.borderControl, ControlShape),
+                .background(if (filled) fill else colors.bgContent, ControlShape)
+                .border(Tokens.Size.Hairline, if (filled) fill else colors.borderControl, ControlShape),
             contentAlignment = Alignment.Center,
         ) {
             if (checked) {

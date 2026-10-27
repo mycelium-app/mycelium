@@ -168,7 +168,7 @@ class TablesRenderTest {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val api = MyceliumApi("https://mycelium.test", "token", MockEngine { respond(RenderTools, HttpStatusCode.OK, json) })
         val integration = integrationsOf(runBlocking { api.chatToolServers() }).first()
-        val actions = PageActions({}, {}, {}, {}, {}, {})
+        val actions = PageActions({}, {}, {}, {}, {}, {}, {})
 
         everywhere("integrations-home", 700) { ChatToolsSettings(store) }
         everywhere("integration-page", 900) { IntegrationPage(store, integration, actions, {}) }

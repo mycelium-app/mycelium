@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -111,8 +112,9 @@ class StartProposalCardTest {
         rule.onNodeWithText("Folder /tmp").assertExists()
         rule.onNodeWithText("claude · a@example.com").assertExists()
         rule.onNodeWithText("Read the schema").assertExists()
-        rule.onNodeWithText("Create and connect").assertExists()
         rule.onNodeWithText("Don't create").assertExists()
+        rule.onNodeWithContentDescription("More ways to create").performClick()
+        rule.onNodeWithText("Create and connect").assertExists()
     }
 
     @Test
@@ -130,8 +132,9 @@ class StartProposalCardTest {
     @Test
     fun pressingCreateAndConnectConnectsTheProposal() {
         show()
-        waitForText("Create and connect")
+        waitForText("Create")
 
+        rule.onNodeWithContentDescription("More ways to create").performClick()
         rule.onNodeWithText("Create and connect").performClick()
 
         waitForRequest(HttpMethod.Post, "/start-proposals/$ProposalId/connect")

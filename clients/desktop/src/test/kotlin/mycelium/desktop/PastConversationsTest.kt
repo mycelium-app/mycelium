@@ -1,19 +1,27 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import mycelium.Connection
@@ -26,8 +34,6 @@ import mycelium.ui.MyceliumTheme
 import mycelium.ui.Route
 import mycelium.ui.Shell
 import org.junit.Rule
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 private const val NodeId = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -146,7 +152,7 @@ class PastConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Plan the rollout").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
+        rule.onNodeWithContentDescription("More for Plan the rollout").performScrollTo().performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Delete Plan the rollout?").assertExists()
         rule.onNodeWithText("Its messages and attachments are removed. This cannot be undone.").assertExists()
@@ -164,7 +170,7 @@ class PastConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Plan the rollout").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for Plan the rollout").performClick()
+        rule.onNodeWithContentDescription("More for Plan the rollout").performScrollTo().performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Cancel").performClick()
 
@@ -190,7 +196,7 @@ class PastConversationsTest {
     @Test
     fun historyRowsWithAndWithoutAProjectPutTheNodeInTheSameColumn() {
         val store = store(archived = TwoArchivedJson, usage = """[{"key":"c1","name":"","turns":1},{"key":"c2","name":"","turns":1}]""")
-        rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.wrapContentSize(unbounded = true).requiredSize(1600.dp, 768.dp)) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Scratch notes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open Scratch notes").assertExists()

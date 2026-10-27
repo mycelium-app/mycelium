@@ -18,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,7 +32,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import mycelium.api.Project
 import mycelium.state.PickedFile
 import mycelium.state.Store
@@ -130,12 +128,12 @@ fun ProjectIcon(project: Project?, size: Dp = Tokens.Size.IconSm, modifier: Modi
 fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDismiss: () -> Unit) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
-    val scope = rememberCoroutineScope()
     var choice by remember { mutableStateOf(projects.firstOrNull()?.icon) }
     var logo by remember { mutableStateOf<PickedFile?>(null) }
     var query by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
+    val run = rememberAttempt { failure = it; running = false }
     val shown = ProjectIconSet.filter { it.name.contains(query.trim().replace(' ', '-'), ignoreCase = true) }
 
     fun pickLogo(picked: List<PickedFile>) {
@@ -159,21 +157,18 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
         failure = null
         running = true
 
-        scope.launch {
-            failure = attempt {
-                val chosenLogo = logo
+        run {
+            val chosenLogo = logo
 
-                for (project in projects) {
-                    if (chosenLogo != null) {
-                        store.uploadProjectAvatar(project.id, chosenLogo.mediaType, chosenLogo.bytes)
-                    } else if (project.icon != choice || project.avatarSha256 != null) {
-                        store.setProjectIcon(project.id, choice)
-                    }
+            for (project in projects) {
+                if (chosenLogo != null) {
+                    store.uploadProjectAvatar(project.id, chosenLogo.mediaType, chosenLogo.bytes)
+                } else if (project.icon != choice || project.avatarSha256 != null) {
+                    store.setProjectIcon(project.id, choice)
                 }
-
-                onDismiss()
             }
-            running = false
+
+            onDismiss()
         }
     }
 

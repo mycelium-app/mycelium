@@ -1,7 +1,6 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -120,16 +118,17 @@ fun HistoryToolbar(
     var naming by remember { mutableStateOf<Naming?>(null) }
     val filters = layout.filters
 
-    Bar {
-        Row(
-            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+    Column {
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             ListSearch(query, onQuery, "conversations")
 
             if (query.isNotBlank()) {
-                return@Row
+                return@FlowRow
             }
 
             Segmented(PastFilter.entries.map { it.label }, filters.state.label, { picked -> onLayout(layout.copy(filters = filters.copy(state = PastFilter.entries.first { it.label == picked }))) }, groupLabel = "State")
@@ -187,6 +186,8 @@ fun HistoryToolbar(
                 }
             }
         }
+
+        Hairline()
     }
 
     naming?.let { mode ->
@@ -254,6 +255,8 @@ private sealed interface HistoryItem {
 }
 
 private val NumericColumns = setOf(HistoryColumn.Turns, HistoryColumn.Tokens, HistoryColumn.Cost)
+private val NarrowHidden = setOf(HistoryColumn.Node, HistoryColumn.Agent)
+private val NarrowWidth = 900.dp
 
 @Composable
 fun HistoryTable(
@@ -288,8 +291,8 @@ fun HistoryTable(
 
             when {
                 column == HistoryColumn.Title -> Col(column.title, stored ?: 120.dp, weight = 1f)
-                stored != null -> Col(column.title, stored, preferred = stored, numeric = column in NumericColumns)
-                else -> Col(column.title, MinColumnWidth, max = DefaultMaxColumnWidth, numeric = column in NumericColumns)
+                stored != null -> Col(column.title, stored, preferred = stored, numeric = column in NumericColumns, priority = if (column in NarrowHidden) 1 else 0)
+                else -> Col(column.title, MinColumnWidth, max = DefaultMaxColumnWidth, numeric = column in NumericColumns, priority = if (column in NarrowHidden) 1 else 0)
             }
         } + Col("", ActionWidth, preferred = ActionWidth, align = ColumnAlign.End)
     }
@@ -381,6 +384,7 @@ fun HistoryTable(
                 }
             },
             rowModifier = { index -> if (items[index] is HistoryItem.Row) Modifier.hoverHighlight() else Modifier },
+            narrowBreakpoint = NarrowWidth,
         )
 
         if (items.isEmpty()) {

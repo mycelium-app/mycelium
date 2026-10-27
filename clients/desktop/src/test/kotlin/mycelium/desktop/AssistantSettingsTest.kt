@@ -96,6 +96,11 @@ class AssistantSettingsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, SettingsPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.AssistantSettings("a1")) } }
     }
 
+    private fun openSection(label: String) {
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText(label)[0].performClick()
+    }
+
     @Test
     fun theBackButtonLeavesSettingsForTheAssistantsThread() {
         shell()
@@ -109,6 +114,7 @@ class AssistantSettingsTest {
     @Test
     fun modelPreferencesReorderWithMoveUpAndAreSavedInThatOrder() {
         shell()
+        openSection("Models and nodes")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Ollama · qwen").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for Ollama · qwen").performClick()
@@ -124,6 +130,7 @@ class AssistantSettingsTest {
     @Test
     fun theStorageTableListsFilesApartFromTheInstructionsAndSavesAnEdit() {
         shell()
+        openSection("Storage and secrets")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for notes/today.md").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithContentDescription("More for AGENTS.md").fetchSemanticsNodes().size)
@@ -141,6 +148,7 @@ class AssistantSettingsTest {
     @Test
     fun addingClaudeCodeAndANodeIsSavedAsPreferences() {
         shell()
+        openSection("Models and nodes")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Add Claude Code").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Add Claude Code").performScrollTo().performClick()
@@ -158,6 +166,7 @@ class AssistantSettingsTest {
     @Test
     fun aSecretIsSetFromItsRowWithoutShowingTheValue() {
         shell()
+        openSection("Storage and secrets")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for GITHUB_TOKEN").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("More for GITHUB_TOKEN").performScrollTo().performClick()
@@ -173,6 +182,7 @@ class AssistantSettingsTest {
     @Test
     fun aRepositoryIsChosenForTheBackup() {
         shell()
+        openSection("Storage and secrets")
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Repository").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Repository").performScrollTo().performTextInput("samexample/standup")

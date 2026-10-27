@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +79,8 @@ fun pastConversations(current: Collection<Conversation>, archived: Collection<Co
         .sortedByDescending { it.updatedAt }
 }
 
+private const val PastList = "past conversations"
+
 @Composable
 fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     val colors = MyTheme.colors
@@ -101,8 +104,11 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
         platform?.savePreference(HistoryWidthsPreference, encodeHistoryWidths(widths))
     }
 
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(PastList) { archived = store.api.conversations(archived = true) } }
+
     LaunchedEffect(Unit) {
-        store.act { archived = store.api.conversations(archived = true) }
+        load()
         store.act { usage = store.api.conversationUsage().associateBy { it.key } }
     }
 
@@ -201,6 +207,12 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
         if (query.isNotBlank() && searchProblem != null) {
             Label(searchProblem.orEmpty(), Modifier.padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), color = colors.textMuted)
+        }
+
+        if (PastList in loadFailures && entries.isEmpty()) {
+            LoadFailedState("past conversations", load, Modifier.weight(1f).fillMaxWidth())
+
+            return@Column
         }
 
         HistoryTable(groups, layout, { layout = it }, widths, { widths = it }, stamp, onOpen, Modifier.weight(1f)) { row ->

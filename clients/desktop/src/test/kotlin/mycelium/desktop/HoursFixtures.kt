@@ -36,11 +36,14 @@ internal fun hoursConversationJson(id: String, title: String, group: String?, st
     """{"id":"$id","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/$id","title":"$title","status":"$status","acp_session_id":"s","mode":null,"model":null,"group_id":${group?.let { "\"$it\"" }},
 "created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null,"pinned_at":null}"""
 
+internal fun hoursFolderJson(id: String, name: String, group: String?) =
+    """{"id":"$id","node_id":"n1","name":"$name","path":"/p/$name","forge_id":null,"repository":null,"created_at":"2026-10-22T10:00:00Z","group_id":${group?.let { "\"$it\"" }}}"""
+
 internal fun clockIn(minutes: Int): String = (Clock.System.now() + minutes.minutes).toString().substring(11, 16)
 
 internal fun isoIn(minutes: Int): String = (Clock.System.now() + minutes.minutes).toString()
 
-internal class HoursServer(private val groups: List<String>, private val conversations: List<String>, val settings: String = WellnessSettingsJson.replace("\"always_open\":false", "\"always_open\":true")) {
+internal class HoursServer(private val groups: List<String>, private val conversations: List<String>, val settings: String = WellnessSettingsJson.replace("\"always_open\":false", "\"always_open\":true"), private val projects: List<String> = emptyList()) {
     val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
 
     var savedHoursResponse: String = "{}"
@@ -63,6 +66,7 @@ internal class HoursServer(private val groups: List<String>, private val convers
                 path.endsWith("/wellness/settings") -> respond(settings, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/overview") -> respond(WellnessOverviewJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond("""[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,"agents":[],"logins":[]}]""", HttpStatusCode.OK, json)
+                path.endsWith("/projects") -> respond(projects.joinToString(",", "[", "]"), HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/projects") || path.endsWith("/worktrees") || path.endsWith("/assistants") -> respond("[]", HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }

@@ -2,7 +2,14 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -26,13 +33,19 @@ internal const val SkillsJson = """[
 {"kind":"area","name":"clients/shared","own_lines":3,"agent_lines":97,"own_share":0.03,"weekly_own_lines":[0,0,0,0,0,0,1,2],"last_practised":null}]"""
 
 private const val Suggested = """{"id":"e1","kind":"language","name":"Kotlin","title":"Debounce the sidebar group filter","brief":"Make the filter wait 150 ms.","minutes":20,"state":"suggested","reviewing":false,"created_at":"2026-10-23T10:00:00Z"}"""
-private const val Started = """{"id":"e1","kind":"language","name":"Kotlin","title":"Debounce the sidebar group filter","brief":"Make the filter wait 150 ms.","minutes":20,"state":"started","branch":"learn/debounce-1","conversation_id":"c1","reviewing":false,"created_at":"2026-10-23T10:00:00Z","started_at":"2026-10-26T09:00:00Z"}"""
+private const val Started = """{"id":"e1","kind":"language","name":"Kotlin","title":"Debounce the sidebar group filter","brief":"Make the filter wait 150 ms.","minutes":20,"state":"started","branch":"learn/debounce-1","conversation_id":"c1","source_conversation_id":"c-src","source_title":"Usage card flicker","reviewing":false,"created_at":"2026-10-23T10:00:00Z","started_at":"2026-10-26T09:00:00Z"}"""
 private const val Tests = """{"exit":1,"passed":5,"failed":1,"failing":["newGroupAppearsWithoutTyping"],"timed_out":false,"output_tail":""}"""
 private const val Reviewed = """{"id":"e1","kind":"language","name":"Kotlin","title":"Debounce the sidebar group filter","brief":"Make the filter wait 150 ms.","minutes":20,"state":"reviewed","branch":"learn/debounce-1","conversation_id":"c1","reviewing":false,"tests":$Tests,"review":{"id":"r1","summary":"Close, one snapshot problem.","comments":[{"path":"Filter.kt","line":14,"body":"This reads groups once."},{"path":"Filter.kt","line":15,"body":"Good initial value.","praise":true}],"created_at":"2026-10-26T10:00:00Z"},"created_at":"2026-10-23T10:00:00Z","started_at":"2026-10-26T09:00:00Z"}"""
+
+private const val KotlinRow = """{"kind":"language","name":"Kotlin","own_lines":24,"agent_lines":76,"own_share":0.24,"weekly_own_lines":[0,2,3,5,4,8,12,24],"last_practised":"2026-10-26"},"""
+private const val HiddenKotlinJson = """[{"kind":"language","name":"Kotlin","own_lines":24,"agent_lines":76,"own_share":0.24,"weekly_own_lines":[0,2,3,5,4,8,12,24],"last_practised":"2026-10-26","hidden":true}]"""
+private const val SolutionJson = """[{"path":"src/Filter.kt","diff":"@@ -1,2 +1,3 @@\n fun filter() {\n-    show()\n+    delay(150)\n+    show()\n }"}]"""
+private const val LearnedJson = """[{"id":"l1","text":"combine versus zip for StateFlow","source_kind":"teach_me","conversation_id":"c1","conversation_title":"Usage card flicker","message_id":12,"created_at":"2026-10-27T09:00:00Z"}]"""
 
 internal class LearningRequests {
     val seen = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
     private var exercise = Suggested
+    private var hidden = false
 
     fun sent(method: String, suffix: String) = seen.toList().any { it.first == method && it.second.endsWith(suffix) }
 
@@ -43,8 +56,15 @@ internal class LearningRequests {
             seen += request.method.value to path
 
             val reply = when {
-                path.endsWith("/skills") -> SkillsJson
-                path.endsWith("/skills/hidden") -> return@MockEngine respond("", HttpStatusCode.NoContent)
+                path.endsWith("/skills") && request.url.parameters["hidden"] == "true" -> if (hidden) HiddenKotlinJson else "[]"
+                path.endsWith("/skills") -> if (hidden) SkillsJson.replace(KotlinRow, "") else SkillsJson
+                path.endsWith("/skills/hidden") -> {
+                    hidden = request.method.value == "PUT"
+
+                    return@MockEngine respond("", HttpStatusCode.NoContent)
+                }
+                path.endsWith("/exercises/e1/solution") -> SolutionJson
+                path.endsWith("/wellness/learned") -> LearnedJson
                 path.endsWith("/exercises/suggested") -> if (exercise == Suggested) "[$Suggested]" else "[]"
                 path.endsWith("/exercises") -> "[$exercise]"
                 path.endsWith("/start") -> Started.also { exercise = it }
@@ -112,6 +132,66 @@ class SkillsTabTest {
         rule.onNodeWithContentDescription("Hide Kotlin").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty() }
         assertTrue(requests.sent("PUT", "/skills/hidden"))
+    }
+
+    @Test
+    fun aHiddenSkillIsListedUnderHiddenAndComesBackAfterUnhiding() {
+        show()
+        openSkills()
+
+        rule.onNodeWithContentDescription("Hide Kotlin").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isEmpty() }
+
+        rule.onNodeWithText("Hidden").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Unhide Kotlin").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("No exercises for a hidden skill. Unhide it to see it in the overview and get exercises for it again.").assertIsDisplayed()
+
+        rule.onNodeWithContentDescription("Unhide Kotlin").performClick()
+        rule.waitUntil(5_000) { requests.sent("DELETE", "/skills/hidden") }
+
+        rule.onNodeWithText("All").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("24%").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun showASolutionOpensTheSourceDiffAndEscapeClosesIt() {
+        show()
+        rule.onNodeWithContentDescription("Start Debounce the sidebar group filter").performClick()
+        rule.waitUntil(5_000) { requests.sent("POST", "/exercises/e1/start") }
+        openSkills()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Show a solution to Debounce the sidebar group filter").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("A solution to Debounce the sidebar group filter").assertIsDisplayed()
+        rule.onNodeWithText("What the agent wrote in Usage card flicker, the conversation this exercise came from. Looking is not recorded.").assertIsDisplayed()
+
+        rule.onAllNodes(isRoot()).onLast().performKeyInput { pressKey(Key.Escape) }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun openingTheConversationFromASolutionClosesItAndLoadsTheConversation() {
+        show()
+        rule.onNodeWithContentDescription("Start Debounce the sidebar group filter").performClick()
+        rule.waitUntil(5_000) { requests.sent("POST", "/exercises/e1/start") }
+        openSkills()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("learn/debounce-1").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Show a solution to Debounce the sidebar group filter").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Open the conversation").performClick()
+
+        rule.waitUntil(5_000) { requests.sent("GET", "/conversations/c-src/events") }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun recentlyLearnedListsWhatTheAgentNoted() {
+        show()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("combine versus zip for StateFlow").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Teach me in Usage card flicker").performScrollTo().assertIsDisplayed()
     }
 
     @Test

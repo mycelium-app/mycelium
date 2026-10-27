@@ -31,6 +31,7 @@ import mycelium.state.accountChoices
 import mycelium.state.accountMenuTitle
 import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
+import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
 import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
@@ -61,7 +62,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         store.load { store.refreshProjects() }
     }
 
-    val projects = state.projects.values.sortedBy { it.name }
+    val groupFilter = LocalGroupFilter.current
+    val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
     val project = state.projects[chosenProject]
     val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()

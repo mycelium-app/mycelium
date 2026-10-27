@@ -327,7 +327,7 @@ fun SuggestedExerciseCard(store: Store, modifier: Modifier = Modifier) {
             exercise.minutes?.let { Tag("About $it min") }
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (started) {
                 exercise.conversationId?.let { id -> MyButton({ store.act { store.open(id) } }, text = "Open the branch chat", variant = ButtonVariant.Primary) }
             } else {

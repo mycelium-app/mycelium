@@ -35,6 +35,7 @@ import mycelium.state.formatEnergy
 import mycelium.state.formatTreeDays
 import mycelium.state.formatWater
 import mycelium.state.dayLabel
+import mycelium.state.inGroup
 import mycelium.state.formatCost
 import mycelium.state.formatDuration
 import mycelium.state.formatTokens
@@ -63,6 +64,7 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
     var activity by remember { mutableStateOf<Activity?>(null) }
     val latestChange = state.conversations.values.maxOfOrNull { it.updatedAt }
     val nodes = state.nodes.values.sortedBy { it.name }
+    val groupFilter = LocalGroupFilter.current
 
     LaunchedEffect(range, nodeId, latestChange) {
         store.act { activity = store.api.activity(range, nodeId) }
@@ -124,7 +126,9 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
                 Label(tokensPerHourSummary(loaded), style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
-            val projects = @Composable { modifier: Modifier -> DataTable("Projects", CompactColumns.withTitle("Project"), loaded.projects.map(::compactCells), "No projects in this range.", modifier) }
+            val shownProjects = loaded.projects.filter { inGroup(state.projects[it.key]?.groupId, groupFilter) }
+            val shownConversations = loaded.conversations.filter { inGroup(state.conversations[it.key]?.groupId, groupFilter) }
+            val projects = @Composable { modifier: Modifier -> DataTable("Projects", CompactColumns.withTitle("Project"), shownProjects.map(::compactCells), "No projects in this range.", modifier) }
             val nodeTable = @Composable { modifier: Modifier -> DataTable("Nodes", CompactColumns.take(2).withTitle("Node"), loaded.nodes.map { compactCells(it).take(2) }, "No nodes in this range.", modifier) }
 
             BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -147,10 +151,10 @@ fun ActivityScreen(store: Store, state: AppState, onOpenConversation: (String) -
             DataTable(
                 "Conversations",
                 Columns.withTitle("Conversation"),
-                loaded.conversations.map { rowCells(it) },
+                shownConversations.map { rowCells(it) },
                 "No conversations in this range.",
-                onRow = { onOpenConversation(loaded.conversations[it].key) },
-                rowDescription = { "Open ${loaded.conversations[it].name}" },
+                onRow = { onOpenConversation(shownConversations[it].key) },
+                rowDescription = { "Open ${shownConversations[it].name}" },
             )
             DataTable("Agents", Columns.withTitle("Agent"), loaded.agents.map { rowCells(it, agentName(it.name)) }, "No agents in this range.")
             DataTable("Models", Columns.withTitle("Model").let { listOf(it.first().copy(rigid = true)) + it.drop(1) }, loaded.models.map { rowCells(it) }, "No models in this range.")

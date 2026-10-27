@@ -34,7 +34,7 @@ fun pinnedCards(items: List<ThreadItem>, dismissed: Set<String>, now: Instant = 
                 val key = workflowPinKey(item.progress.runId)
 
                 val sinceLastLine = item.progress.lastLineAt?.let { now - it }
-                val quietLimit = if (item.progress.complete) BetweenWorkflowStages else RunningWorkflowQuiet
+                val quietLimit = if (item.progress.over) BetweenWorkflowStages else RunningWorkflowQuiet
 
                 if (sinceLastLine != null && sinceLastLine < quietLimit) {
                     pinned[key] = PinnedCard(key, "Workflow", workflow = item.progress)

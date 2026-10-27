@@ -44,12 +44,12 @@ import mycelium.state.ago
 import mycelium.state.formatSize
 import mycelium.state.harnessModelChoices
 
-enum class AssistantSection(val label: String) {
-    Identity("Identity"),
-    Instructions("Instructions"),
-    ModelsAndNodes("Models and nodes"),
-    StorageAndSecrets("Storage and secrets"),
-    SchedulesAndActions("Schedules and actions"),
+enum class AssistantSection(val label: String, val icon: MyIcon) {
+    Identity("Identity", MyIcon.Person),
+    Instructions("Instructions", MyIcon.File),
+    ModelsAndNodes("Models and nodes", MyIcon.Server),
+    StorageAndSecrets("Storage and secrets", MyIcon.Key),
+    SchedulesAndActions("Schedules and actions", MyIcon.Calendar),
 }
 
 @Composable
@@ -96,8 +96,10 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
                                 .pressable({ section = entry }, role = Role.Tab, selected = entry == section, shape = BlockShape)
                                 .semantics { selected = entry == section }
                                 .padding(horizontal = Tokens.Space.S2),
+                            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Icon(entry.icon, MyTheme.colors.textMuted)
                             Label(entry.label, maxLines = 1)
                         }
                     }

@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -142,7 +143,8 @@ class MessageProposalCardTest {
     @Test
     fun sendingAndConnectingApprovesFutureMessagesAsAnExplicitSeparateAction() {
         show()
-        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Don't send").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More ways to send").performClick()
         rule.onNodeWithText("Send and connect").performClick()
         waitForRequest(HttpMethod.Post, "/message-proposals/$ProposalId/connect")
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Sent").fetchSemanticsNodes().isNotEmpty() }
@@ -151,9 +153,10 @@ class MessageProposalCardTest {
     @Test
     fun aMessageAcrossGroupsOffersSendAndConnectGroups() {
         show(AcrossGroups, EnabledExperiments)
-        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect groups").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Don't send").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Connecting groups lets every conversation in yucca and Immich start and message the other without approval.").assertExists()
 
+        rule.onNodeWithContentDescription("More ways to send").performClick()
         rule.onNodeWithText("Send and connect groups").performClick()
 
         waitForRequest(HttpMethod.Post, "/message-proposals/$ProposalId/connect-groups")
@@ -163,8 +166,10 @@ class MessageProposalCardTest {
     @Test
     fun aMessageWithinOneGroupHasNoConnectGroupsButton() {
         show(WithinOneGroup, EnabledExperiments)
-        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Send and connect").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Don't send").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More ways to send").performClick()
 
+        rule.onNodeWithText("Send and connect").assertExists()
         rule.onNodeWithText("Send and connect groups").assertDoesNotExist()
     }
 

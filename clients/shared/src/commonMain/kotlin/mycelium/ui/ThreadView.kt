@@ -274,7 +274,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Permission -> ToolApprovalCard(item, onAnswer)
         is ThreadItem.ResponseEdit -> ResponseEditorCard(item)
         is ThreadItem.TurnEnd -> Unit
-        is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: ")) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
 
             if (onRetry != null) {
@@ -1042,6 +1042,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
     val now = rememberNow(WorkflowTickMillis, ticking = !progress.over)
     val totals = workflowTokens(progress).takeIf { progress.agents.size > 1 }
     val stalled = progress.stalled(now)
+    val pausedAtLimit = LocalPausedWorkflow.current.takeIf { progress.paused }
     val quietMinutes = progress.quietFor(now)?.inWholeMinutes ?: 0
     val beforeAnyStep = progress.stopped && progress.agents.isEmpty()
     val outcome = when {
@@ -1067,6 +1068,8 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                 Icon(MyIcon.Stop, colors.textMuted, Tokens.Size.IconSm)
             } else if (progress.failed) {
                 Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
+            } else if (progress.paused) {
+                Icon(MyIcon.Clock, colors.statusAttention, Tokens.Size.IconSm)
             } else if (stalled) {
                 Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
             } else {
@@ -1120,6 +1123,12 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             }
         }
 
+        if (progress.limit != null && progress.paused) {
+            Box(Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3)) {
+                LimitNote(progress.limit, pausedAtLimit?.agent.orEmpty(), pausedAtLimit?.actions)
+            }
+        }
+
         if (explanation != null) {
             Label(explanation, Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
         }
@@ -1141,11 +1150,13 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                             .fillMaxWidth()
                             .then(if (open != null) Modifier.pressable(open, shape = BlockShape, description = "Open ${agent.label}") else Modifier)
                             .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S0_5)
-                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.failed) "Stopped" else if (agent.finished) "Done" else if (progress.ended) "Stopped" else if (stalled) "Stalled" else "Running"}: ${agent.label}" },
+                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.paused) "Paused" else if (agent.failed) "Stopped" else if (agent.finished) "Done" else if (progress.ended) "Stopped" else if (stalled) "Stalled" else "Running"}: ${agent.label}" },
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (agent.failed) {
+                        if (agent.paused) {
+                            Icon(MyIcon.Clock, colors.statusAttention, Tokens.Size.IconSm)
+                        } else if (agent.failed) {
                             Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
                         } else if (agent.finished) {
                             Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
@@ -1159,7 +1170,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
 
                         Label(agent.label, Modifier.weight(1f), maxLines = 1)
 
-                        val stats = if (stalled && !agent.finished) "last line ${quietMinutes}m ago" else workflowStats(agent)
+                        val stats = if (agent.paused) "Paused" else if (stalled && !agent.finished) "last line ${quietMinutes}m ago" else workflowStats(agent)
 
                         stats?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1) }
                     }

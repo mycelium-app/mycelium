@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +44,11 @@ private fun mcpOffered(kind: String, baseUrl: String): Boolean = kind == "gitlab
 fun ForgesSettings(store: Store) {
     val colors = MyTheme.colors
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val loadFailures by store.loadFailures.collectAsState()
+    val shown = forges.filter { forgeName(it).contains(query.trim(), ignoreCase = true) || it.baseUrl.contains(query.trim(), ignoreCase = true) }
+    val load = { store.load("forges") { forges = store.api.forges(); loaded = true } }
     var connecting by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("github") }
     var baseUrl by remember { mutableStateOf("") }
@@ -55,7 +61,7 @@ fun ForgesSettings(store: Store) {
     val attempt = rememberAttempt { failure = it }
 
     LaunchedEffect(Unit) {
-        store.act { forges = store.api.forges() }
+        load()
     }
 
     fun connect() {
@@ -94,49 +100,53 @@ fun ForgesSettings(store: Store) {
                 }
             }
 
-            Table(
-                listOf(
-                    Col("Forge", 120.dp, weight = 1f),
-                    Col("Signed in as", 80.dp),
-                    Col("Organisations", 120.dp, max = 320.dp, overflow = Overflow.Wrap, priority = 1),
-                    ActionColumn,
-                ),
-                forges.size,
-                { row, column ->
-                    val forge = forges[row]
-                    val name = forgeName(forge)
-                    val host = forge.baseUrl.substringAfter("://").trimEnd('/')
+            ListSearch(query, { query = it }, "forges")
 
-                    when (column) {
-                        0 -> TableCell.Slot("$name $host", Tokens.Size.IconSm + Tokens.Space.S1_5 * 2) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
-                                BrandLogo(if (forge.kind == "gitlab") "gitlab" else "github")
-                                Label(name, maxLines = 1)
-                                Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+            ListFrame("forges", loaded, "forges" in loadFailures, shown.size, load, if (query.isBlank()) "No forges. Choose Connect a forge to add one." else "No forges match.") {
+                Table(
+                    listOf(
+                        Col("Forge", 120.dp, weight = 1f),
+                        Col("Signed in as", 80.dp),
+                        Col("Organisations", 120.dp, max = 320.dp, overflow = Overflow.Wrap, priority = 1),
+                        ActionColumn,
+                    ),
+                    shown.size,
+                    { row, column ->
+                        val forge = shown[row]
+                        val name = forgeName(forge)
+                        val host = forge.baseUrl.substringAfter("://").trimEnd('/')
+
+                        when (column) {
+                            0 -> TableCell.Slot("$name $host", Tokens.Size.IconSm + Tokens.Space.S1_5 * 2) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                                    BrandLogo(if (forge.kind == "gitlab") "gitlab" else "github")
+                                    Label(name, maxLines = 1)
+                                    Label(host, Modifier.weight(1f, fill = false), color = colors.textFaint, maxLines = 1)
+                                }
                             }
-                        }
 
-                        1 -> TableCell.Text(forge.account)
-                        2 -> TableCell.Text(forge.organisations.joinToString(", "), color = colors.textMuted)
-                        else -> TableCell.Slot {
-                            RowMenu("$name account ${forge.account} on $host") { close ->
-                                MenuItem("Disconnect", {
-                                    close()
+                            1 -> TableCell.Text(forge.account)
+                            2 -> TableCell.Text(forge.organisations.joinToString(", "), color = colors.textMuted)
+                            else -> TableCell.Slot {
+                                RowMenu("$name account ${forge.account} on $host") { close ->
+                                    MenuItem("Disconnect", {
+                                        close()
 
-                                    if (forge.mcpServerId != null) {
-                                        disconnecting = forge
-                                    } else {
-                                        store.act {
-                                            store.api.disconnectForge(forge.id)
-                                            forges = forges.filter { it.id != forge.id }
+                                        if (forge.mcpServerId != null) {
+                                            disconnecting = forge
+                                        } else {
+                                            store.act {
+                                                store.api.disconnectForge(forge.id)
+                                                forges = forges.filter { it.id != forge.id }
+                                            }
                                         }
-                                    }
-                                })
+                                    })
+                                }
                             }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
         disconnecting?.let { forge ->

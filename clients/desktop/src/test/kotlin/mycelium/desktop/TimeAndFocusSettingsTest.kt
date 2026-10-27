@@ -2,9 +2,11 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import kotlinx.coroutines.runBlocking
 import mycelium.state.Store
 import mycelium.ui.MyceliumTheme
@@ -27,7 +29,7 @@ class TimeAndFocusSettingsTest {
 
         runBlocking { store.wellness.load() }
         rule.setContent { MyceliumTheme(true) { TimeAndFocusSettings(store) } }
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Quiet hours").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Hours").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -40,19 +42,56 @@ class TimeAndFocusSettingsTest {
     }
 
     @Test
-    fun switchingAWeekdayOffSavesItAsDisabled() {
+    fun markingADayClosedAllDaySavesItAsClosed() {
         show()
 
-        rule.onNodeWithContentDescription("Monday quiet hours").performClick()
+        rule.onNodeWithContentDescription("Monday closed all day").performClick()
         rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/settings") != null }
-        assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"weekday\":0,\"enabled\":false"))
+        assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"weekday\":0,\"closed\":true"))
     }
 
     @Test
-    fun theHoldChoicesShowWhileQuietHoursAreOn() {
+    fun choosingAlwaysOpenSavesMyceliumAsAlwaysOpen() {
         show()
 
+        rule.onNodeWithContentDescription("Mycelium hours").assertExists()
+        rule.onAllNodesWithText("Always open").onFirst().performClick()
+        rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/settings") != null }
+        assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"always_open\":true"))
+    }
+
+    @Test
+    fun aClosingTimeOfTwentyFourHundredIsAcceptedAndSaved() {
+        show()
+
+        rule.onNodeWithContentDescription("Mycelium closes on Monday").performTextReplacement("24:00")
+        rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/settings") != null }
+        assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"closes\":\"24:00\""))
+    }
+
+    @Test
+    fun theGroupsTableSummarisesEachGroupsHours() {
+        show()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Weekdays 09:00 to 18:00").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithText("Every group is closed while Mycelium is closed.").assertExists()
+        rule.onNodeWithText("New groups are always open.").assertExists()
+    }
+
+    @Test
+    fun theHoldChoicesShowUnderWhileClosed() {
+        show()
+
+        rule.onNodeWithText("While closed").assertExists()
         rule.onNodeWithText("Hold scheduled runs").assertExists()
         rule.onNodeWithText("Hold assistant pings").assertExists()
+    }
+
+    @Test
+    fun onlyBreakRemindersAreLeftAndPomodoroIsGone() {
+        show()
+
+        rule.onNodeWithText("90 min").assertExists()
+        assertTrue(rule.onAllNodesWithText("Pomodoro", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
     }
 }

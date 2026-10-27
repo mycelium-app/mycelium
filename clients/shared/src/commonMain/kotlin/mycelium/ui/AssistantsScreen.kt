@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,8 @@ import mycelium.state.GroupByGroup
 import mycelium.state.GroupByNone
 import mycelium.state.GroupByState
 import mycelium.state.NoGroup
+import mycelium.state.groupChoiceOf
+import mycelium.state.groupScope
 import mycelium.state.Store
 import mycelium.state.assistantRows
 import mycelium.state.assistantStateName
@@ -48,9 +51,13 @@ private val StateChoices = listOf(Choice(AllStates, "All states"), Choice("worki
 private val GroupByChoices = listOf(Choice(GroupByNone, "No grouping"), Choice(GroupByGroup, "Group"), Choice(GroupByState, "State"))
 
 @Composable
-internal fun AssistantAvatar(name: String, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar) {
+internal fun AssistantAvatar(name: String, size: androidx.compose.ui.unit.Dp = Tokens.Size.Avatar, builtIn: Boolean = false) {
     Box(Modifier.size(size).clip(CircleShape).background(MyTheme.colors.bgSelected).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
-        Label(name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+        if (builtIn) {
+            Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconSm)
+        } else {
+            Label(name.trim().take(1).uppercase(), style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+        }
     }
 }
 
@@ -89,6 +96,11 @@ internal fun AssistantMenuItems(store: Store, state: AppState, assistant: Assist
     }
 
     MenuItem("Settings", onClick = { close(); onSettings() }, leading = MyIcon.Sliders)
+
+    if (assistant.builtinKey != null) {
+        return
+    }
+
     MenuItem("Archive", onClick = { close(); store.act { store.patchAssistant(assistant, PatchAssistantRequest(archived = true)) } }, leading = MyIcon.Archive)
 }
 
@@ -130,20 +142,26 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
     }
 }
 
+private const val AssistantsList = "assistants"
+
 @Composable
-fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit, onSettings: (Assistant) -> Unit, onNew: () -> Unit) {
+fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit, onSettings: (Assistant) -> Unit, onNew: () -> Unit, creating: Boolean = false, onCloseNew: () -> Unit = {}) {
     val colors = MyTheme.colors
     val sidebarGroup = LocalGroupFilter.current
     var query by remember { mutableStateOf("") }
-    var group by remember(sidebarGroup) { mutableStateOf(sidebarGroup) }
+    val closedGroups = LocalHoursView.current?.closedGroupIds.orEmpty()
+    var group by remember(sidebarGroup) { mutableStateOf(groupChoiceOf(sidebarGroup)) }
     var showing by remember { mutableStateOf(AllStates) }
     var groupBy by remember { mutableStateOf(GroupByNone) }
     val menus = remember { mutableMapOf<String, RowMenuState>() }
 
     var archived by remember { mutableStateOf(emptyList<Assistant>()) }
 
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(AssistantsList) { store.loadAssistants() } }
+
     LaunchedEffect(Unit) {
-        store.load { store.refreshAssistants() }
+        load()
     }
 
     LaunchedEffect(showing) {
@@ -152,8 +170,8 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
         }
     }
 
-    val groupChoices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
-    val sections = assistantRows((archived.associateBy { it.id } + state.assistants).values, state.groups, query, group, showing, groupBy)
+    val groupChoices = listOf(Choice(AllGroups, "All groups")) + state.groups.values.filter { it.id !in closedGroups }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
+    val sections = assistantRows((archived.associateBy { it.id } + state.assistants).values, state.groups, query, groupScope(group, closedGroups), showing, groupBy)
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -164,20 +182,19 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                TextInput(query, { query = it }, label = "Search assistants", placeholder = "Search assistants", showLabel = false, modifier = Modifier.weight(1f))
+                ListSearch(query, { query = it }, "assistants")
                 OptionMenu("Group", groupChoices, group, { group = it }, title = "Show", icon = MyIcon.Layers)
                 OptionMenu("State", StateChoices, showing, { showing = it }, title = "State")
                 OptionMenu("Group by", GroupByChoices, groupBy, { groupBy = it }, title = "Group by")
             }
 
-            if (sections.isEmpty()) {
-                Label(
-                    if (state.assistants.isEmpty()) "Assistants keep their own instructions, files and secrets, and one thread you can come back to." else "No assistant matches.",
-                    color = colors.textMuted,
-                )
-
-                if (state.assistants.isEmpty()) {
-                    MyButton(onNew, text = "New assistant", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            if (sections.isEmpty() && AssistantsList in loadFailures && state.assistants.isEmpty()) {
+                LoadFailedState("assistants", load)
+            } else if (sections.isEmpty()) {
+                EmptyState(if (state.assistants.isEmpty()) "No assistants. Choose New assistant to add one." else "No assistant matches.") {
+                    if (state.assistants.isEmpty()) {
+                        MyButton(onNew, text = "New assistant", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                    }
                 }
             }
 
@@ -207,8 +224,12 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    AssistantAvatar(assistant.name)
+                                    AssistantAvatar(assistant.name, builtIn = assistant.builtinKey != null)
                                     Label(assistant.name, maxLines = 1)
+
+                                    if (assistant.builtinKey != null) {
+                                        Tag("Built in")
+                                    }
                                 }
                             }
 
@@ -233,5 +254,9 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
                 )
             }
         }
+    }
+
+    if (creating) {
+        NewAssistantDialog(store, state, onDismiss = onCloseNew, onCreated = { created -> onCloseNew(); onOpen(created) })
     }
 }

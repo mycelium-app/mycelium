@@ -75,7 +75,7 @@ fun ClosedScreen(notice: ClosedNotice, onSelect: (String) -> Unit, onOpenOutOfHo
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.CenterVertically),
     ) {
-        Icon(MyIcon.Moon, colors.textMuted, Tokens.Size.IconMd * 2)
+        Icon(MyIcon.Moon, colors.leaf, Tokens.Size.IconMd * 2)
         Label(notice.title, Modifier.semantics { heading() }, Tokens.Type.Display)
         Label(notice.body, Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
 

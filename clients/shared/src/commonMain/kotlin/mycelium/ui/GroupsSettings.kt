@@ -36,9 +36,10 @@ private fun folderSummary(group: Group, state: AppState): List<String> =
 
 private const val GroupsList = "groups"
 
+const val GroupInstructionsTab = "Instructions"
 const val GroupHoursTab = "Hours"
 
-private val GroupTabs = listOf("Instructions", "Folders", "Projects", GroupHoursTab)
+private val GroupTabs = listOf(GroupInstructionsTab, "Folders", "Projects", GroupHoursTab)
 
 @Composable
 fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit, startTab: String? = null, onOpenTimeAndFocus: () -> Unit = {}) {
@@ -245,10 +246,10 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
 
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                     HoursEditor(open.name, open.hours) { hours -> attempt { store.saveGroupHours(open.id, hours) } }
-                    Label("Outside these hours ${open.name} leaves the sidebar, every list and the group selector, and its notifications wait. Agents keep working. It is never open while Mycelium is closed.", Modifier.widthIn(max = Tokens.Size.FormColumn), Tokens.Type.Meta, colors.textMuted)
+                    Label("Outside these hours ${open.name} leaves the sidebar, every list and the group selector, and its notifications wait. Agents keep working. It is never open while Mycelium is closed.", Modifier, Tokens.Type.Meta, colors.textMuted)
 
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                        MyButton(onOpenTimeAndFocus, text = "Time and focus", variant = ButtonVariant.Outline)
+                        MyButton(onOpenTimeAndFocus, text = "Time and focus", icon = MyIcon.Clock, muted = true)
 
                         if (status != null && !status.open) {
                             MyButton({ openingOutOfHours = true }, text = "Open for $OpeningMinutes minutes", muted = true)

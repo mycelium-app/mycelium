@@ -100,14 +100,15 @@ class AssistantsTest {
     }
 
     @Test
-    fun creatingAnAssistantFromTheFormListsItOnThePage() {
+    fun creatingAnAssistantFromTheFormSendsItsNameAndOpensIt() {
         shell(mutableListOf(), Route.NewAssistant)
 
         rule.onNodeWithContentDescription("Name").performTextInput("Stand-up")
-        rule.onNodeWithText("Create assistant").performScrollTo().performClick()
+        rule.onNodeWithText("Create assistant").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Stand-up").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("""{"name":"Stand-up","instructions":""}""", requests.last { it.first == "POST /api/v1/assistants" }.second)
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/assistants" } }
+        assertTrue(requests.last { it.first == "POST /api/v1/assistants" }.second.contains(""""name":"Stand-up""""))
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Stand-up").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

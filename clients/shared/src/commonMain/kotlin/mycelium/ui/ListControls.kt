@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -18,8 +19,16 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.state.Choice
 
 @Composable
-fun ListSearch(value: String, onValueChange: (String) -> Unit, things: String, modifier: Modifier = Modifier) {
-    TextInput(value, onValueChange, label = "Search $things", placeholder = "Search $things", showLabel = false, modifier = modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search)
+fun ListSearch(
+    value: String,
+    onValueChange: (String) -> Unit,
+    things: String,
+    modifier: Modifier = Modifier,
+    placeholder: String = "Search $things",
+    mono: Boolean = false,
+    onSubmit: (() -> Unit)? = null,
+) {
+    TextInput(value, onValueChange, label = "Search $things", placeholder = placeholder, showLabel = false, mono = mono, modifier = modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search, onSubmit = onSubmit)
 }
 
 @Composable
@@ -60,5 +69,14 @@ fun ProjectFilter(projects: List<Choice>, selectedId: String?, onSelect: (String
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ListFrame(things: String, loaded: Boolean, failed: Boolean, rows: Int, onRetry: () -> Unit, empty: String, content: @Composable () -> Unit) {
+    when {
+        failed && rows == 0 -> LoadFailedState(things, onRetry)
+        loaded && rows == 0 -> EmptyState(empty, Modifier.fillMaxWidth().padding(vertical = Tokens.Space.S4))
+        else -> content()
     }
 }

@@ -39,6 +39,11 @@ private const val OpenRouterUrl = "https://openrouter.ai/api/v1"
 fun ModelProvidersSettings(store: Store) {
     val colors = MyTheme.colors
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val loadFailures by store.loadFailures.collectAsState()
+    val shown = providers.filter { it.name.contains(query.trim(), ignoreCase = true) }
+    val load = { store.load("providers") { providers = store.api.modelProviders(); loaded = true } }
     var expanded by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<ModelProvider?>(null) }
     var renamed by remember { mutableStateOf("") }
@@ -52,7 +57,7 @@ fun ModelProvidersSettings(store: Store) {
     val attempt = rememberAttempt { failure = it }
 
     LaunchedEffect(Unit) {
-        store.act { providers = store.api.modelProviders() }
+        load()
     }
 
     fun add() {
@@ -84,71 +89,75 @@ fun ModelProvidersSettings(store: Store) {
                 MyButton({ adding = true }, text = "Add a provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
             }
 
-            Table(
-                listOf(
-                    Col("Provider", 110.dp, max = 280.dp, weight = 1f),
-                    Col("Key", 88.dp, priority = 1),
-                    Col("Models", 96.dp, rigid = true),
-                    Col("Data handling", 150.dp, rigid = true, priority = 1),
-                    ActionColumn,
-                ),
-                providers.size,
-                { row, column ->
-                    val provider = providers[row]
-                    val kindName = ProviderKinds.entries.firstOrNull { it.value == provider.kind }?.key ?: provider.kind
+            ListSearch(query, { query = it }, "providers")
 
-                    when (column) {
-                        0 -> TableCell.Slot(provider.baseUrl ?: kindName) {
-                            Column {
-                                Label(provider.name, maxLines = 1)
-                                Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
-                            }
-                        }
+            ListFrame("providers", loaded, "providers" in loadFailures, shown.size, load, if (query.isBlank()) "No providers. Choose Add a provider to add one." else "No providers match.") {
+                Table(
+                    listOf(
+                        Col("Provider", 110.dp, max = 280.dp, weight = 1f),
+                        Col("Key", 88.dp, priority = 1),
+                        Col("Models", 96.dp, rigid = true),
+                        Col("Data handling", 150.dp, rigid = true, priority = 1),
+                        ActionColumn,
+                    ),
+                    shown.size,
+                    { row, column ->
+                        val provider = shown[row]
+                        val kindName = ProviderKinds.entries.firstOrNull { it.value == provider.kind }?.key ?: provider.kind
 
-                        1 -> TableCell.Text(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted)
-                        2 -> TableCell.Slot(if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models", Tokens.Space.S8) {
-                            MyButton(
-                                { expanded = if (expanded == provider.id) null else provider.id; search = "" },
-                                text = if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models",
-                                description = "${if (expanded == provider.id) "Hide" else "Browse"} models from ${provider.name}",
-                                trailingIcon = if (expanded == provider.id) MyIcon.ChevronDown else MyIcon.ChevronRight,
-                                muted = true,
-                                size = ButtonSize.Sm,
-                            )
-                        }
-
-                        3 -> TableCell.Slot(DataHandling.maxBy { it.name.length }.name, Tokens.Space.S8) {
-                            OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
-                                store.act {
-                                    val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
-                                    providers = providers.map { if (it.id == updated.id) updated else it }
+                        when (column) {
+                            0 -> TableCell.Slot(provider.baseUrl ?: kindName) {
+                                Column {
+                                    Label(provider.name, maxLines = 1)
+                                    Label(provider.baseUrl ?: kindName, style = Tokens.Type.Meta, color = colors.textFaint, maxLines = 1)
                                 }
-                            }, size = ButtonSize.Sm)
-                        }
+                            }
 
-                        else -> TableCell.Slot {
-                            RowMenu(provider.name) { close ->
-                                MenuItem("Refresh models", onClick = {
-                                    close()
-                                    store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
-                                })
-                                MenuItem("Rename", onClick = {
-                                    close()
-                                    renamed = provider.name
-                                    renaming = provider
-                                })
-                                MenuItem("Remove provider", onClick = {
-                                    close()
+                            1 -> TableCell.Text(provider.keyHint?.let { "Ends in $it" } ?: "No key", color = colors.textMuted)
+                            2 -> TableCell.Slot(if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models", Tokens.Space.S8) {
+                                MyButton(
+                                    { expanded = if (expanded == provider.id) null else provider.id; search = "" },
+                                    text = if (provider.models.isEmpty()) "No models found" else "${provider.models.size} models",
+                                    description = "${if (expanded == provider.id) "Hide" else "Browse"} models from ${provider.name}",
+                                    trailingIcon = if (expanded == provider.id) MyIcon.ChevronDown else MyIcon.ChevronRight,
+                                    muted = true,
+                                    size = ButtonSize.Sm,
+                                )
+                            }
+
+                            3 -> TableCell.Slot(DataHandling.maxBy { it.name.length }.name, Tokens.Space.S8) {
+                                OptionMenu("Data handling", DataHandling, provider.modelClass, { chosen ->
                                     store.act {
-                                        store.api.deleteModelProvider(provider.id)
-                                        providers = providers.filter { it.id != provider.id }
+                                        val updated = store.api.updateModelProvider(provider.id, UpdateModelProviderRequest(modelClass = chosen))
+                                        providers = providers.map { if (it.id == updated.id) updated else it }
                                     }
-                                })
+                                }, size = ButtonSize.Sm)
+                            }
+
+                            else -> TableCell.Slot {
+                                RowMenu(provider.name) { close ->
+                                    MenuItem("Refresh models", onClick = {
+                                        close()
+                                        store.act { providers = providers.map { if (it.id == provider.id) store.api.refreshModelProvider(provider.id) else it } }
+                                    })
+                                    MenuItem("Rename", onClick = {
+                                        close()
+                                        renamed = provider.name
+                                        renaming = provider
+                                    })
+                                    MenuItem("Remove provider", onClick = {
+                                        close()
+                                        store.act {
+                                            store.api.deleteModelProvider(provider.id)
+                                            providers = providers.filter { it.id != provider.id }
+                                        }
+                                    })
+                                }
                             }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
         renaming?.let { target ->

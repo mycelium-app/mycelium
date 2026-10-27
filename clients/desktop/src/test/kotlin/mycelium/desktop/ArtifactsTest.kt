@@ -8,6 +8,7 @@ import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onRoot
@@ -140,7 +141,7 @@ class ArtifactsScreenTest {
         assertTrue(shown("Loose notes"))
 
         rule.onNodeWithContentDescription("Project: All projects").performClick()
-        rule.onNodeWithText("harbour").performClick()
+        rule.onAllNodesWithText("harbour").onLast().performClick()
 
         assertTrue(shown("Planning board"))
         assertFalse(shown("Loose notes"))
