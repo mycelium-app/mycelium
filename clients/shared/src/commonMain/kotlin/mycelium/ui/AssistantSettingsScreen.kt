@@ -2,12 +2,19 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.key
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,7 +31,6 @@ import mycelium.api.AssistantFile
 import mycelium.api.AssistantPreferences
 import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
-import mycelium.api.CreateAssistantRequest
 import mycelium.api.InstructionLayer
 import mycelium.api.AssistantSecret
 import mycelium.api.SetAssistantBackupRequest
@@ -36,162 +42,303 @@ import mycelium.state.NoGroup
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.formatSize
-import mycelium.state.harnessModels
+import mycelium.state.harnessModelChoices
+
+enum class AssistantSection(val label: String) {
+    Identity("Identity"),
+    Instructions("Instructions"),
+    ModelsAndNodes("Models and nodes"),
+    StorageAndSecrets("Storage and secrets"),
+    SchedulesAndActions("Schedules and actions"),
+}
 
 @Composable
-fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String?, onDone: () -> Unit, onBack: () -> Unit) {
-    val colors = MyTheme.colors
+fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, startOn: AssistantSection = AssistantSection.Identity, onDone: () -> Unit, onBack: () -> Unit) {
     var failure by remember { mutableStateOf<String?>(null) }
     var loaded by remember(assistantId) { mutableStateOf<Assistant?>(null) }
-    var name by remember(assistantId) { mutableStateOf("") }
-    var description by remember(assistantId) { mutableStateOf("") }
-    var group by remember(assistantId) { mutableStateOf(NoGroup) }
-    var models by remember(assistantId) { mutableStateOf(emptyList<ModelChoice>()) }
-    var nodes by remember(assistantId) { mutableStateOf(emptyList<String>()) }
-    var chatFirst by remember(assistantId) { mutableStateOf(true) }
-    var fallBackOn by remember(assistantId) { mutableStateOf(AssistantPreferences().fallBackOn) }
-    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
+    var section by remember(assistantId) { mutableStateOf(startOn) }
     val attempt = rememberAttempt { failure = it }
-    val creating = assistantId == null
-    val ready = creating || loaded != null
+    val touch = LocalTouch.current
 
     LaunchedEffect(assistantId) {
-        store.act { store.refreshGroups() }
-        store.act { providers = store.api.modelProviders() }
+        store.load { store.refreshGroups() }
+        attempt { loaded = store.api.assistant(assistantId) }
+    }
 
-        if (assistantId != null) {
-            attempt {
-                val held = store.api.assistant(assistantId)
+    val current = loaded
 
-                name = held.name
-                description = held.description.orEmpty()
-                group = held.groupId ?: NoGroup
-                models = held.preferences.models
-                nodes = held.preferences.nodes
-                chatFirst = held.preferences.chatFirst
-                fallBackOn = held.preferences.fallBackOn
-                loaded = held
+    Column(Modifier.fillMaxSize()) {
+        Bar {
+            BackButton(current?.name ?: "the assistant", onBack)
+            current?.let { AssistantAvatar(it.name, builtIn = it.builtinKey != null) }
+            BarTitle("${current?.name ?: "Assistant"} settings")
+
+            if (current?.builtinKey != null) {
+                Tag("Built in")
+            }
+        }
+
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, modifier = Modifier.padding(Tokens.Space.S3)) }
+
+        if (touch) {
+            TabRow(AssistantSection.entries.map { it.label }, section.label, { picked -> section = AssistantSection.entries.first { it.label == picked } }, "Assistant settings sections", Modifier.padding(horizontal = Tokens.Space.S3))
+            Hairline()
+        }
+
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            if (!touch) {
+                Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S1_5).semantics { }, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                    for (entry in AssistantSection.entries) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = rowHeight())
+                                .pressable({ section = entry }, role = Role.Tab, selected = entry == section, shape = BlockShape)
+                                .semantics { selected = entry == section }
+                                .padding(horizontal = Tokens.Space.S2),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Label(entry.label, maxLines = 1)
+                        }
+                    }
+                }
+
+                VerticalHairline()
+            }
+
+            Column(Modifier.weight(1f).fillMaxHeight().verticalScrollWithBar().padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+                if (current != null) {
+                    Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+                        when (section) {
+                            AssistantSection.Identity -> IdentitySection(store, state, current, onChanged = { loaded = it }, onArchived = onDone)
+                            AssistantSection.Instructions -> InstructionsSection(store, current, onChanged = { loaded = it })
+                            AssistantSection.ModelsAndNodes -> ModelsSection(store, state, current, onChanged = { loaded = it })
+                            AssistantSection.StorageAndSecrets -> {
+                                StorageSection(store, current.id)
+                                SecretsSection(store, current.id)
+                                BackupSection(store, state, current)
+                            }
+
+                            AssistantSection.SchedulesAndActions -> ActionsSection(store, state, current)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionActions(onSave: () -> Unit, onCancel: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        MyButton(onSave, text = "Save", variant = ButtonVariant.Outline)
+        MyButton(onCancel, text = "Cancel", muted = true)
+    }
+}
+
+@Composable
+private fun IdentitySection(store: Store, state: AppState, assistant: Assistant, onChanged: (Assistant) -> Unit, onArchived: () -> Unit) {
+    val colors = MyTheme.colors
+    var name by remember(assistant.id) { mutableStateOf(assistant.name) }
+    var description by remember(assistant.id) { mutableStateOf(assistant.description.orEmpty()) }
+    var group by remember(assistant.id) { mutableStateOf(assistant.groupId ?: NoGroup) }
+    var nameError by remember(assistant.id) { mutableStateOf<String?>(null) }
+    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
+    var confirmingArchive by remember(assistant.id) { mutableStateOf(false) }
+    val attempt = rememberAttempt { failure = it }
+    val builtIn = assistant.builtinKey != null
+    val groupName = state.groups[group]?.name
+    val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
+
+    fun reset() {
+        name = assistant.name
+        description = assistant.description.orEmpty()
+        group = assistant.groupId ?: NoGroup
+        nameError = null
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        if (builtIn) {
+            Label("${assistant.name} is built in. It cannot be renamed or archived. Pause its schedules instead.", color = colors.textMuted)
+        } else {
+            TextInput(name, { name = it; nameError = null }, label = "Name", placeholder = "Stand-up", error = nameError, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+        }
+
+        TextInput(description, { description = it }, label = "Description", placeholder = "Leave empty to use the first line of the instructions", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Layers)
+
+            if (groupName != null) {
+                Label("Group instructions apply to its sessions, and the sidebar group filter shows it under $groupName.", style = Tokens.Type.Meta, color = colors.textMuted)
+            }
+        }
+
+        SectionActions(
+            onSave = {
+                if (name.isBlank()) {
+                    nameError = "Enter a name for the assistant."
+
+                    return@SectionActions
+                }
+
+                attempt {
+                    val chosen = group.takeUnless { it == NoGroup }
+
+                    onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null)))
+                }
+            },
+            onCancel = ::reset,
+        )
+
+        if (!builtIn) {
+            Hairline()
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Archive", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("Archived assistants keep their thread, files and secrets, and stop waking for schedules. Restore one from Assistants, state Archived.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                Row {
+                    MyButton({ confirmingArchive = true }, text = "Archive assistant", icon = MyIcon.Archive, variant = ButtonVariant.Outline)
+                }
             }
         }
     }
 
-    val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
+    if (confirmingArchive) {
+        ConfirmDialog("Archive ${assistant.name}?", "It keeps its thread, files and secrets, and stops waking for schedules. You can restore it from Assistants.", "Archive assistant", onDismiss = { confirmingArchive = false }, onConfirm = {
+            confirmingArchive = false
+            attempt {
+                store.patchAssistant(assistant, PatchAssistantRequest(archived = true))
+                onArchived()
+            }
+        })
+    }
+}
 
-    Column(Modifier.fillMaxSize()) {
-        Bar {
-            BackButton(if (creating) "assistants" else loaded?.name ?: "the assistant", onBack)
-            BarTitle(if (creating) "New assistant" else "${loaded?.name ?: "Assistant"} settings")
+@Composable
+private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (Assistant) -> Unit) {
+    val colors = MyTheme.colors
+    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
+    var editorKey by remember(assistant.id) { mutableStateOf(0) }
+    val attempt = rememberAttempt { failure = it }
+
+    LaunchedEffect(assistant.id) {
+        store.load { store.refreshInstructionProposals() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        Label("Kept in the assistant's storage as AGENTS.md and added after the global and group instructions.", style = Tokens.Type.Meta, color = colors.textMuted)
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+
+        key(editorKey, assistant.instructions) {
+            InstructionsEditor(
+                layer = InstructionLayer("assistant:${assistant.id}", assistant.name, text = assistant.instructions.orEmpty()),
+                file = "AGENTS.md",
+                saveLabel = "Save",
+                onSave = { text -> attempt { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(instructions = text))) } },
+                actions = { MyButton({ editorKey += 1 }, text = "Cancel", muted = true) },
+            )
         }
 
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-            Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-                failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        Label("Proposed edits", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        InstructionProposals(store, layer = "assistant:${assistant.id}")
+    }
+}
 
-                if (ready) {
-                    TextInput(name, { name = it }, label = "Name", placeholder = "Stand-up", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+@Composable
+private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, onChanged: (Assistant) -> Unit) {
+    val colors = MyTheme.colors
+    var models by remember(assistant.id) { mutableStateOf(assistant.preferences.models) }
+    var nodes by remember(assistant.id) { mutableStateOf(assistant.preferences.nodes) }
+    var chatFirst by remember(assistant.id) { mutableStateOf(assistant.preferences.chatFirst) }
+    var fallBackOn by remember(assistant.id) { mutableStateOf(assistant.preferences.fallBackOn) }
+    var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
+    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
+    val attempt = rememberAttempt { failure = it }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                        OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Layers)
-                    }
+    LaunchedEffect(Unit) {
+        store.act { providers = store.api.modelProviders() }
+    }
 
-                    TextInput(description, { description = it }, label = "Description", placeholder = "Leave empty to use the first line of the instructions", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                        Label("A new session starts on the first model.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            Label("A new session starts on the first model.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-                        OrderedRows(
-                            names = models.map { modelName(it, providers) },
-                            onMove = { from, to -> models = models.moved(from, to) },
-                            onRemove = { index -> models = models.filterIndexed { position, _ -> position != index } },
-                        ) { index ->
-                            val choice = models[index]
+            OrderedRows(
+                names = models.map { modelName(it, providers) },
+                onMove = { from, to -> models = models.moved(from, to) },
+                onRemove = { index -> models = models.filterIndexed { position, _ -> position != index } },
+            ) { index ->
+                val choice = models[index]
 
-                            if (choice.agent != null) {
-                                val offered = listOf(Choice("", "Default model")) + harnessModels(state.conversations.values, choice.agent)
+                if (choice.agent != null) {
+                    val offered = harnessModelChoices(state.nodes.values, choice.agent)
 
-                                OptionMenu("Model for ${harnessName(choice.agent)}", offered, choice.model ?: "", { picked -> models = models.mapIndexed { position, held -> if (position == index) held.copy(model = picked.ifEmpty { null }) else held } }, title = "Model")
-                            }
-                        }
+                    OptionMenu("Model for ${harnessName(choice.agent)}", offered, choice.model ?: "", { picked -> models = models.mapIndexed { position, held -> if (position == index) held.copy(model = picked.ifEmpty { null }) else held } }, title = "Model")
+                }
+            }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                            ModelPicker(ModelPickerControls(providers, null, null) { provider, model -> models = models + ModelChoice(providerId = provider.id, model = model) })
-                            MyButton({ models = models + ModelChoice(agent = "claude") }, text = "Add Claude Code", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
-                            MyButton({ models = models + ModelChoice(agent = "codex") }, text = "Add Codex", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
-                        }
-                    }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                ModelPicker(ModelPickerControls(providers, null, null) { provider, model -> models = models + ModelChoice(providerId = provider.id, model = model) })
+                MyButton({ models = models + ModelChoice(agent = "claude") }, text = "Add Claude Code", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                MyButton({ models = models + ModelChoice(agent = "codex") }, text = "Add Codex", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            }
+        }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Runs on, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                        Label("Used when a session needs files or commands. Leave empty to use any node that is online.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Runs on, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+            Label("Used when a session needs files or commands. Leave empty to use any node that is online.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-                        OrderedRows(
-                            names = nodes.map { state.nodes[it]?.name ?: "Removed node" },
-                            onMove = { from, to -> nodes = nodes.moved(from, to) },
-                            onRemove = { index -> nodes = nodes.filterIndexed { position, _ -> position != index } },
-                        )
+            OrderedRows(
+                names = nodes.map { state.nodes[it]?.name ?: "Removed node" },
+                onMove = { from, to -> nodes = nodes.moved(from, to) },
+                onRemove = { index -> nodes = nodes.filterIndexed { position, _ -> position != index } },
+            )
 
-                        val addable = state.nodes.values.filter { it.id !in nodes }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }
+            val addable = state.nodes.values.filter { it.id !in nodes }.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) }
 
-                        if (addable.isNotEmpty()) {
-                            Row {
-                                OptionMenu("Add node", addable, null, { nodes = nodes + it }, title = "Add node", icon = MyIcon.Plus)
-                            }
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(chatFirst, "Chat first when no files are needed", { chatFirst = !chatFirst }, checkedState = "On", uncheckedState = "Off")
-                        Label("Chat first when no files are needed")
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Move to the next choice when", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-
-                        for ((condition, label) in FallBackConditions) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(condition in fallBackOn, label, { fallBackOn = if (condition in fallBackOn) fallBackOn - condition else fallBackOn + condition }, checkedState = "On", uncheckedState = "Off")
-                                Label(label)
-                            }
-                        }
-
-                        loaded?.nextChoice?.let { Label("Next turn: $it", style = Tokens.Type.Meta, color = colors.textMuted) }
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                        Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                        Label("Kept in the assistant's storage as AGENTS.md and added after the global and group instructions.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-                        InstructionsEditor(
-                            layer = InstructionLayer("assistant", name.ifBlank { "assistant" }, text = loaded?.instructions.orEmpty()),
-                            file = "AGENTS.md",
-                            saveLabel = if (creating) "Create assistant" else "Save",
-                            onSave = { text ->
-                                attempt {
-                                    val chosen = group.takeUnless { it == NoGroup }
-
-                                    val held = loaded
-
-                                    if (held == null) {
-                                        store.createAssistant(CreateAssistantRequest(name, description.ifBlank { null }, chosen, text, AssistantPreferences(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn).takeIf { models.isNotEmpty() }))
-                                    } else {
-                                        store.patchAssistant(held, PatchAssistantRequest(name = name, description = description, groupId = chosen, clearGroup = chosen == null, instructions = text, preferences = held.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))
-                                    }
-
-                                    onDone()
-                                }
-                            },
-                            actions = { MyButton(onDone, text = "Cancel", muted = true) },
-                        )
-                    }
-
-                    loaded?.let { StorageSection(store, it.id) }
-                    loaded?.let { SecretsSection(store, it.id) }
-                    loaded?.let { BackupSection(store, state, it) }
+            if (addable.isNotEmpty()) {
+                Row {
+                    OptionMenu("Add node", addable, null, { nodes = nodes + it }, title = "Add node", icon = MyIcon.Plus)
                 }
             }
         }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(chatFirst, "Chat first when no files are needed", { chatFirst = !chatFirst }, checkedState = "On", uncheckedState = "Off")
+            Label("Chat first when no files are needed")
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Move to the next choice when", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+            for ((condition, label) in FallBackConditions) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(condition in fallBackOn, label, { fallBackOn = if (condition in fallBackOn) fallBackOn - condition else fallBackOn + condition }, checkedState = "On", uncheckedState = "Off")
+                    Label(label)
+                }
+            }
+
+            assistant.nextChoice?.let { Label("Next turn: $it", style = Tokens.Type.Meta, color = colors.textMuted) }
+        }
+
+        SectionActions(
+            onSave = { attempt { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(preferences = assistant.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))) } },
+            onCancel = {
+                models = assistant.preferences.models
+                nodes = assistant.preferences.nodes
+                chatFirst = assistant.preferences.chatFirst
+                fallBackOn = assistant.preferences.fallBackOn
+            },
+        )
     }
 }
 
@@ -432,7 +579,7 @@ private fun BackupSection(store: Store, state: AppState, assistant: Assistant) {
             Label(backup.repository, style = Tokens.Type.Code)
             Label(backup.error ?: backup.lastAt?.let { "Last backed up ${ago(it)}" } ?: "Not backed up yet", color = if (backup.error != null) colors.statusFailed else colors.textMuted)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({ attempt { store.api.pullAssistantBackup(assistant.id) } }, text = "Pull from repository", variant = ButtonVariant.Outline)
                 MyButton({ attempt { store.api.clearAssistantBackup(assistant.id) } }, text = "Stop backing up", variant = ButtonVariant.Outline)
             }

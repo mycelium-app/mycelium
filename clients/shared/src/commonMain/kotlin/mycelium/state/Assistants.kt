@@ -1,7 +1,8 @@
 package mycelium.state
 
+import mycelium.api.ActionInput
 import mycelium.api.Assistant
-import mycelium.api.Conversation
+import mycelium.api.AssistantAction
 import mycelium.api.Group
 
 const val AllStates = "all"
@@ -20,9 +21,6 @@ fun sidebarAssistants(assistants: Collection<Assistant>, groupFilter: String): L
         .filter { it.archivedAt == null && inGroup(it.groupId, groupFilter) }
         .sortedWith(compareByDescending<Assistant> { it.pinnedAt != null }.thenByDescending { it.state != "idle" }.thenByDescending(::mostRecent))
         .take(SidebarAssistantLimit)
-
-fun harnessModels(conversations: Collection<Conversation>, agent: String): List<Choice> =
-    conversations.filter { it.agent == agent }.flatMap { sessionOptions(it, emptyList()).models }.distinctBy { it.id }
 
 fun assistantStateName(state: String): String = when (state) {
     "working" -> "Working"
@@ -43,3 +41,28 @@ fun assistantRows(assistants: Collection<Assistant>, groups: Map<String, Group>,
         else -> if (shown.isEmpty()) emptyList() else listOf(AssistantSection(null, shown))
     }
 }
+
+const val TodayDefault = "today"
+const val BuiltInKey = "builtin"
+
+fun actionInputValue(input: ActionInput, given: String?, today: String): String {
+    val value = given?.trim().orEmpty().ifEmpty { input.default.orEmpty() }
+
+    return if (input.kind == "date" && (value.isEmpty() || value.equals(TodayDefault, ignoreCase = true))) today else value
+}
+
+fun expandAction(action: AssistantAction, values: Map<String, String>, today: String): String =
+    action.inputs.fold(action.prompt) { text, input -> text.replace("{${input.name}}", actionInputValue(input, values[input.name], today)) }
+
+fun missingInput(action: AssistantAction, values: Map<String, String>, today: String): ActionInput? =
+    action.inputs.firstOrNull { it.required && actionInputValue(it, values[it.name], today).isEmpty() }
+
+fun askedFor(inputs: List<ActionInput>): String = if (inputs.isEmpty()) "Nothing" else inputs.joinToString(", ") { it.name.replaceFirstChar { letter -> letter.uppercase() } }
+
+fun inputKindLabel(input: ActionInput): String = when (input.kind) {
+    "date" -> if (input.default == TodayDefault || input.default == null) "Date, today by default" else "Date"
+    "choice" -> "Choice: ${input.options.joinToString(", ")}"
+    else -> "Text"
+}
+
+fun pinnedActions(actions: List<AssistantAction>): List<AssistantAction> = actions.filter { it.pinned }

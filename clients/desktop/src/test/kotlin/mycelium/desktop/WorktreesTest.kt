@@ -28,7 +28,8 @@ import kotlin.test.assertEquals
 private const val LaptopId = "aaaaaaaa-0000-0000-0000-000000000001"
 
 private const val LaptopJson = """[{"id":"$LaptopId","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
-"agents":[{"agent":"claude","version":"2.1.308","available":true}],"logins":[]}]"""
+"agents":[{"agent":"claude","version":"2.1.308","available":true}],"logins":[],
+"harness_models":[{"agent":"claude","models":[{"id":"opus","name":"Opus 5.5"},{"id":"sonnet","name":"Sonnet 5.5"}],"default_model":"opus","reported_at":"2026-10-22T08:00:00Z"}]}]"""
 
 private const val ProjectJson = """[{"id":"p1","node_id":"$LaptopId","name":"app","path":"/p/app","forge_id":null,"repository":null,"created_at":"2026-10-22T10:00:00Z"}]"""
 
@@ -82,11 +83,11 @@ class WorktreesTest {
     fun theBranchFieldAppearsOnlyWhenNewWorktreeIsOn() {
         show(store())
 
-        assertEquals(0, rule.onAllNodesWithText("Branch name").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("New branch").fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("New worktree").performClick()
 
-        rule.onNodeWithContentDescription("Branch name").assertExists()
+        rule.onNodeWithContentDescription("New branch").assertExists()
     }
 
     @Test
@@ -96,7 +97,7 @@ class WorktreesTest {
         show(store) { created = true }
 
         rule.onNodeWithContentDescription("New worktree").performClick()
-        rule.onNodeWithContentDescription("Branch name").performTextInput("  feature/restore ")
+        rule.onNodeWithContentDescription("New branch").performTextInput("  feature/restore ")
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { created }
@@ -121,10 +122,37 @@ class WorktreesTest {
         show(store)
 
         rule.onNodeWithContentDescription("New worktree").performClick()
-        rule.onNodeWithContentDescription("Branch name").performTextInput("x")
+        rule.onNodeWithContentDescription("New branch").performTextInput("x")
         rule.onNodeWithContentDescription("Send").performClick()
 
         rule.waitUntil(5_000) { store.problem.value != null }
         assertEquals("a branch named 'x' already exists", store.problem.value)
+    }
+
+    @Test
+    fun theBranchHintNamesTheFolderTheWorktreeWillBeCreatedIn() {
+        show(store())
+
+        rule.onNodeWithContentDescription("New worktree").performClick()
+        rule.onNodeWithText("Names the branch and its folder").assertExists()
+
+        rule.onNodeWithContentDescription("New branch").performTextInput("fix/restore-copy")
+
+        rule.onNodeWithText("Folder app-worktrees/fix-restore-copy").assertExists()
+    }
+
+    @Test
+    fun theModelMenuOffersTheDefaultAndTheListTheNodeReportedAndTheChoiceIsSent() {
+        val store = store()
+        var created = false
+        show(store) { created = true }
+
+        rule.onNodeWithContentDescription("Model: Default model").performClick()
+        rule.onNodeWithText("Claude Code on laptop, ", substring = true).assertExists()
+        rule.onNodeWithText("Sonnet 5.5").performClick()
+        rule.onNodeWithContentDescription("Send").performClick()
+
+        rule.waitUntil(5_000) { created }
+        assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","model":"sonnet"}""", bodies.single())
     }
 }

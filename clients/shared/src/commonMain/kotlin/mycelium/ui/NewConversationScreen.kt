@@ -32,7 +32,9 @@ import mycelium.state.accountMenuTitle
 import mycelium.state.accountsElsewhere
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
+import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
+import mycelium.state.modelMenu
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
@@ -52,6 +54,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
     var account by remember { mutableStateOf<String?>(null) }
+    var model by remember { mutableStateOf("") }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
 
     LaunchedEffect(Unit) {
@@ -66,6 +69,9 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
     val chosenAccount = accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+
+    val models = if (node != null && chosenAgent != null) modelMenu(node, chosenAgent, chosenAccount?.account) else null
+    val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
 
     fun create() {
         if (node == null || chosenAgent == null) {
@@ -97,6 +103,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     projectId = project?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
                     prompt = text.ifEmpty { null }.takeIf { files.isEmpty() },
+                    model = chosenModel.ifEmpty { null },
                 ),
             )
 
@@ -156,6 +163,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 OptionMenu("Agent", agents.map { Choice(it.agent, agentName(it.agent)) }, chosenAgent, { agent = it })
                             }
 
+                            if (models != null) {
+                                OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title)
+                            }
+
                             if (accounts.isNotEmpty()) {
                                 OptionMenu(
                                     "Account",
@@ -200,7 +211,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     }
 
                     if (project != null && worktree) {
-                        TextInput(branch, { branch = it }, label = "Branch name", placeholder = "feature/restore-copy", mono = true, error = branchError, onSubmit = ::create)
+                        TextInput(branch, { branch = it }, label = "New branch", placeholder = "feature/restore-copy", mono = true, error = branchError, onSubmit = ::create, hint = worktreeHint(project, branch, state.conversations.values))
                     }
                 }
             }

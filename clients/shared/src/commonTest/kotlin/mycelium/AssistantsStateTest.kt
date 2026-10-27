@@ -12,7 +12,6 @@ import mycelium.state.GroupByNone
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.state.assistantRows
-import mycelium.state.harnessModels
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -101,15 +100,5 @@ class AssistantsStateTest {
 
         assertEquals("working", after.assistants.getValue("a").state)
         assertEquals("idle", finished.assistants.getValue("a").state)
-    }
-
-    @Test
-    fun harnessModelsAreTheUnionOfWhatSessionsOfThatAgentOffered() {
-        val options = { ids: List<String> -> buildJsonObject { put("models", buildJsonObject { put("availableModels", buildJsonArray { ids.forEach { id -> add(buildJsonObject { put("modelId", id); put("name", id) }) } }) }) } }
-        val claude = Conversation("c1", "u", "n", "claude", "/w", "One", ConversationStatus.Review, createdAt = "2026-10-23T10:00:00Z", updatedAt = "2026-10-23T10:00:00Z", options = options(listOf("opus", "sonnet")))
-        val other = claude.copy(id = "c2", options = options(listOf("sonnet", "haiku")))
-        val codex = claude.copy(id = "c3", agent = "codex", options = options(listOf("gpt")))
-
-        assertEquals(listOf("opus", "sonnet", "haiku"), harnessModels(listOf(claude, other, codex), "claude").map { it.id })
     }
 }
