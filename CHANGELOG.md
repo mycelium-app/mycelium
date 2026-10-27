@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.12.0
 
+The canonical UI design now lives in the design artefact "Mycelium UI (canonical)", and every screen in this release was designed there first. The code had a refactor for cohesion before the features landed; what still has more than one way is listed in docs/COHERENCE.md.
+
+- History hides its Node and Agent columns when the window is too narrow for every column, so the row menu stays in reach.
+- A usage-limit reply gets the paused card and the automatic resume even when the agent wrote a long answer before it hit the limit.
 - Every tool call that passes through Mycelium has one approval flow: Approve, Approve and edit response, Always approve and Deny. Edit response opens a table, tree or text editor with a jq filter the agent can set, and Send to agent sends only what you kept. Zulip uses the same flow, with Edit response before the agent sees it as its default.
 - An account's approvals are a preset (Ask before writes, Ask before everything, Ask before everything and edit responses, Don't ask) with a Customise table of Ask first and Edit response per tool.
 - Buttons with alternatives are split buttons: Approve, Send and Decline have a chevron menu, and Decline without telling the agent skips the message to the conversation.
@@ -11,7 +15,8 @@
 - Show a solution on an exercise opens what the agent wrote in the conversation it came from.
 - Recently learned on the Overview lists what Teach me, a walkthrough check or an exercise review noted you learned.
 - Assistant notifications and sidebar badges are held during quiet hours when Hold assistant pings is on, and the Overview says how many were held this week.
-- Puzzles is a tab on Wellness & Learning. The desktop app reads Wordle's result from the game page in the built-in browser; the phone and web keep the Played tick.
+- Puzzles is a tab on Wellness & Learning. The desktop app reads the day's result of Wordle, Connections, Daily Orbs and Catfishing from the game page in the built-in browser, only on those four sites; the phone and web keep the Played tick.
+- Reflections says when the Wellness assistant drafted each week.
 - Adding an MCP server, Outline, LiteLLM or Last.fm is one dialog with a numbered step strip: address, credential, test, name. Back keeps what you typed, the test runs by itself, and the token expiry is chosen beside the token.
 - Each integration account has its own page with Overview, Approvals, Availability and Usage tabs. The integration page lists its accounts as links with the token expiry beside each.
 - Changing an account's expiry, token, approvals or availability opens a dialog with Cancel and Save instead of editing in place. So do creating or renaming a group, adding a folder to a group, and editing a memory.
@@ -25,7 +30,6 @@
 - Artefact cards and the viewer show the project and conversation an artefact came from, and the list filters by project.
 - A failed refresh offers Retry, a list that fails its first load says so with Retry, and every list has a Search box as its first control.
 - A workflow card that was stopped, failed or has made no progress for 15 minutes says how it ended instead of spinning.
-- Artefact cards and the viewer show the project and conversation they came from, and the list filters by project.
 - A proposed instructions edit for a group opens that group's page, where its Instructions tab shows the proposal, and Decline can skip telling the agent.
 - Assistant settings are split into Identity, Instructions, Models and nodes, Storage and secrets, and Schedules and actions, each saving on its own. A new assistant asks only for a name, group and instructions.
 - Assistants have Actions: saved prompts with inputs, run from the Actions button or a pinned chip above the composer, and used by schedules. An assistant can propose a new action for you to approve.

@@ -66,7 +66,7 @@ Variants: sub-pages held in screen-local `remember` state: `SettingsScreen` `sec
 
 ### 7. Schedules
 
-Backend is already one mechanism: the reflection schedule and assistant wakes are rows in `schedules`. Client variants: the Schedules dialog (`ui/SchedulesScreen.kt:192`, cadence kinds), the proposed-schedule editor (`ui/ProposedSchedule.kt:75`, time-only or raw cron, v0.12.0), the Reflections setup (v0.12.0). Cron is described in words twice: `describeCron`/`describeInWords` (`state/Schedules.kt`) and `schedules::describe_cron` (`control/schedules.rs:136`, sent as `Assistant.wakes`).
+Backend is already one mechanism: the reflection schedule and assistant wakes are rows in `schedules`. Client variants: the Schedules dialog (`ui/SchedulesScreen.kt:192`, cadence kinds), the proposed-schedule editor (`ui/ProposedSchedule.kt:75`, time-only or raw cron, v0.12.0). Cron is described in words twice: `describeCron`/`describeInWords` (`state/Schedules.kt`) and `schedules::describe_cron` (`control/schedules.rs:136`, sent as `Assistant.wakes`).
 
 ### 8. Pickers
 
@@ -114,7 +114,7 @@ Five `*_regularly` loops spawned in `control/lib.rs:113-117`: `schedules`, `usag
 
 ### 18. Control plane: handlers calling handlers
 
-24 calls build axum extractors to call another module's handler (`prompts::prompt(State(state.clone()), user, Path(id), Json(...))`), including the reflection schedule calling `schedules::create`/`patch`. Six of them discard the result with `let _ =` (`api_access.rs:160`, `instruction_proposals.rs:230`, `message_proposals.rs:172`, `schedules.rs:332`, `start_proposals.rs:275`, and `prompts::cancel` at `workflows.rs:352`), so a failed prompt or cancel is silent. The fix is a plain `prompts::send(state, owner, id, request)` the handler and every caller share; most callers are approval modules, so it follows the v0.12.0 approval flow.
+24 calls build axum extractors to call another module's handler (`prompts::prompt(State(state.clone()), user, Path(id), Json(...))`). Six of them discard the result with `let _ =` (`api_access.rs:160`, `instruction_proposals.rs:230`, `message_proposals.rs:172`, `schedules.rs:332`, `start_proposals.rs:275`, and `prompts::cancel` at `workflows.rs:352`), so a failed prompt or cancel is silent. The fix is a plain `prompts::send(state, owner, id, request)` the handler and every caller share; most callers are approval modules, so it follows the v0.12.0 approval flow.
 
 ### 19. Control plane: owner-scoped loaders
 
