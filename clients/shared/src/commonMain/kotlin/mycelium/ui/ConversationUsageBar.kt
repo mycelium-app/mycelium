@@ -29,7 +29,7 @@ fun spendLabel(usage: ConversationUsage): String? = when {
 @Composable
 fun ConversationUsageBar(api: MyceliumApi, id: String, refreshOn: Any?) {
     val usage by produceState<ConversationUsage?>(null, id, refreshOn) {
-        value = runCatching { api.usageOf(id) }.getOrNull() ?: value
+        attempt { value = api.usageOf(id) }
     }
     val current = usage ?: return
     val context = contextLabel(current)

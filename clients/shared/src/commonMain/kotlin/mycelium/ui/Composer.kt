@@ -215,7 +215,7 @@ fun Composer(
         files = emptyList()
         val wanted = mention?.query ?: return@LaunchedEffect
         delay(FileSearchDelayMillis)
-        files = runCatching { onSearchFiles(wanted) }.getOrDefault(emptyList())
+        attempt { files = onSearchFiles(wanted) }
     }
 
     fun insert(start: Int, completed: String) {

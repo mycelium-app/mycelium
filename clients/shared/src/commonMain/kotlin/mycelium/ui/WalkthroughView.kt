@@ -89,7 +89,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     }
 
     LaunchedEffect(walkthrough.id) {
-        val stored = runCatching { store.api.walkthroughReads(walkthrough.id) }.getOrDefault(emptyList())
+        var stored = emptyList<Int>()
+        attempt { stored = store.api.walkthroughReads(walkthrough.id) }
         reads = reads + stored
     }
 
@@ -98,7 +99,8 @@ fun WalkthroughView(store: Store, conversationId: String, walkthrough: Walkthrou
     }
 
     LaunchedEffect(walkthrough.id) {
-        uncovered = runCatching { store.api.walkthroughUncovered(walkthrough.id) }.getOrDefault(emptyList())
+        uncovered = emptyList()
+        attempt { uncovered = store.api.walkthroughUncovered(walkthrough.id) }
     }
 
     LaunchedEffect(walkthrough.id, index) {

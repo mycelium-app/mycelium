@@ -30,7 +30,8 @@ fun WalkthroughCheckStep(store: Store, walkthrough: Walkthrough, onBackToStep: (
     var answers by remember(walkthrough.id) { mutableStateOf(emptyMap<Int, WalkthroughAnswer>()) }
 
     LaunchedEffect(walkthrough.id) {
-        val stored = runCatching { store.api.walkthroughAnswers(walkthrough.id) }.getOrDefault(emptyList())
+        var stored = emptyList<WalkthroughAnswer>()
+        attempt { stored = store.api.walkthroughAnswers(walkthrough.id) }
 
         answers = stored.associateBy { it.step } + answers
     }
