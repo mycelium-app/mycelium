@@ -23,12 +23,15 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.delay
 import mycelium.Platform
 import mycelium.api.ConversationStatus
@@ -46,8 +49,6 @@ import mycelium.state.displayName
 import mycelium.state.localTimeOf
 import mycelium.state.minutesLeftText
 import mycelium.state.stillWorkingOnBreak
-import kotlin.time.Clock
-import kotlin.time.Duration.Companion.minutes
 
 val LocalHoursView = staticCompositionLocalOf<HoursView?> { null }
 
@@ -135,6 +136,7 @@ fun BreakScreen(store: Store, platform: Platform?) {
     val now = rememberNow(SecondMillis)
     val colors = MyTheme.colors
     var confirming by remember { mutableStateOf(false) }
+    val endEarly = remember { FocusRequester() }
     val startedAt = wellness.breakStartedAt
     val endsAt = wellness.breakEndsAt
 
@@ -144,6 +146,10 @@ fun BreakScreen(store: Store, platform: Platform?) {
 
     if (wellness.clock.phase != BreakPhase.OnBreak || endsAt == null) {
         return
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { endEarly.requestFocus() }
     }
 
     val left = endsAt - now
@@ -162,7 +168,7 @@ fun BreakScreen(store: Store, platform: Platform?) {
 
             Label("Step away from the screen. Stand up, stretch, and look at something far away.", Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
             Label(stillWorkingOnBreak(working), Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
-            MyButton({ confirming = true }, Modifier.padding(top = Tokens.Space.S4), text = "End break early", muted = true)
+            MyButton({ confirming = true }, Modifier.padding(top = Tokens.Space.S4).focusRequester(endEarly), text = "End break early", muted = true)
         }
     }
 

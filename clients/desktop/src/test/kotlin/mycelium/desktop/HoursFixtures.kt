@@ -52,6 +52,7 @@ internal class HoursServer(private val groups: List<String>, private val convers
 
     fun store(scope: CoroutineScope, platform: Platform): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
+        var breakStartedAt: String? = null
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             seen += Triple(request.method.value, path, String(request.body.toByteArray()))
@@ -64,7 +65,12 @@ internal class HoursServer(private val groups: List<String>, private val convers
                 path.endsWith("/conversations") -> respond(conversations.joinToString(",", "[", "]"), HttpStatusCode.OK, json)
                 path.endsWith("/groups") -> respond(groups.joinToString(",", "[", "]"), HttpStatusCode.OK, json)
                 path.endsWith("/wellness/settings") -> respond(settings, HttpStatusCode.OK, json)
-                path.endsWith("/wellness/overview") -> respond(WellnessOverviewJson, HttpStatusCode.OK, json)
+                request.method == HttpMethod.Post && path.endsWith("/wellness/breaks") -> {
+                    breakStartedAt = isoIn(0)
+
+                    respond("""{"id":"b1","started_at":"$breakStartedAt","ends_at":"${isoIn(5)}"}""", HttpStatusCode.Created, json)
+                }
+                path.endsWith("/wellness/overview") -> respond(breakStartedAt?.let { WellnessOverviewJson.replace("\"current_break\":null", """"current_break":{"id":"b1","started_at":"$it","ends_at":"${isoIn(5)}"}""") } ?: WellnessOverviewJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond("""[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,"agents":[],"logins":[]}]""", HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond(projects.joinToString(",", "[", "]"), HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") || path.endsWith("/projects") || path.endsWith("/worktrees") || path.endsWith("/assistants") -> respond("[]", HttpStatusCode.OK, json)
