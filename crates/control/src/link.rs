@@ -544,6 +544,10 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
     if before.acp_session_id.is_none() {
         crate::assistants::session_started(state, updated.owner, conversation_id).await;
+
+        if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
+            tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());
+        }
     }
 
     pump(state, conversation_id, before.acp_session_id.is_none()).await

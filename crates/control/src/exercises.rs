@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::conversations;
 use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
-use crate::prompts;
+use crate::assistant_actions;
 use crate::state::AppState;
 use crate::store::{find_owned, parse_enum};
 use crate::wellness;
@@ -12,16 +12,18 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
 use mycelium_proto::api::{CreateConversationRequest, Exercise, ExerciseReview, ProposeExercisesRequest, ReviewComment, SolutionFile};
-use mycelium_proto::link::{ControlToNode, GitCommand};
+use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 const KINDS: [&str; 3] = ["language", "area", "other"];
 const TEST_TIMEOUT_SECS: u32 = 600;
 const MOST_SUGGESTED: i64 = 3;
-const EXERCISE_COLUMNS: &str = "id, kind, name, title, brief, minutes, state, branch, conversation_id, reviewing, not_now_until, last_tests, created_at, started_at";
+const REVIEW_DIFF_CHARS: usize = 40_000;
+const EXERCISE_COLUMNS: &str = "id, kind, name, title, brief, minutes, state, branch, conversation_id, reviewing, not_now_until, last_tests, created_at, started_at, source_conversation_id, (select c.title from conversations c where c.id = source_conversation_id) as source_title";
 
 #[derive(sqlx::FromRow)]
 struct ExerciseRow {
@@ -39,6 +41,8 @@ struct ExerciseRow {
     last_tests: Option<Value>,
     created_at: DateTime<Utc>,
     started_at: Option<DateTime<Utc>>,
+    source_conversation_id: Option<Uuid>,
+    source_title: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -81,6 +85,8 @@ async fn to_proto(state: &AppState, row: ExerciseRow) -> ApiResult<Exercise> {
         review,
         created_at: row.created_at,
         started_at: row.started_at,
+        source_conversation_id: row.source_conversation_id,
+        source_title: row.source_title,
     })
 }
 
@@ -143,7 +149,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::conflict("exercise_needs_project", "This exercise has no project to branch from. Register the project on its node first."));
     };
     let branch = format!("learn/{}", slug_of(&place.title, id));
-    let request = CreateConversationRequest { account: None, node_id: place.node_id, agent: parse_enum(&place.agent)?, cwd: String::new(), project_id: Some(project_id), branch: Some(branch.clone()), title: Some(place.title.clone()), prompt: None, parent_id: None, side_kind: None };
+    let request = CreateConversationRequest { account: None, node_id: place.node_id, agent: parse_enum(&place.agent)?, cwd: String::new(), project_id: Some(project_id), branch: Some(branch.clone()), title: Some(place.title.clone()), prompt: None, parent_id: None, side_kind: None, model: None };
     let conversation = conversations::start(&state, &user, request).await?;
 
     sqlx::query("update exercises set state = 'started', branch = $2, cwd = $3, conversation_id = $4, started_at = now() where id = $1").bind(id).bind(&branch).bind(&conversation.cwd).bind(conversation.id).execute(&state.pool).await?;
@@ -192,22 +198,27 @@ pub async fn run_tests(State(state): State<AppState>, user: AuthUser, Path(id): 
     Ok(Json(result))
 }
 
-fn review_prompt(tests: Option<&Value>) -> String {
-    let results = match tests {
-        Some(tests) => format!(" The last test run: {tests}."),
-        None => String::new(),
-    };
+async fn review_request(state: &AppState, id: Uuid, conversation_id: Uuid, tests: Option<&Value>) -> ApiResult<String> {
+    let (title, brief, branch) = sqlx::query_as::<_, (String, String, Option<String>)>("select title, brief, branch from exercises where id = $1").bind(id).fetch_one(&state.pool).await?;
+    let changes = walkthroughs::scope_changes(state, conversation_id, "branch").await.unwrap_or_default();
+    let diff: String = changes.iter().map(|change| format!("--- {}\n{}", change.path, change.hunks.iter().map(|hunk| hunk.text.as_str()).collect::<Vec<_>>().join("\n"))).collect::<Vec<_>>().join("\n\n");
+    let diff: String = diff.chars().take(REVIEW_DIFF_CHARS).collect();
+    let results = tests.map(|tests| format!("\nLast test run: {tests}")).unwrap_or_default();
 
-    format!("Review my solution to this exercise on this branch. Read the changes with git, comment on specific lines, and call save_exercise_review once with a short summary and your comments. Say what is good as well as what to improve, and do not give the full answer.{results} Do not edit, create or delete any file.")
+    Ok(format!("Exercise id: {id}\nTitle: {title}\nBrief: {brief}\nBranch: {}{results}\n\nChanges on the branch:\n{diff}", branch.unwrap_or_default()))
 }
 
 pub async fn review(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<(StatusCode, Json<Exercise>)> {
     user.require_full_access()?;
 
     let (conversation_id, _) = started_place(&state, id, user.id).await?;
-    let tests = sqlx::query_scalar::<_, Option<Value>>("update exercises set reviewing = true where id = $1 returning last_tests").bind(id).fetch_one(&state.pool).await?;
+    let tests = sqlx::query_scalar::<_, Option<Value>>("select last_tests from exercises where id = $1").bind(id).fetch_one(&state.pool).await?;
+    let exercise = review_request(&state, id, conversation_id, tests.as_ref()).await?;
+    let (assistant_id, action_id) = assistant_actions::action_of_key(&state, user.id, assistant_actions::EXERCISE_REVIEW).await?;
+    let zone = wellness::zone_of(&state, user.id, None).await?;
 
-    prompts::continue_unless_queued(&state, user.id, conversation_id, &review_prompt(tests.as_ref())).await?;
+    assistant_actions::run(&state, &user, assistant_id, action_id, &BTreeMap::from([("exercise".to_string(), exercise)]), zone).await?;
+    sqlx::query("update exercises set reviewing = true where id = $1").bind(id).execute(&state.pool).await?;
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
 
     Ok((StatusCode::ACCEPTED, Json(one(&state, id, user.id).await?)))
@@ -237,7 +248,7 @@ pub async fn propose(State(state): State<AppState>, user: AuthUser, Json(request
     user.require_full_access()?;
 
     let prompt = "Propose up to three practice exercises for me, based on code agents wrote recently in my conversations. Use find_conversations and recall to look. For each, call propose_exercise with a short title, a brief that says what to build or fix without giving the answer, the skill it practises (a language, or an area of the codebase) and the minutes it should take, naming the conversation the code came from. Do not change any files.".to_string();
-    let conversation = conversations::start(&state, &user, CreateConversationRequest { account: None, node_id: request.node_id, agent: request.agent, cwd: request.cwd, project_id: request.project_id, branch: None, title: Some("Propose exercises".to_string()), prompt: Some(prompt), parent_id: None, side_kind: None }).await?;
+    let conversation = conversations::start(&state, &user, CreateConversationRequest { account: None, node_id: request.node_id, agent: request.agent, cwd: request.cwd, project_id: request.project_id, branch: None, title: Some("Propose exercises".to_string()), prompt: Some(prompt), parent_id: None, side_kind: None, model: None }).await?;
 
     Ok((StatusCode::ACCEPTED, Json(json!({"conversation_id": conversation.id}))))
 }
@@ -288,8 +299,14 @@ pub async fn propose_from_agent(state: &AppState, conversation_id: Uuid, argumen
 }
 
 pub async fn save_review(state: &AppState, conversation_id: Uuid, arguments: &Value) -> ApiResult<Result<Exercise, String>> {
-    let found = sqlx::query_as::<_, (Uuid, Uuid, Option<Value>)>("select id, owner, last_tests from exercises where conversation_id = $1 and reviewing").bind(conversation_id).fetch_optional(&state.pool).await?;
-    let Some((exercise_id, owner, tests)) = found else {
+    if !assistant_actions::is_wellness_conversation(state, conversation_id).await? {
+        return Ok(Err("Nothing was saved. Only the Wellness assistant can save an exercise review.".to_string()));
+    }
+
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let named = arguments.get("exercise_id").and_then(Value::as_str).and_then(|given| given.trim().parse::<Uuid>().ok());
+    let found = sqlx::query_as::<_, (Uuid, Option<Value>)>("select id, last_tests from exercises where owner = $1 and reviewing and ($2::uuid is null or id = $2) order by started_at desc nulls last limit 1").bind(owner).bind(named).fetch_optional(&state.pool).await?;
+    let Some((exercise_id, tests)) = found else {
         return Ok(Err("Nothing was saved. Only a review the person asked for on an exercise can be saved.".to_string()));
     };
     let Some(summary) = arguments.get("summary").and_then(Value::as_str).map(str::trim).filter(|summary| !summary.is_empty()) else {
@@ -303,33 +320,9 @@ pub async fn save_review(state: &AppState, conversation_id: Uuid, arguments: &Va
         None => Vec::new(),
     };
 
-    sqlx::query("insert into exercise_reviews (exercise_id, summary, comments, tests) values ($1, $2, $3, $4)").bind(exercise_id).bind(summary).bind(json!(comments)).bind(tests).execute(&state.pool).await?;
+    sqlx::query("insert into exercise_reviews (exercise_id, summary, comments, tests, assistant_id) values ($1, $2, $3, $4, (select assistant_id from conversations where id = $5))").bind(exercise_id).bind(summary).bind(json!(comments)).bind(tests).bind(conversation_id).execute(&state.pool).await?;
     sqlx::query("update exercises set state = 'reviewed', reviewing = false where id = $1").bind(exercise_id).execute(&state.pool).await?;
     state.publish(Some(owner), StreamMessage::WellnessChanged);
 
     Ok(Ok(one(state, exercise_id, owner).await?))
-}
-
-pub async fn refuse_edit(state: &AppState, node_id: Uuid, conversation_id: Uuid, request_id: &str, request: &Value) -> ApiResult<bool> {
-    let changes_files = matches!(request["toolCall"]["kind"].as_str(), Some("edit" | "delete" | "move"));
-
-    if !changes_files {
-        return Ok(false);
-    }
-
-    let reviewing = sqlx::query_scalar::<_, bool>("select exists (select 1 from exercises where conversation_id = $1 and reviewing)").bind(conversation_id).fetch_one(&state.pool).await?;
-
-    if !reviewing {
-        return Ok(false);
-    }
-
-    let reject = request["options"].as_array().into_iter().flatten().find(|option| option["kind"].as_str().is_some_and(|kind| kind.starts_with("reject")));
-    let outcome = match reject.and_then(|option| option["optionId"].as_str()) {
-        Some(option_id) => json!({"outcome": "selected", "optionId": option_id}),
-        None => json!({"outcome": "cancelled"}),
-    };
-
-    state.hub.send(node_id, ControlToNode::PermissionResponse { conversation_id, request_id: request_id.to_string(), outcome });
-
-    Ok(true)
 }

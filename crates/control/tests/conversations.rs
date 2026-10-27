@@ -386,6 +386,32 @@ async fn a_started_session_reports_its_models_to_the_node_for_conversations_not_
 }
 
 #[tokio::test]
+async fn a_model_chosen_before_the_session_starts_is_set_once_it_has() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let (status, body) = server.user.json(server.user.post("/api/v1/conversations").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "model": "sonnet"}))).await;
+    assert_eq!(status, 201, "{body}");
+    let id: Uuid = body["id"].as_str().unwrap().parse().unwrap();
+    link.expect_start_session().await;
+
+    link.send(NodeToControl::SessionStarted {
+        conversation_id: id,
+        acp_session_id: "acp-1".into(),
+        modes: None,
+        models: Some(json!({"currentModelId": "opus", "availableModels": [{"modelId": "opus", "name": "Opus 5.5"}, {"modelId": "sonnet", "name": "Sonnet 5.5"}]})),
+        config_options: None,
+    })
+    .await;
+
+    match link.next().await {
+        ControlToNode::SetConfig { model, .. } => assert_eq!(model.as_deref(), Some("sonnet")),
+        other => panic!("expected set_config, got {other:?}"),
+    }
+
+    assert_eq!(server.conversation(id).await["model"], "sonnet");
+}
+
+#[tokio::test]
 async fn a_send_now_whose_cancel_never_landed_does_not_release_the_queue_after_a_later_stop() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

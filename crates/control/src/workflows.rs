@@ -635,6 +635,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             prompt: None,
                             parent_id: None,
                             side_kind: None,
+                        model: None,
                         },
                     )
                     .await?;

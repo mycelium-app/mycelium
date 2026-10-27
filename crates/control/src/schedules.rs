@@ -1,3 +1,4 @@
+use crate::assistant_actions;
 use crate::assistants;
 use crate::auth::AuthUser;
 use crate::boot::run_while_ready;
@@ -20,7 +21,7 @@ use mycelium_proto::stream::StreamMessage;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id";
+const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id, action_id, action_inputs";
 const RUN_COLUMNS: &str = "id, schedule_id, ran_at, outcome, reason, conversation_id";
 const DUE_BATCH: i64 = 20;
 const RECENT_RUNS: i64 = 50;
@@ -29,8 +30,8 @@ const RECENT_RUNS: i64 = 50;
 struct ScheduleRow {
     id: Uuid,
     owner: Uuid,
-    node_id: Uuid,
-    agent: String,
+    node_id: Option<Uuid>,
+    agent: Option<String>,
     cwd: String,
     project_id: Option<Uuid>,
     prompt: String,
@@ -45,6 +46,8 @@ struct ScheduleRow {
     last_conversation_id: Option<Uuid>,
     created_at: chrono::DateTime<chrono::Utc>,
     assistant_id: Option<Uuid>,
+    action_id: Option<Uuid>,
+    action_inputs: sqlx::types::Json<std::collections::BTreeMap<String, String>>,
 }
 
 impl ScheduleRow {
@@ -52,7 +55,7 @@ impl ScheduleRow {
         Ok(Schedule {
             id: self.id,
             node_id: self.node_id,
-            agent: parse_enum(&self.agent)?,
+            agent: self.agent.as_deref().map(parse_enum).transpose()?,
             cwd: self.cwd,
             project_id: self.project_id,
             prompt: self.prompt,
@@ -66,6 +69,8 @@ impl ScheduleRow {
             last_run_at: self.last_run_at,
             last_conversation_id: self.last_conversation_id,
             assistant_id: self.assistant_id,
+            action_id: self.action_id,
+            action_inputs: self.action_inputs.0,
             created_at: self.created_at,
         })
     }
@@ -210,51 +215,76 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateScheduleRequest>) -> ApiResult<(StatusCode, Json<Schedule>)> {
+    Ok((StatusCode::CREATED, Json(insert(&state, user.id, request).await?)))
+}
+
+pub async fn insert(state: &AppState, owner: Uuid, request: CreateScheduleRequest) -> ApiResult<Schedule> {
     let prompt = require_prompt(&request.prompt)?;
     let zone = match request.time_zone.as_deref() {
         Some(name) => {
             let zone = parse_zone(name)?;
 
-            sqlx::query("update users set time_zone = $2 where id = $1 and time_zone is null").bind(user.id).bind(zone.name()).execute(&state.pool).await?;
+            sqlx::query("update users set time_zone = $2 where id = $1 and time_zone is null").bind(owner).bind(zone.name()).execute(&state.pool).await?;
 
             zone
         }
-        None => zone_of(&state, user.id).await?,
+        None => zone_of(state, owner).await?,
     };
     let next_run_at = next_run_after(request.cron.trim(), zone, chrono::Utc::now())?;
-    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(request.node_id).fetch_one(&state.pool).await?;
 
-    if !exists {
-        return Err(ApiError::not_found("That node"));
-    }
+    if let Some(assistant_id) = request.assistant_id {
+        assistants::load(state, owner, assistant_id).await?;
 
-    if let Some(project_id) = request.project_id {
-        let project = projects::find_owned(&state, project_id, user.id).await?;
+        if let Some(action_id) = request.action_id {
+            let action = assistant_actions::find(state, assistant_id, action_id).await?;
 
-        if project.node_id != request.node_id {
-            return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+            assistant_actions::expand(&action, &request.action_inputs, zone, chrono::Utc::now())?;
         }
-    } else if request.cwd.trim().is_empty() {
-        return Err(ApiError::bad_request("cwd_required", "Enter the folder the agent should work in."));
+    } else {
+        let Some(node_id) = request.node_id else {
+            return Err(ApiError::bad_request("node_required", "Choose the node the agent should run on."));
+        };
+        let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(node_id).fetch_one(&state.pool).await?;
+
+        if !exists {
+            return Err(ApiError::not_found("That node"));
+        }
+
+        if let Some(project_id) = request.project_id {
+            let project = projects::find_owned(state, project_id, owner).await?;
+
+            if project.node_id != node_id {
+                return Err(ApiError::bad_request("project_not_on_node", "This project is not set up on that node. Choose a node it is set up on."));
+            }
+        } else if request.cwd.trim().is_empty() {
+            return Err(ApiError::bad_request("cwd_required", "Enter the folder the agent should work in."));
+        }
+
+        if request.agent.is_none() {
+            return Err(ApiError::bad_request("agent_required", "Choose the agent to run."));
+        }
     }
 
+    let assistant_schedule = request.assistant_id.is_some();
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning {SCHEDULE_COLUMNS}",
+        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, assistant_id, action_id, action_inputs) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning {SCHEDULE_COLUMNS}",
     )))
-    .bind(user.id)
-    .bind(request.node_id)
-    .bind(enum_text(&request.agent))
+    .bind(owner)
+    .bind(request.node_id.filter(|_| !assistant_schedule))
+    .bind(request.agent.as_ref().filter(|_| !assistant_schedule).map(enum_text))
     .bind(request.cwd.trim())
-    .bind(request.project_id)
+    .bind(request.project_id.filter(|_| !assistant_schedule))
     .bind(prompt)
     .bind(request.cron.trim())
     .bind(enum_text(&request.each_run))
     .bind(next_run_at)
     .bind(zone.name())
+    .bind(request.assistant_id)
+    .bind(request.action_id)
+    .bind(sqlx::types::Json(&request.action_inputs))
     .fetch_one(&state.pool)
     .await?;
-
-    Ok((StatusCode::CREATED, Json(row.to_proto()?)))
+    publish(state, row)
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchScheduleRequest>) -> ApiResult<Json<Schedule>> {
@@ -451,7 +481,7 @@ async fn run_due(state: &AppState) -> ApiResult<()> {
     .await?;
 
     for row in due {
-        let held = crate::wellness::quiet_settings(state, row.owner).await?.is_some_and(|settings| settings.quiet_hold_schedules);
+        let held = crate::wellness::schedule_closure(state, row.owner, row.id).await?.is_some_and(|settings| settings.quiet_hold_schedules);
 
         if held {
             record_held(&mut tx, row.id).await?;
@@ -472,7 +502,7 @@ async fn run_due(state: &AppState) -> ApiResult<()> {
 
 async fn record_held(connection: &mut PgConnection, schedule_id: Uuid) -> ApiResult<()> {
     sqlx::query(
-        "insert into schedule_runs (schedule_id, outcome, reason) select $1, 'held', 'Held until quiet hours end.'
+        "insert into schedule_runs (schedule_id, outcome, reason) select $1, 'held', 'Held until its group opens.'
          where not exists (select 1 from (select outcome from schedule_runs where schedule_id = $1 order by ran_at desc limit 1) latest where latest.outcome = 'held')",
     )
     .bind(schedule_id)
@@ -506,12 +536,23 @@ async fn fire(state: &AppState, connection: &mut PgConnection, row: &ScheduleRow
 
 async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiResult<Uuid> {
     if let Some(assistant_id) = row.assistant_id {
+        if let Some(action_id) = row.action_id {
+            let zone = parse_zone(&row.time_zone)?;
+            let woken = assistant_actions::run(state, user, assistant_id, action_id, &row.action_inputs.0, zone).await?;
+
+            return Ok(woken.id);
+        }
+
         let woken = assistants::prompt(State(state.clone()), user.clone(), Path(assistant_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await?;
 
         return Ok(woken.0.id);
     }
 
-    if !state.hub.is_online(row.node_id) {
+    let (Some(node_id), Some(agent)) = (row.node_id, row.agent.as_deref()) else {
+        return Err(ApiError::conflict("schedule_has_no_node", "This schedule has no node to run on. Edit it and choose one."));
+    };
+
+    if !state.hub.is_online(node_id) {
         return Err(node_offline());
     }
 
@@ -534,7 +575,7 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
         }
     }
 
-    let request = CreateConversationRequest { account: None, node_id: row.node_id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None };
+    let request = CreateConversationRequest { account: None, node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: None };
     let conversation = conversations::start(state, user, request).await?;
 
     Ok(conversation.id)

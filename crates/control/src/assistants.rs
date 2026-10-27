@@ -14,7 +14,7 @@ use axum::body::Bytes;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
-use mycelium_proto::api::{Assistant, AssistantBackup, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
+use mycelium_proto::api::{ModelChoice, Assistant, AssistantBackup, AssistantFile, AssistantPreferences, AssistantSecret, AssistantSecretState, AssistantState, PutAssistantSecretRequest, CreateAssistantRequest, CreateChatRequest, CreateConversationRequest, PatchAssistantRequest, PromptRequest};
 use mycelium_proto::conversation::{AgentId, Conversation};
 use mycelium_proto::link::{ControlToNode, FolderFile};
 use mycelium_proto::stream::StreamMessage;
@@ -35,11 +35,11 @@ const FOLDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const SECRET_NAME_LIMIT: usize = 100;
 const MODEL_ERROR_MINUTES: i64 = 10;
 const FALL_BACK_CONDITIONS: [&str; 4] = ["usage_limit", "signed_out", "offline", "model_error"];
-const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.created_at,
+const ASSISTANT_COLUMNS: &str = "a.id, a.name, a.description, a.group_id, a.preferences, a.builtin_key, a.conversation_id, a.backup, a.pinned_at, a.archived_at, a.created_at,
     c.status as current_status,
     (select max(updated_at) from conversations where assistant_id = a.id) as last_active_at,
     (select count(*) from conversations where assistant_id = a.id) as session_count,
-    (select s.cron from schedules s where s.assistant_id = a.id and not s.proposed and not s.paused order by s.next_run_at limit 1) as wake_cron,
+    (select string_agg(s.cron, '|' order by s.next_run_at) from schedules s where s.assistant_id = a.id and not s.proposed and not s.paused) as wake_cron,
     (select substring(content from 1 for $3) from assistant_files f where f.assistant_id = a.id and f.path = 'AGENTS.md') as instructions_preview";
 
 #[derive(sqlx::FromRow)]
@@ -49,6 +49,7 @@ struct AssistantRow {
     description: Option<String>,
     group_id: Option<Uuid>,
     preferences: Jsonb<AssistantPreferences>,
+    builtin_key: Option<String>,
     conversation_id: Option<Uuid>,
     backup: Option<Jsonb<AssistantBackup>>,
     pinned_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -92,7 +93,8 @@ impl AssistantRow {
             next_choice: None,
             secrets: Vec::new(),
             backup: self.backup.map(|backup| backup.0),
-            wakes: self.wake_cron.as_deref().map(crate::schedules::describe_cron),
+            wakes: self.wake_cron.as_deref().map(|crons| crons.split('|').map(crate::schedules::describe_cron).collect::<Vec<_>>().join(", ")),
+            builtin_key: self.builtin_key,
             created_at: self.created_at,
         }
     }
@@ -104,7 +106,7 @@ pub struct ListQuery {
     archived: bool,
 }
 
-async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
+pub async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
     let row = sqlx::query_as::<_, AssistantRow>(sqlx::AssertSqlSafe(format!(
         "select {ASSISTANT_COLUMNS} from assistants a left join conversations c on c.id = a.conversation_id where a.id = $1 and a.owner = $2"
     )))
@@ -163,6 +165,10 @@ pub async fn store_file(state: &AppState, id: Uuid, path: &str, content: &[u8]) 
     .execute(&state.pool)
     .await?;
 
+    if path == INSTRUCTIONS_PATH {
+        crate::instructions::record_assistant_version(state, id, &String::from_utf8_lossy(content)).await?;
+    }
+
     Ok(())
 }
 
@@ -187,7 +193,7 @@ async fn files_of(state: &AppState, id: Uuid, prefix: &str) -> ApiResult<Vec<Ass
     Ok(rows.into_iter().map(|(path, size, updated_at, backed_up)| AssistantFile { path, size, updated_at, backed_up }).collect())
 }
 
-fn valid_name(name: &str) -> ApiResult<String> {
+pub fn valid_name(name: &str) -> ApiResult<String> {
     let name = name.trim();
 
     if name.is_empty() {
@@ -205,7 +211,7 @@ fn name_taken(name: &str) -> ApiError {
     ApiError::conflict("name_taken", format!("You already have an assistant called {name}. Choose another name."))
 }
 
-async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &AssistantPreferences) -> ApiResult<()> {
+pub async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &AssistantPreferences) -> ApiResult<()> {
     for choice in &preferences.models {
         match (choice.agent, choice.provider_id) {
             (Some(_), None) => {}
@@ -274,13 +280,13 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     Ok((StatusCode::CREATED, Json(assistant)))
 }
 
-pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Assistant>>> {
+pub async fn list_for(state: &AppState, owner: Uuid, archived: bool) -> ApiResult<Vec<Assistant>> {
     let rows = sqlx::query_as::<_, AssistantRow>(sqlx::AssertSqlSafe(format!(
         "select {ASSISTANT_COLUMNS} from assistants a left join conversations c on c.id = a.conversation_id
          where a.owner = $1 and (a.archived_at is not null) = $2 order by lower(a.name), a.id"
     )))
-    .bind(user.id)
-    .bind(query.archived)
+    .bind(owner)
+    .bind(archived)
     .bind(DESCRIPTION_PREVIEW_BYTES)
     .fetch_all(&state.pool)
     .await?;
@@ -288,10 +294,14 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
     let mut assistants: Vec<Assistant> = rows.into_iter().map(AssistantRow::to_proto).collect();
 
     for assistant in &mut assistants {
-        assistant.secrets = secrets_of(&state, assistant.id).await?;
+        assistant.secrets = secrets_of(state, assistant.id).await?;
     }
 
-    Ok(Json(assistants))
+    Ok(assistants)
+}
+
+pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Assistant>>> {
+    Ok(Json(list_for(&state, user.id, query.archived).await?))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
@@ -304,7 +314,17 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchAssistantRequest>) -> ApiResult<Json<Assistant>> {
-    load(&state, user.id, id).await?;
+    let current = load(&state, user.id, id).await?;
+
+    if current.builtin_key.is_some() {
+        if request.name.as_deref().is_some_and(|name| name.trim() != current.name) {
+            return Err(ApiError::conflict("assistant_built_in", format!("{} is built in, so it cannot be renamed. Change its models, nodes or actions instead.", current.name)));
+        }
+
+        if request.archived == Some(true) {
+            return Err(ApiError::conflict("assistant_built_in", format!("{} is built in, so it cannot be archived. Pause its schedules instead.", current.name)));
+        }
+    }
 
     let name = request.name.as_deref().map(valid_name).transpose()?;
 
@@ -346,7 +366,16 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     if let Some(instructions) = &request.instructions {
-        store_file(&state, id, INSTRUCTIONS_PATH, instructions.as_bytes()).await?;
+        match user.scopes.is_some() {
+            true => {
+                let proposed = crate::instruction_proposals::propose_for_assistant(&state, user.id, id, None, instructions, "Proposed through the API.").await?;
+
+                if let Err(message) = proposed {
+                    tracing::debug!("{message}");
+                }
+            }
+            false => store_file(&state, id, INSTRUCTIONS_PATH, instructions.as_bytes()).await?,
+        }
     }
 
     let mut assistant = publish(&state, user.id, id).await?;
@@ -359,6 +388,18 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Json<Conversation>> {
+    Ok(Json(send(&state, &user, id, request, &StartOverrides::default()).await?))
+}
+
+#[derive(Default)]
+pub struct StartOverrides {
+    pub model: Option<ModelChoice>,
+    pub node_id: Option<Uuid>,
+}
+
+pub async fn send(state: &AppState, user: &AuthUser, id: Uuid, request: PromptRequest, overrides: &StartOverrides) -> ApiResult<Conversation> {
+    let state = state.clone();
+    let user = user.clone();
     let assistant = load(&state, user.id, id).await?;
     let text = request.text.trim();
 
@@ -391,12 +432,22 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
             find_owned(&state.pool, row.id, user.id).await?.to_proto()?
         }
         None => {
-            if assistant.preferences.models.is_empty() {
+            let mut preferences = assistant.preferences.clone();
+
+            if let Some(model) = &overrides.model {
+                preferences.models = vec![model.clone()];
+            }
+
+            if let Some(node_id) = overrides.node_id {
+                preferences.nodes = vec![node_id];
+            }
+
+            if preferences.models.is_empty() {
                 return Err(ApiError::bad_request("model_required", "Choose a model for this assistant in its settings, then send your message again."));
             }
 
             let facts = facts_of(&state, user.id, id).await?;
-            let Some(choice) = choose(&assistant.preferences, &facts, false) else {
+            let Some(choice) = choose(&preferences, &facts, false) else {
                 return Err(ApiError::conflict("no_choice_available", "None of this assistant's models can run right now. Bring one of its nodes online and signed in, or add another model in its settings."));
             };
 
@@ -409,7 +460,7 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
                     chats::send(&state, user.id, started.id, text, request.attachments).await?
                 }
                 Choice::Workspace { agent, account, node_id, .. } => {
-                    let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None };
+                    let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None };
                     let started = conversations::start_for(&state, &user, started, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
@@ -423,7 +474,7 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     publish(&state, user.id, id).await?;
 
-    Ok(Json(conversation))
+    Ok(conversation)
 }
 
 pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {

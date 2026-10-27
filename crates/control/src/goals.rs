@@ -198,6 +198,7 @@ async fn start_check(state: &AppState, owner: Uuid, conversation_id: Uuid) -> Ap
         prompt: Some(prompt),
         parent_id: Some(conversation_id),
         side_kind: Some(SideKind::Check),
+    model: None,
     };
 
     match conversations::start(state, &user, request).await {

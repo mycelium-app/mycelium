@@ -1,4 +1,6 @@
 use crate::api_access;
+use crate::assistant_actions;
+use crate::assistant_changes;
 use crate::artifacts;
 use crate::assistants;
 use crate::chat_tools;
@@ -8,6 +10,7 @@ use crate::auth::AuthNode;
 use crate::chat_tool_servers::{ServerRow, bearer, list_owned, refreshable_after_rejection, renew, slug};
 use crate::error::ApiResult;
 use crate::instruction_proposals;
+use crate::learned;
 use crate::memories::{MEMORY_COLUMNS, MemoryRow, omitted_groups, search, usable_banks};
 use crate::mcp_client::{McpConnection, McpError};
 use crate::message_proposals;
@@ -17,6 +20,7 @@ use crate::state::AppState;
 use crate::store::CONVERSATION_GROUP_SQL;
 use crate::tasks;
 use crate::reflections;
+use crate::response_editor;
 use crate::exercises;
 use crate::walkthroughs;
 use axum::Json;
@@ -177,6 +181,70 @@ pub fn tool_definitions() -> Value {
             "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "The environment variable name, for example GITHUB_TOKEN."}, "description": {"type": "string", "description": "What the secret is for and where to find it."}}, "required": ["name"]},
         },
         {
+            "name": "assistant_propose_action",
+            "description": "Propose a reusable action for this assistant, such as a prompt the person keeps asking for. The person approves or edits it before it is added to the assistant's Actions. Use {input} placeholders in the prompt for anything the person should be asked before it runs. Only an assistant's own conversation can use it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "A short name for the action."},
+                    "prompt": {"type": "string", "description": "The prompt the action sends, with {input} placeholders."},
+                    "inputs": {
+                        "type": "array",
+                        "description": "What to ask before running.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "The placeholder name, without braces."},
+                                "kind": {"type": "string", "enum": ["text", "date", "choice"]},
+                                "options": {"type": "array", "items": {"type": "string"}, "description": "The choices, for kind choice."},
+                                "required": {"type": "boolean"},
+                                "default": {"type": "string"},
+                            },
+                            "required": ["name", "kind"],
+                        },
+                    },
+                    "reason": {"type": "string", "description": "Why this action is worth keeping, for example the request you keep getting."},
+                },
+                "required": ["name", "prompt"],
+            },
+        },
+        {
+            "name": "assistant_list",
+            "description": "List the person's assistants with id, name, description, group, state and whether it is built in.",
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "assistant_create",
+            "description": "Propose a new assistant. The person approves it before it exists. Other settings start at their defaults, and the person sets models and nodes afterwards.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The assistant's name."},
+                    "group": {"type": "string", "description": "The name of one of the person's groups."},
+                    "description": {"type": "string", "description": "One line on what the assistant is for."},
+                    "instructions": {"type": "string", "description": "The assistant's instructions, in Markdown."},
+                },
+                "required": ["name", "instructions"],
+            },
+        },
+        {
+            "name": "assistant_update",
+            "description": "Change an assistant. Description, group, models and nodes apply straight away, and the person can undo them. A new instructions text waits for the person's approval. Secrets and archiving are not available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "The assistant id, as assistant_list returned it."},
+                    "description": {"type": "string"},
+                    "group": {"type": "string", "description": "The name of one of the person's groups."},
+                    "models": {"type": "array", "items": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["claude", "codex"]}, "provider_id": {"type": "string"}, "model": {"type": "string"}, "account": {"type": "string"}}}, "description": "The models in order of preference."},
+                    "nodes": {"type": "array", "items": {"type": "string"}, "description": "Node ids the assistant may run on."},
+                    "instructions": {"type": "string", "description": "The whole new instructions text."},
+                    "reason": {"type": "string", "description": "Why the instructions change, shown with the proposal."},
+                },
+                "required": ["id"],
+            },
+        },
+        {
             "name": "assistant_use_workspace",
             "description": "Move this assistant's thread to a node when the work needs files on disk or commands, which a chat cannot do. Only an assistant's own chat can use it. The move happens when this reply ends, with the assistant's storage copied into the working folder, and the conversation carries on there.",
             "inputSchema": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why a working folder is needed."}}},
@@ -237,7 +305,7 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "save_reflection",
-            "description": "Save the person's weekly reflection. Only the weekly reflection run, or a redraft the person asked for, may call it. Look over the week first with find_conversations and recall, then call it once. Sections the person has edited are kept as they wrote them.",
+            "description": "Save the person's weekly reflection. Only the Wellness assistant may call it, when it runs the Weekly reflection action. Look over the week first with find_conversations and recall, then call it once. Sections the person has edited are kept as they wrote them.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -266,11 +334,23 @@ pub fn tool_definitions() -> Value {
             },
         },
         {
+            "name": "note_learned",
+            "description": "Note one thing the person has just learned, in one sentence they would recognise, like \"Why pg_advisory_lock needs a session, not a transaction\". Offered only while Teach me is on, during a walkthrough check or during an exercise review. It appears under Recently learned and feeds the weekly reflection.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "What the person learned, in one sentence."},
+                },
+                "required": ["text"],
+            },
+        },
+        {
             "name": "save_exercise_review",
             "description": "Save the review of the person's solution to a practice exercise. Only a review the person asked for may call it, once. Never edit files.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "exercise_id": {"type": "string", "description": "The exercise id given in the review request."},
                     "summary": {"type": "string", "description": "A short summary of the review."},
                     "comments": {
                         "type": "array",
@@ -383,11 +463,36 @@ pub fn tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "scopes": {"type": "array", "items": {"type": "string", "enum": ["conversations:read", "conversations:write", "nodes:read", "settings:read"]}, "description": "The access you need. Ask for the least that works."},
+                    "scopes": {"type": "array", "items": {"type": "string", "enum": ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants"]}, "description": "The access you need. Ask for the least that works."},
                     "hours": {"type": "number", "description": "How long the access lasts, 1 to 24. Defaults to 4."},
+                    "integration": {"type": "string", "description": "Ask for API access to one integration account instead of Mycelium's own API: its name or id. Scopes are then read and write. On approval you are told a file holding a token and an address under /api/v1/integrations/{id}/proxy/ that forwards to the integration's API with its credentials added, so you never handle its key."},
                     "reason": {"type": "string", "description": "A short reason the person should approve it."},
                 },
                 "required": ["scopes", "reason"],
+            },
+        },
+        {
+            "name": "decide",
+            "description": "Ask a decisions server (OpenJev or Jev-compatible) typed questions about some state. The answer is read from the model's token probabilities, so it cannot go off-schema. Use it for a yes or no, a choice among named options, or a score, instead of reasoning it out in text. Returns, per question, the probability of yes for noul, or the choice or score with its probabilities and confidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "state": {"description": "What the questions are about: text, or an object."},
+                    "questions": {
+                        "type": "object",
+                        "description": "A name for each question mapped to its definition.",
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["noul", "choice", "score"], "description": "noul is a yes or no question."},
+                                "instructions": {"type": "string", "description": "The question to answer."},
+                                "criteria": {"description": "For choice an object mapping each option to what it means; for score a list of level descriptions; for noul optionally {true, false}."},
+                            },
+                            "required": ["type", "instructions"],
+                        },
+                    },
+                },
+                "required": ["state", "questions"],
             },
         },
         {
@@ -551,7 +656,7 @@ async fn integration_tool_values(state: &AppState, servers: &[ServerRow]) -> Vec
 
     for server in servers.iter().filter(|server| server.integration().is_some()) {
         for tool in server.tool_list() {
-            tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+            tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": response_editor::with_filter_property(tool.input_schema)}));
         }
     }
 
@@ -559,7 +664,7 @@ async fn integration_tool_values(state: &AppState, servers: &[ServerRow]) -> Vec
         match remote {
             Ok(remote) => {
                 for tool in remote {
-                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": tool.input_schema}));
+                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": response_editor::with_filter_property(tool.input_schema)}));
                 }
             }
             Err(Some(message)) => tools.push(json!({"name": format!("{}__sign_in_again", slug(&server.name)), "description": format!("{}: {message}", server.name), "inputSchema": {"type": "object"}})),
@@ -660,6 +765,15 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
             let group = group_of(&state, &headers, node.id).await?.map(|(id, _)| id);
             let servers: Vec<_> = list_owned(&state, owner).await?.into_iter().filter(|server| server.enabled && server.in_group(group)).collect();
             let mut tools = tool_definitions().as_array().cloned().unwrap_or_default();
+            let learning = match claimed_conversation(&state, &headers, node.id).await? {
+                Some((conversation_id, _)) => learned::active_source(&state, conversation_id).await?.is_some(),
+                None => false,
+            };
+
+            if !learning {
+                tools.retain(|tool| tool["name"].as_str() != Some("note_learned"));
+            }
+
             tools.extend(integration_tool_values(&state, &servers).await);
 
             reply(&id, json!({"tools": tools}))
@@ -993,6 +1107,32 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     reply(&id, tool_text(&text, is_error))
                 }
+                Some("assistant_propose_action") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was proposed. An action belongs to an assistant's conversation, and this call did not come from one.", true)));
+                    };
+
+                    match assistant_actions::propose_from_agent(&state, conversation_id, &arguments).await? {
+                        Ok(proposal) => reply(&id, tool_text(&format!("Action \"{}\" proposed. It waits for the person to approve it; do not propose it again.", proposal.name), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some(tool @ ("assistant_list" | "assistant_create" | "assistant_update")) => {
+                    let owner = node_owner(&state, node.id).await?;
+                    let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
+
+                    match tool {
+                        "assistant_list" => reply(&id, tool_text(&assistant_changes::list_tool(&state, owner).await?, false)),
+                        "assistant_create" => match assistant_changes::propose_create(&state, owner, conversation, &arguments).await? {
+                            Ok(change) => reply(&id, tool_text(&format!("Assistant \"{}\" proposed. It waits for the person to approve it; it does not exist yet.", change.name), false)),
+                            Err(message) => reply(&id, tool_text(&message, true)),
+                        },
+                        _ => match assistant_changes::update_from_agent(&state, owner, conversation, &arguments).await? {
+                            Ok(message) => reply(&id, tool_text(&message, false)),
+                            Err(message) => reply(&id, tool_text(&message, true)),
+                        },
+                    }
+                }
                 Some("assistant_use_workspace") => {
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
                     let (text, is_error) = assistants::use_workspace_tool(&state, conversation).await?;
@@ -1061,6 +1201,16 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     match exercises::propose_from_agent(&state, conversation_id, &arguments).await? {
                         Ok(exercise) => reply(&id, tool_text(&format!("Exercise \"{}\" proposed. The person can start it from Skills.", exercise.title), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some("note_learned") => {
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Nothing was saved. A note belongs to a conversation, and this call did not come from one.", true)));
+                    };
+
+                    match learned::note_from_agent(&state, conversation_id, &arguments).await? {
+                        Ok(()) => reply(&id, tool_text("Noted. It appears under Recently learned.", false)),
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
@@ -1283,6 +1433,7 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                         prompt: Some(format!("From {}:\n\n{prompt}", message_proposals::label(conversation_id, &caller_title))),
                         parent_id: None,
                         side_kind: None,
+                        model: None,
                     };
                     let started = match crate::conversations::start(&state, &user, request).await {
                         Ok(started) => started,
@@ -1334,8 +1485,17 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let hours = arguments.get("hours").and_then(Value::as_i64);
 
-                    match api_access::request(&state, conversation_id, &scopes, hours, reason).await? {
+                    match api_access::request(&state, conversation_id, &scopes, hours, reason, arguments.get("integration").and_then(Value::as_str)).await? {
                         Ok(request) => reply(&id, tool_text(&format!("Waiting for the person to approve API access (request {}).", request.id), false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
+                    }
+                }
+                Some("decide") => {
+                    let owner = node_owner(&state, node.id).await?;
+                    let outcome = crate::decision_providers::decide(&state, owner, "decide", arguments.get("state").unwrap_or(&Value::Null), arguments.get("questions").unwrap_or(&Value::Null)).await?;
+
+                    match outcome {
+                        Ok(answers) => reply(&id, tool_text(&answers.to_string(), false)),
                         Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
@@ -1396,30 +1556,43 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
 
                     let conversation = claimed_conversation(&state, &headers, node.id).await?.map(|(conversation_id, _)| conversation_id);
                     let mut decision = "auto";
+                    let mut answer = None;
+                    let filter = response_editor::take_filter(&mut arguments);
                     let effective = server.effective(tool);
-                    let asks = effective.ask && (effective.ask_source != crate::integration_policy::Source::Default || server.policy.0.ask.all == Some(true));
+                    let asks = effective.ask && (server.integration().is_some() || effective.ask_source != crate::integration_policy::Source::Preset);
 
-                    if asks || effective.review {
+                    if asks || effective.edit {
                         let Some(conversation_id) = conversation else {
-                            let refusal = if asks { "This tool needs a person's approval, and this call did not come from a conversation. Nothing was done." } else { crate::integration_review::NO_CONVERSATION_TEXT };
+                            let refusal = if asks { "This tool needs a person's approval, and this call did not come from a conversation. Nothing was done." } else { response_editor::NO_CONVERSATION_TEXT };
 
                             return Ok(reply(&id, tool_text(refusal, true)));
                         };
 
                         if asks {
                             let request_id = Uuid::new_v4().to_string();
-                            let answer = chat_tools::request_approval(&state, owner, conversation_id, &request_id, name, &arguments, &server.name, false).await?;
+                            let approval = chat_tools::Approval { title: name, input: &arguments, server: &server.name, account: server.account.as_deref(), filter: filter.as_deref(), edits_by_setting: effective.edit };
+                            let answered = chat_tools::request_approval(&state, owner, conversation_id, &request_id, &approval).await?;
 
-                            if answer != chat_tools::ALLOW_ONCE {
+                            if answered == chat_tools::ALWAYS {
+                                chat_tools::stop_asking(&state, owner, server, tool).await?;
+                            }
+
+                            if !chat_tools::is_approved(&answered) {
                                 chat_tools::record_call(&state, owner, server, tool, conversation, "workspace", None, "declined", false, None).await;
 
                                 return Ok(reply(&id, tool_text(chat_tools::DECLINED_TEXT, true)));
                             }
 
                             decision = "approved";
+                            answer = Some(answered);
                         }
                     }
 
+                    let arguments = match crate::file_arguments::substitute(&state, owner, conversation, tool, arguments).await {
+                        Ok(arguments) => arguments,
+                        Err(message) => return Ok(reply(&id, tool_text(&message, true))),
+                    };
+                    let edits = conversation.is_some() && chat_tools::edits_response(answer.as_deref(), effective.edit);
                     let (mut text, is_error) = if let Some(integration) = server.integration() {
                         let output = integration.call(&state, owner, server, tool, &arguments).await;
 
@@ -1450,17 +1623,18 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     };
                     let mut review = None;
 
-                    if let (true, false, Some(conversation_id)) = (effective.review, is_error, conversation) {
-                        let reviewed = crate::integration_review::hold(&state, owner, conversation_id, &Uuid::new_v4().to_string(), &server.name, tool, text).await?;
-                        text = reviewed.text;
-                        review = Some(reviewed.review);
+                    if let (true, false, Some(conversation_id)) = (edits, is_error, conversation) {
+                        let held = response_editor::held_from(tool, &server.name, server.account.as_deref(), filter, &text);
+                        let sent = response_editor::hold(&state, owner, conversation_id, &Uuid::new_v4().to_string(), held, text).await?;
+                        text = sent.text;
+                        review = Some(sent.outcome);
                     }
 
                     chat_tools::record_call(&state, owner, server, tool, conversation, "workspace", None, decision, is_error, review).await;
 
                     reply(&id, tool_text(&text, is_error))
                 }
-                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, save_exercise_review, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
+                _ => failure(&id, INVALID_PARAMS, "Unknown tool. Use list_places, assistant_list, assistant_create, assistant_update, assistant_propose_action, recall, remember, propose_task, ask_question, propose_schedule, walkthrough, save_reflection, propose_exercise, note_learned, save_exercise_review, read_earlier_turns, get_instructions, propose_instructions_edit, find_conversations, send_to_conversation, request_api_access, decide, request_ssh_access, create_artifact, update_artifact, design_set_artboard, design_remove_item, read_artifact or read_artifact_feedback."),
             }
         }
         _ => failure(&id, METHOD_NOT_FOUND, "Method not found."),

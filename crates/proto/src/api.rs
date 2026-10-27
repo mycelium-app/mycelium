@@ -205,6 +205,8 @@ pub struct CreateConversationRequest {
     pub parent_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side_kind: Option<SideKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -973,6 +975,14 @@ pub struct Group {
     #[serde(default)]
     pub folders: Vec<GroupFolder>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub hours: Hours,
+    pub open_now: bool,
+    #[serde(default)]
+    pub closes_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub opens_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub opened_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2236,12 +2246,38 @@ pub struct SetAssistantBackupRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QuietDay {
+pub struct HoursDay {
     pub weekday: u8,
-    pub enabled: bool,
-    pub all_day: bool,
-    pub starts: String,
-    pub ends: String,
+    pub closed: bool,
+    pub opens: String,
+    pub closes: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Hours {
+    pub always_open: bool,
+    pub days: Vec<HoursDay>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenGroupRequest {
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupOpening {
+    pub opened_until: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutOfHoursOpen {
+    pub group_id: Uuid,
+    pub group_name: String,
+    pub reason: String,
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    pub until: chrono::DateTime<chrono::Utc>,
+    pub closed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2250,12 +2286,11 @@ pub struct WellnessSettings {
     pub break_after_minutes: i32,
     pub snooze_minutes: i32,
     pub break_minutes: i32,
-    pub quiet_hours: bool,
+    pub hours: Hours,
     pub quiet_hold_notifications: bool,
     pub quiet_hold_schedules: bool,
     pub quiet_hold_pings: bool,
     pub time_zone: Option<String>,
-    pub quiet_days: Vec<QuietDay>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2293,6 +2328,8 @@ pub struct WellnessOverview {
     pub quiet_now: bool,
     pub held: i64,
     pub held_week: HeldWeek,
+    #[serde(default)]
+    pub opened_out_of_hours: Vec<OutOfHoursOpen>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -2317,6 +2354,8 @@ pub struct LearnedItem {
 pub struct HoldRequest {
     pub kind: String,
     pub subject: String,
+    #[serde(default)]
+    pub group_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
