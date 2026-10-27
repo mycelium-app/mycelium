@@ -24,6 +24,7 @@ enum class MyceliumTool(val key: String, val label: String, val running: String)
     UpdateArtifact("update_artifact", "Update artefact", "Updating an artefact"),
     DesignSetArtboard("design_set_artboard", "Set artboard", "Setting an artboard"),
     ReadArtifact("read_artifact", "Read artefact", "Reading an artefact"),
+    OpenOutline("open_outline", "Open Outline document", "Opening an Outline document"),
 }
 
 sealed interface MyceliumCall {
@@ -97,6 +98,10 @@ sealed interface MyceliumCall {
 
     data class ReadArtifact(val artifactId: String, val artboard: String?) : MyceliumCall {
         override val tool = MyceliumTool.ReadArtifact
+    }
+
+    data class OpenOutline(val document: String, val page: OutlinePage?) : MyceliumCall {
+        override val tool = MyceliumTool.OpenOutline
     }
 }
 
@@ -193,6 +198,12 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
             val reason = fields.requiredString("reason", input) ?: return null
 
             MyceliumCall.ProposeInstructionsEdit(proposedLayer.find(output)?.groupValues?.get(1) ?: fields.string("layer"), reason)
+        }
+
+        MyceliumTool.OpenOutline -> {
+            val document = fields.requiredString("document", input) ?: return null
+
+            MyceliumCall.OpenOutline(document, outlinePageFromOutput(output))
         }
 
         MyceliumTool.SetProjectIcon -> {

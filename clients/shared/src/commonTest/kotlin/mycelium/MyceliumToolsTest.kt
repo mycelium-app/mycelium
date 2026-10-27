@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonObject
 import mycelium.api.MyceliumJson
 import mycelium.state.MyceliumCall
 import mycelium.state.MyceliumTool
+import mycelium.state.OutlinePage
 import mycelium.state.ThreadItem
 import mycelium.state.ToolStatus
 import mycelium.state.myceliumCall
@@ -202,5 +203,21 @@ class MyceliumToolsTest {
     @Test
     fun requestSshAccessWithoutANodeFallsBackToTheGenericCard() {
         assertNull(myceliumCall(call("mcp__mycelium__request_ssh_access", """{"reason":"Find the full disk"}""")))
+    }
+
+    @Test
+    fun openOutlineCarriesTheTitleAndAddressTheToolReported() {
+        val output = "Opened Release notes beside the conversation: https://docs.example/doc/aB3dE5fG"
+        val parsed = assertIs<MyceliumCall.OpenOutline>(myceliumCall(call("mcp__mycelium__open_outline", """{"document":"aB3dE5fG"}""", output)))
+
+        assertEquals("aB3dE5fG", parsed.document)
+        assertEquals(OutlinePage("Release notes", "https://docs.example/doc/aB3dE5fG"), parsed.page)
+    }
+
+    @Test
+    fun openOutlineStillShowsTheDocumentWhileTheToolHasNotAnswered() {
+        val parsed = assertIs<MyceliumCall.OpenOutline>(myceliumCall(call("mcp__mycelium__open_outline", """{"document":"aB3dE5fG"}""", null, ToolStatus.Running)))
+
+        assertNull(parsed.page)
     }
 }

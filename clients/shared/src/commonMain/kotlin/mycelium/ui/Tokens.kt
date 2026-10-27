@@ -40,6 +40,7 @@ data class Palette(
     val statusAttention: Color,
     val statusFailed: Color,
     val statusDone: Color,
+    val leaf: Color,
     val diffAddBg: Color,
     val diffDelBg: Color,
     val diffAdd: Color,
@@ -85,6 +86,7 @@ object Tokens {
         statusAttention = Color(0xFFE2B45F),
         statusFailed = Color(0xFFEC8576),
         statusDone = Color(0xFF7CCBA0),
+        leaf = Color(0xFF7CCBA0),
         diffAddBg = Color(0xFF17291F),
         diffDelBg = Color(0xFF2F1C19),
         diffAdd = Color(0xFF7CCBA0),
@@ -110,6 +112,7 @@ object Tokens {
         statusAttention = Color(0xFF875800),
         statusFailed = Color(0xFFB0372A),
         statusDone = Color(0xFF1B6A44),
+        leaf = Color(0xFF1B6A44),
         diffAddBg = Color(0xFFE6F4EA),
         diffDelBg = Color(0xFFFBE7E3),
         diffAdd = Color(0xFF1B6A44),
@@ -152,6 +155,7 @@ object Tokens {
         val SidebarMax: Dp = 480.dp
         val SidePanel: Dp = 400.dp
         val SidePanelMin: Dp = 280.dp
+        val SidePanelBrowser: Dp = 480.dp
         val SidePanelMax: Dp = 720.dp
         val ChatMin: Dp = 440.dp
         val TerminalSheet: Dp = 360.dp

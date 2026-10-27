@@ -53,6 +53,9 @@ data class AppState(
     val workflows: Map<String, JsonObject> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val assistants: Map<String, mycelium.api.Assistant> = emptyMap(),
+    val assistantActions: Map<String, List<mycelium.api.AssistantAction>> = emptyMap(),
+    val actionProposals: Map<String, mycelium.api.ActionProposal> = emptyMap(),
+    val assistantChanges: Map<String, mycelium.api.AssistantChange> = emptyMap(),
     val artifacts: Map<String, Artifact> = emptyMap(),
     val artifactAccessRequests: Map<String, ArtifactAccessRequest> = emptyMap(),
     val scheduleRuns: List<ScheduleRun> = emptyList(),
@@ -69,6 +72,7 @@ data class AppState(
     val memoryRevision: Int = 0,
     val integrationsRevision: Int = 0,
     val events: Map<String, List<Event>> = emptyMap(),
+    val outlinePages: Map<String, OutlinePage> = emptyMap(),
     val sessionUpdates: Map<String, List<JsonObject>> = emptyMap(),
     val openedConversations: Set<String> = emptySet(),
     val loadingOlderEvents: Set<String> = emptySet(),
@@ -123,7 +127,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
         val id = message.event.conversationId
 
         val sent = (message.event.payload as? JsonObject)?.string("text").takeIf { message.event.kind == EventKinds.UserMessage }
-        val delivered = state.copy(sending = state.sending.withoutFirst(id, sent))
+        val outline = outlinePageFrom(message.event)
+        val delivered = state.copy(sending = state.sending.withoutFirst(id, sent), outlinePages = if (outline != null) state.outlinePages + (id to outline) else state.outlinePages)
 
         if (id in state.openedConversations) {
             delivered.copy(events = state.events + (id to mergeEvents(state.events[id].orEmpty(), listOf(message.event))))
@@ -157,6 +162,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
 
     is StreamMessage.AssistantChanged -> state.copy(assistants = state.assistants + (message.assistant.id to message.assistant))
+
+    is StreamMessage.AssistantActionsChanged -> state
+
+    is StreamMessage.ActionProposalChanged -> state.copy(actionProposals = state.actionProposals + (message.proposal.id to message.proposal))
+
+    is StreamMessage.AssistantChangeChanged -> state.copy(assistantChanges = state.assistantChanges + (message.change.id to message.change))
 
     is StreamMessage.ScheduleRemoved -> state.copy(schedules = state.schedules - message.scheduleId)
 
@@ -274,9 +285,17 @@ const val NoGroup = "none"
 const val PinnedName = "Pinned"
 const val SettledName = "Settled"
 
-fun inGroup(groupId: String?, filter: String): Boolean = when (filter) {
-    AllGroups -> true
-    NoGroup -> groupId == null
+private const val AllOpenGroups = "all-except:"
+
+fun groupScope(selected: String, closed: Set<String>): String =
+    if (selected == AllGroups && closed.isNotEmpty()) AllOpenGroups + closed.sorted().joinToString(",") else selected
+
+fun groupChoiceOf(scope: String): String = if (scope.startsWith(AllOpenGroups)) AllGroups else scope
+
+fun inGroup(groupId: String?, filter: String): Boolean = when {
+    filter == AllGroups -> true
+    filter == NoGroup -> groupId == null
+    filter.startsWith(AllOpenGroups) -> groupId == null || groupId !in filter.removePrefix(AllOpenGroups).split(',')
     else -> groupId == filter
 }
 

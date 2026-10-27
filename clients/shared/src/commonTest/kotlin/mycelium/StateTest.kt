@@ -147,6 +147,15 @@ class StateTest {
     }
 
     @Test
+    fun anOpenedOutlinePageStreamedLiveIsHeldForItsConversation() {
+        val opened = Event("a", 3, "open_outline", JsonObject(mapOf("title" to kotlinx.serialization.json.JsonPrimitive("Release notes"), "url" to kotlinx.serialization.json.JsonPrimitive("https://docs.example/doc/aB3dE5fG"))))
+
+        val state = reduce(AppState(), StreamMessage.EventAppended(opened))
+
+        assertEquals(mycelium.state.OutlinePage("Release notes", "https://docs.example/doc/aB3dE5fG"), state.outlinePages["a"])
+    }
+
+    @Test
     fun loginOutputAccumulatesInOrder() {
         val state = listOf("Open ", "the link").fold(AppState()) { acc, part ->
             reduce(acc, StreamMessage.LoginOutput("l1", part))
