@@ -175,7 +175,6 @@ private fun NodeGroup(
 ) {
     val colors = MyTheme.colors
     var addOpen by remember { mutableStateOf(false) }
-    var moreOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<String?>(null) }
     val installed = node.agents.filter { it.available }
     val signedOut = installed.filter { agent -> node.logins.none { it.agent == agent.agent && it.state == LoginState.SignedIn } }
@@ -234,40 +233,34 @@ private fun NodeGroup(
                 }
             }
 
-            Box {
-                MyButton({ moreOpen = true }, icon = MyIcon.MoreVertical, size = ButtonSize.Sm, muted = true, description = "More for ${node.name}")
-
-                if (moreOpen) {
-                    MenuPopup(onDismiss = { moreOpen = false }) {
-                        MenuItem("Rename", onClick = { moreOpen = false; renaming = node.name }, leading = MyIcon.Pencil)
-                        MenuLabel("Icon")
-                        Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                            for ((key, icon) in NodeIcons) {
-                                MyButton({ moreOpen = false; onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
-                            }
-                        }
-                        MenuLabel("Colour")
-                        Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                            val current = nodeColour(node)
-
-                            for (accent in NodeColours) {
-                                val colour = if (LocalAppearance.current.dark) accent.dark else accent.light
-                                val name = accent.name.lowercase()
-
-                                Box(
-                                    Modifier
-                                        .size(touchMin(Tokens.Size.ControlMd))
-                                        .pressable({ moreOpen = false; onColour(name) }, description = "Use the $name colour", shape = ControlShape, selected = colour == current, stateDescription = if (colour == current) "Chosen" else null),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(Modifier.size(Tokens.Size.IconMd).background(colour, CircleShape))
-                                }
-                            }
-                        }
-                        MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { moreOpen = false; onDrain() })
-                        MenuItem("Revoke", onClick = { moreOpen = false; onAskRevoke() })
+            RowMenu(node.name) { close ->
+                MenuItem("Rename", onClick = { close(); renaming = node.name }, leading = MyIcon.Pencil)
+                MenuLabel("Icon")
+                Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                    for ((key, icon) in NodeIcons) {
+                        MyButton({ close(); onIcon(key) }, icon = icon, description = "Use the ${key} icon", muted = true, selected = nodeIcon(node) == icon)
                     }
                 }
+                MenuLabel("Colour")
+                Row(Modifier.padding(horizontal = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+                    val current = nodeColour(node)
+
+                    for (accent in NodeColours) {
+                        val colour = if (LocalAppearance.current.dark) accent.dark else accent.light
+                        val name = accent.name.lowercase()
+
+                        Box(
+                            Modifier
+                                .size(touchMin(Tokens.Size.ControlMd))
+                                .pressable({ close(); onColour(name) }, description = "Use the $name colour", shape = ControlShape, selected = colour == current, stateDescription = if (colour == current) "Chosen" else null),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(Modifier.size(Tokens.Size.IconMd).background(colour, CircleShape))
+                        }
+                    }
+                }
+                MenuItem(if (node.draining) "Resume new conversations" else "Drain", onClick = { close(); onDrain() })
+                MenuItem("Revoke", onClick = { close(); onAskRevoke() })
             }
         }
 
