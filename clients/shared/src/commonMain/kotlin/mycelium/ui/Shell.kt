@@ -188,6 +188,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
     val groupFilter = rememberGroupFilter(platform, state)
     var route by remember { mutableStateOf(initialRoute) }
 
+    val retryable by store.retryable.collectAsState()
     LaunchedEffect(store) {
         store.openRequests.collect { route = Route.Chat(it) }
     }
@@ -224,7 +225,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                 ReconnectingBanner()
             }
 
-            problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
+            problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
@@ -241,6 +242,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
     val groupFilter = rememberGroupFilter(platform, state)
     var route by remember { mutableStateOf(initialRoute) }
 
+    val retryable by store.retryable.collectAsState()
     LaunchedEffect(store) {
         store.openRequests.collect { route = Route.Chat(it) }
     }
@@ -337,7 +339,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                     ReconnectingBanner()
                 }
 
-                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem) }
+                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
 
                 Box(Modifier.weight(1f).fillMaxWidth().then(if (route is Route.Artefact) Modifier else openDrag)) {
                     RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
@@ -455,12 +457,12 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val chats = chatSections(state.conversations.values)
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshGroups() }
-        store.act { store.refreshProjects() }
+        store.load { store.refreshGroups() }
+        store.load { store.refreshProjects() }
     }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshAssistants() }
+        store.load { store.refreshAssistants() }
     }
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }

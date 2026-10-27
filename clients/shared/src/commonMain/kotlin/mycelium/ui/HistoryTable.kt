@@ -114,6 +114,8 @@ fun HistoryToolbar(
     onViews: (List<HistoryView>) -> Unit,
     activeView: String?,
     onActiveView: (String?) -> Unit,
+    query: String,
+    onQuery: (String) -> Unit,
 ) {
     var naming by remember { mutableStateOf<Naming?>(null) }
     val filters = layout.filters
@@ -124,6 +126,12 @@ fun HistoryToolbar(
             horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            ListSearch(query, onQuery, "conversations")
+
+            if (query.isNotBlank()) {
+                return@Row
+            }
+
             Segmented(PastFilter.entries.map { it.label }, filters.state.label, { picked -> onLayout(layout.copy(filters = filters.copy(state = PastFilter.entries.first { it.label == picked }))) }, groupLabel = "State")
             FilterMenu("All projects", "Filter by project", options.projects, filters.project) { onLayout(layout.copy(filters = filters.copy(project = it))) }
             FilterMenu("All nodes", "Filter by node", options.nodes, filters.node) { onLayout(layout.copy(filters = filters.copy(node = it))) }

@@ -770,7 +770,7 @@ fun ReconnectingBanner(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
     val colors = MyTheme.colors
 
     Row(
@@ -808,3 +808,8 @@ fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier
         MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy the ${label.lowercase()} command", size = ButtonSize.Sm, muted = true)
     }
 }
+
+        if (onRetry != null) {
+            MyButton(onRetry, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        }
+

@@ -86,6 +86,11 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
+    private val mutableRetryable = MutableStateFlow<(suspend () -> Unit)?>(null)
+    val retryable: StateFlow<(suspend () -> Unit)?> = mutableRetryable.asStateFlow()
+    private val mutableLoaded = MutableStateFlow<Set<String>>(emptySet())
+    private val mutableLoadFailures = MutableStateFlow<Set<String>>(emptySet())
+    val loadFailures: StateFlow<Set<String>> = mutableLoadFailures.asStateFlow()
     private val mutableWalkthroughScopes = MutableStateFlow<Map<String, WalkthroughScope>>(emptyMap())
     val walkthroughScopes: StateFlow<Map<String, WalkthroughScope>> = mutableWalkthroughScopes.asStateFlow()
     private val mutableDiffTabs = MutableStateFlow<Map<String, DiffTabs>>(emptyMap())
@@ -988,8 +993,42 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         } catch (_: Exception) {
             null
         }
+            mutableRetryable.value = null
 
     fun dismissProblem() {
         mutableProblem.value = null
     }
+    fun load(list: String? = null, block: suspend () -> Unit) {
+        scope.launch {
+            mutableProblem.value = null
+            mutableRetryable.value = null
+
+            try {
+                block()
+                list?.let { name ->
+                    mutableLoaded.update { it + name }
+                    mutableLoadFailures.update { it - name }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                val firstLoad = list != null && list !in mutableLoaded.value
+
+                if (firstLoad) {
+                    mutableLoadFailures.update { it + list.orEmpty() }
+                } else {
+                    mutableProblem.value = (failure as? ApiException)?.message ?: ControlPlaneUnreachable
+                    mutableRetryable.value = block
+                }
+            }
+        }
+    }
+
+    fun retryProblem() {
+        val block = mutableRetryable.value ?: return
+
+        load(block = block)
+    }
+
 }
+        mutableRetryable.value = null

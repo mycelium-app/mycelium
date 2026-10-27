@@ -148,32 +148,19 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Bar {
             BarTitle("Past conversations")
-
-            if (!touch) {
-                Box(Modifier.weight(1f))
-            }
-
-            TextInput(
-                query,
-                { query = it },
-                label = "Search past conversations",
-                placeholder = "Search conversations",
-                showLabel = false,
-                modifier = if (touch) Modifier.weight(1f) else Modifier.width(Tokens.Size.FormColumn),
-            )
         }
 
-        if (query.isBlank()) {
-            HistoryToolbar(
-                layout,
-                { layout = it },
-                historyOptions(entries),
-                views,
-                { views = it; platform?.savePreference(HistoryViewsPreference, encodeHistoryViews(it)) },
-                activeView,
-                { activeView = it },
-            )
-        }
+        HistoryToolbar(
+            layout,
+            { layout = it },
+            historyOptions(entries),
+            views,
+            { views = it; platform?.savePreference(HistoryViewsPreference, encodeHistoryViews(it)) },
+            activeView,
+            { activeView = it },
+            query,
+            { query = it },
+        )
 
         val found = hits
 

@@ -37,7 +37,7 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     val assistant = state.assistants[id]
 
     LaunchedEffect(id) {
-        store.act { store.refreshAssistants() }
+        store.load { store.refreshAssistants() }
     }
 
     if (assistant == null) {

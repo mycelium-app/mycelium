@@ -80,7 +80,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     var projectMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshProjects() }
+        store.load { store.refreshProjects() }
     }
 
     val projects = state.projects.values.sortedBy { it.name }

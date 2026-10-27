@@ -47,7 +47,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
     var failure by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshProjects() }
+        store.load { store.refreshProjects() }
     }
 
     LaunchedEffect(Unit) {
@@ -106,6 +106,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
                 showLabel = false,
                 mono = true,
                 modifier = Modifier.width(Tokens.Size.FormColumn),
+                leadingIcon = MyIcon.Search,
                 onSubmit = { query = draft },
             )
 

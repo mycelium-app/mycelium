@@ -68,7 +68,10 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
     val sessions = remember { mutableStateMapOf<String, LoginSession>() }
     var joinOpen by remember { mutableStateOf(false) }
     var revoking by remember { mutableStateOf<String?>(null) }
-    val nodes = state.nodes.values.sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
+    var query by remember { mutableStateOf("") }
+    val nodes = state.nodes.values
+        .filter { it.name.contains(query.trim(), ignoreCase = true) || it.hostname.contains(query.trim(), ignoreCase = true) }
+        .sortedWith(compareByDescending<NodeSummary> { it.online }.thenBy { it.name })
     val touch = LocalTouch.current
 
     Column(Modifier.fillMaxSize()) {
@@ -85,9 +88,17 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
             }
         }
 
+        if (state.nodes.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                ListSearch(query, { query = it }, "nodes")
+            }
+
+            Hairline()
+        }
+
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
             if (nodes.isEmpty()) {
-                Label("No node has joined yet. Select Join a node to connect the first one.", Modifier.padding(Tokens.Space.S4), color = MyTheme.colors.textMuted)
+                EmptyState(if (state.nodes.isEmpty()) "No nodes. Choose Join a node to connect the first one." else "No node matches.", Modifier.fillMaxSize())
             }
 
             if (nodes.isNotEmpty() && !touch) {

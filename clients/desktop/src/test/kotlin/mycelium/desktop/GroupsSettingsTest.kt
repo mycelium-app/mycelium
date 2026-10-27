@@ -129,7 +129,7 @@ class GroupsSettingsTest {
     fun anEmptyListExplainsGroupsAndOffersNewGroup() {
         show("")
 
-        rule.onNodeWithText("Groups keep instructions, memory and the sidebar filter apart for different kinds of work.").assertExists()
+        rule.onNodeWithText("No groups. Choose New group to keep instructions, memory and the sidebar filter apart for different kinds of work.").assertExists()
         rule.onNodeWithText("New group").assertExists()
     }
 

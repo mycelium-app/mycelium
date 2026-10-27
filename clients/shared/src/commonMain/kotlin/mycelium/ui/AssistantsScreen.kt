@@ -143,7 +143,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
     var archived by remember { mutableStateOf(emptyList<Assistant>()) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshAssistants() }
+        store.load { store.refreshAssistants() }
     }
 
     LaunchedEffect(showing) {

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import mycelium.api.ScheduleRun
 import mycelium.state.AppState
 import mycelium.state.scheduleInGroup
 import mycelium.state.Store
+import mycelium.state.Choice
 import mycelium.state.Cadence
 import mycelium.state.WhenKind
 import mycelium.state.Weekdays
@@ -47,19 +49,31 @@ private const val HeldOutcome = "held"
 
 @Composable
 fun SchedulesScreen(store: Store, state: AppState) {
+private const val SchedulesList = "schedules"
+private const val RunsInProject = "Project"
+private const val RunsInAssistant = "Assistant"
+private const val RunsAction = "Runs an action"
+private const val SendsPrompt = "Sends a prompt"
+
     val colors = MyTheme.colors
     val stamp = timestamper()
     var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.conversations.size) {
         store.act {
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(SchedulesList) { store.refreshProjects(); store.refreshSchedules() } }
+
             store.refreshProjects()
             store.refreshSchedules()
         }
     }
 
     val group = LocalGroupFilter.current
-    val schedules = state.schedules.values.filter { scheduleInGroup(it, state, group) }.sortedBy { it.createdAt }
+    var query by remember { mutableStateOf("") }
+    var projectId by remember { mutableStateOf<String?>(null) }
+    val inGroup = state.schedules.values.filter { scheduleInGroup(it, state, group) }
+    val schedules = inGroup.filter { (projectId == null || it.projectId == projectId) && it.prompt.contains(query.trim(), ignoreCase = true) }.sortedBy { it.createdAt }
     val shownIds = schedules.map { it.id }.toSet()
     val runs = state.scheduleRuns.filter { it.scheduleId in shownIds }
 
@@ -69,6 +83,18 @@ fun SchedulesScreen(store: Store, state: AppState) {
             Box(Modifier.weight(1f))
             MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
         }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
+            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            ListSearch(query, { query = it }, "schedules")
+            ProjectFilter(inGroup.mapNotNull { schedule -> schedule.projectId?.let { id -> state.projects[id]?.let { Choice(id, it.name) } } }.distinctBy { it.id }.sortedBy { it.name.lowercase() }, projectId) { projectId = it }
+        }
+
+        Hairline()
+
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
             if (schedules.isNotEmpty()) {
@@ -142,8 +168,10 @@ fun SchedulesScreen(store: Store, state: AppState) {
                 )
             }
 
-            if (schedules.isEmpty()) {
-                Label("No schedule is set up. Add one to start a conversation on its own.", color = colors.textMuted)
+            if (schedules.isEmpty() && SchedulesList in loadFailures && state.schedules.isEmpty()) {
+                LoadFailedState("schedules", load)
+            } else if (schedules.isEmpty()) {
+                EmptyState(if (inGroup.isEmpty()) "No schedules. Choose New schedule to start a conversation on its own." else "No schedule matches.")
             }
         }
     }

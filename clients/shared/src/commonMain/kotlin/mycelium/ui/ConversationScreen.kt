@@ -166,7 +166,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     LaunchedEffect(groupId) {
         if (groupId != null && state.groups[groupId] == null) {
-            store.act { store.refreshGroups() }
+            store.load { store.refreshGroups() }
         }
     }
 

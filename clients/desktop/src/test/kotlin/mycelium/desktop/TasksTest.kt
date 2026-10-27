@@ -3,6 +3,7 @@ package mycelium.desktop
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -91,6 +92,7 @@ class TasksTest {
 
     private val posts = CopyOnWriteArrayList<Pair<String, String>>()
     private val platform = BoardPlatform()
+    private var tasksReachable = true
 
     private fun store(tasks: String = BoardTaskList, conversations: String = BoardConversations): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -112,7 +114,7 @@ class TasksTest {
                 request.method == HttpMethod.Post && path.endsWith("/tasks") -> respond("""{"id":"t2","node_id":"n1","agent":"claude","cwd":"/srv","title":"Tidy","created_at":"2026-10-22T10:00:00Z"}""", HttpStatusCode.Created, json)
                 path.endsWith("/conversations/c-input/events") -> respond(PermissionEvent, HttpStatusCode.OK, json)
                 path.endsWith("/events") || path.endsWith("/queue") -> respond("[]", HttpStatusCode.OK, json)
-                path.endsWith("/tasks") -> respond(tasks, HttpStatusCode.OK, json)
+                path.endsWith("/tasks") -> respond(if (tasksReachable) tasks else "{}", if (tasksReachable) HttpStatusCode.OK else HttpStatusCode.InternalServerError, json)
                 path.endsWith("/projects") -> respond("""[{"id":"p1","node_id":"n1","name":"app","path":"/work/app","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/worktrees") -> respond("""[{"id":"w1","project_id":"p1","branch":"feature/x","path":"/work/app-wt/feature-x","created_at":"2026-10-22T10:00:00Z"}]""", HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond(BoardNodes, HttpStatusCode.OK, json)
@@ -293,10 +295,25 @@ class TasksTest {
     }
 
     @Test
+    fun aFailedFirstLoadShowsTheMessageAndRetryReloadsTheBoard() {
+        val store = store(tasks = BoardTaskList)
+
+        tasksReachable = false
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); TasksScreen(store, state, platform, {}) } }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Could not load tasks. Check your connection, then try again.").fetchSemanticsNodes().isNotEmpty() }
+
+        tasksReachable = true
+        rule.onNodeWithText("Retry").performClick()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Rebuild install.md").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("Could not load tasks. Check your connection, then try again.").assertCountEquals(0)
+    }
+
+    @Test
     fun theTextFilterNarrowsEveryLane() {
         showBoard()
 
-        rule.onNodeWithContentDescription("Filter tasks").performTextInput("running")
+        rule.onNodeWithContentDescription("Search tasks").performTextInput("running")
 
         rule.onNodeWithText("Running job").assertExists()
         rule.onNodeWithText("Waiting on you").assertDoesNotExist()

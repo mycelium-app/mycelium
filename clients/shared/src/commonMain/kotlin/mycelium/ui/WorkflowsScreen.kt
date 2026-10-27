@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,6 +64,8 @@ private data class WorkflowDraft(
     val nested: JsonObject? = null,
 )
 
+private const val WorkflowsList = "workflows"
+
 @Composable
 fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
@@ -70,6 +73,9 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     val group = LocalGroupFilter.current
     val workflows = state.workflows.values.filter { workflowInGroup(it, state, group) }
     var selected by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(WorkflowsList) { store.refreshWorkflows() } }
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var creating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -80,7 +86,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     var gateDecisions by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     LaunchedEffect(store) {
-        store.act { store.refreshWorkflows() }
+        load()
     }
 
     LaunchedEffect(creating) {
@@ -118,6 +124,17 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
 
         Column(Modifier.fillMaxWidth().weight(1f).verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             error?.let { Label(it, color = colors.textMuted) }
+
+            if (selected == null && !creating) {
+                if (WorkflowsList in loadFailures && state.workflows.isEmpty()) {
+                    LoadFailedState("workflows", load)
+                } else if (workflows.isEmpty()) {
+                    EmptyState("No workflows. Ask an agent to start one, or choose New workflow.")
+                } else {
+                    ListSearch(query, { query = it }, "workflows")
+                }
+            }
+
             if (creating) {
                 Label("New workflow", style = Tokens.Type.MetaStrong)
                 WorkflowField("Title", title, { title = it })
@@ -262,7 +279,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                 }, text = "Start workflow", variant = ButtonVariant.Outline)
             }
 
-            for (workflow in workflows.filter { selected == null || it["id"]?.jsonPrimitive?.content == selected }) {
+            for (workflow in workflows.filter { if (selected == null) it["title"]?.jsonPrimitive?.content.orEmpty().contains(query.trim(), ignoreCase = true) else it["id"]?.jsonPrimitive?.content == selected }) {
                 val id = workflow["id"]!!.jsonPrimitive.content
                 val status = workflow["status"]!!.jsonPrimitive.content
                 val name = workflow["title"]!!.jsonPrimitive.content

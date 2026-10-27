@@ -72,12 +72,12 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshProjects() }
-        store.act { store.refreshGroups() }
+        store.load { store.refreshProjects() }
+        store.load { store.refreshGroups() }
     }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshRepositories() }
+        store.load { store.refreshRepositories() }
     }
 
     val filtering = forgeId != null || organisation != null || query.isNotBlank()

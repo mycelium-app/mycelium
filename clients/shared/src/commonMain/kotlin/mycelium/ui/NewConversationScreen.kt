@@ -55,7 +55,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshProjects() }
+        store.load { store.refreshProjects() }
     }
 
     val projects = state.projects.values.sortedBy { it.name }

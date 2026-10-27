@@ -29,6 +29,10 @@ import mycelium.state.Store
 private fun folderSummary(group: Group, state: AppState): List<String> =
     group.folders.map { folder -> "${folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"} ${folder.prefix}" }
 
+private const val GroupsList = "groups"
+
+private val GroupTabs = listOf("Instructions", "Folders", "Projects")
+
 @Composable
 fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit) {
     val colors = MyTheme.colors
@@ -44,7 +48,10 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     var folderNode by remember { mutableStateOf<String?>(null) }
     var folderNodeMenu by remember { mutableStateOf(false) }
     val attempt = rememberAttempt { failure = it }
-    val groups = state.groups.values.sortedBy { it.name.lowercase() }
+    var query by remember { mutableStateOf("") }
+    val groups = state.groups.values.filter { it.name.contains(query.trim(), ignoreCase = true) }.sortedBy { it.name.lowercase() }
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(GroupsList) { store.refreshGroups(); store.refreshProjects() } }
     val open = openGroup?.let { state.groups[it] }
     val forming = renaming?.let { state.groups[it] }
     val doomed = deleting?.let { state.groups[it] }
@@ -140,8 +147,16 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
         }
 
         if (open == null) {
-            if (groups.isEmpty()) {
-                Label("Groups keep instructions, memory and the sidebar filter apart for different kinds of work.", color = colors.textMuted)
+            if (state.groups.isNotEmpty()) {
+                ListSearch(query, { query = it }, "groups")
+            }
+
+            if (state.groups.isEmpty() && GroupsList in loadFailures) {
+                LoadFailedState("groups", load)
+            } else if (state.groups.isEmpty()) {
+                EmptyState("No groups. Choose New group to keep instructions, memory and the sidebar filter apart for different kinds of work.")
+            } else if (groups.isEmpty()) {
+                EmptyState("No group matches.")
             } else {
                 Table(
                     listOf(

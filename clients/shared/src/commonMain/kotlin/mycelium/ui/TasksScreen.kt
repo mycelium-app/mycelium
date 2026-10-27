@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +38,7 @@ import mycelium.api.CreateTaskRequest
 import mycelium.api.Task
 import mycelium.api.TaskStatuses
 import mycelium.state.AppState
+import mycelium.state.Choice
 import mycelium.state.BoardCard
 import mycelium.state.BoardFilter
 import mycelium.state.Lane
@@ -79,19 +81,23 @@ private fun Modifier.vertical(): Modifier =
         }
     }.rotate(90f)
 
+private const val TasksList = "tasks"
+
 @Composable
 fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (String) -> Unit) {
     val colors = MyTheme.colors
     var filter by remember { mutableStateOf(BoardFilter()) }
     var collapsed by remember { mutableStateOf(collapsedLanes(platform.loadPreference(CollapsedPreference))) }
-    var projectMenu by remember { mutableStateOf(false) }
     var nodeMenu by remember { mutableStateOf(false) }
     var agentMenu by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var answering by remember { mutableStateOf<Task?>(null) }
 
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(TasksList) { store.refreshBoard() } }
+
     LaunchedEffect(Unit) {
-        store.act { store.refreshBoard() }
+        load()
     }
 
     val lanes = boardCards(state, filter, LocalGroupFilter.current)
@@ -115,7 +121,6 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
     val projects = state.projects.values.sortedBy { it.name }
     val nodes = state.nodes.values.sortedBy { it.name }
     val agents = nodes.flatMap { node -> node.agents.map { it.agent } }.distinct().sorted()
-    val chosenProject = projects.firstOrNull { it.id == filter.projectId }
     val chosenNode = nodes.firstOrNull { it.id == filter.nodeId }
 
     Column(Modifier.fillMaxSize()) {
@@ -123,28 +128,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
             BarTitle("Tasks")
             Box(Modifier.weight(1f))
 
-            Box {
-                MyButton(
-                    { projectMenu = true },
-                    text = chosenProject?.name ?: "All projects",
-                    description = "Project: ${chosenProject?.name ?: "All projects"}",
-                    variant = ButtonVariant.Outline,
-                    size = ButtonSize.Sm,
-                    muted = chosenProject == null,
-                    trailingIcon = MyIcon.ChevronDown,
-                )
-
-                if (projectMenu) {
-                    MenuPopup(onDismiss = { projectMenu = false }) {
-                        MenuLabel("Project")
-                        MenuItem("All projects", onClick = { filter = filter.copy(projectId = null); projectMenu = false }, checked = filter.projectId == null)
-
-                        for (project in projects) {
-                            MenuItem(project.name, onClick = { filter = filter.copy(projectId = project.id); projectMenu = false }, checked = project.id == filter.projectId)
-                        }
-                    }
-                }
-            }
+            ProjectFilter(projects.map { Choice(it.id, it.name) }, filter.projectId) { filter = filter.copy(projectId = it) }
 
             MyButton({ adding = true }, text = "Add a task", icon = MyIcon.Plus, variant = ButtonVariant.Outline, modifier = Modifier.padding(start = Tokens.Space.S2))
         }
@@ -155,7 +139,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            TextInput(filter.text, { filter = filter.copy(text = it) }, label = "Filter tasks", placeholder = "Filter tasks", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn))
+            ListSearch(filter.text, { filter = filter.copy(text = it) }, "tasks")
 
             Box {
                 MyButton(
@@ -213,6 +197,12 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
         }
 
         Hairline()
+
+        if (TasksList in loadFailures && state.tasks.isEmpty()) {
+            LoadFailedState("tasks", load, Modifier.fillMaxSize())
+
+            return@Column
+        }
 
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val open = Lane.entries.filter { it !in collapsed }
