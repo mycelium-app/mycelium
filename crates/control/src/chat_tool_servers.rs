@@ -7,7 +7,7 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{ChatToolInfo, ChatToolServer, CreateChatToolServerRequest, IntegrationCall, IntegrationPolicy, PatchChatToolServerRequest, SetIntegrationGroupsRequest, ToolKind};
+use mycelium_proto::api::{ApprovalPreset, ChatToolInfo, ChatToolServer, CreateChatToolServerRequest, IntegrationCall, IntegrationPolicy, PatchChatToolServerRequest, SetIntegrationGroupsRequest, ToolKind};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -64,7 +64,7 @@ impl KnownApp {
 pub fn known_app(id: &str) -> Option<&'static KnownApp> {
     KNOWN_APPS.iter().find(|app| app.id == id)
 }
-pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, always_allow, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
+pub const SERVER_COLUMNS: &str = "id, name, kind, url, account, settings, bearer_token, oauth_refresh_token, oauth_expires_at, oauth, enabled, tools, created_at, token_expires_at, last_used_at, last_error, policy, session_key, forge_id";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct ServerRow {
@@ -79,7 +79,6 @@ pub struct ServerRow {
     pub oauth_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub oauth: Option<sqlx::types::Json<Value>>,
     pub enabled: bool,
-    pub always_allow: bool,
     pub tools: sqlx::types::Json<Vec<StoredTool>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub token_expires_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -127,15 +126,21 @@ impl ServerRow {
             token_hint: self.bearer_token.as_deref().map(token_hint),
             oauth: self.oauth.is_some(),
             enabled: self.enabled,
-            always_allow: self.always_allow,
-            tools: self.tool_list().iter().map(|tool| ChatToolInfo { name: tool.name.clone(), description: tool.description.clone(), kind: self.tool_kind(&tool.name), asks: self.effective(&tool.name).ask }).collect(),
+            tools: self
+                .tool_list()
+                .iter()
+                .map(|tool| {
+                    let effective = self.effective(&tool.name);
+
+                    ChatToolInfo { name: tool.name.clone(), description: tool.description.clone(), kind: self.tool_kind(&tool.name), asks: effective.ask, edits: effective.edit, ask_source: effective.ask_source.name().to_string(), edit_source: effective.edit_source.name().to_string() }
+                })
+                .collect(),
             created_at: self.created_at,
             status: self.status(),
             token_expires_at: self.token_expires_at,
             last_used_at: self.last_used_at,
             last_error: self.last_error.clone(),
             policy: self.policy.0.clone(),
-            locked: self.integration() == Some(Integration::Zulip),
             groups: self.groups.clone(),
             signed_in: self.session_key.is_some(),
             forge_id: self.forge_id,
@@ -341,7 +346,7 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         .bind(sqlx::types::Json(tools))
         .bind(sqlx::types::Json(settings))
         .bind(request.token_expires_at)
-        .bind(sqlx::types::Json(request.policy.clone().unwrap_or_default()))
+        .bind(sqlx::types::Json(request.policy.clone().unwrap_or_else(|| IntegrationPolicy { preset: Integration::parse(kind).map_or(ApprovalPreset::AskAll, Integration::default_preset), ..Default::default() })))
         .fetch_one(&state.pool)
         .await?;
 
@@ -364,13 +369,12 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     check_expiry(request.token_expires_at)?;
 
     let row = sqlx::query_as::<_, ServerRow>(sqlx::AssertSqlSafe(format!(
-        "update chat_tool_servers set enabled = coalesce($3, enabled), always_allow = coalesce($4, always_allow), name = coalesce($5, name),
-           token_expires_at = case when $6 then null else coalesce($7, token_expires_at) end, policy = coalesce($8, policy), bearer_token = coalesce($9, bearer_token) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
+        "update chat_tool_servers set enabled = coalesce($3, enabled), name = coalesce($4, name),
+           token_expires_at = case when $5 then null else coalesce($6, token_expires_at) end, policy = coalesce($7, policy), bearer_token = coalesce($8, bearer_token) where id = $1 and owner = $2 returning {SERVER_COLUMNS}"
     )))
     .bind(id)
     .bind(user.id)
     .bind(request.enabled)
-    .bind(request.always_allow)
     .bind(name)
     .bind(request.clear_token_expiry)
     .bind(request.token_expires_at)
@@ -400,6 +404,7 @@ async fn reloaded(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ChatTool
 
 #[derive(serde::Deserialize)]
 pub struct CallsQuery {
+    #[serde(alias = "server_id")]
     server: Option<Uuid>,
     provider: Option<String>,
     decision: Option<String>,
