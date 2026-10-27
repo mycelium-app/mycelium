@@ -518,6 +518,7 @@ private fun FileHeader(section: DiffSection, collapsed: Boolean, focused: Boolea
             Label("+${section.added}", style = Tokens.Type.Code, color = colors.diffAdd)
             Label("-${section.removed}", style = Tokens.Type.Code, color = colors.diffDel)
             section.tag?.let { Tag(it) }
+            OpenInIdeButton(section.path)
 
             if (onEdit != null) {
                 MyButton(onEdit, text = "Edit", description = "Edit file ${section.path}", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
@@ -537,7 +538,7 @@ private fun FileHeader(section: DiffSection, collapsed: Boolean, focused: Boolea
 }
 
 @Composable
-private fun DiffBodyRow(line: DiffLine?, language: String, hunk: Boolean, focused: Boolean) {
+internal fun DiffBodyRow(line: DiffLine?, language: String, hunk: Boolean, focused: Boolean) {
     val colors = MyTheme.colors
     val frame = Modifier.fillMaxWidth().height(diffRowHeight()).let { if (focused) it.border(Tokens.Size.FocusRing, colors.focus) else it }
 

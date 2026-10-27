@@ -43,6 +43,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
     Appearance("Appearance", MyIcon.Sun),
     TimeAndFocus("Time and focus", MyIcon.Clock),
     Experiments("Experiments", MyIcon.Sliders),
+    Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
     Agents("Agents", MyIcon.ClaudeMark),
     Import("Import", MyIcon.Archive, "Past agent transcripts and Claude chats"),
@@ -59,23 +60,30 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 }
 
 internal val SettingsGroups = listOf(
-    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Experiments),
+    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Experiments, SettingsSection.Ides),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
     "Your account" to listOf(SettingsSection.Sessions, SettingsSection.Account),
 )
 
+private class GroupLinks(val tab: String?, val openHours: (String) -> Unit, val openTimeAndFocus: () -> Unit)
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, onSignOut: () -> Unit) {
+fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: SettingsSection? = null, startGroup: String? = null, startGroupTab: String? = null, onSignOut: () -> Unit) {
     var section by remember { mutableStateOf(if (startOn == SettingsSection.ChatModels) SettingsSection.Accounts else startOn) }
-    var openGroup by remember { mutableStateOf<String?>(null) }
+    var openGroup by remember { mutableStateOf(startGroup) }
+    var groupTab by remember { mutableStateOf(startGroupTab) }
     val touch = LocalTouch.current
     val state by store.state.collectAsState()
     val opened = section
-    val showGroup: ((String) -> Unit) = { id -> openGroup = id; section = SettingsSection.Groups }
+    val showGroup: ((String) -> Unit) = { id -> openGroup = id; groupTab = null; section = SettingsSection.Groups }
+    val showGroupHours: (String) -> Unit = { id -> openGroup = id; groupTab = GroupHoursTab; section = SettingsSection.Groups }
+    val showTimeAndFocus = { section = SettingsSection.TimeAndFocus }
     val waitingProposals = waitingInstructionProposals(state)
+    val opensIdes = LocalPlatform.current?.opensIdes == true
+    val groups = SettingsGroups.map { (group, entries) -> group to entries.filter { it != SettingsSection.Ides || opensIdes } }
 
     LaunchedEffect(Unit) {
         attempt { store.refreshInstructionProposals() }
@@ -96,7 +104,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
         if (touch) {
             if (opened == null) {
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar()) {
-                    for ((group, entries) in SettingsGroups) {
+                    for ((group, entries) in groups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {
@@ -129,13 +137,13 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
             } else {
                 CompositionLocalProvider(LocalOpenList provides null) {
-                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, Modifier.weight(1f))
+                    SettingsContent(opened, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), Modifier.weight(1f))
                 }
             }
         } else {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.width(Tokens.Size.SettingsNav).fillMaxHeight().verticalScrollWithBar().padding(Tokens.Space.S1_5), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
-                    for ((group, entries) in SettingsGroups) {
+                    for ((group, entries) in groups) {
                         Label(group, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
 
                         for (entry in entries) {
@@ -161,29 +169,31 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 }
 
                 VerticalHairline()
-                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, Modifier.weight(1f))
+                SettingsContent(opened ?: SettingsSection.Appearance, store, me, controlPlane, onSignOut, openGroup, { openGroup = it }, showGroup, GroupLinks(groupTab, showGroupHours, showTimeAndFocus), Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, modifier: Modifier) {
+private fun SettingsContent(section: SettingsSection, store: Store, me: Me, controlPlane: String, onSignOut: () -> Unit, openGroup: String?, onOpenGroup: (String?) -> Unit, showGroup: ((String) -> Unit)?, links: GroupLinks, modifier: Modifier) {
     Column(
         modifier.fillMaxHeight().verticalScrollWithBar().padding(horizontal = Tokens.Space.S6, vertical = Tokens.Space.S4),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6),
     ) {
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
-            SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store)
+            SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store, links.openHours)
             SettingsSection.Experiments -> ExperimentsSettings(store)
+            SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
             SettingsSection.Accounts, SettingsSection.ChatModels -> {
                 AccountsSettings(store)
                 ModelProvidersSettings(store)
+                DecisionsSettings(store)
             }
             SettingsSection.Agents -> AgentsSettings(store)
             SettingsSection.Import -> ImportSettings(store)
-            SettingsSection.Groups -> GroupsSettings(store, openGroup, onOpenGroup)
+            SettingsSection.Groups -> GroupsSettings(store, openGroup, onOpenGroup, links.tab, links.openTimeAndFocus)
             SettingsSection.Instructions -> InstructionsSettings(store, showGroup)
             SettingsSection.Memories -> MemoriesSettings(store)
             SettingsSection.Sessions -> SessionsSettings(store, onSignOut)

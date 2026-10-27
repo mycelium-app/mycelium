@@ -47,6 +47,8 @@ import mycelium.api.NodeSummary
 import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
 import mycelium.state.Annotation
+import mycelium.state.Ide
+import mycelium.state.OutlinePage
 import mycelium.state.DiffTabs
 import mycelium.state.DraftAttachment
 import mycelium.state.PickedFile
@@ -79,7 +81,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
@@ -92,10 +94,21 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val compact = LocalTouch.current
     val conversation = state.conversations[id] ?: fetched
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
+    val threadAssistant = conversation?.assistantId?.let { state.assistants[it] }
+    var runningAction by remember(id) { mutableStateOf<mycelium.api.AssistantAction?>(null) }
+
+    LaunchedEffect(threadAssistant?.id) {
+        store.act { threadAssistant?.let { store.refreshAssistantActions(it.id); store.refreshActionProposals(it.id) } }
+        store.act { store.refreshAssistantChanges() }
+    }
+
+    fun runAction(action: mycelium.api.AssistantAction, inputs: Map<String, String>) {
+        store.act { store.api.runAssistantAction(action.assistantId, action.id, inputs) }
+    }
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -172,6 +185,24 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val groupName = groupId?.let { state.groups[it]?.name }
     val chat = conversation.isChat
+    var outlinePage by remember(id) { mutableStateOf<OutlinePage?>(null) }
+    val showOutline: (OutlinePage) -> Unit = { page ->
+        if (!compact && !chat && panels) {
+            outlinePage = page
+            openPanel(SidePanel.Outline)
+        } else {
+            platform?.openUrl(page.url)
+        }
+    }
+    val outlineOnEntry = remember(id) { state.outlinePages[id] }
+    val liveOutline = state.outlinePages[id]
+
+    LaunchedEffect(liveOutline) {
+        if (liveOutline != null && liveOutline != outlineOnEntry) {
+            showOutline(liveOutline)
+        }
+    }
+
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
 
     LaunchedEffect(Unit) {
@@ -188,6 +219,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val node = if (chat) null else state.nodes[conversation.nodeId]
+    val ides = LocalIdes.current
+    val ideTarget = if (node != null && !chat && ides != null) IdeTarget(node, conversation.cwd) else null
+    val ideMain = node?.let { ides?.main(it) }
+    val ideControls = if (ides != null && node != null && ideMain != null && !chat) {
+        IdeControls(ideMain, ides.others(node), ides.where(node), { ide -> ides.open(node, ide, conversation.cwd) }, ides.openSettings)
+    } else {
+        null
+    }
     val subagentParent = conversation.parentId?.takeIf { conversation.isSubagent }?.let { state.conversations[it] }
     val sideKind = { kind: String -> if (chat) "side" else kind }
     val threadBuilder = remember(id) { ThreadBuilder() }
@@ -234,7 +273,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener) {
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalOutlineOpener provides showOutline, LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -249,6 +288,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
+                    ide = ideControls,
                     onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
@@ -328,14 +368,22 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                val reviews = remember(id) {
-                    ReviewActions(
-                        load = { requestId -> api.reviewItems(id, requestId) },
-                        answer = { requestId, decision, removed -> store.act { api.answerReview(id, mycelium.api.ReviewAnswer(requestId, decision, removed)) } },
+                val responses = remember(id) {
+                    ResponseActions(
+                        load = { requestId -> api.response(id, requestId) },
+                        filter = { requestId, filter -> api.filterResponse(id, requestId, filter) },
+                        send = { requestId, send -> store.act { api.sendResponse(id, requestId, send) } },
                     )
                 }
 
-                CompositionLocalProvider(LocalReviewActions provides reviews) {
+                val limitActions = LimitActions(
+                    resumeAt = conversation.resumeAt,
+                    onResume = { store.act { api.scheduleResume(id) } },
+                    onRetryNow = { store.act { api.retryConversation(id) } },
+                    onCancelResume = { store.act { api.cancelResume(id) } },
+                )
+
+                CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
                         items = thread + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
                         hasOlder = state.hasOlderEvents(id),
@@ -346,12 +394,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         modifier = Modifier.weight(1f),
                         onSuggest = ::send,
                         onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
-                        limitActions = if (conversation.status == ConversationStatus.Failed) LimitActions(
-                            resumeAt = conversation.resumeAt,
-                            onResume = { store.act { api.scheduleResume(id) } },
-                            onRetryNow = { store.act { api.retryConversation(id) } },
-                            onCancelResume = { store.act { api.cancelResume(id) } },
-                        ) else null,
+                        limitActions = if (conversation.status == ConversationStatus.Failed) limitActions else null,
                         agent = conversation.agent,
                         dismissedPins = dismissedPins,
                         onUnpin = { key ->
@@ -362,6 +405,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
 
                 state.schedules.values.filter { it.proposed && it.conversationId == id }.forEach { ProposedScheduleCard(store, it, state) }
+                state.actionProposals.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { ProposedActionCard(store, state, it) }
+                state.assistantChanges.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { AssistantChangeCard(store, state, it, onOpenSettings = onManageActions) }
+
+                runningAction?.let { action ->
+                    RunActionDialog(action, onDismiss = { runningAction = null }, onRun = { inputs -> runningAction = null; runAction(action, inputs) })
+                }
 
                 val parentId = conversation.parentId
 
@@ -382,6 +431,9 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         annotations = annotations,
                         onRemoveAnnotation = { removed -> annotations = annotations - removed },
                         attachments = attached.controls(),
+                        assistantActions = threadAssistant?.let { held ->
+                            AssistantActionControls(held, state.assistantActions[held.id].orEmpty(), { action -> if (action.inputs.isEmpty()) runAction(action, emptyMap()) else runningAction = action }, onManageActions)
+                        },
                         dictation = dictation,
                         initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
                         onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
@@ -439,19 +491,20 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 if (panel != null) {
                     ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
 
-                    Box(Modifier.width(panelWidth).fillMaxHeight()) {
+                    Box(Modifier.width(if (panel == SidePanel.Outline) maxOf(panelWidth, Tokens.Size.SidePanelBrowser) else panelWidth).fillMaxHeight()) {
                         when (panel) {
                             SidePanel.Details -> Inspector(conversation, node, groupName)
                             SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
+                            SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, "Outline's own page, signed in as you", onClose = { openPanel(null) }) } }
                             null -> Unit
                         }
                     }
                 }
 
-                Rail(panel) { chosen -> openPanel(if (panel == chosen) null else chosen) }
+                Rail(panel, outlinePage != null) { chosen -> openPanel(if (panel == chosen) null else chosen) }
             }
         }
     }
@@ -464,7 +517,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
-                null -> Unit
+                SidePanel.Outline, null -> Unit
             }
         }
     }
@@ -489,6 +542,7 @@ private fun ConversationHeader(
     compact: Boolean,
     onNode: () -> Unit,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
+    ide: IdeControls?,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
@@ -588,6 +642,17 @@ private fun ConversationHeader(
             Box(Modifier.weight(1f))
         }
 
+        if (ide != null && !compact) {
+            SplitButton(
+                "Open in ${ide.main.label}",
+                { ide.open(ide.main) },
+                ide.others.map { SplitAlternative("Open in ${it.label}", { ide.open(it) }) } + SplitAlternative("IDE settings", ide.onSettings, separated = true),
+                variant = ButtonVariant.Outline,
+                size = ButtonSize.Sm,
+                menuLabel = ide.where,
+            )
+        }
+
         Box {
             if (!compact || slots != null) {
                 MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = if (slots != null) "More for ${conversation.title}" else "More", muted = true)
@@ -641,6 +706,8 @@ private fun ConversationHeader(
     }
 }
 
+class IdeControls(val main: Ide, val others: List<Ide>, val where: String, val open: (Ide) -> Unit, val onSettings: () -> Unit)
+
 class HeaderSlots(val title: @Composable RowScope.() -> Unit, val menu: @Composable (close: () -> Unit) -> Unit, val notices: @Composable () -> Unit)
 
 fun toneOf(status: ConversationStatus): Tone = when (status) {
@@ -661,10 +728,10 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts }
+private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline }
 
 @Composable
-private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -680,6 +747,10 @@ private fun Rail(open: SidePanel?, onToggle: (SidePanel) -> Unit) {
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
             MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
+
+            if (outlineOpen) {
+                MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.Globe, description = if (open == SidePanel.Outline) "Close Outline page" else "Open Outline page", muted = true, selected = open == SidePanel.Outline)
+            }
         }
     }
 }

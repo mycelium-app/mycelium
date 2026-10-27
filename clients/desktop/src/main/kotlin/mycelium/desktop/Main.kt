@@ -24,8 +24,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import mycelium.App
 import mycelium.AudioRecorder
+import mycelium.CommandOutcome
 import mycelium.Connection
 import mycelium.DeviceInfo
+import mycelium.PageReading
 import mycelium.Platform
 import mycelium.state.MaxAttachmentBytes
 import mycelium.state.PickedFile
@@ -113,6 +115,51 @@ private object DesktopPlatform : Platform {
         }
     }
 
+    override val opensIdes = true
+
+    override fun hostname(): String? = runCatching { InetAddress.getLocalHost().hostName }.getOrNull()
+
+    override fun prepareSshHost(host: String, nodeId: String, token: String): String? {
+        val connection = loadConnection() ?: return "Sign in before opening a folder on another node."
+        val onPath = System.getenv("PATH").orEmpty().split(File.pathSeparator).any { Files.isExecutable(Path.of(it, "mycelium")) }
+
+        if (!onPath) {
+            return "The mycelium command was not found on this computer. Put it on your PATH so the IDE can reach the node over SSH."
+        }
+
+        val ssh = Path.of(System.getProperty("user.home"), ".ssh")
+        val hosts = ssh.resolve("mycelium.d")
+        val tokenFile = configDir.resolve("ssh-$host.token")
+
+        return runCatching {
+            Files.createDirectories(configDir)
+            Files.deleteIfExists(tokenFile)
+            Files.createFile(tokenFile, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+            Files.writeString(tokenFile, token)
+            Files.createDirectories(hosts)
+            Files.writeString(
+                hosts.resolve("$host.conf"),
+                "Host $host\n  HostName $host\n  User mycelium\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile ${ssh.resolve("mycelium_known_hosts")}\n  ProxyCommand mycelium ssh-proxy $nodeId --token-file $tokenFile --control-plane ${connection.baseUrl}\n",
+            )
+            includeMyceliumHosts(ssh)
+            null
+        }.getOrElse { "Mycelium could not write the SSH settings for this node: ${it.message}" }
+    }
+
+    private fun includeMyceliumHosts(ssh: Path) {
+        val config = ssh.resolve("config")
+        val include = "Include ${ssh.resolve("mycelium.d")}/*.conf"
+        val existing = if (Files.exists(config)) Files.readString(config) else ""
+
+        if (include !in existing) {
+            Files.writeString(config, "$include\n\n$existing")
+            runCatching { Files.setPosixFilePermissions(config, PosixFilePermissions.fromString("rw-------")) }
+        }
+    }
+
+    override fun runCommand(command: List<String>): CommandOutcome =
+        runCatching { ProcessBuilder(command).apply { environment().remove("LD_LIBRARY_PATH") }.start() }.fold({ CommandOutcome.Started }, { CommandOutcome.NotFound })
+
     override fun copyToClipboard(text: String) {
         Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
     }
@@ -192,12 +239,14 @@ private object DesktopPlatform : Platform {
         }
     }
 
+    override val readsPages: Boolean get() = jcefAvailable
+
     @Composable
-    override fun WebContent(url: String, token: String?, modifier: Modifier) {
+    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) {
         if (jcefAvailable) {
-            JcefWebContent(url, token, modifier)
+            JcefWebContent(url, token, modifier, reading)
         } else {
-            super.WebContent(url, token, modifier)
+            super.WebContent(url, token, modifier, reading)
         }
     }
 

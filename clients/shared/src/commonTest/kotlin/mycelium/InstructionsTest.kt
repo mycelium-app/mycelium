@@ -39,8 +39,8 @@ class InstructionsTest {
     @Test
     fun sessionsOnAnOlderVersionAreCountedAndAnOfflineNodeSaysItCatchesUp() {
         assertEquals("None", olderSessions(node(older = 0)))
-        assertEquals("1 session", olderSessions(node(older = 1)))
-        assertEquals("2 sessions", olderSessions(node(older = 2)))
+        assertEquals("1, updates on its next message", olderSessions(node(older = 1)))
+        assertEquals("2, update on their next message", olderSessions(node(older = 2)))
         assertEquals("Offline, catches up on reconnect", olderSessions(node(online = false, older = 2)))
     }
 

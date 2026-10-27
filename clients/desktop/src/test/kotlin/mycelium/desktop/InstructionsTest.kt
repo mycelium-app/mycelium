@@ -121,7 +121,7 @@ class InstructionsTest {
         show()
 
         rule.onNodeWithText("afad776").assertExists()
-        rule.onNodeWithText("2 sessions").assertExists()
+        rule.onNodeWithText("2, update on their next message").assertExists()
         rule.onNodeWithText("85d49d3").assertExists()
         rule.onNodeWithText("Offline, catches up on reconnect").assertExists()
     }

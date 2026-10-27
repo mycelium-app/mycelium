@@ -18,10 +18,16 @@ const val DefaultEventPageSize = 500
 
 data class Connection(val baseUrl: String, val token: String)
 
+data class PageReading(val script: String, val allowedUrl: (String) -> Boolean, val onRead: (String) -> Unit)
+
+enum class CommandOutcome { Started, NotFound }
+
 data class DeviceInfo(val label: String, val hostname: String, val os: String, val arch: String)
 
 interface Platform {
     val signsInThroughTheBrowser: Boolean
+
+    val readsPages: Boolean get() = false
 
     val originUrl: String?
 
@@ -56,12 +62,20 @@ interface Platform {
     fun copyToClipboard(text: String)
 
     @Composable
-    fun WebContent(url: String, token: String?, modifier: Modifier) {
+    fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null) {
         Column(modifier.fillMaxSize(), Arrangement.spacedBy(Tokens.Space.S3, Alignment.CenterVertically), Alignment.CenterHorizontally) {
             Label("This artefact can't be shown here.")
             MyButton(onClick = { openUrl(url) }, text = "Open in browser", variant = ButtonVariant.Outline)
         }
     }
+
+    val opensIdes: Boolean get() = false
+
+    fun hostname(): String? = null
+
+    fun prepareSshHost(host: String, nodeId: String, token: String): String? = null
+
+    fun runCommand(command: List<String>): CommandOutcome = CommandOutcome.NotFound
 
     fun timeZone(): String? = null
 

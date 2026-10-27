@@ -65,6 +65,15 @@ import mycelium.api.PatchConversationRequest
 import mycelium.api.Project
 import androidx.compose.foundation.shape.CircleShape
 import mycelium.state.AllGroups
+import mycelium.state.HoursAction
+import mycelium.state.HoursView
+import mycelium.state.closedNotice
+import mycelium.state.groupChoiceOf
+import mycelium.state.groupScope
+import mycelium.state.hoursNotice
+import mycelium.state.sidebarClosedLine
+import mycelium.state.untilEarliestOpening
+import mycelium.state.workingBehindClosedDoors
 import mycelium.state.UnnamedAccount
 import mycelium.state.Choice
 import mycelium.state.AppState
@@ -85,6 +94,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.absoluteValue
 import mycelium.state.SidebarSection
+import mycelium.state.IdeLauncher
 import mycelium.state.Store
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.heading
@@ -109,6 +119,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import mycelium.state.agentName
 import mycelium.state.clockTime
+import mycelium.state.resetBefore
 import mycelium.state.isLaptop
 import mycelium.state.isSubagent
 import mycelium.state.agentAccounts
@@ -153,13 +164,15 @@ sealed interface Route {
 
     data object Activity : Route
 
+    data object UsageHistory : Route
+
     data object Assistants : Route
 
     data class Assistant(val id: String) : Route
 
     data object NewAssistant : Route
 
-    data class AssistantSettings(val id: String) : Route
+    data class AssistantSettings(val id: String, val section: AssistantSection = AssistantSection.Identity) : Route
 
     data object Settings : Route
 }
@@ -185,10 +198,13 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
 
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
-    val groupFilter = rememberGroupFilter(platform, state)
+    val retryable by store.retryable.collectAsState()
+    val hours = rememberHoursView(store)
+    val groupFilter = rememberGroupFilter(platform, state, hours)
+    val shownScope = groupScope(groupFilter.value, hours.closedGroupIds)
+    var openRequest by remember { mutableStateOf<OpenRequest?>(null) }
     var route by remember { mutableStateOf(initialRoute) }
 
-    val retryable by store.retryable.collectAsState()
     LaunchedEffect(store) {
         store.openRequests.collect { route = Route.Chat(it) }
     }
@@ -214,6 +230,8 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                 route = route,
                 onRoute = { route = it },
                 groupFilter = groupFilter,
+                hours = hours,
+                onOpenOutOfHours = { openRequest = OpenRequest(it) },
                 modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
             )
         }
@@ -228,10 +246,12 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
             problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
+                RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
             }
         }
     }
+
+    OpenOutOfHoursHost(store, platform, hours, openRequest, onDismiss = { openRequest = null }, onOpened = groupFilter.choose)
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -239,10 +259,13 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
 fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     val state by store.state.collectAsState()
     val problem by store.problem.collectAsState()
-    val groupFilter = rememberGroupFilter(platform, state)
+    val retryable by store.retryable.collectAsState()
+    val hours = rememberHoursView(store)
+    val groupFilter = rememberGroupFilter(platform, state, hours)
+    val shownScope = groupScope(groupFilter.value, hours.closedGroupIds)
+    var openRequest by remember { mutableStateOf<OpenRequest?>(null) }
     var route by remember { mutableStateOf(initialRoute) }
 
-    val retryable by store.retryable.collectAsState()
     LaunchedEffect(store) {
         store.openRequests.collect { route = Route.Chat(it) }
     }
@@ -342,7 +365,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                 problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
 
                 Box(Modifier.weight(1f).fillMaxWidth().then(if (route is Route.Artefact) Modifier else openDrag)) {
-                    RouteContent(store, state, platform, me, route, groupFilter.value, onRoute = { route = it }, onSignOut = onSignOut)
+                    RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
                 }
             }
         }
@@ -365,6 +388,8 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                     route = route,
                     onRoute = { route = it; drawerOpen = false },
                     groupFilter = groupFilter,
+                    hours = hours,
+                    onOpenOutOfHours = { openRequest = OpenRequest(it) },
                     modifier = Modifier
                         .width(drawerWidth)
                         .fillMaxHeight()
@@ -374,46 +399,87 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
             }
         }
     }
+
+    OpenOutOfHoursHost(store, platform, hours, openRequest, onDismiss = { openRequest = null }, onOpened = groupFilter.choose)
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, hours: HoursView, onChooseGroup: (String) -> Unit, onOpenOutOfHours: (String?) -> Unit, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
     var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
+    var settingsGroup by remember { mutableStateOf<String?>(null) }
+    var settingsGroupTab by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(route) {
         if (route != Route.Settings) {
             settingsStart = null
+            settingsGroup = null
+            settingsGroupTab = null
         }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { settingsStart = SettingsSection.Instructions; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter) {
-        when (route) {
-            Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
-            is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
-            Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
-            Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) })
-            is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
-            Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
-            is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
-            Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Schedules -> SchedulesScreen(store, state)
-            Route.Wellness -> WellnessScreen(store, platform)
-            Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
-            Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
-            Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
-            Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
-            is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Assistants -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) })
-            is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onBack = { onRoute(Route.Assistants) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
-            Route.NewAssistant -> AssistantSettingsScreen(store, state, null, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistants) })
-            is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
-            Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
-            Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, onSignOut = onSignOut) }
+    val ides = if (platform.opensIdes) remember(platform) { IdeLauncher(store, platform) { settingsStart = SettingsSection.Ides; onRoute(Route.Settings) } } else null
+
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides { layer -> val group = state.groups.values.firstOrNull { it.name == layer }; settingsStart = if (group != null) SettingsSection.Groups else SettingsSection.Instructions; settingsGroup = group?.id; onRoute(Route.Settings) }, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides) {
+        val selected = routeGroup(route, state, groupFilter)
+        val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
+        val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)
+
+        Column(Modifier.fillMaxSize()) {
+            notice?.let { shown ->
+                HoursBanner(shown) {
+                    if (shown.action == HoursAction.CloseNow) {
+                        store.act { store.closeGroupOpening(shown.groupId) }
+                    } else {
+                        settingsStart = SettingsSection.Groups
+                        settingsGroup = shown.groupId
+                        settingsGroupTab = GroupHoursTab
+                        onRoute(Route.Settings)
+                    }
+                }
+            }
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (closed != null) {
+                    ClosedScreen(closed, onSelect = onChooseGroup, onOpenOutOfHours = { onOpenOutOfHours(closed.groupId) })
+                } else when (route) {
+                    Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
+                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+                    Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+                    Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) })
+                    is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
+                    Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
+                    is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
+                    Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
+                    Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
+                    Route.Schedules -> SchedulesScreen(store, state)
+                    Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) })
+                    Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
+                    Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
+                    Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+                    Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
+                    is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Projects) })
+                    Route.Assistants, Route.NewAssistant -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) }, creating = route == Route.NewAssistant, onCloseNew = { onRoute(Route.Assistants) })
+                    is Route.Assistant -> AssistantScreen(store, state, route.id, onOpenSettings = { onRoute(Route.AssistantSettings(route.id)) }, onManageActions = { onRoute(Route.AssistantSettings(route.id, AssistantSection.SchedulesAndActions)) }, onBack = { onRoute(Route.Assistants) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+                    is Route.AssistantSettings -> AssistantSettingsScreen(store, state, route.id, route.section, onDone = { onRoute(Route.Assistants) }, onBack = { onRoute(Route.Assistant(route.id)) })
+                    Route.Activity -> ActivityScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
+                    Route.UsageHistory -> UsageHistoryScreen(store)
+                    Route.Settings -> CompositionLocalProvider(LocalOpenConversation provides { onRoute(Route.Chat(it)) }) { SettingsScreen(store, me, store.api.baseUrl, startOn = settingsStart, startGroup = settingsGroup, startGroupTab = settingsGroupTab, onSignOut = onSignOut) }
+                }
+            }
         }
 
         WellnessPresence(store, platform)
     }
+}
+
+private fun Route.opensBehindHours(): Boolean = this !in HoursExemptRoutes && this !is Route.Node
+
+private val HoursExemptRoutes = setOf(Route.Settings, Route.Wellness, Route.Activity, Route.UsageHistory, Route.Nodes)
+
+private fun routeGroup(route: Route, state: AppState, selected: String): String = when (route) {
+    is Route.Chat -> state.conversations[route.id]?.groupId ?: NoGroup
+    is Route.Assistant -> state.assistants[route.id]?.groupId ?: NoGroup
+    else -> groupChoiceOf(selected)
 }
 
 @Composable
@@ -448,13 +514,18 @@ private const val WorkspacesMode = "Workspaces"
 private const val ChatsMode = "Chats"
 
 @Composable
-private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, modifier: Modifier = Modifier) {
+private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, hours: HoursView, onOpenOutOfHours: (String?) -> Unit, modifier: Modifier = Modifier) {
     val colors = MyTheme.colors
     var settledOpen by remember { mutableStateOf(platform.loadPreference(SettledOpenPreference) == true.toString()) }
-    val pinned = pinnedConversations(state.conversations.values, groupFilter.value)
-    val sections = sidebarSections(state.conversations.values, groupFilter.value)
-    val pinnedChatRows = pinnedChats(state.conversations.values)
-    val chats = chatSections(state.conversations.values)
+    val scope = groupScope(groupFilter.value, hours.closedGroupIds)
+    val closedNotice = closedNotice(hours, groupFilter.value, 0, platform)
+    val closedLine = sidebarClosedLine(hours, groupFilter.value, platform)
+    val everythingClosed = closedNotice != null && closedNotice.groupId == null
+    val pinned = pinnedConversations(state.conversations.values, scope)
+    val sections = sidebarSections(state.conversations.values, scope)
+    val openChats = state.conversations.values.filterNot { hours.closed(it.groupId) }
+    val pinnedChatRows = pinnedChats(openChats)
+    val chats = chatSections(openChats)
 
     LaunchedEffect(Unit) {
         store.load { store.refreshGroups() }
@@ -488,7 +559,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val openedMode = when (route) {
         Route.NewChat -> ChatsMode
         is Route.Chat -> state.conversations[route.id]?.let { if (it.isChat) ChatsMode else WorkspacesMode }
-        Route.Settings, Route.Activity, Route.Empty -> null
+        Route.Settings, Route.Activity, Route.UsageHistory, Route.Empty -> null
         Route.Assistants, is Route.Assistant, Route.NewAssistant, is Route.AssistantSettings -> null
         else -> WorkspacesMode
     }
@@ -504,16 +575,28 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         Segmented(listOf(WorkspacesMode, ChatsMode), mode, { chosen -> mode = chosen; lastOpened[chosen]?.let(onRoute) }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
 
         if (mode == WorkspacesMode && state.groups.isNotEmpty()) {
+            val openGroups = state.groups.values.filter { it.id !in hours.closedGroupIds }
             val choices = listOf(Choice(AllGroups, "All groups")) +
-                state.groups.values.sortedBy { it.name.lowercase() }.map { group ->
+                openGroups.sortedBy { it.name.lowercase() }.map { group ->
                     val waiting = if (group.id == groupFilter.value) 0 else needsInputIn(state.conversations.values, group.id)
 
                     Choice(group.id, group.name, if (waiting > 0) "$waiting needs input" else null)
                 } +
                 Choice(NoGroup, "No group")
+            val closedCount = hours.closedGroupIds.size
 
             Box(Modifier.fillMaxWidth().padding(start = Tokens.Space.S1_5, end = Tokens.Space.S1_5, bottom = Tokens.Space.S1_5)) {
-                OptionMenu("Group", choices, groupFilter.value, groupFilter.choose, title = "Show", icon = MyIcon.Layers, fill = true)
+                OptionMenu(
+                    "Group",
+                    choices,
+                    groupFilter.value,
+                    groupFilter.choose,
+                    title = "Show",
+                    icon = MyIcon.Layers,
+                    fill = true,
+                    label = state.groups[groupFilter.value]?.name,
+                    footer = if (closedCount == 0) null else OptionFooter("Open a closed group", "$closedCount closed${untilEarliestOpening(hours, platform)?.let { " until $it" }.orEmpty()}", MyIcon.Moon) { onOpenOutOfHours(null) },
+                )
             }
         }
 
@@ -522,6 +605,8 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
             if (mode == ChatsMode) {
                 SidebarLink("New chat", MyIcon.Plus, selected = route == Route.NewChat) { onRoute(Route.NewChat) }
+            } else if (everythingClosed) {
+                SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
@@ -531,7 +616,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
 
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
-                SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tintWhenSelected = true) { onRoute(Route.Wellness) }
+                SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             }
         }
 
@@ -540,7 +625,9 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         val list = rememberLazyListState()
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth().scrollbar(list), list, contentPadding = PaddingValues(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S2)) {
-            sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, groupFilter.value), route, onRoute)
+            if (!everythingClosed) {
+                sidebarAssistantItems(store, state, sidebarAssistants(state.assistants.values, scope), route, onRoute)
+            }
 
             if (mode == ChatsMode) {
                 conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
@@ -552,6 +639,12 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 item(key = "label") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+                    }
+                }
+
+                if (closedLine != null) {
+                    item(key = "closed") {
+                        Label(closedLine, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
                     }
                 }
 
@@ -574,7 +667,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
         if (usageOpen) {
             val current = (route as? Route.Chat)?.let { state.conversations[it.id] }
 
-            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onUseReset = { account, key -> store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome })
+            UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome })
         }
 
         Hairline()
@@ -596,7 +689,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 }
 
                 Box(Modifier.weight(1f))
-                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen)
+                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)
                 MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
                 MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
                 MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)
@@ -650,6 +743,7 @@ private fun LazyListScope.conversationRows(
             onClick = { onRoute(Route.Chat(row.conversation.id)) },
             depth = row.depth,
             sideChats = row.sideChats,
+            pingHeld = row.conversation.assistantId != null && store.wellness.holdsPings(LocalHoursView.current?.closed(row.conversation.groupId) == true),
             expanded = row.conversation.id !in collapsed,
             onToggle = { onCollapsed(if (row.conversation.id in collapsed) collapsed - row.conversation.id else collapsed + row.conversation.id) },
             onPin = { store.pin(row.conversation, row.conversation.pinnedAt == null) },
@@ -669,7 +763,7 @@ private fun LazyListScope.conversationRows(
 }
 
 @Composable
-private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tintWhenSelected: Boolean = false, onClick: () -> Unit) {
+private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tint: Color? = null, onClick: () -> Unit) {
     val colors = MyTheme.colors
 
     Row(
@@ -681,7 +775,7 @@ private fun SidebarLink(text: String, icon: MyIcon, selected: Boolean, tintWhenS
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, if (tintWhenSelected && selected) colors.accent else colors.textMuted, Tokens.Size.IconMd)
+        Icon(icon, tint ?: colors.textMuted, Tokens.Size.IconMd)
         Label(text, maxLines = 1)
     }
 }
@@ -710,12 +804,13 @@ private fun SectionHeading(section: SidebarSection, open: Boolean?, onToggle: ()
 }
 
 @Composable
-private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
+private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Project?, selected: Boolean, onClick: () -> Unit, depth: Int = 0, sideChats: Int = 0, pingHeld: Boolean = false, expanded: Boolean = true, onToggle: () -> Unit = {}, onPin: () -> Unit = {}, onRename: (String) -> Unit = {}, onCloseSession: () -> Unit = {}, onDismiss: () -> Unit = {}, onArchive: () -> Unit = {}, onCancelResume: () -> Unit = {}) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val menu = rememberRowMenuState()
     var renaming by remember { mutableStateOf(false) }
-    val statusName = if (row.resumeAt != null) WaitingForReset else statusSectionName(row.status)
+    val pausedUntil = row.resumeAt?.let(::resetBefore)?.let { reset -> "Paused until ${clockTime(reset) { millis -> platform?.localDateTime(millis) }}" }
+    val statusName = pausedUntil ?: statusSectionName(row.status)
     val notRunning = node != null && (!node.online || row.id !in node.sessions)
     val indent = Tokens.Space.S3 * depth
     val projectName = project?.takeIf { !row.isChat }?.name
@@ -761,7 +856,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
         ) {
             val badge = when (row.status) {
                 ConversationStatus.Working -> colors.statusWorking
-                ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention
+                ConversationStatus.Input, ConversationStatus.Review -> colors.statusAttention.takeUnless { pingHeld }
                 ConversationStatus.Failed -> if (row.resumeAt != null) colors.statusAttention else colors.statusFailed
                 ConversationStatus.Done -> null
             }
@@ -794,8 +889,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 }
                 BasicText(title, style = Tokens.Type.Ui.themed().copy(color = if (notRunning) colors.textMuted else colors.text), maxLines = 1, overflow = TextOverflow.Ellipsis)
 
-                if (row.resumeAt != null) {
-                    Label(WaitingForReset, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
+                if (pausedUntil != null) {
+                    Label(pausedUntil, style = Tokens.Type.Meta, color = colors.statusAttention, maxLines = 1)
                 }
 
                 if (!row.isChat && place.isNotEmpty()) {
@@ -817,7 +912,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
 
             if (row.isChat) {
                 val unread = when (row.status) {
-                    ConversationStatus.Input, ConversationStatus.Review -> colors.text
+                    ConversationStatus.Input, ConversationStatus.Review -> colors.text.takeUnless { pingHeld }
                     else -> badge
                 }
 
@@ -842,6 +937,8 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
             if (row.status == ConversationStatus.Failed) {
                 MenuItem("Dismiss", onClick = { close(); onDismiss() }, leading = MyIcon.Check)
             }
+
+            MenuItem("Archive", onClick = { close(); onArchive() }, leading = MyIcon.Archive)
         }
 
         if (row.resumeAt != null) {
@@ -853,8 +950,6 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
         if (sideChats > 0) {
             MyButton(
                 onToggle,
-
-            MenuItem("Archive", onClick = { close(); onArchive() }, leading = MyIcon.Archive)
                 modifier = Modifier.padding(start = indent),
                 icon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
                 description = if (expanded) "Collapse side chats of ${row.title}" else "Expand side chats of ${row.title}",
@@ -876,8 +971,6 @@ fun nodeColour(node: NodeSummary): Color {
 
 private const val SidebarWidthPreference = "sidebar-width"
 
-private const val WaitingForReset = "Waiting for reset"
-
 private const val UsageOpenPreference = "usage-card-open"
 
 private val FooterLabelsWidth = 360.dp
@@ -891,9 +984,20 @@ val LocalGroupFilter = staticCompositionLocalOf { AllGroups }
 private class GroupFilterChoice(val value: String, val choose: (String) -> Unit)
 
 @Composable
-private fun rememberGroupFilter(platform: Platform, state: AppState): GroupFilterChoice {
+private fun rememberGroupFilter(platform: Platform, state: AppState, hours: HoursView): GroupFilterChoice {
     var saved by remember { mutableStateOf(platform.loadPreference(GroupFilterPreference) ?: AllGroups) }
+    var launched by remember { mutableStateOf(false) }
     val known = saved == AllGroups || saved == NoGroup || saved in state.groups
+
+    LaunchedEffect(state.groups.isNotEmpty()) {
+        if (state.groups.isNotEmpty() && !launched) {
+            launched = true
+
+            if (saved in hours.closedGroupIds) {
+                saved = AllGroups
+            }
+        }
+    }
 
     return GroupFilterChoice(if (known) saved else AllGroups) { chosen -> saved = chosen; platform.savePreference(GroupFilterPreference, chosen) }
 }

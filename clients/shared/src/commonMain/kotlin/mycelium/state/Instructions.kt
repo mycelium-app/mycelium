@@ -13,6 +13,6 @@ fun heldVersion(node: NodeSummary): String = node.instructionsRevision?.let(::sh
 fun olderSessions(node: NodeSummary): String = when {
     !node.online -> "Offline, catches up on reconnect"
     node.sessionsOnOlderInstructions == 0 -> "None"
-    node.sessionsOnOlderInstructions == 1 -> "1 session"
-    else -> "${node.sessionsOnOlderInstructions} sessions"
+    node.sessionsOnOlderInstructions == 1 -> "1, updates on its next message"
+    else -> "${node.sessionsOnOlderInstructions}, update on their next message"
 }

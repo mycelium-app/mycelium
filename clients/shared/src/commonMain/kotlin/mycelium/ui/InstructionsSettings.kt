@@ -229,7 +229,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
         extensions?.let { held ->
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                 Label("Mycelium extensions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Built-in additions to the instructions of conversations that start after you change them.", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("Built-in additions to the instructions of conversations. A session picks up a change before its next message.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 ExtensionSwitch("Generated UI", "Teaches agents to answer with tables, charts and buttons you can press. Added to Claude Code and Codex sessions.", held.generatedUi) {
                     attempt { extensions = store.api.saveExtensions(held.copy(generatedUi = !held.generatedUi)) }
