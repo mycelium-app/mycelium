@@ -261,8 +261,13 @@ pub async fn import_orchestrator(State(state): State<AppState>, _user: AuthUser,
         return Err(ApiError::conflict("no_node", "Add a node before importing usage readings."));
     };
 
+    let imported = store_orchestrator_readings(&state, node_id, request.agent, &account, request.coarse.iter().chain(request.fine.iter())).await?;
+
+    Ok(Json(ImportedUsage { imported }))
+}
+
+pub async fn store_orchestrator_readings<'a>(state: &AppState, node_id: Uuid, agent: AgentId, account: &str, readings: impl Iterator<Item = &'a OrchestratorReading>) -> ApiResult<i64> {
     let mut imported = 0;
-    let readings: Vec<&OrchestratorReading> = request.coarse.iter().chain(request.fine.iter()).collect();
 
     for reading in readings {
         let Some(read_at) = DateTime::from_timestamp(reading.at, 0) else {
@@ -271,8 +276,8 @@ pub async fn import_orchestrator(State(state): State<AppState>, _user: AuthUser,
         let windows = vec![window_of(FIVE_HOUR, reading.five, reading.five_resets), window_of(SEVEN_DAY, reading.seven, reading.seven_resets)];
         let inserted = sqlx::query("insert into login_usage_history (node_id, agent, account, read_at, windows, source) values ($1, $2, $3, $4, $5, 'orchestrator') on conflict do nothing")
             .bind(node_id)
-            .bind(enum_text(&request.agent))
-            .bind(&account)
+            .bind(enum_text(&agent))
+            .bind(account)
             .bind(read_at)
             .bind(Sql(&windows))
             .execute(&state.pool)
@@ -280,7 +285,7 @@ pub async fn import_orchestrator(State(state): State<AppState>, _user: AuthUser,
         imported += inserted.rows_affected() as i64;
     }
 
-    Ok(Json(ImportedUsage { imported }))
+    Ok(imported)
 }
 
 #[cfg(test)]

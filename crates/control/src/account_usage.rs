@@ -12,7 +12,7 @@ use sqlx::types::Json;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-const HISTORY_DAYS: i64 = 8;
+const HISTORY_DAYS: i64 = 400;
 const SHORTEST_SPAN_MINUTES: i64 = 10;
 const FALL_THAT_MEANS_A_RESET: f64 = 0.5;
 
@@ -46,7 +46,7 @@ pub async fn cache(tx: &mut Transaction<'_, Postgres>, node_id: Uuid, login: &mu
             login.usage_read_at = Some(read_at);
         }
 
-        sqlx::query("delete from login_usage_history where node_id = $1 and agent = $2 and account = $3 and read_at < now() - make_interval(days => $4::int) and read_at < $5")
+        sqlx::query("delete from login_usage_history where node_id = $1 and agent = $2 and account = $3 and source = 'mycelium' and read_at < now() - make_interval(days => $4::int) and read_at < $5")
             .bind(node_id)
             .bind(enum_text(&login.agent))
             .bind(account)
