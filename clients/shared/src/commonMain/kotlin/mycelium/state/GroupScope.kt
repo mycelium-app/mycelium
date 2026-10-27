@@ -3,6 +3,7 @@ package mycelium.state
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Artifact
 import mycelium.api.Schedule
+import mycelium.api.Workflow
 
 fun artifactInGroup(artifact: Artifact, state: AppState, filter: String): Boolean {
     val conversations = listOfNotNull(artifact.conversationId) + artifact.conversationIds.orEmpty()
@@ -17,5 +18,5 @@ fun scheduleInGroup(schedule: Schedule, state: AppState, filter: String): Boolea
     return inGroup(group, filter)
 }
 
-fun workflowInGroup(workflow: JsonObject, state: AppState, filter: String): Boolean =
-    inGroup(workflow.string("conversation_id")?.let { state.conversations[it]?.groupId }, filter)
+fun workflowInGroup(workflow: Workflow, state: AppState, filter: String): Boolean =
+    inGroup(workflow.conversationId?.let { state.conversations[it]?.groupId }, filter)

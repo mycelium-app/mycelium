@@ -13,7 +13,7 @@ data class GoalLimits(val tokenBudget: Long? = null, val timeLimitSeconds: Long?
 fun goalProgress(goal: Goal, now: Instant = Clock.System.now()): String {
     val tokens = if (!goal.tokensKnown) "Token usage pending" else goal.tokenBudget?.let { "${formatTokens(goal.tokensUsed)} of ${formatTokens(it)} tokens" } ?: "${formatTokens(goal.tokensUsed)} tokens"
     val time = goal.timeLimitSeconds?.let { limit ->
-        val started = goal.startedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        val started = goal.startedAt?.let { instantOrNull(it) }
         val left = started?.let { limit - (now - it).inWholeSeconds }
 
         left?.let { if (it <= 0) "time limit reached" else "${formatTimeLeft(it)} left" }

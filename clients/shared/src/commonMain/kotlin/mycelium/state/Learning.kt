@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.time.Instant
 import mycelium.api.Exercise
 import mycelium.api.LearnedItem
 import mycelium.api.PatchReflectionRequest
@@ -57,7 +56,7 @@ fun dayLabel(isoDate: String, today: String): String {
 }
 
 fun draftedLabel(iso: String, localDateTime: (Long) -> String?): String? {
-    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return null
+    val moment = instantOrNull(iso) ?: return null
     val local = localDateTime(moment.toEpochMilliseconds()) ?: iso.take(16)
 
     return "Drafted by the Wellness assistant, ${WeekdayNames[weekdayOf(local.substringBefore('T'))]} ${local.substringAfter('T').take(5)}"
@@ -122,26 +121,26 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
     val state: StateFlow<LearningState> = mutableState.asStateFlow()
 
     suspend fun load() {
-        val reflections = runCatching { api.reflections() }.getOrNull() ?: return
+        val reflections = catching { api.reflections() }.getOrNull() ?: return
         mutableState.update { it.copy(reflections = reflections, loaded = true) }
     }
 
     suspend fun loadSkills() {
-        val skills = runCatching { api.skills() }.getOrNull() ?: return
-        val exercises = runCatching { api.exercises() }.getOrNull().orEmpty()
-        val suggested = runCatching { api.suggestedExercises() }.getOrNull().orEmpty()
+        val skills = catching { api.skills() }.getOrNull() ?: return
+        val exercises = catching { api.exercises() }.getOrNull().orEmpty()
+        val suggested = catching { api.suggestedExercises() }.getOrNull().orEmpty()
 
         mutableState.update { it.copy(skills = skills, exercises = exercises, suggested = suggested, loaded = true) }
     }
 
     suspend fun loadLearned() {
-        val learned = runCatching { api.learned() }.getOrNull() ?: return
+        val learned = catching { api.learned() }.getOrNull() ?: return
 
         mutableState.update { it.copy(learned = learned) }
     }
 
     suspend fun loadHiddenSkills() {
-        val hidden = runCatching { api.skills(hidden = true) }.getOrNull() ?: return
+        val hidden = catching { api.skills(hidden = true) }.getOrNull() ?: return
 
         mutableState.update { it.copy(hiddenSkills = hidden) }
     }
@@ -154,14 +153,14 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
     }
 
     suspend fun loadSolution(exercise: Exercise) {
-        val files = runCatching { api.exerciseSolution(exercise.id) }.getOrNull() ?: return
+        val files = catching { api.exerciseSolution(exercise.id) }.getOrNull() ?: return
 
         mutableState.update { it.copy(solutions = it.solutions + (exercise.id to files)) }
     }
 
     fun hideSkill(skill: Skill) {
         scope.launch {
-            val hidden = runCatching { api.hideSkill(skill) }
+            val hidden = catching { api.hideSkill(skill) }
 
             mutableState.update { state ->
                 if (hidden.isSuccess) {
@@ -175,7 +174,7 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     fun unhideSkill(skill: Skill) {
         scope.launch {
-            val shown = runCatching { api.unhideSkill(skill) }
+            val shown = catching { api.unhideSkill(skill) }
 
             if (shown.isSuccess) {
                 mutableState.update { state -> state.copy(hiddenSkills = state.hiddenSkills - skill, problem = null) }
@@ -199,7 +198,7 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
     private fun change(exercise: Exercise, what: String, call: suspend () -> Exercise) {
         mutableState.update { it.copy(working = it.working + exercise.id, problem = null) }
         scope.launch {
-            val result = runCatching { call() }
+            val result = catching { call() }
             val updated = result.getOrNull()
 
             mutableState.update { state ->
@@ -219,7 +218,7 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
         }
 
         scope.launch {
-            val saved = runCatching { api.patchReflection(reflection.id, reflectionPatch(section, text)) }.getOrNull()
+            val saved = catching { api.patchReflection(reflection.id, reflectionPatch(section, text)) }.getOrNull()
 
             if (saved == null) {
                 mutableState.update { it.copy(problem = "Could not save your changes to ${section.title}. Check your connection and try again.") }
@@ -234,7 +233,7 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
     fun redraft(reflection: Reflection, onStarted: (String) -> Unit = {}) {
         mutableState.update { it.copy(redrafting = it.redrafting + reflection.id, problem = null) }
         scope.launch {
-            val started = runCatching { api.redraftReflection(reflection.id) }
+            val started = catching { api.redraftReflection(reflection.id) }
 
             mutableState.update { state ->
                 state.copy(redrafting = state.redrafting - reflection.id, problem = started.exceptionOrNull()?.let { "Could not start a redraft. ${it.message.orEmpty()}".trim() })

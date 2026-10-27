@@ -68,7 +68,7 @@ fun RowMenuPopup(state: RowMenuState, content: @Composable (close: () -> Unit) -
 }
 
 @Composable
-fun RowMenu(title: String, state: RowMenuState, content: @Composable (close: () -> Unit) -> Unit) {
+fun RowMenu(title: String, state: RowMenuState = rememberRowMenuState(), content: @Composable (close: () -> Unit) -> Unit) {
     Box {
         MyButton({ state.open = true }, icon = MyIcon.MoreVertical, description = "More for $title", size = ButtonSize.Sm, muted = true, selected = state.open)
         RowMenuPopup(state, content)

@@ -68,7 +68,7 @@ fun chatAccountFirst(accounts: List<AgentAccount>, agent: String?, nodeName: Str
 
 fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?): String {
     val count = if (credits.availableCount == 1) "1 reset banked" else "${credits.availableCount} resets banked"
-    val next = credits.credits.orEmpty().mapNotNull { credit -> credit.expiresAt?.let { runCatching { Instant.parse(it) }.getOrNull() } }.minOrNull() ?: return count
+    val next = credits.credits.orEmpty().mapNotNull { credit -> credit.expiresAt?.let { instantOrNull(it) } }.minOrNull() ?: return count
     val date = (localDateTime(next.toEpochMilliseconds()) ?: next.toString()).substringBefore('T')
     val (_, month, day) = date.split('-')
 
@@ -76,8 +76,8 @@ fun bankedResetsSummary(credits: ResetCredits, localDateTime: (Long) -> String?)
 }
 
 fun runsOutBeforeReset(window: UsageWindow): Boolean {
-    val runsOut = window.runsOutAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
-    val resets = window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
+    val runsOut = window.runsOutAt?.let { instantOrNull(it) } ?: return false
+    val resets = window.resetsAt?.let { instantOrNull(it) } ?: return false
 
     return runsOut < resets
 }
@@ -165,7 +165,7 @@ fun windowName(name: String): String = when (name) {
 }
 
 fun usageClockTime(iso: String, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): String {
-    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val moment = instantOrNull(iso) ?: return ""
     val local = localDateTime(moment.toEpochMilliseconds())
     val today = localDateTime(now.toEpochMilliseconds())
 
@@ -201,7 +201,7 @@ data class CompactWindowUsage(val percent: Int, val forecast: String?, val summa
 
 fun compactWindowUsage(window: UsageWindow, localDateTime: (Long) -> String?, now: Instant = Clock.System.now()): CompactWindowUsage {
     val resetsAt = window.resetsAt
-    val resets = resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
+    val resets = resetsAt?.let { instantOrNull(it) }
 
     if (resetsAt != null && resets != null && resets <= now) {
         return CompactWindowUsage(0, null, "0% used, reset ${usageClockTime(resetsAt, localDateTime, now)}", false)
@@ -226,7 +226,7 @@ fun evenPacePercent(window: UsageWindow, now: Instant = Clock.System.now()): Int
         window.name.startsWith("seven_day") -> SevenDays
         else -> return null
     }
-    val resets = window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return null
+    val resets = window.resetsAt?.let { instantOrNull(it) } ?: return null
     val remaining = resets - now
 
     if (remaining <= Duration.ZERO || remaining > length) {
@@ -238,7 +238,7 @@ fun evenPacePercent(window: UsageWindow, now: Instant = Clock.System.now()): Int
 
 fun nextUsageTick(windows: List<UsageWindow>, now: Instant = Clock.System.now()): Duration {
     val untilReset = windows
-        .mapNotNull { window -> window.resetsAt?.let { runCatching { Instant.parse(it) }.getOrNull() } }
+        .mapNotNull { window -> window.resetsAt?.let { instantOrNull(it) } }
         .map { it - now }
         .filter { it > Duration.ZERO }
         .minOrNull() ?: UsageTickCeiling

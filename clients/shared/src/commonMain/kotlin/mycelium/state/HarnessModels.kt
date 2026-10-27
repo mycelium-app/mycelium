@@ -16,7 +16,7 @@ private fun defaultChoice(report: HarnessModels?): Choice =
     Choice(DefaultModelId, "Default model", report?.let { held -> held.models.firstOrNull { it.id == held.defaultModel }?.name ?: held.defaultModel })
 
 private fun reportedAgo(iso: String, now: Instant): String {
-    val minutes = (now - Instant.parse(iso)).inWholeMinutes
+    val minutes = (now - (instantOrNull(iso) ?: now)).inWholeMinutes
 
     return when {
         minutes < 1 -> "just now"

@@ -4,6 +4,7 @@ import kotlin.time.Instant
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.Conversation
+import mycelium.api.Workflow
 import mycelium.api.ConversationStatus
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.Event
@@ -50,7 +51,7 @@ data class AppState(
     val repositoryListing: mycelium.api.Repositories? = null,
     val worktrees: Map<String, Worktree> = emptyMap(),
     val tasks: Map<String, Task> = emptyMap(),
-    val workflows: Map<String, JsonObject> = emptyMap(),
+    val workflows: Map<String, Workflow> = emptyMap(),
     val schedules: Map<String, Schedule> = emptyMap(),
     val assistants: Map<String, mycelium.api.Assistant> = emptyMap(),
     val assistantActions: Map<String, List<mycelium.api.AssistantAction>> = emptyMap(),
@@ -157,7 +158,7 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.MoveChanged -> state.copy(moves = state.moves + (message.progress.conversationId to message.progress))
 
-    is StreamMessage.WorkflowChanged -> state.copy(workflows = state.workflows + (message.workflow.string("id").orEmpty() to message.workflow))
+    is StreamMessage.WorkflowChanged -> state.copy(workflows = state.workflows + (message.workflow.id to message.workflow))
 
     is StreamMessage.ScheduleChanged -> state.copy(schedules = state.schedules + (message.schedule.id to message.schedule))
 
@@ -252,7 +253,7 @@ fun setUpRepositories(projects: Collection<Project>, listed: List<Repository>): 
 fun registeredFolders(projects: Collection<Project>): List<Project> = projects.filter { it.forgeId == null }.sortedBy { it.name }
 
 fun lastActivity(project: Project, conversations: Collection<Conversation>): String =
-    conversations.filter { it.projectId == project.id }.map { it.updatedAt }.maxByOrNull { runCatching { Instant.parse(it) }.getOrNull() ?: Instant.DISTANT_PAST } ?: project.createdAt
+    conversations.filter { it.projectId == project.id }.map { it.updatedAt }.maxByOrNull { instantOrNull(it) ?: Instant.DISTANT_PAST } ?: project.createdAt
 
 fun mergeEvents(existing: List<Event>, incoming: List<Event>): List<Event> {
     val appends = incoming.zipWithNext().all { (a, b) -> a.seq < b.seq } && (existing.isEmpty() || incoming.isEmpty() || existing.last().seq < incoming.first().seq)

@@ -13,12 +13,12 @@ fun limitName(window: String): String = when (window) {
     else -> "usage limit"
 }
 
-fun resumeTimeAfter(resetsAt: String): String? = runCatching { (Instant.parse(resetsAt) + ResumeDelay).toString() }.getOrNull()
+fun resumeTimeAfter(resetsAt: String): String? = instantOrNull(resetsAt)?.let { (it + ResumeDelay).toString() }
 
-fun resetBefore(resumeAt: String): String? = runCatching { (Instant.parse(resumeAt) - ResumeDelay).toString() }.getOrNull()
+fun resetBefore(resumeAt: String): String? = instantOrNull(resumeAt)?.let { (it - ResumeDelay).toString() }
 
 fun clockTime(iso: String, now: Instant = Clock.System.now(), localDateTime: (Long) -> String?): String {
-    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val moment = instantOrNull(iso) ?: return ""
     val local = localDateTime(moment.toEpochMilliseconds()) ?: moment.toString().substringBefore('Z')
     val today = (localDateTime(now.toEpochMilliseconds()) ?: now.toString().substringBefore('Z')).substringBefore('T')
     val time = local.substringAfter('T').take(5)

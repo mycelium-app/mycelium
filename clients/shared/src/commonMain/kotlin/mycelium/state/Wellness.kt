@@ -142,8 +142,8 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     val state: StateFlow<WellnessState> = mutableState.asStateFlow()
 
     suspend fun load() {
-        val settings = runCatching { api.wellnessSettings() }.getOrNull() ?: return
-        val overview = runCatching { api.wellnessOverview() }.getOrNull()
+        val settings = catching { api.wellnessSettings() }.getOrNull() ?: return
+        val overview = catching { api.wellnessOverview() }.getOrNull()
         val current = overview?.currentBreak
         val phase = if (current != null) BreakPhase.OnBreak else mutableState.value.clock.phase.takeUnless { it == BreakPhase.OnBreak } ?: BreakPhase.Idle
 
@@ -174,7 +174,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     fun hold(notification: HeldNotification, ping: Boolean = false) {
         mutableState.update { it.copy(held = it.held + notification) }
-        scope.launch { runCatching { api.holdQuietly(if (ping) "ping" else "notification", notification.conversationId, notification.groupId) } }
+        scope.launch { catching { api.holdQuietly(if (ping) "ping" else "notification", notification.conversationId, notification.groupId) } }
     }
 
     fun releaseHeld(closed: (String?) -> Boolean): List<HeldNotification> {
@@ -196,7 +196,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     }
 
     fun heartbeat(seconds: Int) {
-        scope.launch { runCatching { api.wellnessHeartbeat(seconds) } }
+        scope.launch { catching { api.wellnessHeartbeat(seconds) } }
     }
 
     fun update(change: (WellnessSettings) -> WellnessSettings) {
@@ -205,7 +205,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
         mutableState.update { it.copy(settings = changed) }
         scope.launch {
-            val saved = runCatching { api.saveWellnessSettings(changed) }.getOrNull()
+            val saved = catching { api.saveWellnessSettings(changed) }.getOrNull()
 
             mutableState.update { it.copy(settings = saved ?: before) }
         }
@@ -224,7 +224,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
         mutableState.update { it.copy(clock = it.clock.startBreak()) }
         scope.launch {
-            runCatching { api.startWellnessBreak(minutes) }
+            catching { api.startWellnessBreak(minutes) }
             load()
         }
     }
@@ -232,13 +232,13 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     fun endBreak() {
         mutableState.update { it.copy(clock = it.clock.endBreak()) }
         scope.launch {
-            runCatching { api.endWellnessBreak() }
+            catching { api.endWellnessBreak() }
             load()
         }
     }
 
     suspend fun loadPuzzles() {
-        val puzzles = runCatching { api.puzzles() }.getOrNull() ?: return
+        val puzzles = catching { api.puzzles() }.getOrNull() ?: return
 
         mutableState.update { it.copy(puzzles = puzzles) }
     }
@@ -253,14 +253,14 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     fun setPlayed(puzzle: String, played: Boolean) {
         scope.launch {
-            runCatching { api.setPuzzlePlayed(puzzle, played) }
+            catching { api.setPuzzlePlayed(puzzle, played) }
             loadPuzzles()
         }
     }
 
     fun recordResult(puzzle: String, result: PuzzleResult) {
         scope.launch {
-            runCatching { api.recordPuzzleResult(puzzle, result.copy(source = "read")) }
+            catching { api.recordPuzzleResult(puzzle, result.copy(source = "read")) }
             loadPuzzles()
         }
     }

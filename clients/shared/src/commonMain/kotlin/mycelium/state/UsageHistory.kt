@@ -49,7 +49,7 @@ fun priceRatio(account: UsageHistoryAccount): String? {
 }
 
 fun dateTimeLabel(iso: String, localDateTime: (Long) -> String?): String {
-    val moment = runCatching { kotlin.time.Instant.parse(iso) }.getOrNull() ?: return iso
+    val moment = instantOrNull(iso) ?: return iso
     val local = localDateTime(moment.toEpochMilliseconds()) ?: moment.toString().substringBefore('Z')
 
     return "${dayLabel(local.substringBefore('T'))} ${local.substringAfter('T').take(5)}"

@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +93,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
@@ -656,9 +658,27 @@ fun rememberAttempt(onFailure: (String?) -> Unit): (suspend () -> Unit) -> Unit 
     }
 }
 
+@Stable
+class ActionRunner(private val scope: CoroutineScope, private val unreachable: String) {
+    var running by mutableStateOf(false)
+        private set
+    var failure by mutableStateOf<String?>(null)
+
+    operator fun invoke(block: suspend () -> Unit) {
+        failure = null
+        running = true
+        scope.launch {
+            failure = attempt(unreachable, block)
+            running = false
+        }
+    }
+}
+
 @Composable
-fun RowMenu(title: String, content: @Composable (close: () -> Unit) -> Unit) {
-    RowMenu(title, rememberRowMenuState(), content)
+fun rememberAction(unreachable: String = ControlPlaneUnreachable): ActionRunner {
+    val scope = rememberCoroutineScope()
+
+    return remember(scope, unreachable) { ActionRunner(scope, unreachable) }
 }
 
 @Composable

@@ -58,11 +58,3 @@ fun missingInput(action: AssistantAction, values: Map<String, String>, today: St
     action.inputs.firstOrNull { it.required && actionInputValue(it, values[it.name], today).isEmpty() }
 
 fun askedFor(inputs: List<ActionInput>): String = if (inputs.isEmpty()) "Nothing" else inputs.joinToString(", ") { it.name.replaceFirstChar { letter -> letter.uppercase() } }
-
-fun inputKindLabel(input: ActionInput): String = when (input.kind) {
-    "date" -> if (input.default == TodayDefault || input.default == null) "Date, today by default" else "Date"
-    "choice" -> "Choice: ${input.options.joinToString(", ")}"
-    else -> "Text"
-}
-
-fun pinnedActions(actions: List<AssistantAction>): List<AssistantAction> = actions.filter { it.pinned }

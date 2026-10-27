@@ -425,10 +425,6 @@ class AllScreensRenderTest {
         val store = store()
 
         for (section in SettingsSection.entries) {
-            if (section == SettingsSection.ChatModels) {
-                continue
-            }
-
             snap("settings-${section.name.lowercase()}") { Surface { SettingsScreen(store, me, "https://mycelium.example.com", startOn = section, onSignOut = {}) } }
         }
     }

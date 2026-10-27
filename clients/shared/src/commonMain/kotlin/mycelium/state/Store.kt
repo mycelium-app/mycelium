@@ -686,7 +686,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     suspend fun refreshWorkflows() {
         val workflows = api.workflows()
-        mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.string("id").orEmpty() }) }
+        mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.id }) }
     }
 
     suspend fun refreshSchedules() {

@@ -639,7 +639,7 @@ private fun applyWorkflowLine(items: MutableList<ThreadItem>, key: String, paylo
         resumed -> current.copy(agents = journaled, limit = null)
         else -> current.copy(agents = journaled)
     }
-    val updated = applied.copy(lastLineAt = payload.string("at")?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: applied.lastLineAt)
+    val updated = applied.copy(lastLineAt = payload.string("at")?.let { instantOrNull(it) } ?: applied.lastLineAt)
 
     if (index < 0) {
         items += ThreadItem.Workflow(key, updated)
@@ -656,7 +656,7 @@ private fun workflowEnd(line: JsonObject): WorkflowEnd? {
 
     val state = line.string("state") ?: return null
 
-    return WorkflowEnd(state, line.string("ended_at")?.let { runCatching { Instant.parse(it) }.getOrNull() }, line.string("reason"))
+    return WorkflowEnd(state, line.string("ended_at")?.let { instantOrNull(it) }, line.string("reason"))
 }
 
 fun applyWorkflowJournal(agents: List<WorkflowAgent>, line: JsonObject, paused: Boolean = false): List<WorkflowAgent> {

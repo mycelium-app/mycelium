@@ -35,7 +35,7 @@ fun chatSections(conversations: Collection<Conversation>, now: Instant = Clock.S
         .filter { it.parentId == null || it.parentId !in activeIds }
         .sortedByDescending { it.updatedAt }
         .groupBy { chat ->
-            val daysAgo = runCatching { today - (Instant.parse(chat.updatedAt).epochSeconds).floorDiv(SecondsPerDay) }.getOrNull()
+            val daysAgo = instantOrNull(chat.updatedAt)?.let { today - it.epochSeconds.floorDiv(SecondsPerDay) }
 
             when {
                 daysAgo == null || daysAgo >= DaysInWeek -> OlderName

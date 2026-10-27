@@ -22,8 +22,10 @@ fun agentVersion(version: String?): String = version.orEmpty().trim().substringA
 
 fun versionWithUpdate(version: String, updateAvailable: String?): String = if (updateAvailable == null) version else "$version · $updateAvailable available"
 
+fun instantOrNull(text: String): Instant? = runCatching { Instant.parse(text) }.getOrNull()
+
 fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
-    val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val then = instantOrNull(iso) ?: return ""
     val elapsed: Duration = now - then
 
     return when {
@@ -37,7 +39,7 @@ fun relativeTime(iso: String, now: Instant = Clock.System.now()): String {
 fun ago(iso: String, now: Instant = Clock.System.now()): String = relativeTime(iso, now).let { if (it == "now") it else "$it ago" }
 
 fun absoluteTime(iso: String, localDateTime: (Long) -> String?): String {
-    val moment = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val moment = instantOrNull(iso) ?: return ""
     val local = localDateTime(moment.toEpochMilliseconds()) ?: iso.substringBefore('Z').take(16)
     val (year, month, day) = local.substringBefore('T').split('-')
 
@@ -51,7 +53,7 @@ fun projectName(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').
 fun isLaptop(os: String): Boolean = os.lowercase().let { it.contains("mac") || it.contains("darwin") || it.contains("windows") }
 
 fun until(iso: String, now: Instant = Clock.System.now()): String {
-    val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val then = instantOrNull(iso) ?: return ""
     val remaining: Duration = then - now
 
     return when {
@@ -63,7 +65,7 @@ fun until(iso: String, now: Instant = Clock.System.now()): String {
 }
 
 fun elapsed(iso: String, now: Instant = Clock.System.now()): String {
-    val then = runCatching { Instant.parse(iso) }.getOrNull() ?: return ""
+    val then = instantOrNull(iso) ?: return ""
     val total = (now - then).inWholeSeconds.coerceAtLeast(0)
 
     return when {

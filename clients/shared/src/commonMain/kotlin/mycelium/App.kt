@@ -30,6 +30,7 @@ import mycelium.api.ApiException
 import mycelium.api.Me
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.state.catching
 import mycelium.ui.ApproveScreen
 import mycelium.ui.Label
 import mycelium.ui.LocalReducedMotion
@@ -205,7 +206,7 @@ private fun AppContent(platform: Platform) {
                             me = current.me,
                             onSignOut = {
                                 scope.launch {
-                                    runCatching { current.api.logout() }
+                                    catching { current.api.logout() }
                                     platform.saveConnection(null)
                                     phase = Phase.SignedOut(null)
                                 }
