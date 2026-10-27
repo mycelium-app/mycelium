@@ -65,6 +65,13 @@ class WellnessScreenTest {
     }
 
     @Test
+    fun theChartSaysWhatWasHeldWhileClosedThisWeek() {
+        show()
+
+        rule.onNodeWithText("While closed, Mycelium held 11 notifications, 2 scheduled runs and 3 assistant pings this week.").assertIsDisplayed()
+    }
+
+    @Test
     fun theWeekChartIsDescribedForAssistiveTechnology() {
         show()
 
@@ -75,20 +82,14 @@ class WellnessScreenTest {
     fun aPuzzleOpensItsSiteAndPlayedTodayIsSelfReported() {
         show()
 
+        rule.onNodeWithText("Puzzles").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Opens in your browser", substring = true).fetchSemanticsNodes().isNotEmpty() }
+
         rule.onNodeWithContentDescription("Open Wordle").performClick()
         assertEquals(listOf("https://www.nytimes.com/games/wordle/index.html"), platform.opened)
 
         rule.onNodeWithContentDescription("Connections played today").performClick()
         rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/puzzles/connections/today") != null }
         assertTrue(requests.sent("PUT", "/wellness/puzzles/connections/today") != null)
-    }
-
-    @Test
-    fun turningOnPomodoroSavesTheSetting() {
-        show()
-
-        rule.onNodeWithContentDescription("Pomodoro").performClick()
-        rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/settings") != null }
-        assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"pomodoro\":true"))
     }
 }

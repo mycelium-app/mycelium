@@ -7,10 +7,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mycelium.api.Exercise
+import mycelium.api.LearnedItem
 import mycelium.api.PatchReflectionRequest
 import mycelium.api.Reflection
-import mycelium.api.ReflectionSchedule
-import mycelium.api.ReflectionScheduleRequest
 import mycelium.api.Skill
 import mycelium.api.SolutionFile
 import mycelium.api.MyceliumApi
@@ -40,6 +39,12 @@ fun reflectionPatch(section: ReflectionSection, text: String): PatchReflectionRe
 
 private val MonthNames = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
 
+fun learnedWhere(item: LearnedItem): String = when (item.sourceKind) {
+    "teach_me" -> "Teach me in ${item.conversationTitle}"
+    "walkthrough_check" -> "Walkthrough check in ${item.conversationTitle}"
+    else -> "Exercise review of ${item.conversationTitle}"
+}
+
 fun dayLabel(isoDate: String, today: String): String {
     if (isoDate == today) {
         return "Today"
@@ -58,16 +63,44 @@ fun weekLabel(isoDate: String): String {
 
 data class LearningState(
     val reflections: List<Reflection> = emptyList(),
-    val schedule: ReflectionSchedule? = null,
     val loaded: Boolean = false,
     val redrafting: Set<String> = emptySet(),
     val problem: String? = null,
     val skills: List<Skill> = emptyList(),
+    val hiddenSkills: List<Skill> = emptyList(),
+    val learned: List<LearnedItem> = emptyList(),
     val exercises: List<Exercise> = emptyList(),
     val suggested: List<Exercise> = emptyList(),
     val working: Set<String> = emptySet(),
     val solutions: Map<String, List<SolutionFile>> = emptyMap(),
 )
+
+fun solutionLines(diff: String): List<DiffLine> {
+    var oldNumber = 0
+    var newNumber = 0
+    var inHunk = false
+    val lines = mutableListOf<DiffLine>()
+
+    for (text in diff.lines()) {
+        val header = Regex("""^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@""").find(text)
+
+        when {
+            header != null -> {
+                oldNumber = header.groupValues[1].toInt()
+                newNumber = header.groupValues[2].toInt()
+                inHunk = true
+                lines += DiffLine(DiffLine.Kind.Context, null, null, text)
+            }
+
+            !inHunk -> Unit
+            text.startsWith("+") -> lines += DiffLine(DiffLine.Kind.Added, null, newNumber++, text.drop(1))
+            text.startsWith("-") -> lines += DiffLine(DiffLine.Kind.Removed, oldNumber++, null, text.drop(1))
+            text.startsWith(" ") -> lines += DiffLine(DiffLine.Kind.Context, oldNumber++, newNumber++, text.drop(1))
+        }
+    }
+
+    return lines
+}
 
 fun List<Exercise>.practisedOf(skill: Skill): List<Exercise> = filter { it.kind == skill.kind && it.name == skill.name }
 
@@ -82,9 +115,7 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     suspend fun load() {
         val reflections = runCatching { api.reflections() }.getOrNull() ?: return
-        val schedule = runCatching { api.reflectionSchedule() }.getOrNull()
-
-        mutableState.update { it.copy(reflections = reflections, schedule = schedule, loaded = true) }
+        mutableState.update { it.copy(reflections = reflections, loaded = true) }
     }
 
     suspend fun loadSkills() {
@@ -95,11 +126,29 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
         mutableState.update { it.copy(skills = skills, exercises = exercises, suggested = suggested, loaded = true) }
     }
 
+    suspend fun loadLearned() {
+        val learned = runCatching { api.learned() }.getOrNull() ?: return
+
+        mutableState.update { it.copy(learned = learned) }
+    }
+
+    suspend fun loadHiddenSkills() {
+        val hidden = runCatching { api.skills(hidden = true) }.getOrNull() ?: return
+
+        mutableState.update { it.copy(hiddenSkills = hidden) }
+    }
+
     fun reload() {
         scope.launch {
             load()
             loadSkills()
         }
+    }
+
+    suspend fun loadSolution(exercise: Exercise) {
+        val files = runCatching { api.exerciseSolution(exercise.id) }.getOrNull() ?: return
+
+        mutableState.update { it.copy(solutions = it.solutions + (exercise.id to files)) }
     }
 
     fun hideSkill(skill: Skill) {
@@ -112,6 +161,19 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
                 } else {
                     state.copy(problem = "Could not hide ${skill.name}. Check your connection and try again.")
                 }
+            }
+        }
+    }
+
+    fun unhideSkill(skill: Skill) {
+        scope.launch {
+            val shown = runCatching { api.unhideSkill(skill) }
+
+            if (shown.isSuccess) {
+                mutableState.update { state -> state.copy(hiddenSkills = state.hiddenSkills - skill, problem = null) }
+                loadSkills()
+            } else {
+                mutableState.update { it.copy(problem = "Could not unhide ${skill.name}. Check your connection and try again.") }
             }
         }
     }
@@ -170,16 +232,6 @@ class LearningStore(private val api: MyceliumApi, private val scope: CoroutineSc
                 state.copy(redrafting = state.redrafting - reflection.id, problem = started.exceptionOrNull()?.let { "Could not start a redraft. ${it.message.orEmpty()}".trim() })
             }
             started.getOrNull()?.let { onStarted(it.conversationId) }
-        }
-    }
-
-    fun setUp(request: ReflectionScheduleRequest) {
-        scope.launch {
-            val saved = runCatching { api.saveReflectionSchedule(request) }
-
-            mutableState.update { state ->
-                state.copy(schedule = saved.getOrNull() ?: state.schedule, problem = saved.exceptionOrNull()?.let { "Could not set up the weekly reflection. ${it.message.orEmpty()}".trim() })
-            }
         }
     }
 }

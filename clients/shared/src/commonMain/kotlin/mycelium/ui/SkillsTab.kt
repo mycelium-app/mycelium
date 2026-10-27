@@ -39,11 +39,14 @@ import mycelium.state.Store
 import mycelium.state.doneCount
 import mycelium.state.practisedOf
 import mycelium.state.dayLabel
+import mycelium.state.learnedWhere
 
 private val SparklineWidth = 160.dp
 private val SparklineHeight = 20.dp
 private val ShareBarWidth = 90.dp
 private val ShareBarHeight = 6.dp
+private const val AllSkills = "All"
+private const val HiddenSkills = "Hidden"
 private val SkillKinds = listOf("language" to "Languages", "area" to "Areas of the codebase", "other" to "Other")
 
 private fun today(): String = Clock.System.now().toString().take(10)
@@ -74,18 +77,28 @@ fun testsSummary(tests: ExerciseTests): String = when {
 fun SkillsTab(store: Store) {
     val learning by store.learning.state.collectAsState()
     var chosen by remember { mutableStateOf<String?>(null) }
-    val skills = learning.skills
+    var shown by remember { mutableStateOf(AllSkills) }
+    val hidden = shown == HiddenSkills
+    val skills = if (hidden) learning.hiddenSkills else learning.skills
     val selected = skills.firstOrNull { "${it.kind}/${it.name}" == chosen } ?: skills.firstOrNull()
 
     LaunchedEffect(Unit) {
         store.learning.loadSkills()
     }
 
+    LaunchedEffect(hidden, learning.skills.size) {
+        if (hidden) {
+            store.learning.loadHiddenSkills()
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
 
+        Segmented(listOf(AllSkills, HiddenSkills), shown, { shown = it }, groupLabel = "Show")
+
         if (skills.isEmpty()) {
-            Label(if (learning.loaded) "Skills appear here once you or an agent have changed code on one of your nodes." else "Loading skills.", color = MyTheme.colors.textMuted)
+            Label(if (hidden) "No skills are hidden." else if (learning.loaded) "Skills appear here once you or an agent have changed code on one of your nodes." else "Loading skills.", color = MyTheme.colors.textMuted)
 
             return@Column
         }
@@ -102,7 +115,7 @@ fun SkillsTab(store: Store) {
                         }
                     }
 
-                    Label("From the last 90 days of changes on your nodes. Share of changed lines.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+                    Label(if (hidden) "Hidden skills are left out of the overview and of suggested exercises." else "From the last 90 days of changes on your nodes. Share of changed lines.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
                 }
             }
 
@@ -174,7 +187,19 @@ private fun SkillDetail(store: Store, skill: Skill, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Label(skill.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
-            MyButton({ store.learning.hideSkill(skill) }, text = "Hide skill", description = "Hide ${skill.name}", muted = true)
+
+            if (skill.hidden) {
+                Tag("Hidden")
+                MyButton({ store.learning.unhideSkill(skill) }, text = "Unhide skill", description = "Unhide ${skill.name}", muted = true)
+            } else {
+                MyButton({ store.learning.hideSkill(skill) }, text = "Hide skill", description = "Hide ${skill.name}", muted = true)
+            }
+        }
+
+        if (skill.hidden) {
+            Label("No exercises for a hidden skill. Unhide it to see it in the overview and get exercises for it again.", color = colors.textMuted)
+
+            return@Column
         }
 
         if (related.isEmpty()) {
@@ -213,11 +238,19 @@ private fun SkillDetail(store: Store, skill: Skill, modifier: Modifier) {
 @Composable
 fun ExerciseCard(store: Store, exercise: Exercise, modifier: Modifier = Modifier) {
     val learning by store.learning.state.collectAsState()
+    val app by store.state.collectAsState()
+    val branchChat = exercise.conversationId?.let { app.conversations[it] }
+    val branchNode = branchChat?.let { app.nodes[it.nodeId] }
     val colors = MyTheme.colors
     val busy = exercise.id in learning.working
     val tests = exercise.tests
     val review = exercise.review
     val started = exercise.conversationId != null && exercise.state != "suggested"
+    var showingSolution by remember { mutableStateOf(false) }
+
+    if (showingSolution) {
+        SolutionDialog(store, exercise) { showingSolution = false }
+    }
 
     Column(modifier.border(Tokens.Size.Hairline, colors.border, ControlShape).background(colors.bgPanel, ControlShape).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), itemVerticalAlignment = Alignment.CenterVertically) {
@@ -253,6 +286,8 @@ fun ExerciseCard(store: Store, exercise: Exercise, modifier: Modifier = Modifier
             if (!started) {
                 MyButton({ store.learning.startExercise(exercise) }, text = if (busy) "Starting" else "Start exercise", variant = ButtonVariant.Primary)
             } else {
+                MyButton({ showingSolution = true }, text = "Show a solution", description = "Show a solution to ${exercise.title}", muted = true)
+                OpenInIdeButton(branchNode, branchChat?.cwd.orEmpty(), labelled = true)
                 MyButton({ store.learning.runTests(exercise) }, text = "Run tests", description = "Run tests for ${exercise.title}", variant = ButtonVariant.Outline)
                 MyButton({ store.learning.requestReview(exercise) }, text = if (review == null) "Ask for review" else "Review again", description = "Ask for a review of ${exercise.title}", variant = ButtonVariant.Outline)
 
@@ -348,5 +383,46 @@ private fun Sparkline(skill: Skill) {
         val points = weeks.mapIndexed { index, lines -> Offset(index * step, size.height - 2f - (size.height - 4f) * lines.toFloat() / peak) }
 
         points.zipWithNext().forEach { (from, to) -> drawLine(colors.accent, from, to, strokeWidth = 3f, cap = StrokeCap.Round) }
+    }
+}
+
+@Composable
+fun RecentlyLearned(store: Store, onReflect: () -> Unit, modifier: Modifier = Modifier) {
+    val learning by store.learning.state.collectAsState()
+    val items = learning.learned
+    val colors = MyTheme.colors
+
+    LaunchedEffect(Unit) {
+        store.learning.loadLearned()
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Label("Recently learned", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
+            MyButton(onReflect, text = "Weekly reflection", trailingIcon = MyIcon.ChevronRight, muted = true)
+        }
+
+        if (items.isEmpty()) {
+            Label("Things you learn with Teach me, a walkthrough check or an exercise review appear here.", color = colors.textMuted)
+
+            return@Column
+        }
+
+        Table(
+            listOf(Col("What you learned", 160.dp, weight = 1f), Col("Where", 140.dp, preferred = 240.dp, priority = 1), Col("When", 80.dp, preferred = 110.dp)),
+            items.size,
+            { row, column ->
+                val item = items[row]
+
+                when (column) {
+                    0 -> TableCell.Text(item.text)
+                    1 -> TableCell.Text(learnedWhere(item), color = colors.textMuted)
+                    else -> TableCell.Text(dayLabel(item.createdAt.take(10), today()), color = colors.textMuted)
+                }
+            },
+            rowKey = { items[it].id },
+            onRow = { store.act { store.open(items[it].conversationId) } },
+            rowDescription = { items[it].text },
+        )
     }
 }

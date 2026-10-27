@@ -30,9 +30,6 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.Reflection
-import mycelium.api.ReflectionSchedule
-import mycelium.api.ReflectionScheduleRequest
-import mycelium.state.Choice
 import mycelium.state.LearningState
 import mycelium.state.ReflectionSection
 import mycelium.state.Store
@@ -40,11 +37,10 @@ import mycelium.state.text
 import mycelium.state.wasEdited
 import mycelium.state.weekLabel
 
-private val Agents = listOf(Choice("claude", "Claude Code"), Choice("codex", "Codex"))
 private val SectionHeight = 72.dp
 
 @Composable
-fun ReflectionsTab(store: Store) {
+fun ReflectionsTab(store: Store, onOpenAssistant: (String) -> Unit) {
     val learning by store.learning.state.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -54,26 +50,8 @@ fun ReflectionsTab(store: Store) {
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
 
-        val schedule = learning.schedule
-
-        if (schedule == null) {
-            SetUpReflection(store)
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    schedule.enabled,
-                    "Draft every Friday at 16:00",
-                    { store.learning.setUp(ReflectionScheduleRequest(schedule.nodeId, schedule.agent, schedule.cwd, !schedule.enabled)) },
-                    checkedState = "On",
-                    uncheckedState = "Off",
-                )
-                Label("Draft every Friday at 16:00")
-            }
-        }
-
-        if (learning.reflections.isEmpty() && schedule != null && learning.loaded) {
-            Label("The first reflection is drafted on Friday at 16:00.", color = MyTheme.colors.textMuted)
-        }
+        Label("The Wellness assistant drafts this every Friday at 16:00.", color = MyTheme.colors.textMuted)
+        MyButton({ store.act { onOpenAssistant(store.api.wellnessAssistant().id) } }, text = "Open the Wellness assistant", variant = ButtonVariant.Outline)
 
         if (learning.reflections.isNotEmpty()) {
             Label("Redraft rewrites only the sections you have not edited.", color = MyTheme.colors.textMuted)
@@ -82,50 +60,6 @@ fun ReflectionsTab(store: Store) {
         for (reflection in learning.reflections) {
             ReflectionCard(store, reflection, learning)
         }
-    }
-}
-
-@Composable
-private fun SetUpReflection(store: Store) {
-    val app by store.state.collectAsState()
-    var open by remember { mutableStateOf(false) }
-    var nodeId by remember { mutableStateOf<String?>(null) }
-    var agent by remember { mutableStateOf("claude") }
-    var folder by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    val nodes = app.nodes.values.filter { it.online }.map { Choice(it.id, it.name) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-        Label("Weekly reflection", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-        Label("An agent drafts what you did, learned, are waiting on and plan for next week, every Friday at 16:00. You can edit every section.", color = MyTheme.colors.textMuted)
-
-        if (!open) {
-            MyButton({ open = true }, text = "Set up weekly reflection", icon = MyIcon.GraduationCap, variant = ButtonVariant.Outline)
-
-            return@Column
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            OptionMenu("Node", nodes, nodeId, { nodeId = it; error = null })
-            OptionMenu("Agent", Agents, agent, { agent = it })
-        }
-
-        TextInput(folder, { folder = it; error = null }, label = "Folder", placeholder = "/home/you/notes", mono = true)
-        error?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
-
-        MyButton(
-            {
-                val chosen = nodeId
-
-                when {
-                    chosen == null -> error = "Choose the node the agent should run on."
-                    folder.isBlank() -> error = "Enter the folder the agent should work in."
-                    else -> store.learning.setUp(ReflectionScheduleRequest(chosen, agent, folder.trim(), true))
-                }
-            },
-            text = "Turn on weekly reflection",
-            variant = ButtonVariant.Outline,
-        )
     }
 }
 
@@ -149,7 +83,7 @@ private fun ReflectionCard(store: Store, reflection: Reflection, learning: Learn
         }
 
         if (started && !drafting && learning.problem == null) {
-            Label("Drafting has started. The new text appears here when the agent saves it.", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
+            Label("Drafting has started. The new text appears here when the Wellness assistant saves it.", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
         }
 
         for (section in ReflectionSection.entries) {

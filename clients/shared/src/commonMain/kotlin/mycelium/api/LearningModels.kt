@@ -34,24 +34,6 @@ data class PatchReflectionRequest(
 )
 
 @Serializable
-data class ReflectionScheduleRequest(
-    @SerialName("node_id") val nodeId: String,
-    val agent: String,
-    val cwd: String,
-    val enabled: Boolean,
-)
-
-@Serializable
-data class ReflectionSchedule(
-    @SerialName("schedule_id") val scheduleId: String,
-    @SerialName("node_id") val nodeId: String,
-    val agent: String,
-    val cwd: String,
-    val enabled: Boolean,
-    val cron: String = "",
-)
-
-@Serializable
 data class RedraftReflection(@SerialName("conversation_id") val conversationId: String)
 
 @Serializable
@@ -63,6 +45,7 @@ data class Skill(
     @SerialName("own_share") val ownShare: Double? = null,
     @SerialName("weekly_own_lines") val weeklyOwnLines: List<Long> = emptyList(),
     @SerialName("last_practised") val lastPractised: String? = null,
+    val hidden: Boolean = false,
 )
 
 @Serializable
@@ -106,6 +89,8 @@ data class Exercise(
     val review: ExerciseReview? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("source_conversation_id") val sourceConversationId: String? = null,
+    @SerialName("source_title") val sourceTitle: String? = null,
 )
 
 @Serializable
