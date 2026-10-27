@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import mycelium.PageReading
 import mycelium.Connection
 import mycelium.DeviceInfo
 import mycelium.Dictation
@@ -236,7 +237,7 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     }
 
     @Composable
-    override fun WebContent(url: String, token: String?, modifier: Modifier) = AndroidWebContent(url, token, modifier)
+    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: PageReading?) = AndroidWebContent(url, token, modifier)
 
     override fun copyToClipboard(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
