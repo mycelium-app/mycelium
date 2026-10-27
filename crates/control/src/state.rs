@@ -110,6 +110,46 @@ pub struct PendingReview {
     pub answer: oneshot::Sender<mycelium_proto::conversation::ReviewAnswer>,
 }
 
+pub struct PendingRequests<A> {
+    waiting: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<A>)>>,
+}
+
+impl<A> Default for PendingRequests<A> {
+    fn default() -> Self {
+        PendingRequests { waiting: Mutex::new(HashMap::new()) }
+    }
+}
+
+impl<A> PendingRequests<A> {
+    fn register(&self, node_id: Uuid) -> (Uuid, oneshot::Receiver<A>) {
+        let request_id = Uuid::new_v4();
+        let (answer, answered) = oneshot::channel();
+
+        if let Ok(mut waiting) = self.waiting.lock() {
+            waiting.insert(request_id, (node_id, answer));
+        }
+
+        (request_id, answered)
+    }
+
+    fn answer(&self, node_id: Uuid, request_id: Uuid, answer: A) {
+        let waiting = self.waiting.lock().ok().and_then(|mut waiting| match waiting.get(&request_id) {
+            Some((owner, _)) if *owner == node_id => waiting.remove(&request_id),
+            _ => None,
+        });
+
+        if let Some((_, waiter)) = waiting {
+            let _ = waiter.send(answer);
+        }
+    }
+
+    fn forget(&self, request_id: Uuid) {
+        if let Ok(mut waiting) = self.waiting.lock() {
+            waiting.remove(&request_id);
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Hub {
     nodes: Mutex<HashMap<Uuid, NodeConnection>>,
@@ -118,16 +158,16 @@ pub struct Hub {
     send_now: Mutex<HashMap<Uuid, Uuid>>,
     stale_secrets: Mutex<HashSet<Uuid>>,
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
-    file_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Vec<String>>)>>,
-    git_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<GitAnswer>)>>,
-    steer_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<SteerAnswer>)>>,
-    stop_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ProcessAnswer>)>>,
-    folder_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<FolderAnswer>)>>,
+    file_requests: PendingRequests<Vec<String>>,
+    git_requests: PendingRequests<GitAnswer>,
+    steer_requests: PendingRequests<SteerAnswer>,
+    stop_requests: PendingRequests<ProcessAnswer>,
+    folder_requests: PendingRequests<FolderAnswer>,
     workspace_asks: Mutex<std::collections::HashSet<Uuid>>,
     backups: Mutex<std::collections::HashSet<Uuid>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
-    reset_requests: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<ResetAnswer>)>>,
+    reset_requests: PendingRequests<ResetAnswer>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
@@ -261,169 +301,75 @@ impl Hub {
         self.forget_resources_of(node_id);
     }
 
-    pub fn request_files(&self, node_id: Uuid, cwd: String, query: String) -> Option<(Uuid, oneshot::Receiver<Vec<String>>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
+    fn request<A>(&self, pending: &PendingRequests<A>, node_id: Uuid, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<(Uuid, oneshot::Receiver<A>)> {
+        let (request_id, answered) = pending.register(node_id);
 
-        if let Ok(mut requests) = self.file_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::ListFiles { request_id, cwd, query }) {
+        if self.send(node_id, message(request_id)) {
             Some((request_id, answered))
         } else {
-            self.forget_file_request(request_id);
+            pending.forget(request_id);
             None
         }
+    }
+
+    pub fn request_files(&self, node_id: Uuid, cwd: String, query: String) -> Option<(Uuid, oneshot::Receiver<Vec<String>>)> {
+        self.request(&self.file_requests, node_id, |request_id| ControlToNode::ListFiles { request_id, cwd, query })
     }
 
     pub fn answer_files(&self, node_id: Uuid, request_id: Uuid, paths: Vec<String>) {
-        let waiting = self.file_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, answer)) = waiting {
-            let _ = answer.send(paths);
-        }
+        self.file_requests.answer(node_id, request_id, paths);
     }
 
     pub fn forget_file_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.file_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.file_requests.forget(request_id);
     }
 
     pub fn request_git(&self, node_id: Uuid, cwd: String, command: GitCommand) -> Option<(Uuid, oneshot::Receiver<GitAnswer>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
-
-        if let Ok(mut requests) = self.git_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::Git { request_id, cwd, command }) {
-            Some((request_id, answered))
-        } else {
-            self.forget_git_request(request_id);
-            None
-        }
+        self.request(&self.git_requests, node_id, |request_id| ControlToNode::Git { request_id, cwd, command })
     }
 
     pub fn answer_git(&self, node_id: Uuid, request_id: Uuid, answer: GitAnswer) {
-        let waiting = self.git_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, waiter)) = waiting {
-            let _ = waiter.send(answer);
-        }
+        self.git_requests.answer(node_id, request_id, answer);
     }
 
     pub fn forget_git_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.git_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.git_requests.forget(request_id);
     }
 
     pub fn request_steer(&self, node_id: Uuid, conversation_id: Uuid, text: String, attachments: Vec<PromptAttachment>) -> Option<(Uuid, oneshot::Receiver<SteerAnswer>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
-
-        if let Ok(mut requests) = self.steer_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::Steer { conversation_id, request_id, text, attachments }) {
-            Some((request_id, answered))
-        } else {
-            self.forget_steer_request(request_id);
-            None
-        }
+        self.request(&self.steer_requests, node_id, |request_id| ControlToNode::Steer { conversation_id, request_id, text, attachments })
     }
 
     pub fn answer_steer(&self, node_id: Uuid, request_id: Uuid, answer: SteerAnswer) {
-        let waiting = self.steer_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, waiter)) = waiting {
-            let _ = waiter.send(answer);
-        }
+        self.steer_requests.answer(node_id, request_id, answer);
     }
 
     pub fn forget_steer_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.steer_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.steer_requests.forget(request_id);
     }
 
     pub fn request_stop(&self, node_id: Uuid, pid: u32, name: String) -> Option<(Uuid, oneshot::Receiver<ProcessAnswer>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
-
-        if let Ok(mut requests) = self.stop_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::StopProcess { request_id, pid, name }) {
-            Some((request_id, answered))
-        } else {
-            self.forget_stop_request(request_id);
-            None
-        }
+        self.request(&self.stop_requests, node_id, |request_id| ControlToNode::StopProcess { request_id, pid, name })
     }
 
     pub fn answer_stop(&self, node_id: Uuid, request_id: Uuid, answer: ProcessAnswer) {
-        let waiting = self.stop_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, waiter)) = waiting {
-            let _ = waiter.send(answer);
-        }
+        self.stop_requests.answer(node_id, request_id, answer);
     }
 
     pub fn forget_stop_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.stop_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.stop_requests.forget(request_id);
     }
 
     pub fn request_folder(&self, node_id: Uuid, root: String) -> Option<(Uuid, oneshot::Receiver<FolderAnswer>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
-
-        if let Ok(mut requests) = self.folder_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::ReadFolder { request_id, root }) {
-            Some((request_id, answered))
-        } else {
-            self.forget_folder_request(request_id);
-            None
-        }
+        self.request(&self.folder_requests, node_id, |request_id| ControlToNode::ReadFolder { request_id, root })
     }
 
     pub fn answer_folder(&self, node_id: Uuid, request_id: Uuid, answer: FolderAnswer) {
-        let waiting = self.folder_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, waiter)) = waiting {
-            let _ = waiter.send(answer);
-        }
+        self.folder_requests.answer(node_id, request_id, answer);
     }
 
     pub fn forget_folder_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.folder_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.folder_requests.forget(request_id);
     }
 
     pub fn begin_backup(&self, assistant_id: Uuid) -> bool {
@@ -447,36 +393,15 @@ impl Hub {
     }
 
     pub fn request_reset(&self, node_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) -> Option<(Uuid, oneshot::Receiver<ResetAnswer>)> {
-        let request_id = Uuid::new_v4();
-        let (answer, answered) = oneshot::channel();
-
-        if let Ok(mut requests) = self.reset_requests.lock() {
-            requests.insert(request_id, (node_id, answer));
-        }
-
-        if self.send(node_id, ControlToNode::UseReset { request_id, agent, account, idempotency_key }) {
-            Some((request_id, answered))
-        } else {
-            self.forget_reset_request(request_id);
-            None
-        }
+        self.request(&self.reset_requests, node_id, |request_id| ControlToNode::UseReset { request_id, agent, account, idempotency_key })
     }
 
     pub fn answer_reset(&self, node_id: Uuid, request_id: Uuid, answer: ResetAnswer) {
-        let waiting = self.reset_requests.lock().ok().and_then(|mut requests| match requests.get(&request_id) {
-            Some((owner, _)) if *owner == node_id => requests.remove(&request_id),
-            _ => None,
-        });
-
-        if let Some((_, waiter)) = waiting {
-            let _ = waiter.send(answer);
-        }
+        self.reset_requests.answer(node_id, request_id, answer);
     }
 
     pub fn forget_reset_request(&self, request_id: Uuid) {
-        if let Ok(mut requests) = self.reset_requests.lock() {
-            requests.remove(&request_id);
-        }
+        self.reset_requests.forget(request_id);
     }
 
     pub fn record_resources(&self, node_id: Uuid, sample: ResourceSample) {
@@ -786,4 +711,36 @@ pub fn new_token() -> String {
 
 pub fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_from_another_node_is_ignored() {
+        let pending = PendingRequests::<String>::default();
+        let asked = Uuid::new_v4();
+        let (request_id, mut answered) = pending.register(asked);
+
+        pending.answer(Uuid::new_v4(), request_id, "wrong".into());
+
+        assert!(answered.try_recv().is_err());
+
+        pending.answer(asked, request_id, "right".into());
+
+        assert_eq!(answered.try_recv().ok().as_deref(), Some("right"));
+    }
+
+    #[test]
+    fn a_forgotten_request_is_dropped() {
+        let pending = PendingRequests::<String>::default();
+        let asked = Uuid::new_v4();
+        let (request_id, mut answered) = pending.register(asked);
+
+        pending.forget(request_id);
+        pending.answer(asked, request_id, "late".into());
+
+        assert!(matches!(answered.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+    }
 }
