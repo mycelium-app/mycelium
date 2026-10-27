@@ -163,18 +163,25 @@ async fn grouped(state: &AppState, owner: Uuid, days: i32, node_id: Option<Uuid>
     Ok(rows.into_iter().map(TotalsRow::to_proto).collect())
 }
 
+async fn days_since_first_turn(state: &AppState, owner: Uuid) -> ApiResult<i32> {
+    let days = sqlx::query_scalar::<_, Option<i32>>("select (now() at time zone 'utc')::date - min(day) + 1 from usage_turns where owner = $1").bind(owner).fetch_one(&state.pool).await?;
+
+    Ok(days.unwrap_or(1).max(1))
+}
+
 pub async fn get(State(state): State<AppState>, user: AuthUser, Query(query): Query<ActivityQuery>) -> ApiResult<Json<Activity>> {
     let (range, days) = match query.range.as_deref().unwrap_or("7d") {
         "today" => ("today", 1),
         "7d" => ("7d", 7),
         "30d" => ("30d", 30),
-        _ => return Err(ApiError::bad_request("range_invalid", "Choose today, 7d or 30d as the range.")),
+        "all" => ("all", days_since_first_turn(&state, user.id).await?),
+        _ => return Err(ApiError::bad_request("range_invalid", "Choose today, 7d, 30d or all as the range.")),
     };
 
     let by_tokens = "sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens) desc, count(*) desc";
     let totals = grouped(&state, user.id, days, query.node_id, "''", "''", "1", 1).await?.into_iter().next().unwrap_or_default();
     let recorded_days = grouped(&state, user.id, days, query.node_id, "u.day::text", "u.day::text", "1", SERIES_LIMIT).await?;
-    let recorded_hours = grouped(&state, user.id, days, query.node_id, HOUR_KEY, HOUR_KEY, "1", SERIES_LIMIT).await?;
+    let recorded_hours = if range == "all" { Vec::new() } else { grouped(&state, user.id, days, query.node_id, HOUR_KEY, HOUR_KEY, "1", SERIES_LIMIT).await? };
     let conversations = grouped(&state, user.id, days, query.node_id, "c.id::text", "c.title", by_tokens, BREAKDOWN_LIMIT).await?;
     let nodes = grouped(&state, user.id, days, query.node_id, "n.id::text", "n.name", by_tokens, BREAKDOWN_LIMIT).await?;
     let agents = grouped(&state, user.id, days, query.node_id, "u.agent", "u.agent", by_tokens, BREAKDOWN_LIMIT).await?;
@@ -188,7 +195,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Query(query): Qu
     let now_hour = sqlx::query_scalar::<_, NaiveDateTime>("select date_trunc('hour', now() at time zone 'utc')").fetch_one(&state.pool).await?;
     let first_hour = (today - chrono::Duration::days(days as i64 - 1)).and_hms_opt(0, 0, 0).unwrap_or(now_hour);
     let hours = std::iter::successors(Some(first_hour), |hour| Some(*hour + chrono::Duration::hours(1)))
-        .take_while(|hour| *hour <= now_hour)
+        .take_while(|hour| *hour <= now_hour && range != "all")
         .map(|hour| hour.format("%Y-%m-%dT%H").to_string())
         .map(|key| recorded_hours.iter().find(|row| row.key == key).cloned().unwrap_or(ActivityRow { key: key.clone(), name: key, ..ActivityRow::default() }))
         .collect();

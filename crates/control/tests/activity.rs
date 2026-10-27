@@ -150,6 +150,23 @@ async fn the_range_and_the_node_narrow_what_is_counted() {
 }
 
 #[tokio::test]
+async fn all_time_runs_from_the_first_recorded_day_and_groups_by_day() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = conversation_on(&server, &mut link, "/work/app").await;
+    finish_turn(&mut link, conversation, 1, Some(usage(5, 0, 0, 0)), None, None).await;
+    finish_turn(&mut link, conversation, 3, Some(usage(7, 0, 0, 0)), None, None).await;
+    sqlx::query("update usage_turns set day = day - 99 where id = (select min(id) from usage_turns)").execute(&server.pool).await.unwrap();
+
+    let body = activity(&server, "?range=all").await;
+
+    assert_eq!(body["range"], "all");
+    assert_eq!(body["totals"]["input_tokens"], 12);
+    assert_eq!(body["days"].as_array().unwrap().len(), 100);
+    assert_eq!(body["hours"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn someone_elses_usage_is_not_visible() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
@@ -170,7 +187,7 @@ async fn an_unknown_range_is_refused_with_the_choices() {
     let (status, body) = server.user.json(server.user.get("/api/v1/activity?range=year")).await;
 
     assert_eq!(status, 400);
-    assert_eq!(body["message"], "Choose today, 7d or 30d as the range.");
+    assert_eq!(body["message"], "Choose today, 7d, 30d or all as the range.");
 }
 
 #[tokio::test]
