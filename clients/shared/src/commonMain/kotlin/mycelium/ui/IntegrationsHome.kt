@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import mycelium.api.ChatToolServer
+import mycelium.api.PresetAskAllEdit
 
 private const val AnyStatus = "Any status"
 private const val AllCategories = "All"
@@ -39,8 +40,8 @@ fun IntegrationMark(integration: Integration, size: androidx.compose.ui.unit.Dp 
         } else {
             val icon = when (integration.key) {
                 "email" -> MyIcon.Send
-                "outline" -> MyIcon.File
                 "caldav" -> MyIcon.Calendar
+                "outline" -> MyIcon.File
                 "litellm" -> MyIcon.Cloud
                 else -> MyIcon.Server
             }
@@ -109,7 +110,7 @@ data class IntegrationActions(
 @Composable
 private fun IntegrationCard(integration: Integration, actions: IntegrationActions, modifier: Modifier) {
     val colors = MyTheme.colors
-    val locked = integration.accounts.any { it.locked }
+    val editsResponses = integration.accounts.any { it.policy.preset == PresetAskAllEdit }
     val disabled = integration.group == IntegrationGroup.Disabled
 
     Column(
@@ -147,9 +148,9 @@ private fun IntegrationCard(integration: Integration, actions: IntegrationAction
         Hairline()
 
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            if (locked) {
+            if (editsResponses) {
                 Icon(MyIcon.Info, colors.textFaint, Tokens.Size.IconSm)
-                Label("Asks every call, you review results", Modifier.weight(1f), Tokens.Type.Meta, colors.textFaint, maxLines = 1)
+                Label("Ask before everything and edit responses", Modifier.weight(1f), Tokens.Type.Meta, colors.textFaint, maxLines = 1)
             } else if (integration.kind == "lastfm" && integration.accounts.none { it.signedIn }) {
                 Label("Sign in to love tracks and scrobble", Modifier.weight(1f), Tokens.Type.Meta, colors.textFaint, maxLines = 1)
             } else {
@@ -215,7 +216,7 @@ fun IntegrationsHome(servers: List<ChatToolServer>, actions: IntegrationActions,
             return@Column
         }
 
-        TextInput(query, { query = it }, label = "Search integrations and accounts", placeholder = "Search integrations and accounts", leadingIcon = MyIcon.Search, showLabel = false)
+        ListSearch(query, { query = it }, "integrations and accounts")
         FilterChips(listOf(AllCategories) + IntegrationCategory.entries.map { it.label }, category, { category = it }, "Category")
         FilterMenu("Status", listOf(AnyStatus) + IntegrationGroup.entries.map { it.title }, status, { status = it })
 

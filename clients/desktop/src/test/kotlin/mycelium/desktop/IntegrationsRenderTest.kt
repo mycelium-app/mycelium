@@ -18,6 +18,9 @@ import mycelium.api.ChatToolServer
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
 import mycelium.state.Store
+import mycelium.ui.AccountPage
+import mycelium.ui.DecisionsSettings
+import mycelium.ui.SetupFlow
 import mycelium.ui.IntegrationActions
 import mycelium.ui.IntegrationPage
 import mycelium.ui.IntegrationsCatalogue
@@ -53,13 +56,35 @@ class IntegrationsRenderTest {
     fun theHomeCatalogueAndAnIntegrationsPageRenderOnADesktopAndAPhone() {
         val store = store()
         val actions = IntegrationActions({}, {}, {}, {})
-        val pageActions = PageActions({}, {}, {}, {}, {}, {})
+        val pageActions = PageActions({}, {}, {}, {}, {}, {}, {})
 
         for (phone in listOf(false, true)) {
             for (dark in listOf(true, false)) {
                 assertTrue(screen("integrations-home", dark, phone) { IntegrationsHome(servers, actions, {}, {}) }.length() > 5_000)
                 assertTrue(screen("integrations-catalogue", dark, phone) { IntegrationsCatalogue(integrationsOf(servers), emptyList(), {}, {}, {}, {}) }.length() > 5_000)
                 assertTrue(screen("integrations-page", dark, phone) { IntegrationPage(store, integrationsOf(servers).first { it.name == "Email" }, pageActions) {} }.length() > 5_000)
+            }
+        }
+    }
+
+    @Test
+    fun theSetupDialogAccountPageAndDecisionsSettingsRenderOnADesktopAndAPhone() {
+        val store = store()
+        val pageActions = PageActions({}, {}, {}, {}, {}, {}, {})
+        val email = integrationsOf(servers).first { it.name == "Email" }
+
+        for (phone in listOf(false, true)) {
+            for (dark in listOf(true, false)) {
+                assertTrue(screen("setup-flow", dark, phone) { SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {}, {}) }.length() > 5_000)
+                assertTrue(
+                    screen("setup-flow-over-catalogue", dark, phone) {
+                        IntegrationsCatalogue(integrationsOf(servers), emptyList(), {}, {}, {}, {})
+                        SetupFlow(store, "mcp", "https://example.com/mcp", emptySet(), {}, {}, {}, {})
+                    }.length() > 5_000,
+                )
+                assertTrue(screen("setup-flow-email", dark, phone) { SetupFlow(store, "email", null, emptySet(), {}, {}, {}, {}) }.length() > 5_000)
+                assertTrue(screen("integration-account", dark, phone) { AccountPage(store, email, email.accounts.first(), pageActions, {}) {} }.length() > 5_000)
+                assertTrue(screen("decisions-settings", dark, phone) { DecisionsSettings(store) }.length() > 3_000)
             }
         }
     }

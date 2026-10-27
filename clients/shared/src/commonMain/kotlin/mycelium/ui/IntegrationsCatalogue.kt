@@ -131,7 +131,7 @@ fun IntegrationsCatalogue(integrations: List<Integration>, forges: List<Forge>, 
         }
 
         Label("Add integration", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-        TextInput(query, { query = it }, label = "Search services and tools", placeholder = "Search services and tools", leadingIcon = MyIcon.Search, showLabel = false)
+        ListSearch(query, { query = it }, "services and tools")
         FilterChips(listOf(AllCategories) + IntegrationCategory.entries.map { it.label }, category, { category = it }, "Category")
 
         if (showMcp) {

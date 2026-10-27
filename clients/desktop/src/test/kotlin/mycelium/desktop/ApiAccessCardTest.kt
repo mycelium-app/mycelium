@@ -26,6 +26,7 @@ import kotlinx.serialization.serializer
 import mycelium.api.Event
 import mycelium.api.MyceliumApi
 import mycelium.state.Store
+import mycelium.state.apiScopeLabel
 import mycelium.state.buildThread
 import mycelium.ui.LocalApiAccessRequests
 import mycelium.ui.MyTheme
@@ -106,6 +107,11 @@ class ApiAccessCardTest {
         rule.onNodeWithText("For 4 hours").assertExists()
         rule.onNodeWithText("Read the events to find the stuck turn").assertExists()
         rule.onNodeWithText("Decline").assertExists()
+    }
+
+    @Test
+    fun theAssistantsScopeReadsAsAllowManagingAssistants() {
+        assertEquals("Allow managing assistants", apiScopeLabel("assistants"))
     }
 
     @Test

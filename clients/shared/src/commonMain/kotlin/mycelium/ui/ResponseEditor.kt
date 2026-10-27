@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -484,7 +485,7 @@ private fun EditValueDialog(path: ResponsePath, current: JsonElement, original: 
         TextArea(text, { text = it; problem = null }, "Value", mono = true, minLines = 4, error = problem)
         Label(if (isText) "The agent gets this text in place of the original." else "The agent gets this value in place of the original.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::save, text = "Save", variant = ButtonVariant.Primary)
         }

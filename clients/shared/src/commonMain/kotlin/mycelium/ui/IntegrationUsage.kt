@@ -44,13 +44,13 @@ data class UsageRow(
     val calls: Int,
     val approved: Int,
     val declined: Int,
-    val shared: Int,
-    val removed: Int,
-    val withheld: Int,
+    val sent: Int,
+    val edited: Int,
+    val notSent: Int,
     val lastAt: String,
 )
 
-data class ToolUsage(val tool: String, val calls: Int, val declined: Int, val withheld: Int?, val lastAt: String)
+data class ToolUsage(val tool: String, val calls: Int, val declined: Int, val notSent: Int?, val lastAt: String)
 
 fun decisionWord(call: IntegrationCall): String = when (call.decision) {
     "declined" -> "Declined"
@@ -59,10 +59,10 @@ fun decisionWord(call: IntegrationCall): String = when (call.decision) {
 }
 
 fun reviewWord(call: IntegrationCall): String = when (call.review) {
-    "shared" -> "Shared"
-    "removed" -> "Items removed"
-    "withheld" -> "Withheld"
-    else -> if (call.kind == "write") "Not reviewed" else ""
+    "shared" -> "Sent as it was"
+    "edited" -> "Edited"
+    "not_sent" -> "Not sent"
+    else -> if (call.kind == "write") "Not edited" else ""
 }
 
 fun surfaceWord(surface: String): String = when (surface) {
@@ -102,15 +102,15 @@ fun usageRows(calls: List<IntegrationCall>, conversations: Map<String, Conversat
             group.count { it.decision != "declined" },
             group.count { it.decision == "declined" },
             group.count { it.review == "shared" },
-            group.count { it.review == "removed" },
-            group.count { it.review == "withheld" },
+            group.count { it.review == "edited" },
+            group.count { it.review == "not_sent" },
             group.maxOf { it.at },
         )
     }.sortedByDescending { it.lastAt }
 
 fun toolUsage(calls: List<IntegrationCall>): List<ToolUsage> =
     calls.groupBy { it.tool }.map { (tool, group) ->
-        ToolUsage(tool, group.size, group.count { it.decision == "declined" }, if (group.first().kind == "write") null else group.count { it.review == "withheld" }, group.maxOf { it.at })
+        ToolUsage(tool, group.size, group.count { it.decision == "declined" }, if (group.first().kind == "write") null else group.count { it.review == "not_sent" }, group.maxOf { it.at })
     }.sortedByDescending { it.calls }
 
 @Composable
@@ -165,8 +165,8 @@ fun IntegrationUsage(store: Store, integration: Integration, onOpenActivity: () 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Stat(calls.size, "calls")
             Stat(calls.count { it.decision == "declined" }, "declined by you")
-            Stat(calls.count { it.review == "withheld" }, "results withheld")
-            Stat(calls.count { it.review == "removed" }, "results with items removed")
+            Stat(calls.count { it.review == "not_sent" }, "results not sent")
+            Stat(calls.count { it.review == "edited" }, "results edited")
         }
 
         if (calls.isEmpty()) {
@@ -186,7 +186,7 @@ fun IntegrationUsage(store: Store, integration: Integration, onOpenActivity: () 
                     Col("Tools", 96.dp, max = 220.dp, priority = 3),
                     Col("Calls", 48.dp, align = ColumnAlign.End, numeric = true),
                     Col("Approved, declined", 96.dp, priority = 2),
-                    Col("Shared, removed, withheld", 96.dp, priority = 3),
+                    Col("Sent, edited, not sent", 96.dp, priority = 3),
                     Col("Last used", 80.dp, priority = 1),
                 ),
                 rows.size,
@@ -200,7 +200,7 @@ fun IntegrationUsage(store: Store, integration: Integration, onOpenActivity: () 
                         3 -> TableCell.Text(usage.tools.joinToString(", "), Tokens.Type.Code, colors.textMuted)
                         4 -> TableCell.Text(usage.calls.toString())
                         5 -> TableCell.Text("${usage.approved}, ${usage.declined}")
-                        6 -> TableCell.Text("${usage.shared}, ${usage.removed}, ${usage.withheld}")
+                        6 -> TableCell.Text("${usage.sent}, ${usage.edited}, ${usage.notSent}")
                         else -> TableCell.Text(stamp(usage.lastAt, true), color = colors.textMuted)
                     }
                 },
@@ -218,7 +218,7 @@ fun IntegrationUsage(store: Store, integration: Integration, onOpenActivity: () 
                     Col("Tool", 120.dp, weight = 1f),
                     Col("Calls", 48.dp, align = ColumnAlign.End, numeric = true),
                     Col("Declined", 64.dp, align = ColumnAlign.End, numeric = true),
-                    Col("Withheld", 96.dp, align = ColumnAlign.End),
+                    Col("Not sent", 96.dp, align = ColumnAlign.End),
                     Col("Last used", 80.dp, priority = 1),
                 ),
                 byTool.size,
@@ -229,7 +229,7 @@ fun IntegrationUsage(store: Store, integration: Integration, onOpenActivity: () 
                         0 -> TableCell.Text(usage.tool, Tokens.Type.Code)
                         1 -> TableCell.Text(usage.calls.toString())
                         2 -> TableCell.Text(usage.declined.toString())
-                        3 -> TableCell.Text(usage.withheld?.toString() ?: "not reviewed", color = colors.textMuted)
+                        3 -> TableCell.Text(usage.notSent?.toString() ?: "not edited", color = colors.textMuted)
                         else -> TableCell.Text(stamp(usage.lastAt, true), color = colors.textMuted)
                     }
                 },

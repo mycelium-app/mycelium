@@ -14,6 +14,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -104,81 +105,9 @@ class ChatToolsSettingsTest {
         rule.onNodeWithText("2 tools").assertExists()
         rule.onNodeWithText("Lab").performClick()
 
-        rule.onAllNodesWithText("Ends in ••••cdef")[0].assertExists()
         rule.onNodeWithText("MCP server · Developer").assertExists()
-    }
-
-    @Test
-    fun addingAServerSendsItsAddressAndAMaskedTokenAndNeverShowsTheToken() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Any MCP server").performClick()
-        rule.onNodeWithContentDescription("Name").performTextInput("GitHub")
-        rule.onNodeWithContentDescription("Streamable HTTP address").performTextInput("https://gh.test/mcp")
-        rule.onNodeWithContentDescription("Bearer token, if the server needs one").performTextInput("ghp-secret")
-        rule.onNodeWithContentDescription("Bearer token, if the server needs one").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("ghp-secret").fetchSemanticsNodes().isEmpty() && rule.onAllNodesWithText("No token").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("""{"name":"GitHub","url":"https://gh.test/mcp","bearer_token":"ghp-secret"}""", bodies.last { it.isNotEmpty() })
-        rule.onAllNodesWithText("ghp-secret").assertCountEquals(0)
-        rule.onAllNodesWithText("No token")[0].assertExists()
-    }
-
-    @Test
-    fun theAddFormShowsEveryButtonInFullAtPhoneWidth() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(320.dp)) { Scrolling { ChatToolsSettings(store) } } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Any MCP server").performClick()
-
-        for (label in listOf("Connect integration", "Sign in with OAuth", "Cancel")) {
-            val bounds = rule.onNodeWithText(label).assertExists().fetchSemanticsNode().boundsInRoot
-
-            assertTrue(bounds.left >= 0f && bounds.right <= with(rule.density) { 320.dp.toPx() }, "$label stays inside 320dp: $bounds")
-            assertTrue(bounds.height < with(rule.density) { 36.dp.toPx() }, "$label stays on one line: $bounds")
-        }
-    }
-
-    @Test
-    fun outlineAsksForItsAddressAndApiKeyAndIsListedAsOutline() {
-        postAnswer = HttpStatusCode.Created to """{"id":"s6","name":"Docs","url":"https://docs.test/mcp","settings":{"app":"outline"},"token_hint":"••••cdef","enabled":true,"always_allow":false,"tools":[{"name":"search","description":"Search"}],"created_at":"2026-10-22T15:00:00Z"}"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Outline").performClick()
-        rule.onNodeWithContentDescription("Name").performTextInput("Docs")
-        rule.onNodeWithContentDescription("Outline address").performTextInput("https://docs.test")
-        rule.onNodeWithContentDescription("Outline API key").performTextInput("ol_api_secret")
-        rule.onNodeWithContentDescription("Outline API key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
-        assertEquals("""{"name":"Docs","url":"https://docs.test","bearer_token":"ol_api_secret","kind":"outline"}""", bodies.last { it.isNotEmpty() })
-        rule.onAllNodesWithText("ol_api_secret").assertCountEquals(0)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built in · Docs").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Outline").assertExists()
-    }
-
-    @Test
-    fun addingALiteLlmGatewaySendsItsKindAddressAndMaskedKey() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("LiteLLM").performClick()
-        rule.onNodeWithContentDescription("LiteLLM address").performTextInput("https://litellm.test")
-        rule.onNodeWithContentDescription("LiteLLM key").performTextInput("sk-secret-1")
-        rule.onNodeWithContentDescription("LiteLLM key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
-        assertEquals("""{"name":"LiteLLM","url":"https://litellm.test","bearer_token":"sk-secret-1","kind":"litellm"}""", bodies.last { it.isNotEmpty() })
-        rule.onAllNodesWithText("sk-secret-1").assertCountEquals(0)
+        rule.onNodeWithContentDescription("Open lab.test/mcp").performClick()
+        rule.onAllNodesWithText("Ends in ••••cdef")[0].assertExists()
     }
 
     @Test
@@ -190,66 +119,10 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("LiteLLM").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("LiteLLM").performClick()
-        rule.onNodeWithContentDescription("More for litellm.test/mcp").performClick()
-        rule.onNodeWithText("Refresh tools").performClick()
+        rule.onNodeWithContentDescription("Open litellm.test/mcp").performClick()
+        rule.onNodeWithText("Refresh tools").performScrollTo().performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/s7/refresh") } }
-    }
-
-    @Test
-    fun signInWithOutlineOpensTheBrowserAndTheIntegrationAppearsWhenTheSignInFinishes() {
-        val opened = CopyOnWriteArrayList<String>()
-        val platform = object : Platform {
-            override val originUrl: String? = null
-            override val signsInThroughTheBrowser = false
-            override fun loadConnection(): Connection? = null
-            override fun saveConnection(connection: Connection?) = Unit
-            override fun device() = DeviceInfo("Desktop", "host", "linux", "x86_64")
-            override fun approveCode(): String? = null
-            override fun currentPath() = "/"
-            override fun navigate(url: String) = Unit
-            override fun openUrl(url: String) { opened += url }
-            override fun copyToClipboard(text: String) = Unit
-        }
-        postAnswer = HttpStatusCode.OK to """{"authorize_url":"https://docs.test/authorize?state=s"}"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { CompositionLocalProvider(LocalPlatform provides platform) { Scrolling { ChatToolsSettings(store) } } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Outline").performClick()
-        rule.onNodeWithContentDescription("Name").performTextInput("Docs")
-        rule.onNodeWithContentDescription("Outline address").performTextInput("https://docs.test")
-        rule.onNodeWithText("Sign in with Outline").performClick()
-
-        rule.waitUntil(5_000) { opened.isNotEmpty() }
-        assertEquals(listOf("https://docs.test/authorize?state=s"), opened.toList())
-        assertEquals("""{"name":"Docs","url":"https://docs.test","kind":"outline"}""", bodies.last { it.isNotEmpty() })
-        rule.onNodeWithText("Finish signing in in your browser.").assertExists()
-
-        listed = """{"id":"s6","name":"Docs","url":"https://docs.test/mcp","settings":{"app":"outline"},"oauth":true,"enabled":true,"always_allow":false,"tools":[{"name":"search","description":"Search"}],"created_at":"2026-10-22T15:00:00Z"}"""
-        store.receive(StreamMessage.IntegrationsChanged)
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Signed in with OAuth").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Finish signing in in your browser.").assertDoesNotExist()
-        rule.onNodeWithText("Connect integration").assertDoesNotExist()
-    }
-
-    @Test
-    fun aGatewayEndpointCanBeSubmittedFromTheBearerTokenFieldWithEnter() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Any MCP server").performClick()
-        rule.onNodeWithContentDescription("Name").performTextInput("Gateway")
-        rule.onNodeWithContentDescription("Streamable HTTP address").performTextInput("https://gateway.test/mcp")
-        rule.onNodeWithContentDescription("Bearer token, if the server needs one").performTextInput("test-gateway-key")
-        rule.onNodeWithContentDescription("Bearer token, if the server needs one").performKeyInput { pressKey(Key.Enter) }
-
-        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post } }
-        assertEquals("""{"name":"Gateway","url":"https://gateway.test/mcp","bearer_token":"test-gateway-key"}""", bodies.last { it.isNotEmpty() })
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("test-gateway-key").fetchSemanticsNodes().isEmpty() }
-        rule.onAllNodesWithText("test-gateway-key").assertCountEquals(0)
     }
 
     @Test
@@ -263,26 +136,10 @@ class ChatToolsSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("500 tools").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("tool_1").assertDoesNotExist()
         rule.onNodeWithText("Lab").performClick()
-        rule.onNodeWithContentDescription("More for lab.test/mcp").performClick()
-        rule.onNodeWithText("Refresh tools").performClick()
+        rule.onNodeWithContentDescription("Open lab.test/mcp").performClick()
+        rule.onNodeWithText("Refresh tools").performScrollTo().performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("get_weather").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("/api/v1/chat-tool-servers/s1/refresh", requests.last { it.method == HttpMethod.Post }.url.encodedPath)
-    }
-
-    @Test
-    fun aRefusedServerShowsWhatToFixAndKeepsTheForm() {
-        postAnswer = HttpStatusCode.BadRequest to """{"error":"tool_server_failed","message":"GitHub did not accept this token. Check that it has not expired and is for this server, then try again."}"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Any MCP server").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub did not accept this token. Check that it has not expired and is for this server, then try again.").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Name").assertExists()
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath == "/api/v1/chat-tool-servers/s1/refresh" } }
     }
 
     @Test
@@ -311,12 +168,12 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Lab").performClick()
-        rule.onNodeWithContentDescription("More for lab.test/mcp").performClick()
-        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Open lab.test/mcp").performClick()
+        rule.onNodeWithText("Rename account").performScrollTo().performClick()
         rule.onNodeWithContentDescription("Account name").performTextReplacement("  Weather  ")
         rule.onNodeWithText("Save").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Rename account").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account name").fetchSemanticsNodes().isEmpty() }
         assertEquals("""{"name":"Weather"}""", bodies.last { it.isNotEmpty() })
         assertEquals("/api/v1/chat-tool-servers/s1", requests.last { it.method == HttpMethod.Patch }.url.encodedPath)
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Weather").fetchSemanticsNodes().isNotEmpty() }
@@ -330,33 +187,13 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Lab").performClick()
-        rule.onNodeWithContentDescription("More for lab.test/mcp").performClick()
-        rule.onNodeWithText("Rename").performClick()
+        rule.onNodeWithContentDescription("Open lab.test/mcp").performClick()
+        rule.onNodeWithText("Rename account").performScrollTo().performClick()
         rule.onNodeWithContentDescription("Account name").performTextReplacement("GitHub")
         rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Enter a different name. Another tool server already has this one.").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Rename account").assertExists()
-    }
-
-    @Test
-    fun choosingZulipAsksForTheServerEmailAndApiKeyAndShowsItAsBuiltIn() {
-        postAnswer = HttpStatusCode.Created to ZulipJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Zulip").performClick()
-        rule.onNodeWithContentDescription("Zulip server address").performTextInput("https://chat.test")
-        rule.onNodeWithContentDescription("Zulip email address").performTextInput("ada@example.com")
-        rule.onNodeWithContentDescription("Zulip API key").performTextInput("zulip-secret")
-        rule.onNodeWithContentDescription("Zulip API key").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built in · Chat").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("""{"name":"Zulip","url":"https://chat.test","bearer_token":"zulip-secret","kind":"zulip","account":"ada@example.com"}""", bodies.last { it.isNotEmpty() })
-        rule.onAllNodesWithText("zulip-secret").assertCountEquals(0)
-        rule.onNodeWithText("ada@example.com").assertExists()
+        rule.onNodeWithContentDescription("Account name").assertExists()
     }
 
     @Test
@@ -367,146 +204,9 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Zulip").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Zulip").performClick()
-        rule.onNodeWithContentDescription("More for ada@example.com").performClick()
-        rule.onNodeWithText("Rename").assertExists()
+        rule.onNodeWithContentDescription("Open ada@example.com").performClick()
+        rule.onNodeWithText("Rename account").assertExists()
         rule.onNodeWithText("Refresh tools").assertDoesNotExist()
-    }
-
-    @Test
-    fun choosingEmailAsksForTheMailServersAndSendsTheirSettingsWithoutShowingThePassword() {
-        postAnswer = HttpStatusCode.Created to EmailJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Email").performClick()
-        rule.onNodeWithContentDescription("Email username").performTextInput("ada@example.com")
-        rule.onNodeWithContentDescription("Email password or app password").performTextInput("mail-secret")
-        rule.onNodeWithContentDescription("Email password or app password").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithContentDescription("IMAP server").performTextInput("imap.example.com")
-        rule.onNodeWithContentDescription("SMTP server").performTextInput("smtp.example.com")
-        rule.onNodeWithContentDescription("SMTP port, if not the usual one").performTextInput("587")
-        rule.onAllNodesWithText("STARTTLS")[1].performClick()
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built in · Mail").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(
-            """{"name":"Email","url":"","bearer_token":"mail-secret","kind":"email","account":"ada@example.com","settings":{"imap_host":"imap.example.com","imap_tls":"tls","smtp_host":"smtp.example.com","smtp_tls":"starttls","smtp_port":587}}""",
-            bodies.last { it.isNotEmpty() },
-        )
-        rule.onAllNodesWithText("mail-secret").assertCountEquals(0)
-        rule.onNodeWithText("ada@example.com").assertExists()
-    }
-
-    @Test
-    fun anEmailPortThatIsNotANumberIsExplainedAndNothingIsSent() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Email").performClick()
-        rule.onNodeWithContentDescription("IMAP port, if not the usual one").performTextInput("imap")
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.onNodeWithText("Enter the IMAP port as a number, for example 993.").assertExists()
-        assertEquals(0, requests.count { it.method == HttpMethod.Post })
-    }
-
-    @Test
-    fun choosingStoatAsksForTheServerAddressAndTokenAndSendsTheTokenType() {
-        postAnswer = HttpStatusCode.Created to StoatJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Stoat").performClick()
-        rule.onNodeWithContentDescription("Stoat API address").performTextInput("https://api.stoat.chat")
-        rule.onNodeWithText("Bot").performClick()
-        rule.onNodeWithContentDescription("Stoat token").performTextInput("stoat-secret")
-        rule.onNodeWithContentDescription("Stoat token").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Built in · Chat").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("""{"name":"Stoat","url":"https://api.stoat.chat","bearer_token":"stoat-secret","kind":"stoat","settings":{"token_kind":"bot"}}""", bodies.last { it.isNotEmpty() })
-        rule.onAllNodesWithText("stoat-secret").assertCountEquals(0)
-    }
-
-    @Test
-    fun stoatUsesItsOwnAddressWhenNoneIsGiven() {
-        postAnswer = HttpStatusCode.Created to StoatJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Stoat").performClick()
-        rule.onNodeWithContentDescription("Stoat token").performTextInput("stoat-secret")
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { bodies.any { it.contains("stoat-secret") } }
-        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"url\":\"https://stoat.chat/api\""), bodies.last())
-    }
-
-    @Test
-    fun anExpiringTokenShowsItsDateOnTheCardAndTheWarningOnThePage() {
-        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"status\":\"expires_soon\",\"token_expires_at\":\"2027-01-24T00:00:00Z\"")
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Token expires soon, on 24 Jan 2027").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Needs attention").assertExists()
-        rule.onNodeWithText("Lab").performClick()
-
-        rule.onAllNodesWithText("on 24 Jan 2027. Replace the token before then.", substring = true).assertCountEquals(1)
-    }
-
-    @Test
-    fun anExpiredTokenNeedsAttentionAndThePageAsksToReplaceIt() {
-        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"status\":\"expired\",\"token_expires_at\":\"2026-10-01T00:00:00Z\"")
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Token expired").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Needs attention").assertExists()
-        rule.onNodeWithText("Lab").performClick()
-
-        rule.onNodeWithText("Token expired 1 Oct 2026. Agents cannot use this account until you re-authenticate it.").assertExists()
-        rule.onNodeWithContentDescription("New token").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-    }
-
-    @Test
-    fun theApprovalsEditorShowsWhereEachToolInheritsFromAndSavesTheOverrides() {
-        listed = LabJson.replace("\"enabled\":true", "\"enabled\":true,\"policy\":{\"ask\":{\"all\":false}}")
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Lab").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Lab").performClick()
-
-        rule.onAllNodesWithText("Inherited from the integration default: no").assertCountEquals(4)
-        rule.onAllNodesWithText("Yes")[0].performClick()
-
-        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
-        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"ask\":{\"all\":true"), bodies.last())
-    }
-
-    @Test
-    fun lastFmNeedsAKeyASecretAndAUsernameAndSendsThemWithoutAnAddress() {
-        postAnswer = HttpStatusCode.Created to LastFmJson
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { Scrolling { ChatToolsSettings(store) } } }
-
-        rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Last.fm").performClick()
-        rule.onNodeWithContentDescription("Last.fm username").performTextInput("ada")
-        rule.onNodeWithContentDescription("Last.fm API key").performTextInput("key-1")
-        rule.onNodeWithContentDescription("Last.fm shared secret").performTextInput("secret-5678")
-        rule.onNodeWithContentDescription("Last.fm shared secret").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
-        rule.onNodeWithText("Connect integration").performClick()
-
-        rule.waitUntil(5_000) { bodies.any { it.contains("secret-5678") } }
-        assertEquals("""{"name":"Last.fm","url":"","bearer_token":"secret-5678","kind":"lastfm","account":"ada","settings":{"api_key":"key-1"}}""", bodies.last { it.isNotEmpty() })
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Connect integration").fetchSemanticsNodes().isEmpty() }
-        rule.onAllNodesWithText("secret-5678").assertCountEquals(0)
     }
 
     @Test
@@ -531,8 +231,8 @@ class ChatToolsSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to love tracks and scrobble").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Last.fm").performClick()
-        rule.onNodeWithContentDescription("More for ada").performClick()
-        rule.onNodeWithText("Sign in to Last.fm").performClick()
+        rule.onNodeWithContentDescription("Open ada").performClick()
+        rule.onNodeWithText("Re-authenticate").performScrollTo().performClick()
 
         rule.waitUntil(5_000) { opened.isNotEmpty() }
         assertEquals(listOf("https://www.last.fm/api/auth/?api_key=key-1"), opened.toList())

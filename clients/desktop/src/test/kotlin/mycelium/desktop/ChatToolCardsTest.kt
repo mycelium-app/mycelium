@@ -83,16 +83,17 @@ class ChatToolCardsTest {
     }
 
     @Test
-    fun aPendingApprovalNamesTheToolTheServerAndTheArgumentsAndOffersThreeChoices() {
+    fun aPendingApprovalNamesTheToolTheServerAndTheArgumentsAndOffersApproveDenyAndAlwaysApprove() {
         show(ChatToolThread)
 
         rule.onNodeWithText("Waiting for your approval").assertExists()
         rule.onNodeWithText("Server: lab").assertExists()
         rule.onNodeWithContentDescription("city: Paris").assertExists()
         rule.onNodeWithContentDescription("days: 3").assertExists()
-        rule.onNodeWithText("Allow once").assertExists()
-        rule.onNodeWithText("Always allow this tool").assertExists()
+        rule.onNodeWithText("Approve").assertExists()
         rule.onNodeWithText("Deny").assertExists()
+        rule.onNodeWithContentDescription("More ways to approve").performClick()
+        rule.onNodeWithText("Always approve").assertExists()
     }
 
     @Test
@@ -100,7 +101,8 @@ class ChatToolCardsTest {
         val answered = mutableListOf<Pair<String, String>>()
         show(ChatToolThread, answered)
 
-        rule.onNodeWithText("Always allow this tool").performClick()
+        rule.onNodeWithContentDescription("More ways to approve").performClick()
+        rule.onNodeWithText("Always approve").performClick()
 
         assertEquals(listOf("call_2" to "allow_always"), answered)
 

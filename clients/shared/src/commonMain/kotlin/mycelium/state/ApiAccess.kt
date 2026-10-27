@@ -5,6 +5,7 @@ fun apiScopeLabel(scope: String): String = when (scope) {
     "conversations:write" -> "Send messages and change conversations"
     "nodes:read" -> "Read nodes"
     "settings:read" -> "Read settings"
+    "assistants" -> "Allow managing assistants"
     else -> scope
 }
 

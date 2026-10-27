@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -51,6 +53,8 @@ internal const val ZulipLocked = """{"id":"z1","name":"Zulip","kind":"zulip","ur
 internal const val TrackerOff = """{"id":"t1","name":"Tracker","kind":"mcp","url":"https://mcp.tracker.test","enabled":false,"always_allow":false,"tools":[{"name":"list_issues","kind":"read"}],"created_at":"2026-10-22T13:00:00Z"}"""
 
 internal const val StoatExpired = """{"id":"s1","name":"Stoat","kind":"stoat","url":"https://api.stoat.chat","token_hint":"••••cdef","enabled":true,"always_allow":false,"status":"expired","token_expires_at":"2026-10-01T00:00:00Z","tools":[{"name":"list_servers","kind":"read"}],"created_at":"2026-10-22T14:00:00Z"}"""
+
+internal const val CalendarServer = """{"id":"c1","name":"Calendar","kind":"caldav","url":"https://cal.example.com","account":"sam","settings":{"principal":"https://cal.example.com/dav/principals/sam/","calendar_home":"https://cal.example.com/dav/calendars/sam/"},"token_hint":"••••7k2q","enabled":true,"always_allow":false,"tools":[{"name":"list_events","kind":"read"},{"name":"create_event","kind":"write","asks":true}],"created_at":"2026-10-22T15:00:00Z"}"""
 
 internal const val AcmeGroup = """{"id":"g1","name":"acme","folders":[],"created_at":"2026-10-22T10:00:00Z"}"""
 
@@ -108,7 +112,7 @@ class IntegrationsTest {
     }
 
     private fun openCard(name: String) {
-        rule.onNodeWithText(name).performClick()
+        rule.onAllNodesWithText(name).filterToOne(!hasContentDescription("Category: $name")).performClick()
     }
 
     @Test
@@ -118,7 +122,6 @@ class IntegrationsTest {
         rule.onNodeWithText("Needs attention").assertExists()
         rule.onNodeWithText("Disabled: agents cannot use it").assertExists()
         rule.onNodeWithText("Token expires soon, on 24 Jan 2027").assertExists()
-        rule.onNodeWithText("Ask before everything and edit responses").assertExists()
         rule.onNodeWithText("2 accounts: a@example.com, b@example.com").assertExists()
 
         rule.onNodeWithContentDescription("Search integrations and accounts").performTextInput("send_message")
@@ -177,7 +180,7 @@ class IntegrationsTest {
         rule.onNodeWithText("Added, 2 accounts").assertExists()
         rule.onNodeWithText("Agents can: Search, read and move mail.").assertExists()
         rule.onNodeWithText("Asks first: Sending mail asks first.").assertExists()
-        rule.onAllNodesWithText("Not added").assertCountEquals(3)
+        rule.onAllNodesWithText("Not added").assertCountEquals(4)
     }
 
     @Test
@@ -199,54 +202,64 @@ class IntegrationsTest {
         show()
 
         rule.onNodeWithText("Add integration").performClick()
-        rule.onNodeWithText("Calendar").performClick()
+        rule.onAllNodesWithText("Calendar").onLast().performClick()
 
         rule.onNodeWithText("Add a calendar").assertExists()
         rule.onNodeWithText("Works with any CalDAV server, such as Nextcloud, Radicale, Fastmail or iCloud.").assertExists()
     }
 
     @Test
-    fun settingsBelongToTheChosenAccountAndExpiryIsSetFromPresetsOrADate() {
+    fun aCalendarAccountHasACardUnderTheCalendarFilterThatOpensItsAccountPage() {
+        servers = listOf(DocsServer, CalendarServer)
         show()
-        openCard("Email")
 
-        rule.onNodeWithText("Settings for a@example.com").assertExists()
-        rule.onNodeWithContentDescription("Settings for b@example.com").performClick()
-        rule.onNodeWithText("Settings for b@example.com").assertExists()
+        rule.onNodeWithContentDescription("Category: Calendar").performClick()
+        rule.onNodeWithText("docs.test", substring = true).assertDoesNotExist()
 
-        rule.onNodeWithText("30 days").performScrollTo().performClick()
-        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch && it.url.encodedPath.endsWith("/e2") } }
-        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"token_expires_at\""), bodies.last())
+        openCard("Calendar")
+        rule.onNodeWithContentDescription("Open sam").performClick()
 
-        rule.onNodeWithText("No expiry").performScrollTo().performClick()
-        rule.waitUntil(5_000) { bodies.any { it == """{"clear_token_expiry":true}""" } }
-
-        rule.onNodeWithContentDescription("Custom expiry date").performScrollTo().performTextInput("next week")
-        rule.onNodeWithText("Set date").performScrollTo().performClick()
-        rule.onNodeWithContentDescription("Custom expiry date. Error: Enter the expiry date as year-month-day, for example 2027-01-24.").assertExists()
+        rule.onNodeWithText("https://cal.example.com/dav/calendars/sam/").assertExists()
     }
 
     @Test
-    fun theApprovalsEditorShowsInheritedAndOverriddenValuesForTheChosenAccount() {
+    fun eachAccountHasItsOwnPageAndChangingItsExpiryIsSavedForThatAccount() {
         show()
         openCard("Email")
 
-        rule.onAllNodesWithText("Inherited from the integration default: yes").assertCountEquals(1)
-        rule.onNodeWithText("Write tools always ask first.").assertExists()
-        rule.onAllNodesWithText("Yes")[0].performClick()
+        rule.onNodeWithContentDescription("Open b@example.com").performClick()
+        rule.onNodeWithText("Change expiry").performScrollTo().performClick()
+        rule.onNodeWithText("Save").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch && it.url.encodedPath.endsWith("/e2") } }
+        assertEquals("""{"clear_token_expiry":true}""", bodies.last { it.isNotEmpty() })
+    }
+
+    @Test
+    fun approvalsAreChangedInADialogForTheChosenAccountOnly() {
+        show()
+        openCard("Email")
+
+        rule.onNodeWithContentDescription("Open a@example.com").performClick()
+        rule.onNodeWithText("Approvals").performClick()
+        rule.onNodeWithText("Change approvals").performClick()
+        rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch && it.url.encodedPath.endsWith("/e1") } }
-        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"ask\":{\"all\":true"), bodies.last())
+        assertTrue(bodies.last { it.isNotEmpty() }.contains("\"policy\""), bodies.last())
     }
 
     @Test
     fun availabilityCanBeLimitedToChosenGroups() {
         show()
         openCard("Tracker")
-
-        rule.onNodeWithText("Chosen groups").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Open mcp.tracker.test").performClick()
+        rule.onNodeWithText("Availability").performClick()
+        rule.onNodeWithText("Change availability").performClick()
+        rule.onNodeWithText("Chosen groups").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Available in acme").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Available in acme").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Available in acme").performClick()
+        rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Put && it.url.encodedPath.endsWith("/t1/groups") } }
         assertEquals("""{"groups":["g1"]}""", bodies.last { it.isNotEmpty() })
@@ -259,10 +272,12 @@ class IntegrationsTest {
 
         rule.onNodeWithText("Needs attention").assertExists()
         openCard("Stoat")
+        rule.onNodeWithContentDescription("Open api.stoat.chat").performClick()
 
-        rule.onNodeWithText("Token expired 1 Oct 2026. Agents cannot use this account until you re-authenticate it.").assertExists()
-        rule.onNodeWithContentDescription("New token").performScrollTo().performTextInput("fresh-secret-token")
+        rule.onNodeWithText("1 Oct 2026, expired").assertExists()
         rule.onNodeWithText("Replace token").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("New token").performTextInput("fresh-secret-token")
+        rule.onNodeWithText("Save").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
         assertEquals("""{"clear_token_expiry":true,"bearer_token":"fresh-secret-token"}""", bodies.last { it.isNotEmpty() })
@@ -298,7 +313,6 @@ class IntegrationsTest {
         rule.onNodeWithText("Claude Code").assertExists()
         rule.onNodeWithText("OpenRouter · a chat model").assertExists()
         rule.onNodeWithText("2, 1").assertExists()
-        rule.onNodeWithText("1, 0, 1").assertExists()
 
         rule.onNodeWithContentDescription("Open Triage support inbox").performClick()
         assertEquals(listOf("k1"), opened.toList())
