@@ -314,7 +314,11 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
             let credentials = Credentials { address: address.clone(), account: account.unwrap_or_default().to_string(), secret: secret.to_string(), settings: settings.clone(), session: None };
 
-            integration.verify(&state.http, &credentials).await.map_err(|reason| ApiError::bad_request("tool_server_failed", reason))?;
+            let discovered = integration.verify(&state.http, &credentials).await.map_err(|reason| ApiError::bad_request("tool_server_failed", reason))?;
+
+            if let (Some(settings), Some(discovered)) = (settings.as_object_mut(), discovered.as_object()) {
+                settings.extend(discovered.clone());
+            }
 
             Vec::new()
         }
