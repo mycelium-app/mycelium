@@ -188,8 +188,43 @@ async fn walkthrough_with_a_bad_check_stores_nothing() {
     assert_eq!(latest_walkthrough(&server, id).await, Value::Null);
 }
 
-async fn set_up_reflection(server: &Server, link: &NodeLink, enabled: bool) -> (u16, Value) {
-    server.user.json(server.user.post("/api/v1/reflections/schedule").json(&json!({"node_id": link.id, "agent": "claude", "cwd": "/work/app", "enabled": enabled}))).await
+async fn next_matching<T>(link: &mut NodeLink, pick: impl Fn(&ControlToNode) -> Option<T>) -> T {
+    loop {
+        let message = link.next().await;
+
+        if let Some(found) = pick(&message) {
+            return found;
+        }
+    }
+}
+
+async fn wellness_on(server: &Server, link: &NodeLink) -> String {
+    let (status, assistant) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
+    assert_eq!(status, 200, "{assistant}");
+    let id = assistant["id"].as_str().unwrap().to_string();
+    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"preferences": {"models": [{"agent": "claude"}], "nodes": [link.id]}}))).await;
+    assert_eq!(status, 200, "{patched}");
+
+    id
+}
+
+async fn action_id(server: &Server, assistant: &str, name: &str) -> String {
+    let (_, actions) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}/actions"))).await;
+
+    actions.as_array().unwrap().iter().find(|action| action["name"] == name).unwrap()["id"].as_str().unwrap().to_string()
+}
+
+async fn run_action(server: &Server, link: &mut NodeLink, assistant: &str, name: &str, inputs: Value) -> (Uuid, String) {
+    let id = action_id(server, assistant, name).await;
+    let (status, started) = server.user.json(server.user.post(&format!("/api/v1/assistants/{assistant}/actions/{id}/run")).json(&json!({"inputs": inputs}))).await;
+    assert_eq!(status, 200, "{started}");
+    let conversation: Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    let starting = next_matching(link, |message| matches!(message, ControlToNode::StartSession { .. }).then_some(())).await;
+    let _ = starting;
+    link.start_session(conversation, "acp-wellness").await;
+    let (_, text) = link.expect_prompt().await;
+
+    (conversation, text)
 }
 
 async fn save_reflection(server: &Server, token: &str, conversation: Uuid, arguments: Value) -> Value {
@@ -204,37 +239,61 @@ async fn reflections(server: &Server) -> Vec<Value> {
     listed.as_array().unwrap().clone()
 }
 
-async fn first_drafting_run(server: &Server, link: &mut NodeLink, schedule: &str) -> Uuid {
-    let (status, run) = server.user.json(server.user.post(&format!("/api/v1/schedules/{schedule}/run"))).await;
-    assert!(status < 300, "{run}");
+#[tokio::test]
+async fn the_wellness_assistant_is_created_once_with_its_actions_and_schedules() {
+    let server = Server::start().await;
 
-    link.expect_start_session().await
+    let (status, first) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
+    let (_, second) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
+    assert_eq!((status, first["builtin_key"].clone(), first["name"].clone()), (200, json!("wellness"), json!("Wellness")));
+    assert_eq!(first["id"], second["id"]);
+
+    let id = first["id"].as_str().unwrap();
+    let (_, actions) = server.user.json(server.user.get(&format!("/api/v1/assistants/{id}/actions"))).await;
+    let names: Vec<&str> = actions.as_array().unwrap().iter().map(|action| action["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Weekly reflection", "End-of-day wrap-up", "Review an exercise"]);
+    let (_, schedules) = server.user.json(server.user.get("/api/v1/schedules")).await;
+    let crons: Vec<&str> = schedules.as_array().unwrap().iter().map(|schedule| schedule["cron"].as_str().unwrap()).collect();
+    assert_eq!(crons, ["0 16 * * 5", "30 17 * * 1-5"]);
+    assert!(schedules.as_array().unwrap().iter().all(|schedule| schedule["assistant_id"] == json!(id) && schedule["node_id"].is_null()));
 }
 
 #[tokio::test]
-async fn reflection_schedule_is_created_once() {
+async fn the_wellness_assistant_cannot_be_renamed_archived_or_have_actions_deleted() {
     let server = Server::start().await;
-    let link = server.online_node("laptop").await;
+    let (_, wellness) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
+    let id = wellness["id"].as_str().unwrap();
 
-    let (status, first) = set_up_reflection(&server, &link, true).await;
-    assert_eq!(status, 200, "{first}");
-    let (_, second) = set_up_reflection(&server, &link, true).await;
-    let (_, paused) = set_up_reflection(&server, &link, false).await;
+    let (renamed, body) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"name": "Health"}))).await;
+    let (archived, _) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true}))).await;
+    let action = action_id(&server, id, "Weekly reflection").await;
+    let (deleted, _) = server.user.json(server.user.delete(&format!("/api/v1/assistants/{id}/actions/{action}"))).await;
 
-    assert_eq!(first["schedule_id"], second["schedule_id"]);
-    assert_eq!((first["cron"].clone(), paused["enabled"].clone(), paused["schedule_id"].clone()), (json!("0 16 * * 5"), json!(false), first["schedule_id"].clone()));
-    let count = sqlx::query_scalar::<_, i64>("select count(*) from schedules").fetch_one(&server.pool).await.unwrap();
-    assert_eq!(count, 1);
-    let (_, shown) = server.user.json(server.user.get("/api/v1/reflections/schedule")).await;
-    assert_eq!(shown["enabled"], false);
+    assert_eq!((renamed, body["error"].clone(), archived, deleted), (409, json!("assistant_built_in"), 409, 409));
+}
+
+#[tokio::test]
+async fn a_built_in_action_can_be_edited_and_reset_to_its_default() {
+    let server = Server::start().await;
+    let (_, wellness) = server.user.json(server.user.get("/api/v1/assistants/builtin/wellness")).await;
+    let id = wellness["id"].as_str().unwrap();
+    let action = action_id(&server, id, "End-of-day wrap-up").await;
+    let path = format!("/api/v1/assistants/{id}/actions/{action}");
+
+    let (status, edited) = server.user.json(server.user.put(&path).json(&json!({"name": "End-of-day wrap-up", "prompt": "Keep it to one line.", "inputs": [], "pinned": false}))).await;
+    assert_eq!((status, edited["prompt"].clone(), edited["builtin_key"].clone()), (200, json!("Keep it to one line."), json!("end_of_day")));
+    let (_, restored) = server.user.json(server.user.post(&format!("{path}/reset"))).await;
+
+    assert_eq!((restored["pinned"].clone(), restored["prompt"].as_str().unwrap().starts_with("Wrap up my day")), (json!(true), true));
 }
 
 #[tokio::test]
 async fn save_reflection_keeps_edited_sections() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let (_, schedule) = set_up_reflection(&server, &link, true).await;
-    let scheduled = first_drafting_run(&server, &mut link, schedule["schedule_id"].as_str().unwrap()).await;
+    let assistant = wellness_on(&server, &link).await;
+    let (scheduled, asked) = run_action(&server, &mut link, &assistant, "Weekly reflection", json!({"week": "2026-10-28"})).await;
+    assert!(asked.contains("the week containing 2026-10-28") && asked.contains("save_reflection"), "{asked}");
     let token = link.token.clone();
     let saved = save_reflection(&server, &token, scheduled, json!({"week": "2026-10-28", "done": "Shipped A", "learned": "L1", "waiting": "W1", "next_week": "N1"})).await;
     assert_eq!(saved["isError"], false, "{saved}");
@@ -242,12 +301,14 @@ async fn save_reflection_keeps_edited_sections() {
     assert_eq!(stored[0]["week"], "2026-10-26");
     let id = stored[0]["id"].as_str().unwrap().to_string();
     server.user.json(server.user.patch(&format!("/api/v1/reflections/{id}")).json(&json!({"learned": "Mine"}))).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: scheduled, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
 
     let (status, redraft) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
     assert_eq!(status, 202, "{redraft}");
-    let redrafting = link.expect_start_session().await;
-    assert_eq!(redrafting.to_string(), redraft["conversation_id"]);
-    save_reflection(&server, &token, redrafting, json!({"week": "2026-10-26", "done": "Shipped B", "learned": "L2", "waiting": "W2", "next_week": "N2"})).await;
+    let (_, redraft_prompt) = link.expect_prompt().await;
+    assert!(redraft_prompt.contains("the week containing 2026-10-26"), "{redraft_prompt}");
+    assert_eq!(scheduled.to_string(), redraft["conversation_id"]);
+    save_reflection(&server, &token, scheduled, json!({"week": "2026-10-26", "done": "Shipped B", "learned": "L2", "waiting": "W2", "next_week": "N2"})).await;
 
     let after = reflections(&server).await;
     assert_eq!(after.len(), 1);
@@ -256,7 +317,7 @@ async fn save_reflection_keeps_edited_sections() {
 }
 
 #[tokio::test]
-async fn a_conversation_that_is_not_drafting_cannot_save_a_reflection() {
+async fn a_conversation_that_is_not_the_wellness_assistant_cannot_save_a_reflection() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let id = started_conversation(&server, &mut link).await;
@@ -272,8 +333,8 @@ async fn a_conversation_that_is_not_drafting_cannot_save_a_reflection() {
 async fn patch_marks_sections_edited() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
-    let (_, schedule) = set_up_reflection(&server, &link, true).await;
-    let scheduled = first_drafting_run(&server, &mut link, schedule["schedule_id"].as_str().unwrap()).await;
+    let assistant = wellness_on(&server, &link).await;
+    let (scheduled, _) = run_action(&server, &mut link, &assistant, "Weekly reflection", json!({})).await;
     let token = link.token.clone();
     save_reflection(&server, &token, scheduled, json!({"done": "A", "learned": "B"})).await;
     let id = reflections(&server).await[0]["id"].as_str().unwrap().to_string();
@@ -291,14 +352,14 @@ async fn patch_marks_sections_edited() {
 }
 
 #[tokio::test]
-async fn redrafting_before_the_reflection_is_set_up_says_what_to_do() {
+async fn redrafting_before_the_wellness_assistant_has_a_model_says_what_to_do() {
     let server = Server::start().await;
     let user = sqlx::query_scalar::<_, Uuid>("select id from users limit 1").fetch_one(&server.pool).await.unwrap();
     let id = sqlx::query_scalar::<_, Uuid>("insert into reflections (owner, week) values ($1, '2026-10-26') returning id").bind(user).fetch_one(&server.pool).await.unwrap();
 
     let (status, body) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
 
-    assert_eq!((status, body["error"].clone()), (409, json!("reflection_not_set_up")));
+    assert_eq!((status, body["error"].clone()), (400, json!("model_required")));
 }
 
 async fn skills(server: &Server) -> Vec<Value> {
@@ -371,6 +432,11 @@ async fn hidden_skills_are_left_out() {
     let (status, _) = server.user.json(server.user.put("/api/v1/skills/hidden").json(&hidden)).await;
     assert_eq!(status, 204);
     assert!(skill(&skills(&server).await, "language", "Rust").is_none());
+
+    let (_, listed) = server.user.json(server.user.get("/api/v1/skills?hidden=true")).await;
+    let listed = listed.as_array().unwrap().clone();
+    let shown = skill(&listed, "language", "Rust").expect("hidden skill is listed under hidden");
+    assert_eq!(shown["hidden"], json!(true));
 
     let (status, _) = server.user.json(server.user.delete("/api/v1/skills/hidden").json(&hidden)).await;
     assert_eq!(status, 204);
@@ -522,24 +588,34 @@ async fn run_tests_relays_the_project_test_command() {
 }
 
 #[tokio::test]
-async fn review_saves_comments_and_test_results() {
+async fn review_runs_through_the_wellness_assistant_and_saves_comments_and_test_results() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     project_on(&server, &link).await;
+    let assistant = wellness_on(&server, &link).await;
     let source = started_conversation(&server, &mut link).await;
     let exercise = proposed_exercise(&server, &link, source).await;
-    let (conversation, _) = start_exercise(&server, &mut link, &exercise).await;
+    start_exercise(&server, &mut link, &exercise).await;
     let tests = json!({"exit": 0, "passed": 6, "failed": 0, "failing": []});
     sqlx::query("update exercises set last_tests = $1").bind(&tests).execute(&server.pool).await.unwrap();
     let token = link.token.clone();
+    let user = server.user.clone();
+    let path = format!("/api/v1/exercises/{exercise}/review");
+    let reviewing = tokio::spawn(async move { user.json(user.post(&path)).await });
 
-    let early = tool(&server, &token, conversation, "save_exercise_review", json!({"summary": "Looks fine"})).await;
-    assert_eq!(early["isError"], true);
-
-    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/review"))).await;
-    assert_eq!(status, 202);
+    let (_, command) = answer_git(&mut link, json!({"diff": "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,1 +1,2 @@\n+fn parse_duration() {}\n"})).await;
+    let (status, _) = reviewing.await.unwrap();
+    assert_eq!((status, command), (202, GitCommand::ScopeDiff { scope: "branch".into() }));
+    let conversation = next_matching(&mut link, |message| match message {
+        ControlToNode::StartSession { conversation_id, .. } => Some(*conversation_id),
+        _ => None,
+    })
+    .await;
+    link.start_session(conversation, "acp-wellness").await;
     let (_, asked) = link.expect_prompt().await;
-    assert!(asked.contains("save_exercise_review") && asked.contains("Do not edit"));
+    assert!(asked.contains("save_exercise_review") && asked.contains("Do not edit") && asked.contains("Parse a duration") && asked.contains("parse_duration"), "{asked}");
+    let (_, held) = server.user.json(server.user.get(&format!("/api/v1/assistants/{assistant}"))).await;
+    assert_eq!(held["conversation_id"], json!(conversation));
 
     let saved = tool(&server, &token, conversation, "save_exercise_review", json!({"summary": "Close", "comments": [{"path": "src/lib.rs", "line": 4, "body": "Handle an empty string."}, {"path": "src/lib.rs", "line": 9, "body": "Nice use of split_once.", "praise": true}]})).await;
     assert_ne!(saved["isError"], true, "{saved}");
@@ -551,28 +627,36 @@ async fn review_saves_comments_and_test_results() {
 }
 
 #[tokio::test]
-async fn review_session_cannot_edit_files() {
+async fn only_the_wellness_assistant_can_save_an_exercise_review() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     project_on(&server, &link).await;
     let source = started_conversation(&server, &mut link).await;
     let exercise = proposed_exercise(&server, &link, source).await;
     let (conversation, _) = start_exercise(&server, &mut link, &exercise).await;
-    server.user.json(server.user.post(&format!("/api/v1/exercises/{exercise}/review"))).await;
-    link.expect_prompt().await;
+    sqlx::query("update exercises set reviewing = true").execute(&server.pool).await.unwrap();
+    let token = link.token.clone();
 
-    let options = json!([{"optionId": "allow", "name": "Allow", "kind": "allow_once"}, {"optionId": "reject", "name": "Reject", "kind": "reject_once"}]);
-    link.send(NodeToControl::PermissionRequest { conversation_id: conversation, seq: 10, request_id: "edit-1".into(), request: json!({"toolCall": {"title": "Edit lib.rs", "kind": "edit"}, "options": options}) }).await;
+    let refused = tool(&server, &token, conversation, "save_exercise_review", json!({"summary": "Looks fine"})).await;
 
-    match link.next().await {
-        ControlToNode::PermissionResponse { request_id, outcome, .. } => assert_eq!((request_id.as_str(), outcome), ("edit-1", json!({"outcome": "selected", "optionId": "reject"}))),
-        other => panic!("expected a refusal, got {other:?}"),
-    }
+    assert_eq!(refused["isError"], true, "{refused}");
+}
 
-    link.send(NodeToControl::PermissionRequest { conversation_id: conversation, seq: 11, request_id: "read-1".into(), request: json!({"toolCall": {"title": "git log", "kind": "execute"}, "options": options}) }).await;
-    common::eventually("a command request waits for the person", || async {
-        let events = server.events(conversation).await;
+#[tokio::test]
+async fn a_learned_note_is_kept_only_while_teach_me_is_on() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link).await;
+    let note = json!({"text": "Why pg_advisory_lock needs a session, not a transaction"});
 
-        events.iter().any(|event| event["kind"] == "permission_request").then_some(())
-    }).await;
+    let refused = tool(&server, &link.token, id, "note_learned", note.clone()).await;
+    assert_eq!(refused["isError"], true, "{refused}");
+
+    teach_me(&server, id, true).await;
+    let saved = tool(&server, &link.token, id, "note_learned", note).await;
+    assert_ne!(saved["isError"], true, "{saved}");
+
+    let (status, listed) = server.user.json(server.user.get("/api/v1/wellness/learned?limit=5")).await;
+    assert_eq!(status, 200);
+    assert_eq!((listed[0]["text"].clone(), listed[0]["source_kind"].clone(), listed[0]["conversation_id"].clone()), (json!("Why pg_advisory_lock needs a session, not a transaction"), json!("teach_me"), json!(id)));
 }
