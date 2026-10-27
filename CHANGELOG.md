@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.13.1
+
+- During a break the keyboard stays on the break screen: Tab no longer reaches the app behind it, screen readers skip it, and End break early has focus.
+
 ## v0.13.0
 
 Every screen in this release was designed in the canonical design artefact first. The code had a whole-codebase refactor for cohesion before the features landed, and the tests now check what the app does rather than its wording or layout.
