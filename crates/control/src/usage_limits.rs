@@ -184,13 +184,14 @@ pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uui
     let reply = sqlx::query_scalar::<_, Option<String>>(
         "select string_agg(payload->'update'->'content'->>'text', '' order by seq) from events
          where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
-           and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)",
+           and seq > coalesce((select max(seq) from events where conversation_id = $1 and (kind = 'user_message' or (kind = 'acp_update' and payload->'update'->>'sessionUpdate' is distinct from 'agent_message_chunk'))), 0)",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
     .await?
     .flatten();
-    let Some(message) = reply.map(|text| text.trim().to_string()).filter(|text| text.chars().count() <= LIMIT_REPLY_LENGTH) else {
+    let last_paragraph = |text: &str| text.trim().rsplit('\n').find(|line| !line.trim().is_empty()).unwrap_or_default().trim().to_string();
+    let Some(message) = reply.map(|text| if text.trim().chars().count() <= LIMIT_REPLY_LENGTH { text.trim().to_string() } else { last_paragraph(&text) }).filter(|text| !text.is_empty() && text.chars().count() <= LIMIT_REPLY_LENGTH) else {
         return Ok(None);
     };
     let limit = inspect(state, node_id, conversation_id, &message).await?;

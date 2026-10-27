@@ -284,6 +284,35 @@ async fn a_limit_reply_streamed_in_several_chunks_still_stops_the_conversation_w
 }
 
 #[tokio::test]
+async fn a_limit_reply_after_a_long_run_of_earlier_text_still_gets_the_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let drafted = format!("Drafting them now. {}", "The first section covers the plan in detail. ".repeat(12));
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": drafted}}}) }).await;
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 4, update: json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Write", "kind": "edit", "status": "completed"}}) }).await;
+    reply_with_limit(&server, &mut link, id, 5, &limit_message(2)).await;
+
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
+    let resumes = common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
+    assert!(resumes > Utc::now() + Duration::hours(1));
+}
+
+#[tokio::test]
+async fn a_limit_reply_on_its_own_line_after_text_in_the_same_message_gets_the_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let drafted = format!("{}\n\n", "The first section covers the plan in detail. ".repeat(12));
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": drafted}}}) }).await;
+    reply_with_limit(&server, &mut link, id, 4, &limit_message(2)).await;
+
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
+}
+
+#[tokio::test]
 async fn a_limit_reply_waits_for_the_person_when_they_chose_to_be_asked() {
     let server = Server::start().await;
     choose_to_be_asked(&server).await;
