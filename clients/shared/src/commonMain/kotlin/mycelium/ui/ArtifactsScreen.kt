@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -32,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
@@ -41,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import org.jetbrains.compose.resources.decodeToImageBitmap
 import mycelium.Platform
 import mycelium.api.Artifact
+import mycelium.api.ArtifactOrigin
+import mycelium.api.Project
 import mycelium.api.ArtifactKinds
 import mycelium.api.Me
 import mycelium.state.MarkdownBlock
@@ -53,6 +57,7 @@ import mycelium.state.ArtifactTabs
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.artifactKindName
+import mycelium.state.artifactProjects
 import mycelium.state.artifactOpenUrl
 import mycelium.state.artifactPreview
 import mycelium.state.PreviewLines
@@ -60,6 +65,8 @@ import mycelium.state.parsedMarkdown
 import mycelium.state.visibleArtifacts
 
 private const val AnyKind = "All kinds"
+
+private const val ArtifactsList = "artefacts"
 
 private val CardMinWidth = 260.dp
 
@@ -88,14 +95,17 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
     var tab by remember { mutableStateOf(AllArtifacts) }
     var kindName by remember { mutableStateOf(AnyKind) }
     var query by remember { mutableStateOf("") }
+    var projectId by remember { mutableStateOf<String?>(null) }
+    val loadFailures by store.loadFailures.collectAsState()
+    val load = { store.load(ArtifactsList) { store.refreshArtifacts(); store.refreshArtifactAccessRequests() } }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshArtifacts(); store.refreshArtifactAccessRequests() }
+        load()
     }
 
     val kind = ArtifactKindFilters.firstOrNull { it.second == kindName }?.first
     val group = LocalGroupFilter.current
-    val shown = visibleArtifacts(state.artifacts.values.filter { artifactInGroup(it, state, group) }, tab, me.id, kind, query)
+    val shown = visibleArtifacts(state.artifacts.values.filter { artifactInGroup(it, state, group) }, tab, me.id, kind, query, projectId)
 
     Column(Modifier.fillMaxSize()) {
         Bar {
@@ -108,9 +118,10 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
+            ListSearch(query, { query = it }, "artefacts")
             Segmented(ArtifactTabs, tab, { tab = it }, groupLabel = "Whose artefacts")
             Segmented(listOf(AnyKind) + ArtifactKindFilters.map { it.second }, kindName, { kindName = it }, groupLabel = "Kind")
-            TextInput(query, { query = it }, label = "Search artefacts", placeholder = "Search artefacts", showLabel = false, modifier = Modifier.width(Tokens.Size.FormColumn), leadingIcon = MyIcon.Search)
+            ProjectFilter(artifactProjects(state.artifacts.values), projectId) { projectId = it }
         }
 
         Hairline()
@@ -119,10 +130,10 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
             ArtifactAccessRequestCard(request, store, state)
         }
 
-        if (shown.isEmpty()) {
-            val text = if (state.artifacts.isEmpty()) "No artefact yet. Ask an agent to create a design or a page and it appears here." else "No artefact matches."
-
-            Label(text, Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+        if (ArtifactsList in loadFailures && state.artifacts.isEmpty()) {
+            LoadFailedState("artefacts", load, Modifier.fillMaxSize())
+        } else if (shown.isEmpty()) {
+            EmptyState(if (state.artifacts.isEmpty()) "No artefacts. Ask an agent to create a design or a page and it appears here." else "No artefact matches.", Modifier.fillMaxSize())
         } else {
             LazyVerticalGrid(
                 GridCells.Adaptive(CardMinWidth),
@@ -194,6 +205,25 @@ private fun ArtifactPreviewArea(artifact: Artifact, store: Store) {
 }
 
 @Composable
+private fun ArtifactOriginLine(origin: ArtifactOrigin, state: AppState) {
+    val colors = MyTheme.colors
+    val project = origin.projectId?.let { id -> state.projects[id] ?: Project(id, "", origin.projectName.orEmpty(), "", createdAt = "", icon = origin.projectIcon) }
+    val description = "From ${origin.conversationTitle}${project?.let { " in ${it.name}" }.orEmpty()}"
+
+    Row(Modifier.semantics(mergeDescendants = true) { contentDescription = description }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+        if (project != null) {
+            ProjectIcon(project, Tokens.Size.IconSm)
+            Label(project.name, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+            Label("·", style = Tokens.Type.Meta, color = colors.textFaint)
+        } else {
+            Icon(MyIcon.Chat, colors.textMuted, Tokens.Size.IconSm)
+        }
+
+        Label(origin.conversationTitle, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+    }
+}
+
+@Composable
 private fun ArtifactCard(artifact: Artifact, store: Store, state: AppState, platform: Platform, mine: Boolean, onOpen: () -> Unit) {
     val colors = MyTheme.colors
     var access by remember(artifact.id) { mutableStateOf(false) }
@@ -221,6 +251,7 @@ private fun ArtifactCard(artifact: Artifact, store: Store, state: AppState, plat
                 }
 
                 Label(artifact.title, style = Tokens.Type.UiStrong, maxLines = 2)
+                artifact.origin?.let { ArtifactOriginLine(it, state) }
                 Label("Edited ${ago(artifact.updatedAt)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 

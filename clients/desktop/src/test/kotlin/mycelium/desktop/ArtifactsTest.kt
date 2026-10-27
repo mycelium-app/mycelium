@@ -39,8 +39,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private fun artifact(id: String, kind: String, title: String, owner: String, isPublic: Boolean = false, url: String? = null, thumbnailVersion: Int? = null) =
-    """{"id":"$id","owner":"$owner","conversation_id":null,"kind":"$kind","title":"$title","slug":"$id-ab12","public":$isPublic,"latest_version":2,"thumbnail_version":${thumbnailVersion ?: "null"},"url":${url?.let { "\"$it\"" } ?: "null"},
+private fun artifact(id: String, kind: String, title: String, owner: String, isPublic: Boolean = false, url: String? = null, thumbnailVersion: Int? = null, origin: String? = null) =
+    """{"id":"$id","owner":"$owner","conversation_id":null,${origin?.let { "\"origin\":$it," }.orEmpty()}"kind":"$kind","title":"$title","slug":"$id-ab12","public":$isPublic,"latest_version":2,"thumbnail_version":${thumbnailVersion ?: "null"},"url":${url?.let { "\"$it\"" } ?: "null"},
 "created_at":"2026-10-22T09:00:00Z","updated_at":"2026-10-22T10:00:00Z"}"""
 
 private val Artifacts = "[" + listOf(
@@ -129,6 +129,21 @@ class ArtifactsScreenTest {
         rule.waitUntil(5_000) { shown("Continue the plan") }
         rule.onNodeWithText("Approve").performClick()
         rule.waitUntil(5_000) { sent("POST", "/artifact-access-requests/r1/approve") != null && !shown("Continue the plan") }
+    }
+
+    @Test
+    fun aCardNamesTheProjectAndConversationItCameFromAndTheProjectFilterNarrowsTheList() {
+        val origin = """{"conversation_id":"c1","conversation_title":"Bump the UI kit","project_id":"p1","project_name":"harbour","project_icon":null}"""
+        showArtifacts("[" + listOf(artifact("a1", "page", "Planning board", "u1", origin = origin), artifact("a2", "page", "Loose notes", "u1")).joinToString(",") + "]")
+
+        rule.onNodeWithContentDescription("From Bump the UI kit in harbour").assertExists()
+        assertTrue(shown("Loose notes"))
+
+        rule.onNodeWithContentDescription("Project: All projects").performClick()
+        rule.onNodeWithText("harbour").performClick()
+
+        assertTrue(shown("Planning board"))
+        assertFalse(shown("Loose notes"))
     }
 
     @Test

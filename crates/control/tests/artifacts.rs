@@ -622,3 +622,37 @@ async fn artefacts_belong_to_the_creator_project_and_can_be_shared_with_more_pro
     assert_eq!(artifact["project_ids"].as_array().unwrap().len(), 2);
     assert!(artifact["conversation_ids"].as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn an_artefact_lists_with_the_project_and_conversation_it_came_from() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+    let project: Uuid = sqlx::query_scalar("insert into projects (owner, node_id, name, path, icon) select owner, node_id, 'Okapi', '/okapi', 'rocket' from conversations where id = $1 returning id").bind(conversation).fetch_one(&server.pool).await.unwrap();
+    sqlx::query("update conversations set project_id = $1, title = 'Plan the rollout' where id = $2").bind(project).bind(conversation).execute(&server.pool).await.unwrap();
+    tool(&server, &link, conversation, "create_artifact", json!({"kind": "markdown", "title": "Rollout notes", "content": "Notes"})).await;
+    let (_, listed) = server.user.json(server.user.get("/api/v1/artifacts")).await;
+    let origin = &listed[0]["origin"];
+
+    assert_eq!(
+        (origin["project_name"].as_str(), origin["project_icon"].as_str(), origin["conversation_title"].as_str(), origin["project_id"].as_str(), origin["conversation_id"].as_str()),
+        (Some("Okapi"), Some("rocket"), Some("Plan the rollout"), Some(project.to_string().as_str()), Some(conversation.to_string().as_str()))
+    );
+
+    let (_, in_project) = server.user.json(server.user.get(&format!("/api/v1/artifacts?project={project}"))).await;
+    let (_, elsewhere) = server.user.json(server.user.get(&format!("/api/v1/artifacts?project={}", Uuid::new_v4()))).await;
+
+    assert_eq!((in_project.as_array().unwrap().len(), elsewhere.as_array().unwrap().len()), (1, 0));
+}
+
+#[tokio::test]
+async fn an_artefact_whose_conversation_was_deleted_has_no_origin() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+    let (_, text) = tool(&server, &link, conversation, "create_artifact", json!({"kind": "markdown", "title": "Orphan", "content": "Notes"})).await;
+    let id = artifact_id(&text);
+    sqlx::query("delete from conversations where id = $1").bind(conversation).execute(&server.pool).await.unwrap();
+    let (status, artifact) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{id}"))).await;
+
+    assert_eq!(status, 200, "{artifact}");
+    assert!(artifact.get("origin").is_none());
+}

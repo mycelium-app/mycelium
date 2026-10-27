@@ -43,6 +43,8 @@ fun ArtefactViewer(
     onPopOut: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     onBackTo: String = "artefacts",
+    onOpenProjects: (() -> Unit)? = null,
+    onOpenConversation: ((String) -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = MyTheme.colors
@@ -58,7 +60,25 @@ fun ArtefactViewer(
             }
 
             Icon(artifactIcon(artifact.kind), colors.textMuted, Tokens.Size.IconSm)
-            Label(artifact.title, Modifier.weight(1f), Tokens.Type.UiStrong, maxLines = 1)
+            Label(artifact.title, Modifier, Tokens.Type.UiStrong, maxLines = 1)
+
+            val origin = artifact.origin
+
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                if (origin != null) {
+                    val projectName = origin.projectName
+
+                    if (projectName != null && onOpenProjects != null) {
+                        MyButton(onOpenProjects, text = projectName, icon = MyIcon.Folder, description = "Project: $projectName", size = ButtonSize.Sm, muted = true)
+                        Label("/", style = Tokens.Type.Meta, color = colors.textFaint)
+                    }
+
+                    if (onOpenConversation != null) {
+                        MyButton({ onOpenConversation(origin.conversationId) }, text = origin.conversationTitle, icon = MyIcon.Chat, description = "Open the conversation ${origin.conversationTitle}", size = ButtonSize.Sm, muted = true)
+                    }
+                }
+            }
+
             Label(artifactKindName(artifact.kind), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             trailing()
             MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", muted = true)
@@ -134,7 +154,7 @@ fun ArtefactsPanel(
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(conversationId) {
-        store.act { store.refreshArtifacts() }
+        store.load { store.refreshArtifacts() }
     }
 
     val viewed = selected?.let { state.artifacts[it] }
@@ -165,10 +185,11 @@ fun ArtefactFullView(
     onBack: () -> Unit,
     onOpenNodes: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    onOpenProjects: () -> Unit = {},
 ) {
     LaunchedEffect(artifactId) {
         if (state.artifacts[artifactId] == null) {
-            store.act { store.refreshArtifacts() }
+            store.load { store.refreshArtifacts() }
         }
     }
 
@@ -204,7 +225,7 @@ fun ArtefactFullView(
 
     Row(Modifier.fillMaxSize()) {
         if (!(compact && chatShown)) {
-            ArtefactViewer(artifact, store, platform, Modifier.weight(1f).fillMaxHeight(), onBack = onBack, trailing = toggle)
+            ArtefactViewer(artifact, store, platform, Modifier.weight(1f).fillMaxHeight(), onBack = onBack, onOpenProjects = onOpenProjects, onOpenConversation = onOpenConversation, trailing = toggle)
         }
 
         if (attached != null && chatShown) {

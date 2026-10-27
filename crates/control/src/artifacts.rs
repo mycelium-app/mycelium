@@ -13,7 +13,7 @@ use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use base64::Engine;
 use mycelium_proto::api::{
-    AddArtifactVersionRequest, Artifact, ArtifactAuthor, ArtifactComment, ArtifactDataEntry, ArtifactKind, ArtifactVersion, CreateArtifactCommentRequest, CreateArtifactRequest, HostedArtifact, PatchArtifactCommentRequest, PatchArtifactRequest,
+    AddArtifactVersionRequest, Artifact, ArtifactAuthor, ArtifactComment, ArtifactDataEntry, ArtifactKind, ArtifactOrigin, ArtifactVersion, CreateArtifactCommentRequest, CreateArtifactRequest, HostedArtifact, PatchArtifactCommentRequest, PatchArtifactRequest,
 };
 use mycelium_proto::link::GitCommand;
 use mycelium_proto::stream::StreamMessage;
@@ -35,7 +35,7 @@ const MOST_READ_CHARACTERS: usize = 100_000;
 const ARTBOARD_GAP: i64 = 80;
 const ARTBOARD_WIDTH: i64 = 1440;
 const ARTBOARD_HEIGHT: i64 = 900;
-const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from artifact_links where artifact_id = artifacts.id and project_id is not null) as project_ids, array(select conversation_id from artifact_links where artifact_id = artifacts.id and conversation_id is not null) as conversation_ids, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type";
+const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from artifact_links where artifact_id = artifacts.id and project_id is not null) as project_ids, array(select conversation_id from artifact_links where artifact_id = artifacts.id and conversation_id is not null) as conversation_ids, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type, (select title from conversations where id = artifacts.conversation_id) as origin_title, (select project_id from conversations where id = artifacts.conversation_id) as origin_project_id, (select name from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_name, (select icon from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_icon";
 const COMMENT_COLUMNS: &str = "id, artifact_id, author_name, body, anchor, resolved, created_at";
 
 #[derive(sqlx::FromRow)]
@@ -54,6 +54,10 @@ struct ArtifactRow {
     updated_at: chrono::DateTime<chrono::Utc>,
     thumbnail_version: Option<i32>,
     media_type: Option<String>,
+    origin_title: Option<String>,
+    origin_project_id: Option<Uuid>,
+    origin_project_name: Option<String>,
+    origin_project_icon: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -98,6 +102,7 @@ pub struct NewArtifact<'a> {
 pub struct ListQuery {
     kind: Option<String>,
     q: Option<String>,
+    project: Option<Uuid>,
 }
 
 pub struct ArtifactHost;
@@ -160,6 +165,7 @@ impl ArtifactRow {
             conversation_id: self.conversation_id,
             project_ids: self.project_ids,
             conversation_ids: self.conversation_ids,
+            origin: self.conversation_id.zip(self.origin_title).map(|(conversation_id, conversation_title)| ArtifactOrigin { conversation_id, conversation_title, project_id: self.origin_project_id, project_name: self.origin_project_name, project_icon: self.origin_project_icon }),
             kind: parse_kind(&self.kind).map_err(|_| ApiError::internal(format!("unknown artefact kind {}", self.kind)))?,
             url: domain.map(|domain| format!("https://{}.{domain}", self.slug)),
             title: self.title,
@@ -453,11 +459,13 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
         "select {COLUMNS} from artifacts
          where owner = $1 and ($2::text is null or kind = $2)
            and ($3::text is null or strpos(lower(title), lower($3)) > 0 or strpos(slug, lower($3)) > 0)
+           and ($4::uuid is null or exists (select 1 from artifact_links where artifact_id = artifacts.id and project_id = $4))
          order by updated_at desc, id"
     )))
     .bind(user.id)
     .bind(kind)
     .bind(words)
+    .bind(query.project)
     .fetch_all(&state.pool)
     .await?;
     let domain = state.config.artifact_domain.as_deref();

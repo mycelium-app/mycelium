@@ -38,12 +38,19 @@ fun artifactOpenUrl(baseUrl: String, id: String, kind: String, version: Int, dar
 fun artifactOpenUrl(baseUrl: String, artifact: Artifact, dark: Boolean = true, accent: String = "neutral"): String =
     artifactOpenUrl(baseUrl, artifact.id, artifact.kind, artifact.latestVersion, dark, accent)
 
-fun visibleArtifacts(artifacts: Collection<Artifact>, tab: String, ownerId: String, kind: String?, query: String): List<Artifact> {
+fun visibleArtifacts(artifacts: Collection<Artifact>, tab: String, ownerId: String, kind: String?, query: String, projectId: String? = null): List<Artifact> {
     val needle = query.trim()
 
     return artifacts
         .filter { tab != YourArtifacts || it.owner == ownerId }
         .filter { kind == null || it.kind == kind }
+        .filter { projectId == null || it.origin?.projectId == projectId }
         .filter { needle.isEmpty() || it.title.contains(needle, ignoreCase = true) }
         .sortedByDescending { it.updatedAt }
 }
+
+fun artifactProjects(artifacts: Collection<Artifact>): List<Choice> =
+    artifacts
+        .mapNotNull { artifact -> artifact.origin?.let { origin -> origin.projectId?.let { id -> Choice(id, origin.projectName.orEmpty()) } } }
+        .distinctBy { it.id }
+        .sortedBy { it.name.lowercase() }
