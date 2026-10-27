@@ -254,26 +254,16 @@ private fun ArtifactCard(artifact: Artifact, store: Store, state: AppState, plat
             store.act { store.renameArtifact(artifact, title.trim()) }
         }
 
-        Dialog(onDismiss = { renaming = false }) {
-            Label("Rename artefact", Modifier.semantics { heading() }, Tokens.Type.Title)
-            TextInput(title, { title = it }, label = "Artefact name", onSubmit = save)
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
-                MyButton({ renaming = false }, text = "Cancel", muted = true)
-                MyButton(save, text = "Save", variant = ButtonVariant.Outline)
-            }
-        }
+        RenameDialog("Rename artefact", "Artefact name", title, { title = it }, save, onDismiss = { renaming = false })
     }
 
     if (deleting) {
-        Dialog(onDismiss = { deleting = false }) {
-            Label("Delete ${artifact.title}?", Modifier.semantics { heading() }, Tokens.Type.Title)
-            Label("Its versions, comments and data are removed. This cannot be undone.", style = Tokens.Type.Meta, color = colors.textMuted)
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
-                MyButton({ deleting = false }, text = "Cancel", muted = true)
-                MyButton({ deleting = false; store.act { store.deleteArtifact(artifact) } }, text = "Delete artefact", variant = ButtonVariant.Danger)
-            }
-        }
+        ConfirmDialog(
+            "Delete ${artifact.title}?",
+            "Its versions, comments and data are removed. This cannot be undone.",
+            "Delete artefact",
+            onDismiss = { deleting = false },
+            onConfirm = { deleting = false; store.act { store.deleteArtifact(artifact) } },
+        )
     }
 }
