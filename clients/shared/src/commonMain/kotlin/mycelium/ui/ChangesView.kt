@@ -54,14 +54,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.ChangesLayout
 import mycelium.api.Conversation
 import mycelium.api.RowRange
@@ -140,19 +138,18 @@ internal class RowSource(private val scope: CoroutineScope, private val fetch: s
             var stale = false
 
             try {
-                for (answer in fetch(ranges)) {
-                    if (fingerprints[answer.path] != answer.fingerprint) {
-                        stale = true
-                        continue
-                    }
+                attempt {
+                    for (answer in fetch(ranges)) {
+                        if (fingerprints[answer.path] != answer.fingerprint) {
+                            stale = true
+                            continue
+                        }
 
-                    answer.rows.map(::diffLine).chunked(RowChunk).forEachIndexed { offset, part ->
-                        chunks[ChunkKey(answer.path, answer.from / RowChunk + offset)] = part
+                        answer.rows.map(::diffLine).chunked(RowChunk).forEachIndexed { offset, part ->
+                            chunks[ChunkKey(answer.path, answer.from / RowChunk + offset)] = part
+                        }
                     }
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
             } finally {
                 inFlight -= missing.toSet()
             }
@@ -172,6 +169,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     var layout by remember(id) { mutableStateOf<ChangesLayout?>(null) }
     var loadFailed by remember(id) { mutableStateOf(false) }
     var failure by remember(id) { mutableStateOf<String?>(null) }
+    val run = rememberAttempt { failure = it }
     var editing by remember(id) { mutableStateOf<String?>(null) }
     var original by remember(id) { mutableStateOf("") }
     var draft by remember(id) { mutableStateOf("") }
@@ -181,19 +179,15 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
 
     LaunchedEffect(id) {
         while (true) {
-            try {
+            val problem = attempt {
                 val latest = store.api.gitChangesLayout(id)
 
                 if (latest != layout) {
                     layout = latest
                 }
-
-                loadFailed = false
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                loadFailed = true
             }
+
+            loadFailed = problem != null
 
             delay(DiskPollMillis)
         }
@@ -208,19 +202,10 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     }
 
     fun stage(path: String, staging: Boolean) {
-        scope.launch {
-            try {
-                if (staging) store.api.gitStage(id, listOf(path)) else store.api.gitUnstage(id, listOf(path))
+        run {
+            if (staging) store.api.gitStage(id, listOf(path)) else store.api.gitUnstage(id, listOf(path))
 
-                layout = store.api.gitChangesLayout(id)
-                failure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            }
+            layout = store.api.gitChangesLayout(id)
         }
     }
 
@@ -241,16 +226,11 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                     MyButton({
                         if (!saving) {
                             saving = true
-                            scope.launch {
+                            run {
                                 try {
                                     store.api.gitFile(id, path, draft, original)
                                     layout = store.api.gitChangesLayout(id)
                                     editing = null
-                                    failure = null
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (problem: Exception) {
-                                    failure = problem.message ?: "Could not save this file. Try again."
                                 } finally {
                                     saving = false
                                 }
@@ -274,31 +254,17 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 onStage = { stage(it, true) },
                 onUnstage = { stage(it, false) },
                 onEdit = { path ->
-                    scope.launch {
-                        try {
-                            val loaded = store.api.gitFile(id, path)
-                            original = loaded.content
-                            draft = loaded.content
-                            editing = path
-                            failure = null
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (problem: Exception) {
-                            failure = problem.message ?: "Could not open this file. Try again."
-                        }
+                    run {
+                        val loaded = store.api.gitFile(id, path)
+                        original = loaded.content
+                        draft = loaded.content
+                        editing = path
                     }
                 },
                 onHunk = { section, row, action ->
-                    scope.launch {
-                        try {
-                            store.api.gitHunk(id, section.path, row, section.fingerprint, action)
-                            layout = store.api.gitChangesLayout(id)
-                            failure = null
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (problem: Exception) {
-                            failure = problem.message ?: "Could not change this hunk. Refresh the view and try again."
-                        }
+                    run {
+                        store.api.gitHunk(id, section.path, row, section.fingerprint, action)
+                        layout = store.api.gitChangesLayout(id)
                     }
                 },
                 reveal = tab.reveal,
@@ -319,15 +285,13 @@ fun CommitTabView(store: Store, conversation: Conversation, tab: DiffTab, modifi
     LaunchedEffect(tab.key, conversation.id) {
         failed = false
 
-        try {
+        val problem = attempt {
             val answer = store.api.gitShow(conversation.id, tab.hash.orEmpty())
 
             shown = splitCommitDiff(answer.diff) to answer.truncated
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            failed = true
         }
+
+        failed = problem != null
     }
 
     val loaded = shown

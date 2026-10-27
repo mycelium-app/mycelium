@@ -19,7 +19,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,10 +35,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.GitBranches
 import mycelium.api.GitCommit
@@ -74,7 +70,6 @@ internal const val DiskPollMillis = 2_000L
 @Composable
 fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modifier, onOpenDiff: ((DiffTab) -> Unit)? = null) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
     val id = conversation.id
     var status by remember(id) { mutableStateOf<GitStatus?>(null) }
     var log by remember(id) { mutableStateOf<List<GitCommit>>(emptyList()) }
@@ -109,20 +104,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         }
     }
 
-    fun run(block: suspend () -> Unit) {
-        scope.launch {
-            try {
-                block()
-                failure = null
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            }
-        }
-    }
+    val run = rememberAttempt { failure = it }
 
     LaunchedEffect(id, conversation.status) {
         run { refresh() }
@@ -132,16 +114,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         while (true) {
             delay(DiskPollMillis)
 
-            try {
+            attempt {
                 val latest = store.api.gitStatus(id)
 
                 if (latest != status) {
                     status = latest
                     log = store.api.gitLog(id)
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
             }
         }
     }

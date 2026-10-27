@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.IntSize
 import kotlin.io.encoding.Base64
 import kotlin.math.floor
 import kotlinx.coroutines.delay
-import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.state.AppState
 import mycelium.state.CellStyle
@@ -130,14 +129,10 @@ private fun TerminalView(store: Store, state: AppState, conversation: Conversati
 
     LaunchedEffect(emulator, columns > 0 && rows > 0) {
         if (columns > 0 && rows > 0 && terminalId == null) {
-            try {
+            failure = attempt {
                 terminalId = store.api.startTerminal(conversation.id, columns, rows).terminalId
                 sentSize[0] = columns
                 sentSize[1] = rows
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
             }
         }
     }
