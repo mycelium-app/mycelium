@@ -1,7 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::integration_policy::{self, Effective};
-use mycelium_proto::api::{IntegrationStatus, ToolKind};
-use crate::{email, lastfm, stoat, zulip};
+use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
+use crate::{caldav, email, lastfm, stoat, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
 use serde_json::Value;
@@ -12,6 +12,7 @@ pub enum Integration {
     Email,
     Stoat,
     LastFm,
+    CalDav,
 }
 
 pub struct Credentials {
@@ -37,12 +38,20 @@ impl Integration {
         }
     }
 
+    pub fn default_preset(self) -> ApprovalPreset {
+        match self {
+            Integration::Zulip => ApprovalPreset::AskAllEdit,
+            _ => ApprovalPreset::AskWrites,
+        }
+    }
+
     pub fn parse(kind: &str) -> Option<Integration> {
         match kind {
             "zulip" => Some(Integration::Zulip),
             "email" => Some(Integration::Email),
             "stoat" => Some(Integration::Stoat),
             "lastfm" => Some(Integration::LastFm),
+            "caldav" => Some(Integration::CalDav),
             _ => None,
         }
     }
@@ -64,6 +73,7 @@ impl Integration {
             Integration::Email => Some("Enter your email username, usually your full email address."),
             Integration::Stoat => None,
             Integration::LastFm => Some("Enter your Last.fm username."),
+            Integration::CalDav => Some("Enter your calendar username."),
         }
     }
 
@@ -73,6 +83,7 @@ impl Integration {
             Integration::Email => "Enter your email password, or an app password if your provider needs one.",
             Integration::Stoat => "Enter your Stoat token.",
             Integration::LastFm => "Enter your Last.fm shared secret.",
+            Integration::CalDav => "Enter an app password for your calendar account.",
         }
     }
 
@@ -82,6 +93,7 @@ impl Integration {
             Integration::Email => email::normalise_settings(settings),
             Integration::Stoat => stoat::normalise_settings(settings),
             Integration::LastFm => lastfm::normalise_settings(settings),
+            Integration::CalDav => caldav::normalise_settings(settings),
         }
     }
 
@@ -91,6 +103,7 @@ impl Integration {
             Integration::Email => email::tools(),
             Integration::Stoat => stoat::tools(),
             Integration::LastFm => lastfm::tools(),
+            Integration::CalDav => caldav::tools(),
         }
     }
 
@@ -100,15 +113,17 @@ impl Integration {
             Integration::Email => email::always_asks(tool),
             Integration::Stoat => stoat::always_asks(tool),
             Integration::LastFm => lastfm::always_asks(tool),
+            Integration::CalDav => caldav::always_asks(tool),
         }
     }
 
-    pub async fn verify(self, http: &reqwest::Client, credentials: &Credentials) -> Result<(), String> {
+    pub async fn verify(self, http: &reqwest::Client, credentials: &Credentials) -> Result<Value, String> {
         match self {
-            Integration::Zulip => zulip::verify(http, credentials).await,
-            Integration::Email => email::verify(credentials).await,
-            Integration::Stoat => stoat::verify(http, credentials).await,
-            Integration::LastFm => lastfm::verify(http, credentials).await,
+            Integration::Zulip => zulip::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::Email => email::verify(credentials).await.map(|_| Value::Null),
+            Integration::Stoat => stoat::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::LastFm => lastfm::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::CalDav => caldav::verify(http, credentials).await,
         }
     }
 
@@ -119,6 +134,7 @@ impl Integration {
             Integration::Zulip => zulip::call(&state.http, &credentials, tool, arguments).await,
             Integration::Email => email::call(state, owner, server, &credentials, tool, arguments).await,
             Integration::Stoat => stoat::call(&state.http, &credentials, tool, arguments).await,
+            Integration::CalDav => caldav::call(&state.http, &credentials, tool, arguments).await,
             Integration::LastFm => {
                 let outcome = lastfm::call(&state.http, &credentials, tool, arguments).await;
 
@@ -158,21 +174,7 @@ impl ServerRow {
     }
 
     pub fn effective(&self, tool: &str) -> Effective {
-        let integration = self.integration();
-
-        if integration == Some(Integration::Zulip) {
-            return integration_policy::locked();
-        }
-
-        let kind = self.tool_kind(tool);
-        let mut effective = integration_policy::effective(&self.policy.0, tool, kind, !self.always_allow);
-
-        if integration.is_some() && kind == ToolKind::Write {
-            effective.ask = true;
-            effective.ask_source = integration_policy::Source::Locked;
-        }
-
-        effective
+        integration_policy::effective(&self.policy.0, tool, self.tool_kind(tool))
     }
 
     pub fn status(&self) -> IntegrationStatus {

@@ -1,10 +1,9 @@
 use crate::chat_tool_servers::{OWN_SERVER, ServerRow, bearer, list_owned, refreshable_after_rejection, renew, slug};
 use crate::chats::{chat_node, record};
 use crate::error::ApiResult;
-use crate::integration_policy::Source as PolicySource;
-use crate::integration_review;
 use crate::mcp;
 use crate::mcp_client::{McpConnection, McpError};
+use crate::response_editor;
 use crate::model_providers::{ToolCall, ToolDefinition, ToolResult};
 use crate::state::AppState;
 use crate::store::{CONVERSATION_GROUP_SQL, append_event, set_status};
@@ -21,9 +20,10 @@ const SEARCH_RESULTS: usize = 5;
 const LISTED_TOOLS_PER_SERVER: usize = 40;
 const MAX_TOOL_NAME: usize = 64;
 const MAX_RESULT_CHARS: usize = 50_000;
-pub const ALLOW_ONCE: &str = "allow_once";
-const ALLOW_ALWAYS: &str = "allow_always";
-const DECLINE: &str = "reject_once";
+pub const APPROVE: &str = "approve";
+pub const APPROVE_EDIT: &str = "approve_edit";
+pub const ALWAYS: &str = "always";
+pub const DENY: &str = "deny";
 pub const DECLINED_TEXT: &str = "The person declined this tool call.";
 
 #[derive(Clone)]
@@ -133,7 +133,7 @@ impl Toolbox {
                     None => Source::Remote { server: Box::new(server.clone()) },
                 };
 
-                tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: stored.input_schema, source });
+                tools.push(Tool { name: model_name(&server.name, &stored.name), server: server.name.clone(), original: stored.name, description: stored.description, schema: response_editor::with_filter_property(stored.input_schema), source });
             }
         }
 
@@ -148,10 +148,10 @@ impl Toolbox {
 
         let always_allowed = sqlx::query_scalar::<_, String>(
             "select distinct r.payload->'toolCall'->>'title' from events r join events s on s.conversation_id = r.conversation_id and s.kind = 'permission_resolved' and s.payload->>'request_id' = r.payload->>'request_id'
-             where r.conversation_id = $1 and r.kind = 'permission_request' and s.payload->>'option_id' = $2",
+             where r.conversation_id = $1 and r.kind = 'permission_request' and s.payload->>'option_id' = any($2)",
         )
         .bind(conversation_id)
-        .bind(ALLOW_ALWAYS)
+        .bind(vec![ALWAYS.to_string(), "allow_always".to_string()])
         .fetch_all(&state.pool)
         .await?;
 
@@ -228,9 +228,8 @@ impl Toolbox {
         let Some(server) = tool.server_row() else {
             return !self.always_allowed.contains(&tool.name);
         };
-        let effective = server.effective(&tool.original);
 
-        effective.ask_source == PolicySource::Locked || (effective.ask && !self.always_allowed.contains(&tool.name))
+        server.effective(&tool.original).ask && !self.always_allowed.contains(&tool.name)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -328,40 +327,73 @@ async fn outcome_of(state: &AppState, owner: Uuid, id: Uuid, toolbox: &mut Toolb
         return Ok((format!("There is no tool called {}. Use {TOOL_SEARCH} to find the tools you can call.", call.name), true, None));
     };
 
+    let mut arguments = call.input.clone();
+    let filter = tool.server_row().and_then(|_| response_editor::take_filter(&mut arguments));
+    let edits_by_setting = tool.server_row().is_some_and(|server| server.effective(&tool.original).edit);
     let mut decision = "auto";
+    let mut answer = None;
 
     if toolbox.needs_approval(&tool) {
-        let answer = ask(state, owner, id, call, &tool).await?;
+        let approval = Approval { title: &call.name, input: &arguments, server: &tool.server, account: tool.server_row().and_then(|server| server.account.as_deref()), filter: filter.as_deref(), edits_by_setting };
+        let answered = request_approval(state, owner, id, &call.id, &approval).await?;
 
-        if answer == ALLOW_ALWAYS {
+        if answered == ALWAYS {
             toolbox.always_allowed.insert(tool.name.clone());
+
+            if let Some(server) = tool.server_row() {
+                stop_asking(state, owner, server, &tool.original).await?;
+            }
         }
 
-        if answer != ALLOW_ONCE && answer != ALLOW_ALWAYS {
+        if !is_approved(&answered) {
             toolbox.record(state, owner, id, &tool, "declined", false, None).await;
 
             return Ok((DECLINED_TEXT.to_string(), true, None));
         }
 
         decision = "approved";
+        answer = Some(answered);
     }
 
-    let (mut text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &call.input).await {
+    let (mut text, is_error) = match toolbox.call(state, owner, id, &call.id, &tool, &arguments).await {
         Ok(result) => result,
         Err(error) => (format!("The {} tool failed: {} The person did not decline this call. Do not report the action as completed or declined; check whether it was recorded before retrying.", tool.original, error.message()), true),
     };
 
     let mut review = None;
 
-    if !is_error && tool.server_row().is_some_and(|server| server.effective(&tool.original).review) {
-        let reviewed = integration_review::hold(state, owner, id, &call.id, &tool.server, &tool.original, text).await?;
-        text = reviewed.text;
-        review = Some(reviewed.review);
+    if !is_error && edits_response(answer.as_deref(), edits_by_setting) {
+        let account = tool.server_row().and_then(|server| server.account.as_deref());
+        let held = response_editor::held_from(&tool.original, &tool.server, account, filter, &text);
+        let sent = response_editor::hold(state, owner, id, &call.id, held, text).await?;
+        text = sent.text;
+        review = Some(sent.outcome);
     }
 
     toolbox.record(state, owner, id, &tool, decision, is_error, review).await;
 
     Ok((text, is_error, None))
+}
+
+pub fn is_approved(answer: &str) -> bool {
+    matches!(answer, APPROVE | APPROVE_EDIT | ALWAYS)
+}
+
+pub fn edits_response(answer: Option<&str>, edits_by_setting: bool) -> bool {
+    match answer {
+        Some(APPROVE_EDIT) => true,
+        Some(APPROVE) => false,
+        _ => edits_by_setting,
+    }
+}
+
+pub async fn stop_asking(state: &AppState, owner: Uuid, server: &ServerRow, tool: &str) -> ApiResult<()> {
+    let mut policy = server.policy.0.clone();
+    policy.ask.tools.insert(tool.to_string(), false);
+    sqlx::query("update chat_tool_servers set policy = $3 where id = $1 and owner = $2").bind(server.id).bind(owner).bind(sqlx::types::Json(policy)).execute(&state.pool).await?;
+    state.publish(Some(owner), StreamMessage::IntegrationsChanged);
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -399,24 +431,26 @@ pub async fn record_call(state: &AppState, owner: Uuid, server: &ServerRow, tool
     }
 }
 
-async fn ask(state: &AppState, owner: Uuid, id: Uuid, call: &ToolCall, tool: &Tool) -> ApiResult<String> {
-    request_approval(state, owner, id, &call.id, &call.name, &call.input, &tool.server, true).await
+pub struct Approval<'a> {
+    pub title: &'a str,
+    pub input: &'a Value,
+    pub server: &'a str,
+    pub account: Option<&'a str>,
+    pub filter: Option<&'a str>,
+    pub edits_by_setting: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_id: &str, title: &str, input: &Value, server: &str, offer_always: bool) -> ApiResult<String> {
+pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_id: &str, approval: &Approval<'_>) -> ApiResult<String> {
     let answer = state.hub.await_chat_approval(id, request_id);
-    let mut options = vec![json!({"optionId": ALLOW_ONCE, "name": "Allow once", "kind": ALLOW_ONCE})];
-
-    if offer_always {
-        options.push(json!({"optionId": ALLOW_ALWAYS, "name": "Always allow this tool", "kind": ALLOW_ALWAYS}));
-    }
-
-    options.push(json!({"optionId": DECLINE, "name": "Deny", "kind": DECLINE}));
-
+    let options = json!([
+        {"optionId": APPROVE, "name": "Approve", "kind": "allow_once"},
+        {"optionId": APPROVE_EDIT, "name": "Approve and edit response", "kind": "allow_once"},
+        {"optionId": ALWAYS, "name": "Always approve", "kind": "allow_always"},
+        {"optionId": DENY, "name": "Deny", "kind": "reject_once"},
+    ]);
     let request = json!({
         "request_id": request_id,
-        "toolCall": {"toolCallId": request_id, "title": title, "rawInput": input, "server": server},
+        "toolCall": {"toolCallId": request_id, "title": approval.title, "rawInput": approval.input, "server": approval.server, "account": approval.account, "filter": approval.filter, "edit": approval.edits_by_setting},
         "options": options,
     });
     let mut tx = state.pool.begin().await?;
@@ -430,7 +464,7 @@ pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_i
 
     state.publish(Some(owner), StreamMessage::Conversation(waiting.to_proto()?));
 
-    let option_id = answer.await.unwrap_or_else(|_| DECLINE.to_string());
+    let option_id = answer.await.unwrap_or_else(|_| DENY.to_string());
     let mut tx = state.pool.begin().await?;
     let event = append_event(&mut tx, id, EventKind::PermissionResolved, &json!({"request_id": request_id, "option_id": option_id}), None).await?;
     let working = set_status(&mut tx, id, ConversationStatus::Working).await?;
@@ -467,7 +501,7 @@ pub async fn close_open_calls(state: &AppState, owner: Uuid, id: Uuid, reason: &
     .await?;
 
     for request_id in reviews {
-        record(state, owner, id, EventKind::ReviewResolved, &json!({"request_id": request_id, "decision": "withhold", "removed_count": 0})).await?;
+        record(state, owner, id, EventKind::ReviewResolved, &json!({"request_id": request_id, "outcome": "nothing"})).await?;
     }
 
     let calls = sqlx::query_scalar::<_, String>(

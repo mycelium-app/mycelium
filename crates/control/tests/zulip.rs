@@ -30,27 +30,32 @@ async fn open_review(server: &Server, conversation: Uuid) -> Value {
     .await
 }
 
-async fn answer_review(server: &Server, conversation: Uuid, request: &Value, decision: &str, removed: Vec<usize>) -> u16 {
-    let body = json!({"request_id": request["request_id"], "decision": decision, "removed": removed});
-    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{conversation}/review")).json(&body)).await;
+async fn shown(server: &Server, conversation: Uuid, request: &Value) -> Value {
+    let (_, shown) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/responses/{}", request["request_id"].as_str().unwrap()))).await;
+
+    shown
+}
+
+async fn send_response(server: &Server, conversation: Uuid, request: &Value, send: Value) -> u16 {
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{conversation}/responses/{}", request["request_id"].as_str().unwrap())).json(&json!({"send": send}))).await;
 
     status
 }
 
-async fn reviewed_call(server: &Server, token: &str, body: Value, decision: &str, removed: Vec<usize>) -> (Value, Uuid, Value) {
+async fn edited_call(server: &Server, token: &str, body: Value, edit: impl FnOnce(&Value) -> Value) -> (Value, Uuid, Value) {
     let conversation = server.node_conversation(token).await;
-    let (reply, shown) = tokio::join!(server.agent_mcp(token, conversation, body), async {
+    let (reply, seen) = tokio::join!(server.agent_mcp(token, conversation, body), async {
         let permission = server.open_request(conversation).await;
-        server.answer(conversation, &permission, "allow_once").await;
-        let review = open_review(server, conversation).await;
-        let (_, shown) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/reviews/{}", review["request_id"].as_str().unwrap()))).await;
+        server.answer(conversation, &permission, "approve_edit").await;
+        let held = open_review(server, conversation).await;
+        let seen = shown(server, conversation, &held).await;
 
-        assert_eq!(answer_review(server, conversation, &review, decision, removed).await, 204);
+        assert_eq!(send_response(server, conversation, &held, edit(&seen["value"])).await, 204);
 
-        shown
+        seen
     });
 
-    (reply, conversation, shown)
+    (reply, conversation, seen)
 }
 
 async fn add_zulip(server: &Server, base: &str, name: &str) -> (u16, Value) {
@@ -71,7 +76,7 @@ async fn a_zulip_integration_is_added_listed_renamed_and_removed_without_returni
     let (_, no_key) = post(json!({"name": "Other", "kind": "zulip", "url": base, "account": ACCOUNT})).await;
     let (_, unknown) = post(json!({"name": "Other", "kind": "carrier-pigeon", "url": base})).await;
     let id = added["id"].as_str().unwrap();
-    let (_, renamed) = server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Work chat", "always_allow": true}))).await;
+    let (_, renamed) = server.user.json(server.user.patch(&format!("/api/v1/chat-tool-servers/{id}")).json(&json!({"name": "Work chat"}))).await;
     let (removed, _) = server.user.json(server.user.delete(&format!("/api/v1/chat-tool-servers/{id}"))).await;
     let (_, after) = server.user.json(server.user.get("/api/v1/chat-tool-servers")).await;
 
@@ -82,7 +87,7 @@ async fn a_zulip_integration_is_added_listed_renamed_and_removed_without_returni
     assert!(!stored.contains(API_KEY));
     assert_eq!((wrong["error"].clone(), no_account["error"].clone(), no_key["error"].clone(), unknown["error"].clone()), (json!("tool_server_failed"), json!("account_required"), json!("api_key_required"), json!("kind_invalid")));
     assert!(wrong["message"].as_str().unwrap().contains("API key"));
-    assert_eq!((renamed["name"].clone(), renamed["always_allow"].clone()), (json!("Work chat"), json!(true)));
+    assert_eq!((renamed["name"].clone(), renamed["policy"]["preset"].clone()), (json!("Work chat"), json!("ask_all_edit")));
     assert_eq!((removed, after), (204, json!([])));
     assert!(zulip.paths().iter().all(|path| path == "/api/v1/users/me"));
 }
@@ -103,18 +108,18 @@ async fn zulip_tools_are_listed_under_the_integrations_name_and_calls_reach_zuli
     assert!(["zulip__list_channels", "zulip__get_messages", "zulip__search_messages", "zulip__send_message"].iter().all(|name| names.contains(name)));
     assert!(send["description"].as_str().unwrap().contains("needs the person's approval"));
 
-    let (channels, _, _) = reviewed_call(&server, &token, call(2, "zulip__list_channels", json!({})), "share", vec![]).await;
+    let (channels, _, _) = edited_call(&server, &token, call(2, "zulip__list_channels", json!({})), Value::clone).await;
     let channels: Value = serde_json::from_str(channels["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(channels, json!([{"id": 7, "name": "general", "description": "Everything"}]));
 
-    let (messages, _, _) = reviewed_call(&server, &token, call(3, "zulip__get_messages", json!({"channel": "general", "topic": "lunch", "limit": 5})), "share", vec![]).await;
+    let (messages, _, _) = edited_call(&server, &token, call(3, "zulip__get_messages", json!({"channel": "general", "topic": "lunch", "limit": 5})), Value::clone).await;
     let messages: Value = serde_json::from_str(messages["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(messages[0]["content"], "Noon?");
     assert_eq!(messages[0]["place"], json!({"channel": "general", "topic": "lunch"}));
 
-    reviewed_call(&server, &token, call(4, "zulip__search_messages", json!({"query": "lunch plans"})), "share", vec![]).await;
-    let (sent, _, _) = reviewed_call(&server, &token, call(5, "zulip__send_message", json!({"channel": "general", "topic": "lunch", "content": "Yes, noon."})), "share", vec![]).await;
-    let (direct, _, _) = reviewed_call(&server, &token, call(6, "zulip__send_message", json!({"direct_to": ["grace@example.com"], "content": "Hi"})), "share", vec![]).await;
+    edited_call(&server, &token, call(4, "zulip__search_messages", json!({"query": "lunch plans"})), Value::clone).await;
+    let (sent, _, _) = edited_call(&server, &token, call(5, "zulip__send_message", json!({"channel": "general", "topic": "lunch", "content": "Yes, noon."})), Value::clone).await;
+    let (direct, _, _) = edited_call(&server, &token, call(6, "zulip__send_message", json!({"direct_to": ["grace@example.com"], "content": "Hi"})), Value::clone).await;
     let neither = server.approved_agent_mcp(&token, json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "zulip__send_message", "arguments": {"content": "Hi"}}})).await;
 
     let seen = zulip.seen.lock().unwrap().clone();
@@ -147,7 +152,7 @@ async fn a_switched_off_zulip_integration_refuses_calls_and_stays_out_of_the_too
 }
 
 #[tokio::test]
-async fn every_zulip_read_from_a_workspace_waits_for_approval_and_a_review() {
+async fn every_zulip_read_from_a_workspace_waits_for_approval_and_an_edit() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
     let (router, zulip) = fake_zulip();
@@ -163,11 +168,11 @@ async fn every_zulip_read_from_a_workspace_waits_for_approval_and_a_review() {
     let (reply, ()) = tokio::join!(server.agent_mcp(&node.token, conversation, body), async {
         let permission = server.open_request(conversation).await;
         assert_eq!(zulip.paths(), ["/api/v1/users/me"]);
-        server.answer(conversation, &permission, "allow_once").await;
-        let review = open_review(&server, conversation).await;
+        server.answer(conversation, &permission, "approve_edit").await;
+        let held = open_review(&server, conversation).await;
 
         assert_eq!(server.conversation(conversation).await["status"], "input");
-        assert_eq!(answer_review(&server, conversation, &review, "share", vec![]).await, 204);
+        assert_eq!(send_response(&server, conversation, &held, shown(&server, conversation, &held).await["value"].clone()).await, 204);
     });
     let messages: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let (_, calls) = server.user.json(server.user.get("/api/v1/integration-calls?review=shared")).await;
@@ -178,7 +183,7 @@ async fn every_zulip_read_from_a_workspace_waits_for_approval_and_a_review() {
 }
 
 #[tokio::test]
-async fn withheld_zulip_result_is_never_stored_in_events() {
+async fn a_zulip_result_sent_as_nothing_is_never_stored_in_events() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
     let (router, _) = fake_zulip();
@@ -186,36 +191,87 @@ async fn withheld_zulip_result_is_never_stored_in_events() {
     add_zulip(&server, &base, "Zulip").await;
     let body = call(1, "call_integration_tool", json!({"name": "zulip__get_messages", "arguments": {"channel": "general", "topic": "lunch"}}));
 
-    let (reply, conversation, shown) = reviewed_call(&server, &node.token, body, "withhold", vec![]).await;
+    let (reply, conversation, seen) = edited_call(&server, &node.token, body, |_| Value::Null).await;
     let events = server.events(conversation).await;
     let stored = serde_json::to_string(&events).unwrap();
     let resolved = events.iter().find(|event| event["kind"] == "review_resolved").unwrap();
 
-    assert_eq!(shown["items"].as_array().unwrap().len(), 2);
-    assert!(reply["result"]["content"][0]["text"].as_str().unwrap().contains("withheld"));
+    assert_eq!(seen["value"].as_array().unwrap().len(), 2);
+    assert_eq!(reply["result"]["content"][0]["text"], "The person sent nothing from this response.");
     assert!(!stored.contains("secret-recipe") && !stored.contains("Noon?"));
-    assert_eq!(resolved["payload"]["decision"], "withhold");
+    assert_eq!(resolved["payload"]["outcome"], "nothing");
 }
 
 #[tokio::test]
-async fn removed_items_reach_the_agent_with_a_note() {
+async fn a_dropped_message_never_reaches_the_agent_and_the_edit_is_noted() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
     let (router, _) = fake_zulip();
     let base = serve(router).await;
     add_zulip(&server, &base, "Zulip").await;
 
-    let (reply, conversation, _) = reviewed_call(&server, &node.token, call(1, "zulip__get_messages", json!({"channel": "general", "topic": "lunch"})), "remove", vec![1]).await;
+    let (reply, conversation, _) = edited_call(&server, &node.token, call(1, "zulip__get_messages", json!({"channel": "general", "topic": "lunch"})), |value| json!([value[0].clone()])).await;
     let text = reply["result"]["content"][0]["text"].as_str().unwrap();
     let stored = serde_json::to_string(&server.events(conversation).await).unwrap();
 
     assert!(text.contains("Noon?") && !text.contains("secret-recipe"));
-    assert!(text.ends_with("[The person removed 1 of 2 items before you saw them.]"));
+    assert!(text.ends_with("[The person edited this response before you saw it.]"));
     assert!(!stored.contains("Noon?"));
 }
 
 #[tokio::test]
-async fn review_items_are_gone_once_answered() {
+async fn an_agent_filter_is_stripped_before_the_call_and_preselects_what_it_matches() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (router, zulip) = fake_zulip();
+    let base = serve(router).await;
+    add_zulip(&server, &base, "Zulip").await;
+    let body = call(1, "zulip__get_messages", json!({"channel": "general", "topic": "lunch", "response_filter": ".[] | select(.content | test(\"Noon\"))"}));
+
+    let (_, _, seen) = edited_call(&server, &node.token, body, Value::clone).await;
+
+    assert_eq!(seen["filter"], ".[] | select(.content | test(\"Noon\"))");
+    assert_eq!(seen["selected_paths"], json!([[0]]));
+    assert!(seen.get("filter_error").is_none());
+    assert!(zulip.seen.lock().unwrap().iter().all(|(_, _, body)| !body.contains("response_filter")));
+}
+
+#[tokio::test]
+async fn editing_the_filter_returns_new_paths_a_replacement_value_or_a_readable_error() {
+    let server = Server::start().await;
+    let node = server.online_node("laptop").await;
+    let (router, _) = fake_zulip();
+    let base = serve(router).await;
+    add_zulip(&server, &base, "Zulip").await;
+    let conversation = server.node_conversation(&node.token).await;
+    let body = call(1, "zulip__get_messages", json!({"channel": "general", "topic": "lunch"}));
+
+    let (_, outcome) = tokio::join!(server.agent_mcp(&node.token, conversation, body), async {
+        let permission = server.open_request(conversation).await;
+        server.answer(conversation, &permission, "approve_edit").await;
+        let held = open_review(&server, conversation).await;
+        let path = format!("/api/v1/conversations/{conversation}/responses/{}/filter", held["request_id"].as_str().unwrap());
+        let ask = |filter: &str| server.user.json(server.user.post(&path).json(&json!({"filter": filter})));
+        let paths = ask(".[1]").await;
+        let replaced = ask("map(.content)").await;
+        let cleared = ask("  ").await;
+        let broken = ask(".[").await;
+
+        send_response(&server, conversation, &held, Value::Null).await;
+
+        (paths, replaced, cleared, broken)
+    });
+    let (paths, replaced, cleared, broken) = outcome;
+
+    assert_eq!((paths.0, paths.1), (200, json!({"selected_paths": [[1]]})));
+    assert_eq!(replaced.1["value"], json!(["Noon?", "Pizza secret-recipe?"]));
+    assert_eq!(cleared.1["value"].as_array().unwrap().len(), 2);
+    assert_eq!(broken.0, 400);
+    assert!(broken.1["message"].as_str().unwrap().starts_with("The filter could not be read: ") && broken.1["message"].as_str().unwrap().ends_with(". Fix it or clear it."));
+}
+
+#[tokio::test]
+async fn a_response_is_gone_once_answered() {
     let server = Server::start().await;
     let node = server.online_node("laptop").await;
     let (router, _) = fake_zulip();
@@ -226,20 +282,16 @@ async fn review_items_are_gone_once_answered() {
 
     let (_, request) = tokio::join!(server.agent_mcp(&node.token, conversation, body), async {
         let permission = server.open_request(conversation).await;
-        server.answer(conversation, &permission, "allow_once").await;
-        let review = open_review(&server, conversation).await;
-        let nothing = answer_review(&server, conversation, &review, "remove", vec![]).await;
-        let outside = answer_review(&server, conversation, &review, "remove", vec![9]).await;
+        server.answer(conversation, &permission, "approve_edit").await;
+        let held = open_review(&server, conversation).await;
 
-        assert_eq!((nothing, outside), (400, 400));
-        assert_eq!(answer_review(&server, conversation, &review, "share", vec![]).await, 204);
+        assert_eq!(send_response(&server, conversation, &held, json!([])).await, 204);
 
-        review
+        held
     });
-    let path = format!("/api/v1/conversations/{conversation}/reviews/{}", request["request_id"].as_str().unwrap());
-    let (gone, error) = server.user.json(server.user.get(&path)).await;
-    let again = answer_review(&server, conversation, &request, "share", vec![]).await;
+    let (gone, error) = server.user.json(server.user.get(&format!("/api/v1/conversations/{conversation}/responses/{}", request["request_id"].as_str().unwrap()))).await;
+    let again = send_response(&server, conversation, &request, json!([])).await;
 
     assert_eq!((gone, again), (404, 409));
-    assert_eq!(error["message"], "This result is no longer waiting for review.");
+    assert_eq!(error["message"], "This response is no longer waiting for you.");
 }

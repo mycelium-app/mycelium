@@ -1,22 +1,31 @@
-use mycelium_proto::api::{IntegrationPolicy, PolicyLevel, ToolKind};
+use mycelium_proto::api::{ApprovalPreset, IntegrationPolicy, PolicyLevel, ToolKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    Default,
+    Preset,
     Type,
     Tool,
-    Locked,
+}
+
+impl Source {
+    pub fn name(self) -> &'static str {
+        match self {
+            Source::Preset => "preset",
+            Source::Type => "type",
+            Source::Tool => "tool",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Effective {
     pub ask: bool,
-    pub review: bool,
+    pub edit: bool,
     pub ask_source: Source,
-    pub review_source: Source,
+    pub edit_source: Source,
 }
 
-fn resolve(level: &PolicyLevel, tool: &str, kind: ToolKind, fallback: bool) -> (bool, Source) {
+fn resolve(level: &PolicyLevel, tool: &str, kind: ToolKind, preset: bool) -> (bool, Source) {
     if let Some(value) = level.tools.get(tool) {
         return (*value, Source::Tool);
     }
@@ -26,76 +35,99 @@ fn resolve(level: &PolicyLevel, tool: &str, kind: ToolKind, fallback: bool) -> (
         ToolKind::Write => level.write,
     };
 
-    if let Some(value) = by_type {
-        return (value, Source::Type);
-    }
-
-    match level.all {
-        Some(value) => (value, Source::Default),
-        None => (fallback, Source::Default),
+    match by_type {
+        Some(value) => (value, Source::Type),
+        None => (preset, Source::Preset),
     }
 }
 
-pub fn effective(policy: &IntegrationPolicy, tool: &str, kind: ToolKind, ask_fallback: bool) -> Effective {
-    let (ask, ask_source) = resolve(&policy.ask, tool, kind, ask_fallback);
-    let (review, review_source) = resolve(&policy.review, tool, kind, false);
+pub fn effective(policy: &IntegrationPolicy, tool: &str, kind: ToolKind) -> Effective {
+    let asks_by_preset = match policy.preset {
+        ApprovalPreset::AskWrites => kind == ToolKind::Write,
+        ApprovalPreset::AskAll | ApprovalPreset::AskAllEdit => true,
+        ApprovalPreset::DontAsk => false,
+    };
+    let (ask, ask_source) = resolve(&policy.ask, tool, kind, asks_by_preset);
+    let (edit, edit_source) = resolve(&policy.edit, tool, kind, policy.preset == ApprovalPreset::AskAllEdit);
 
-    Effective { ask, review, ask_source, review_source }
-}
-
-pub fn locked() -> Effective {
-    Effective { ask: true, review: true, ask_source: Source::Locked, review_source: Source::Locked }
+    Effective { ask, edit, ask_source, edit_source }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn policy(ask: PolicyLevel) -> IntegrationPolicy {
-        IntegrationPolicy { ask, review: PolicyLevel::default() }
+    fn preset(preset: ApprovalPreset) -> IntegrationPolicy {
+        IntegrationPolicy { preset, ..Default::default() }
     }
 
     #[test]
-    fn nothing_set_falls_back_and_is_marked_inherited() {
-        let result = effective(&IntegrationPolicy::default(), "list", ToolKind::Read, true);
+    fn ask_before_writes_asks_for_writes_only() {
+        let policy = preset(ApprovalPreset::AskWrites);
+
+        assert!(effective(&policy, "send", ToolKind::Write).ask);
+        assert!(!effective(&policy, "list", ToolKind::Read).ask);
+        assert_eq!(effective(&policy, "list", ToolKind::Read).ask_source, Source::Preset);
+    }
+
+    #[test]
+    fn ask_before_everything_asks_for_reads_too_without_editing() {
+        let result = effective(&preset(ApprovalPreset::AskAll), "list", ToolKind::Read);
 
         assert!(result.ask);
-        assert_eq!(result.ask_source, Source::Default);
-        assert!(!result.review);
+        assert!(!result.edit);
     }
 
     #[test]
-    fn the_integration_default_applies_to_every_tool() {
-        let result = effective(&policy(PolicyLevel { all: Some(false), ..Default::default() }), "send", ToolKind::Write, true);
+    fn the_edit_preset_asks_and_edits_every_call() {
+        let result = effective(&preset(ApprovalPreset::AskAllEdit), "list", ToolKind::Read);
 
-        assert!(!result.ask);
-        assert_eq!(result.ask_source, Source::Default);
+        assert!(result.ask && result.edit);
+        assert_eq!(result.edit_source, Source::Preset);
     }
 
     #[test]
-    fn a_type_override_beats_the_default() {
-        let level = PolicyLevel { all: Some(true), read: Some(false), ..Default::default() };
-
-        assert!(!effective(&policy(level.clone()), "list", ToolKind::Read, true).ask);
-        assert!(effective(&policy(level), "send", ToolKind::Write, false).ask);
+    fn dont_ask_asks_for_nothing_not_even_writes() {
+        assert!(!effective(&preset(ApprovalPreset::DontAsk), "send", ToolKind::Write).ask);
     }
 
     #[test]
-    fn a_tool_override_beats_the_type_override() {
+    fn a_type_rule_beats_the_preset() {
+        let policy = IntegrationPolicy { ask: PolicyLevel { read: Some(true), ..Default::default() }, ..Default::default() };
+        let result = effective(&policy, "list", ToolKind::Read);
+
+        assert!(result.ask);
+        assert_eq!(result.ask_source, Source::Type);
+    }
+
+    #[test]
+    fn a_tool_rule_beats_the_type_rule() {
         let mut level = PolicyLevel { read: Some(false), ..Default::default() };
         level.tools.insert("list".to_string(), true);
-        let result = effective(&policy(level), "list", ToolKind::Read, false);
+        let result = effective(&IntegrationPolicy { ask: level, ..Default::default() }, "list", ToolKind::Read);
 
         assert!(result.ask);
         assert_eq!(result.ask_source, Source::Tool);
     }
 
     #[test]
-    fn review_is_resolved_separately_from_asking() {
-        let result = effective(&IntegrationPolicy { ask: PolicyLevel::default(), review: PolicyLevel { write: Some(true), ..Default::default() } }, "send", ToolKind::Write, false);
+    fn a_tool_can_stop_asking_and_still_be_held_for_editing() {
+        let mut level = PolicyLevel::default();
+        level.tools.insert("get_messages".to_string(), false);
+        let policy = IntegrationPolicy { preset: ApprovalPreset::AskAllEdit, ask: level, ..Default::default() };
+        let result = effective(&policy, "get_messages", ToolKind::Read);
 
-        assert!(result.review);
-        assert_eq!(result.review_source, Source::Type);
+        assert!(!result.ask);
+        assert!(result.edit);
+    }
+
+    #[test]
+    fn editing_is_resolved_separately_from_asking() {
+        let policy = IntegrationPolicy { edit: PolicyLevel { write: Some(true), ..Default::default() }, preset: ApprovalPreset::DontAsk, ..Default::default() };
+        let result = effective(&policy, "send", ToolKind::Write);
+
+        assert!(result.edit);
+        assert_eq!(result.edit_source, Source::Type);
         assert!(!result.ask);
     }
 }

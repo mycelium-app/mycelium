@@ -105,9 +105,9 @@ pub struct ResetAnswer {
     pub error: Option<String>,
 }
 
-pub struct PendingReview {
-    pub items: Vec<serde_json::Value>,
-    pub answer: oneshot::Sender<mycelium_proto::conversation::ReviewAnswer>,
+pub struct PendingResponse {
+    pub held: crate::response_editor::Held,
+    pub answer: oneshot::Sender<Option<serde_json::Value>>,
 }
 
 pub struct PendingRequests<A> {
@@ -172,7 +172,7 @@ pub struct Hub {
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
     chat_approvals: Mutex<HashMap<(Uuid, String), oneshot::Sender<String>>>,
-    reviews: Mutex<HashMap<(Uuid, String), PendingReview>>,
+    responses: Mutex<HashMap<(Uuid, String), PendingResponse>>,
     tool_streams: Mutex<HashMap<Uuid, broadcast::Sender<()>>>,
 }
 
@@ -237,29 +237,29 @@ impl Hub {
             approvals.retain(|(conversation, _), _| *conversation != conversation_id);
         }
 
-        if let Ok(mut reviews) = self.reviews.lock() {
-            reviews.retain(|(conversation, _), _| *conversation != conversation_id);
+        if let Ok(mut responses) = self.responses.lock() {
+            responses.retain(|(conversation, _), _| *conversation != conversation_id);
         }
     }
 
-    pub fn await_review(&self, conversation_id: Uuid, request_id: &str, items: Vec<serde_json::Value>) -> oneshot::Receiver<mycelium_proto::conversation::ReviewAnswer> {
+    pub fn await_response(&self, conversation_id: Uuid, request_id: &str, held: crate::response_editor::Held) -> oneshot::Receiver<Option<serde_json::Value>> {
         let (answer, receiver) = oneshot::channel();
 
-        if let Ok(mut reviews) = self.reviews.lock() {
-            reviews.insert((conversation_id, request_id.to_string()), PendingReview { items, answer });
+        if let Ok(mut responses) = self.responses.lock() {
+            responses.insert((conversation_id, request_id.to_string()), PendingResponse { held, answer });
         }
 
         receiver
     }
 
-    pub fn review_items(&self, conversation_id: Uuid, request_id: &str) -> Option<Vec<serde_json::Value>> {
-        self.reviews.lock().ok().and_then(|reviews| reviews.get(&(conversation_id, request_id.to_string())).map(|pending| pending.items.clone()))
+    pub fn held_response(&self, conversation_id: Uuid, request_id: &str) -> Option<crate::response_editor::Held> {
+        self.responses.lock().ok().and_then(|responses| responses.get(&(conversation_id, request_id.to_string())).map(|pending| pending.held.clone()))
     }
 
-    pub fn answer_review(&self, conversation_id: Uuid, request_id: &str, answer: mycelium_proto::conversation::ReviewAnswer) -> bool {
-        let pending = self.reviews.lock().ok().and_then(|mut reviews| reviews.remove(&(conversation_id, request_id.to_string())));
+    pub fn answer_response(&self, conversation_id: Uuid, request_id: &str, send: Option<serde_json::Value>) -> bool {
+        let pending = self.responses.lock().ok().and_then(|mut responses| responses.remove(&(conversation_id, request_id.to_string())));
 
-        pending.is_some_and(|pending| pending.answer.send(answer).is_ok())
+        pending.is_some_and(|pending| pending.answer.send(send).is_ok())
     }
 
     pub fn register(&self, node_id: Uuid, sender: mpsc::UnboundedSender<ControlToNode>) -> Uuid {

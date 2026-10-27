@@ -1,3 +1,4 @@
+use crate::assistants;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::instructions::{self, find_layer};
@@ -174,6 +175,39 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, requested: Option<
     Ok(Ok(publish(state, owner, find_owned(state, id, owner).await?)))
 }
 
+pub async fn propose_for_assistant(state: &AppState, owner: Uuid, assistant_id: Uuid, conversation_id: Option<Uuid>, text: &str, reason: &str) -> ApiResult<Result<InstructionProposal, String>> {
+    let assistant = assistants::load(state, owner, assistant_id).await?;
+    let current = assistants::instructions_of(state, assistant_id).await?;
+
+    if text == current {
+        return Ok(Err(format!("Nothing was proposed. The new text is the same as the current instructions of {}.", assistant.name)));
+    }
+
+    let key = instructions::assistant_layer(assistant_id);
+
+    instructions::record_assistant_version(state, assistant_id, &current).await?;
+
+    let revision = sqlx::query_scalar::<_, String>("select id from instruction_versions where layer = $1 order by seq desc limit 1").bind(&key).fetch_one(&state.pool).await?;
+    let superseded = sqlx::query_scalar::<_, Uuid>("update instruction_proposals set state = 'superseded', decided_at = now() where layer = $1 and state = 'proposed' returning id").bind(&key).fetch_all(&state.pool).await?;
+    let id = sqlx::query_scalar::<_, Uuid>("insert into instruction_proposals (owner, conversation_id, layer, layer_name, base_revision, base_text, text, reason) values ($1, $2, $3, $4, $5, $6, $7, $8) returning id")
+        .bind(owner)
+        .bind(conversation_id)
+        .bind(&key)
+        .bind(&assistant.name)
+        .bind(revision)
+        .bind(current)
+        .bind(text)
+        .bind(reason)
+        .fetch_one(&state.pool)
+        .await?;
+
+    for earlier in superseded {
+        publish(state, owner, find_owned(state, earlier, owner).await?);
+    }
+
+    Ok(Ok(publish(state, owner, find_owned(state, id, owner).await?)))
+}
+
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<InstructionProposal>>> {
     let rows = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!(
         "select {PROPOSAL_COLUMNS} from instruction_proposals p left join conversations c on c.id = p.conversation_id where p.owner = $1 order by (p.state = 'proposed') desc, p.created_at desc limit {LISTED}",
@@ -216,7 +250,7 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     sqlx::query("update instruction_proposals set state = 'declined', note = $2, decided_at = now() where id = $1").bind(id).bind(note).execute(&state.pool).await?;
 
-    if let Some(conversation_id) = found.conversation_id {
+    if let Some(conversation_id) = found.conversation_id.filter(|_| request.notify) {
         let mut text = if request.redo {
             format!("The {} instructions changed after you proposed your edit to them. Read them again with get_instructions and, if your edit still applies, propose it again on the current text.", found.layer_name)
         } else {
