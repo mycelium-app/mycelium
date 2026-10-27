@@ -2,11 +2,12 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
-use mycelium_proto::api::{Break, QuietDay, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
+use mycelium_proto::api::{Break, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -16,21 +17,129 @@ const PUZZLES: [&str; 4] = ["wordle", "connections", "daily-orbs", "catfishing"]
 const HEARTBEAT_CAP_SECONDS: i32 = 90;
 const OVERVIEW_DAYS_LIMIT: i64 = 31;
 
-type SettingsRow = (bool, i32, i32, i32, bool, bool, bool, bool, bool, Option<String>);
+type SettingsRow = (bool, i32, i32, i32, bool, bool, bool, bool, Option<String>);
 
-const SETTINGS_COLUMNS: &str = "break_reminders, break_after_minutes, snooze_minutes, break_minutes, pomodoro, quiet_hours, quiet_hold_notifications, quiet_hold_schedules, quiet_hold_pings, time_zone";
+pub const OPENING_MINUTES: i64 = 15;
+const DAY_MINUTES: u32 = 24 * 60;
+const FLIP_SEARCH_DAYS: i64 = 8;
+
+const SETTINGS_COLUMNS: &str = "break_reminders, break_after_minutes, snooze_minutes, break_minutes, app_always_open, quiet_hold_notifications, quiet_hold_schedules, quiet_hold_pings, time_zone";
 
 #[derive(Deserialize)]
 pub struct OverviewQuery {
     days: Option<i64>,
 }
 
-fn default_quiet_days() -> Vec<QuietDay> {
-    (0..7u8).map(|weekday| QuietDay { weekday, enabled: true, all_day: weekday >= 5, starts: "22:00".into(), ends: "08:00".into() }).collect()
+pub fn default_hours() -> Hours {
+    Hours { always_open: true, days: (0..7u8).map(|weekday| HoursDay { weekday, closed: weekday >= 5, opens: "09:00".into(), closes: "18:00".into() }).collect() }
 }
 
-fn parse_time(text: &str) -> ApiResult<NaiveTime> {
-    NaiveTime::parse_from_str(text, "%H:%M").map_err(|_| ApiError::bad_request("quiet_time_invalid", "Enter quiet hours as a time like 22:00."))
+fn time_invalid() -> ApiError {
+    ApiError::bad_request("hours_time_invalid", "Enter a time like 09:00.")
+}
+
+fn parse_minutes(text: &str) -> Option<u32> {
+    let (hours, minutes) = text.split_once(':')?;
+
+    if hours.len() != 2 || minutes.len() != 2 {
+        return None;
+    }
+
+    let total = hours.parse::<u32>().ok()? * 60 + minutes.parse::<u32>().ok()?;
+
+    (minutes.parse::<u32>().ok()? < 60 && total <= DAY_MINUTES).then_some(total)
+}
+
+pub fn validate_hours(hours: &Hours) -> ApiResult<Vec<(i16, bool, String, String)>> {
+    let mut days = Vec::new();
+
+    for day in &hours.days {
+        if day.weekday > 6 {
+            return Err(ApiError::bad_request("weekday_invalid", "Hours cover weekdays 0 to 6, Monday to Sunday."));
+        }
+
+        let opens = parse_minutes(&day.opens).filter(|minutes| *minutes < DAY_MINUTES).ok_or_else(time_invalid)?;
+        let closes = parse_minutes(&day.closes).ok_or_else(time_invalid)?;
+
+        days.push((day.weekday as i16, day.closed, format_minutes(opens), format_minutes(closes)));
+    }
+
+    Ok(days)
+}
+
+fn format_minutes(minutes: u32) -> String {
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+pub fn is_open(hours: &Hours, at: NaiveDateTime) -> bool {
+    if hours.always_open {
+        return true;
+    }
+
+    let today = at.weekday().num_days_from_monday() as u8;
+    let yesterday = (today + 6) % 7;
+    let now = at.time().num_seconds_from_midnight() / 60;
+    let in_today = hours.days.iter().filter(|day| !day.closed && day.weekday == today).any(|day| {
+        let (Some(opens), Some(closes)) = (parse_minutes(&day.opens), parse_minutes(&day.closes)) else { return false };
+
+        if closes > opens { now >= opens && now < closes } else { now >= opens }
+    });
+    let in_yesterdays_overnight = hours.days.iter().filter(|day| !day.closed && day.weekday == yesterday).any(|day| {
+        let (Some(opens), Some(closes)) = (parse_minutes(&day.opens), parse_minutes(&day.closes)) else { return false };
+
+        closes <= opens && now < closes
+    });
+
+    in_today || in_yesterdays_overnight
+}
+
+fn all_open(hours: &[&Hours], at: NaiveDateTime) -> bool {
+    hours.iter().all(|each| is_open(each, at))
+}
+
+fn next_change(hours: &[&Hours], at: NaiveDateTime) -> Option<NaiveDateTime> {
+    let before = all_open(hours, at);
+    let mut candidates = Vec::new();
+
+    for offset in 0..=FLIP_SEARCH_DAYS {
+        let date = at.date() + Duration::days(offset);
+        let weekday = date.weekday().num_days_from_monday() as u8;
+
+        for each in hours.iter().filter(|each| !each.always_open) {
+            for day in each.days.iter().filter(|day| !day.closed && day.weekday == weekday) {
+                let (Some(opens), Some(closes)) = (parse_minutes(&day.opens), parse_minutes(&day.closes)) else { continue };
+                let closing_date = if closes <= opens { date + Duration::days(1) } else { date };
+
+                candidates.push(date.and_hms_opt(0, 0, 0)? + Duration::minutes(opens as i64));
+                candidates.push(closing_date.and_hms_opt(0, 0, 0)? + Duration::minutes(closes as i64));
+            }
+        }
+    }
+
+    candidates.sort();
+    candidates.into_iter().filter(|candidate| *candidate > at).find(|candidate| all_open(hours, *candidate) != before)
+}
+
+pub struct GroupStatus {
+    pub open_now: bool,
+    pub closes_at: Option<DateTime<Utc>>,
+    pub opens_at: Option<DateTime<Utc>>,
+    pub opened_until: Option<DateTime<Utc>>,
+}
+
+pub fn status_of(app: &Hours, group: Option<&Hours>, opened_until: Option<DateTime<Utc>>, zone: Tz, now: DateTime<Utc>) -> GroupStatus {
+    let opened_until = opened_until.filter(|until| *until > now);
+    let local = now.with_timezone(&zone).naive_local();
+    let hours: Vec<&Hours> = std::iter::once(app).chain(group).collect();
+    let by_hours = all_open(&hours, local);
+    let to_utc = |naive: NaiveDateTime| zone.from_local_datetime(&naive).earliest().map(|moment| moment.with_timezone(&Utc));
+    let change = next_change(&hours, local).and_then(to_utc);
+
+    if opened_until.is_some() {
+        return GroupStatus { open_now: true, closes_at: opened_until, opens_at: None, opened_until };
+    }
+
+    GroupStatus { open_now: by_hours, closes_at: change.filter(|_| by_hours), opens_at: change.filter(|_| !by_hours), opened_until: None }
 }
 
 fn require_range(name: &'static str, message: &'static str, value: i32, low: i32, high: i32) -> ApiResult<()> {
@@ -39,28 +148,6 @@ fn require_range(name: &'static str, message: &'static str, value: i32, low: i32
     }
 
     Ok(())
-}
-
-pub fn is_quiet(days: &[QuietDay], at: NaiveDateTime) -> bool {
-    let today = at.weekday().num_days_from_monday() as u8;
-    let yesterday = (today + 6) % 7;
-    let time = at.time();
-    let in_today = days.iter().filter(|day| day.enabled && day.weekday == today).any(|day| {
-        if day.all_day {
-            return true;
-        }
-
-        let (Ok(starts), Ok(ends)) = (parse_time(&day.starts), parse_time(&day.ends)) else { return false };
-
-        if ends > starts { time >= starts && time < ends } else { time >= starts }
-    });
-    let in_yesterdays_overnight = days.iter().filter(|day| day.enabled && !day.all_day && day.weekday == yesterday).any(|day| {
-        let (Ok(starts), Ok(ends)) = (parse_time(&day.starts), parse_time(&day.ends)) else { return false };
-
-        ends <= starts && time < ends
-    });
-
-    in_today || in_yesterdays_overnight
 }
 
 pub async fn zone_of(state: &AppState, owner: Uuid, saved: Option<&str>) -> ApiResult<Tz> {
@@ -73,28 +160,57 @@ pub async fn zone_of(state: &AppState, owner: Uuid, saved: Option<&str>) -> ApiR
     Ok(stored.and_then(|name| name.parse::<Tz>().ok()).unwrap_or(Tz::UTC))
 }
 
+pub async fn load_hours(state: &AppState, owner: Uuid, group_id: Option<Uuid>, always_open: bool) -> ApiResult<Hours> {
+    let stored = sqlx::query_as::<_, (i16, bool, String, String)>("select weekday, closed, to_char(opens, 'HH24:MI'), to_char(closes, 'HH24:MI') from hours where owner = $1 and group_id is not distinct from $2 order by weekday")
+        .bind(owner)
+        .bind(group_id)
+        .fetch_all(&state.pool)
+        .await?;
+    let mut hours = default_hours();
+
+    hours.always_open = always_open;
+
+    for (weekday, closed, opens, closes) in stored {
+        hours.days[weekday as usize] = HoursDay { weekday: weekday as u8, closed, opens, closes };
+    }
+
+    Ok(hours)
+}
+
+pub async fn save_hours(connection: &mut sqlx::PgConnection, owner: Uuid, group_id: Option<Uuid>, hours: &Hours) -> ApiResult<()> {
+    for (weekday, closed, opens, closes) in validate_hours(hours)? {
+        sqlx::query(
+            "insert into hours (owner, group_id, weekday, closed, opens, closes) values ($1, $2, $3, $4, $5::text::time, $6::text::time)
+             on conflict (owner, group_id, weekday) do update set closed = excluded.closed, opens = excluded.opens, closes = excluded.closes",
+        )
+        .bind(owner)
+        .bind(group_id)
+        .bind(weekday)
+        .bind(closed)
+        .bind(opens)
+        .bind(closes)
+        .execute(&mut *connection)
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn load_settings(state: &AppState, owner: Uuid) -> ApiResult<WellnessSettings> {
     let row = sqlx::query_as::<_, SettingsRow>(sqlx::AssertSqlSafe(format!("select {SETTINGS_COLUMNS} from user_settings where owner = $1"))).bind(owner).fetch_optional(&state.pool).await?;
-    let row = row.unwrap_or((true, 50, 10, 5, false, false, true, true, true, None));
-    let stored = sqlx::query_as::<_, (i16, bool, bool, NaiveTime, NaiveTime)>("select weekday, enabled, all_day, starts, ends from quiet_hours where owner = $1 order by weekday").bind(owner).fetch_all(&state.pool).await?;
-    let mut quiet_days = default_quiet_days();
-
-    for (weekday, enabled, all_day, starts, ends) in stored {
-        quiet_days[weekday as usize] = QuietDay { weekday: weekday as u8, enabled, all_day, starts: starts.format("%H:%M").to_string(), ends: ends.format("%H:%M").to_string() };
-    }
+    let row = row.unwrap_or((true, 50, 10, 5, true, true, true, true, None));
+    let hours = load_hours(state, owner, None, row.4).await?;
 
     Ok(WellnessSettings {
         break_reminders: row.0,
         break_after_minutes: row.1,
         snooze_minutes: row.2,
         break_minutes: row.3,
-        pomodoro: row.4,
-        quiet_hours: row.5,
-        quiet_hold_notifications: row.6,
-        quiet_hold_schedules: row.7,
-        quiet_hold_pings: row.8,
-        time_zone: row.9,
-        quiet_days,
+        hours,
+        quiet_hold_notifications: row.5,
+        quiet_hold_schedules: row.6,
+        quiet_hold_pings: row.7,
+        time_zone: row.8,
     })
 }
 
@@ -115,10 +231,10 @@ pub async fn save_settings(State(state): State<AppState>, user: AuthUser, Json(r
     let mut tx = state.pool.begin().await?;
 
     sqlx::query(
-        "insert into user_settings (owner, break_reminders, break_after_minutes, snooze_minutes, break_minutes, pomodoro, quiet_hours, quiet_hold_notifications, quiet_hold_schedules, quiet_hold_pings, time_zone)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "insert into user_settings (owner, break_reminders, break_after_minutes, snooze_minutes, break_minutes, app_always_open, quiet_hold_notifications, quiet_hold_schedules, quiet_hold_pings, time_zone)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          on conflict (owner) do update set break_reminders = excluded.break_reminders, break_after_minutes = excluded.break_after_minutes, snooze_minutes = excluded.snooze_minutes, break_minutes = excluded.break_minutes,
-            pomodoro = excluded.pomodoro, quiet_hours = excluded.quiet_hours, quiet_hold_notifications = excluded.quiet_hold_notifications, quiet_hold_schedules = excluded.quiet_hold_schedules,
+            app_always_open = excluded.app_always_open, quiet_hold_notifications = excluded.quiet_hold_notifications, quiet_hold_schedules = excluded.quiet_hold_schedules,
             quiet_hold_pings = excluded.quiet_hold_pings, time_zone = excluded.time_zone",
     )
     .bind(user.id)
@@ -126,8 +242,7 @@ pub async fn save_settings(State(state): State<AppState>, user: AuthUser, Json(r
     .bind(request.break_after_minutes)
     .bind(request.snooze_minutes)
     .bind(request.break_minutes)
-    .bind(request.pomodoro)
-    .bind(request.quiet_hours)
+    .bind(request.hours.always_open)
     .bind(request.quiet_hold_notifications)
     .bind(request.quiet_hold_schedules)
     .bind(request.quiet_hold_pings)
@@ -135,24 +250,7 @@ pub async fn save_settings(State(state): State<AppState>, user: AuthUser, Json(r
     .execute(&mut *tx)
     .await?;
 
-    for day in &request.quiet_days {
-        if day.weekday > 6 {
-            return Err(ApiError::bad_request("weekday_invalid", "Quiet hours cover weekdays 0 to 6, Monday to Sunday."));
-        }
-
-        sqlx::query(
-            "insert into quiet_hours (owner, weekday, enabled, all_day, starts, ends) values ($1, $2, $3, $4, $5, $6)
-             on conflict (owner, weekday) do update set enabled = excluded.enabled, all_day = excluded.all_day, starts = excluded.starts, ends = excluded.ends",
-        )
-        .bind(user.id)
-        .bind(day.weekday as i16)
-        .bind(day.enabled)
-        .bind(day.all_day)
-        .bind(parse_time(&day.starts)?)
-        .bind(parse_time(&day.ends)?)
-        .execute(&mut *tx)
-        .await?;
-    }
+    save_hours(&mut tx, user.id, None, &request.hours).await?;
 
     tx.commit().await?;
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
@@ -160,17 +258,44 @@ pub async fn save_settings(State(state): State<AppState>, user: AuthUser, Json(r
     Ok(Json(load_settings(&state, user.id).await?))
 }
 
-pub async fn quiet_settings(state: &AppState, owner: Uuid) -> ApiResult<Option<WellnessSettings>> {
+pub async fn app_hours(state: &AppState, owner: Uuid) -> ApiResult<Hours> {
+    Ok(load_settings(state, owner).await?.hours)
+}
+
+pub async fn group_opened_until(state: &AppState, owner: Uuid, group_id: Uuid) -> ApiResult<Option<DateTime<Utc>>> {
+    Ok(sqlx::query_scalar::<_, Option<DateTime<Utc>>>("select max(until) from out_of_hours_opens where owner = $1 and group_id = $2 and closed_at is null and until > now()").bind(owner).bind(group_id).fetch_one(&state.pool).await?)
+}
+
+pub async fn closure(state: &AppState, owner: Uuid, group_id: Option<Uuid>) -> ApiResult<Option<WellnessSettings>> {
     let settings = load_settings(state, owner).await?;
-
-    if !settings.quiet_hours {
-        return Ok(None);
-    }
-
     let zone = zone_of(state, owner, settings.time_zone.as_deref()).await?;
-    let quiet = is_quiet(&settings.quiet_days, Utc::now().with_timezone(&zone).naive_local());
+    let group_hours = match group_id {
+        Some(id) => {
+            let always_open = sqlx::query_scalar::<_, bool>("select always_open from groups where id = $1 and owner = $2").bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
-    Ok(quiet.then_some(settings))
+            match always_open {
+                Some(always_open) => Some(load_hours(state, owner, Some(id), always_open).await?),
+                None => None,
+            }
+        }
+        None => None,
+    };
+    let opened_until = match group_id {
+        Some(id) => group_opened_until(state, owner, id).await?,
+        None => None,
+    };
+    let status = status_of(&settings.hours, group_hours.as_ref(), opened_until, zone, Utc::now());
+
+    Ok((!status.open_now).then_some(settings))
+}
+
+const CONVERSATION_GROUP: &str = "coalesce((select p.group_id from projects p where p.id = c.project_id), (select a.group_id from assistants a where a.id = c.assistant_id))";
+const SCHEDULE_GROUP: &str = "coalesce((select p.group_id from projects p where p.id = s.project_id), (select a.group_id from assistants a where a.id = s.assistant_id), (select p.group_id from conversations c join projects p on p.id = c.project_id where c.id = s.conversation_id))";
+
+pub async fn schedule_closure(state: &AppState, owner: Uuid, schedule_id: Uuid) -> ApiResult<Option<WellnessSettings>> {
+    let group_id = sqlx::query_scalar::<_, Option<Uuid>>(sqlx::AssertSqlSafe(format!("select {SCHEDULE_GROUP} from schedules s where s.id = $1"))).bind(schedule_id).fetch_optional(&state.pool).await?.flatten();
+
+    closure(state, owner, group_id).await
 }
 
 pub async fn heartbeat(State(state): State<AppState>, user: AuthUser, Json(request): Json<WellnessHeartbeat>) -> ApiResult<StatusCode> {
@@ -236,13 +361,38 @@ async fn today_of(state: &AppState, owner: Uuid) -> ApiResult<NaiveDate> {
     Ok(Utc::now().with_timezone(&zone).date_naive())
 }
 
-pub async fn mark_puzzle(State(state): State<AppState>, user: AuthUser, Path(puzzle): Path<String>) -> ApiResult<StatusCode> {
+pub async fn mark_puzzle(State(state): State<AppState>, user: AuthUser, Path(puzzle): Path<String>, body: Bytes) -> ApiResult<StatusCode> {
     user.require_full_access()?;
     require_puzzle(&puzzle)?;
 
     let day = today_of(&state, user.id).await?;
 
-    sqlx::query("insert into puzzle_plays (owner, puzzle, day) values ($1, $2, $3) on conflict do nothing").bind(user.id).bind(&puzzle).bind(day).execute(&state.pool).await?;
+    if body.is_empty() {
+        sqlx::query("insert into puzzle_plays (owner, puzzle, day) values ($1, $2, $3) on conflict do nothing").bind(user.id).bind(&puzzle).bind(day).execute(&state.pool).await?;
+    } else {
+        let result = serde_json::from_slice::<PuzzleResult>(&body).map_err(|_| ApiError::bad_request("puzzle_result_invalid", "Send the result as solved, guesses, mistakes, score and source."))?;
+        let source = result.source.as_deref().unwrap_or("manual");
+
+        if !["manual", "read"].contains(&source) {
+            return Err(ApiError::bad_request("puzzle_source_invalid", "Record a puzzle result as manual or read."));
+        }
+
+        sqlx::query(
+            "insert into puzzle_plays (owner, puzzle, day, solved, guesses, mistakes, score, source) values ($1, $2, $3, $4, $5, $6, $7, $8)
+             on conflict (owner, puzzle, day) do update set solved = excluded.solved, guesses = excluded.guesses, mistakes = excluded.mistakes, score = excluded.score, source = excluded.source, recorded_at = now()",
+        )
+        .bind(user.id)
+        .bind(&puzzle)
+        .bind(day)
+        .bind(result.solved)
+        .bind(result.guesses)
+        .bind(result.mistakes)
+        .bind(&result.score)
+        .bind(source)
+        .execute(&state.pool)
+        .await?;
+    }
+
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
 
     Ok(StatusCode::NO_CONTENT)
@@ -258,6 +408,93 @@ pub async fn unmark_puzzle(State(state): State<AppState>, user: AuthUser, Path(p
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct PuzzlesQuery {
+    days: Option<i64>,
+}
+
+type PuzzleRow = (String, NaiveDate, Option<bool>, Option<i32>, Option<i32>, Option<String>, String, DateTime<Utc>);
+
+pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query): Query<PuzzlesQuery>) -> ApiResult<Json<Vec<PuzzleSummary>>> {
+    let count = query.days.unwrap_or(30).clamp(1, 366);
+    let today = today_of(&state, user.id).await?;
+    let first = today - Duration::days(count - 1);
+    let rows = sqlx::query_as::<_, PuzzleRow>("select puzzle, day, solved, guesses, mistakes, score, source, recorded_at from puzzle_plays where owner = $1 and day >= $2 order by day desc").bind(user.id).bind(first).fetch_all(&state.pool).await?;
+
+    let summaries = PUZZLES
+        .iter()
+        .map(|name| {
+            let own: Vec<&PuzzleRow> = rows.iter().filter(|row| row.0 == *name).collect();
+            let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, guesses: row.3, mistakes: row.4, score: row.5.clone(), source: Some(row.6.clone()) };
+            let values: Vec<i32> = own.iter().filter(|row| row.2 != Some(false)).filter_map(|row| row.3.or(row.4)).collect();
+            let mut distribution: BTreeMap<i32, i64> = BTreeMap::new();
+
+            for value in &values {
+                *distribution.entry(*value).or_default() += 1;
+            }
+
+            PuzzleSummary {
+                puzzle: name.to_string(),
+                today: own.iter().find(|row| row.1 == today).map(|row| result(row)),
+                history: own.iter().map(|row| PuzzleDay { day: row.1.to_string(), result: result(row), recorded_at: row.7 }).collect(),
+                stats: PuzzleStats {
+                    played: own.len() as i64,
+                    solved: own.iter().filter(|row| row.2 == Some(true)).count() as i64,
+                    average: (!values.is_empty()).then(|| values.iter().map(|value| f64::from(*value)).sum::<f64>() / values.len() as f64),
+                    distribution: distribution.into_iter().map(|(value, count)| PuzzleBucket { value, count }).collect(),
+                },
+            }
+        })
+        .collect();
+
+    Ok(Json(summaries))
+}
+
+pub async fn hold(State(state): State<AppState>, user: AuthUser, Json(request): Json<HoldRequest>) -> ApiResult<StatusCode> {
+    user.require_full_access()?;
+
+    let Some(settings) = closure(&state, user.id, request.group_id).await? else { return Ok(StatusCode::NO_CONTENT) };
+    let wanted = match request.kind.as_str() {
+        "notification" => settings.quiet_hold_notifications,
+        "ping" => settings.quiet_hold_pings,
+        _ => return Err(ApiError::bad_request("hold_kind_invalid", "Hold a notification or a ping.")),
+    };
+
+    if wanted {
+        sqlx::query("insert into quiet_holds (owner, kind, subject) values ($1, $2, $3) on conflict do nothing").bind(user.id).bind(&request.kind).bind(&request.subject).execute(&state.pool).await?;
+        state.publish(Some(user.id), StreamMessage::WellnessChanged);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn release_holds(state: &AppState, owner: Uuid) -> ApiResult<()> {
+    let open = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(sqlx::AssertSqlSafe(format!(
+        "select h.id, (select {CONVERSATION_GROUP} from conversations c where c.id::text = h.subject) from quiet_holds h where h.owner = $1 and h.released_at is null",
+    )))
+    .bind(owner)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut still_closed: BTreeMap<Option<Uuid>, bool> = BTreeMap::new();
+    let mut released = Vec::new();
+
+    for (hold, group_id) in open {
+        if !still_closed.contains_key(&group_id) {
+            let closed = closure(state, owner, group_id).await?.is_some();
+
+            still_closed.insert(group_id, closed);
+        }
+
+        if !still_closed[&group_id] {
+            released.push(hold);
+        }
+    }
+
+    sqlx::query("update quiet_holds set released_at = now() where id = any($1)").bind(&released).execute(&state.pool).await?;
+
+    Ok(())
 }
 
 fn union_minutes_per_day(spans: Vec<(DateTime<Utc>, DateTime<Utc>)>, zone: Tz) -> BTreeMap<NaiveDate, i64> {
@@ -302,7 +539,6 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
     let viewing = sqlx::query_as::<_, (NaiveDate, i32)>("select day, seconds from viewing_time where owner = $1 and day >= $2").bind(user.id).bind(first).fetch_all(&state.pool).await?;
     let turns = sqlx::query_as::<_, (DateTime<Utc>, i64)>("select ended_at, coalesce(working_ms, 0)::bigint from usage_turns where owner = $1 and ended_at >= $2 and coalesce(working_ms, 0) > 0").bind(user.id).bind(since).fetch_all(&state.pool).await?;
     let breaks = sqlx::query_as::<_, (DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>)>("select started_at, ended_early_at, ends_at from breaks where owner = $1 and started_at >= $2").bind(user.id).bind(since).fetch_all(&state.pool).await?;
-    let puzzles = sqlx::query_as::<_, (NaiveDate, String)>("select day, puzzle from puzzle_plays where owner = $1 and day >= $2 order by puzzle").bind(user.id).bind(first).fetch_all(&state.pool).await?;
     let spans = turns.into_iter().map(|(ended, working_ms)| (ended - Duration::milliseconds(working_ms), ended)).collect();
     let agent_minutes = union_minutes_per_day(spans, zone);
     let current_break = sqlx::query_as::<_, (Uuid, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>("select id, started_at, ends_at, ended_early_at from breaks where owner = $1 and ends_at > now() and ended_early_at is null order by started_at desc limit 1")
@@ -311,12 +547,15 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
         .await?
         .map(|row| Break { id: row.0, started_at: row.1, ends_at: row.2, ended_early_at: row.3 });
     let last_break_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>("select max(coalesce(ended_early_at, ends_at)) from breaks where owner = $1 and coalesce(ended_early_at, ends_at) <= now()").bind(user.id).fetch_one(&state.pool).await?;
-    let quiet = settings.quiet_hours && is_quiet(&settings.quiet_days, Utc::now().with_timezone(&zone).naive_local());
-    let held = if quiet && settings.quiet_hold_schedules {
-        sqlx::query_scalar::<_, i64>("select count(*) from schedules where owner = $1 and not paused and not proposed and next_run_at <= now()").bind(user.id).fetch_one(&state.pool).await?
-    } else {
-        0
-    };
+    let quiet = !is_open(&settings.hours, Utc::now().with_timezone(&zone).naive_local());
+    let due = sqlx::query_scalar::<_, Uuid>("select id from schedules where owner = $1 and not paused and not proposed and next_run_at <= now()").bind(user.id).fetch_all(&state.pool).await?;
+    let mut held = 0;
+
+    for schedule in due {
+        if schedule_closure(&state, user.id, schedule).await?.is_some_and(|closed| closed.quiet_hold_schedules) {
+            held += 1;
+        }
+    }
 
     let days = (0..count)
         .map(|offset| {
@@ -327,12 +566,27 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
                 viewing_minutes: viewing.iter().filter(|(d, _)| *d == day).map(|(_, seconds)| *seconds as i64 / 60).sum(),
                 agent_minutes: agent_minutes.get(&day).copied().unwrap_or(0),
                 breaks: breaks.iter().filter(|(started, _, _)| started.with_timezone(&zone).date_naive() == day).count() as i64,
-                puzzles: puzzles.iter().filter(|(d, _)| *d == day).map(|(_, puzzle)| puzzle.clone()).collect(),
             }
         })
         .collect();
 
-    Ok(Json(WellnessOverview { days, last_break_at, current_break, quiet_now: quiet, held }))
+    release_holds(&state, user.id).await?;
+
+    let held_kind = |kind: &'static str| sqlx::query_scalar::<_, i64>("select count(*) from quiet_holds where owner = $1 and kind = $2 and held_at > now() - interval '7 days'").bind(user.id).bind(kind).fetch_one(&state.pool);
+    let schedules = sqlx::query_scalar::<_, i64>("select count(*) from schedule_runs where outcome = 'held' and ran_at > now() - interval '7 days' and schedule_id in (select id from schedules where owner = $1)").bind(user.id).fetch_one(&state.pool).await?;
+    let held_week = HeldWeek { notifications: held_kind("notification").await?, schedules, pings: held_kind("ping").await? };
+
+    let opened_out_of_hours = sqlx::query_as::<_, (Uuid, String, String, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>(
+        "select o.group_id, g.name, o.reason, o.opened_at, o.until, o.closed_at from out_of_hours_opens o join groups g on g.id = o.group_id where o.owner = $1 and o.opened_at > now() - interval '7 days' order by o.opened_at desc",
+    )
+    .bind(user.id)
+    .fetch_all(&state.pool)
+    .await?
+    .into_iter()
+    .map(|(group_id, group_name, reason, opened_at, until, closed_at)| OutOfHoursOpen { group_id, group_name, reason, opened_at, until, closed_at })
+    .collect();
+
+    Ok(Json(WellnessOverview { days, last_break_at, current_break, quiet_now: quiet, held, held_week, opened_out_of_hours }))
 }
 
 #[cfg(test)]
@@ -343,22 +597,61 @@ mod tests {
         NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M").unwrap()
     }
 
-    #[test]
-    fn quiet_window_spanning_midnight_ends_next_morning() {
-        let days = default_quiet_days();
+    fn workdays() -> Hours {
+        Hours { always_open: false, ..default_hours() }
+    }
 
-        assert!(is_quiet(&days, at("2026-10-26 23:00")));
-        assert!(is_quiet(&days, at("2026-10-27 07:59")));
-        assert!(!is_quiet(&days, at("2026-10-27 08:00")));
-        assert!(!is_quiet(&days, at("2026-10-27 12:00")));
+    fn night_shift() -> Hours {
+        Hours { always_open: false, days: (0..7u8).map(|weekday| HoursDay { weekday, closed: false, opens: "22:00".into(), closes: "06:00".into() }).collect() }
     }
 
     #[test]
-    fn friday_night_runs_into_all_day_saturday_and_sunday_night_into_monday_morning() {
-        let days = default_quiet_days();
+    fn always_open_hours_are_open_at_any_time() {
+        assert!(is_open(&default_hours(), at("2026-10-31 03:00")));
+    }
 
-        assert!(is_quiet(&days, at("2026-10-31 15:00")));
-        assert!(is_quiet(&days, at("2026-11-01 15:00")));
-        assert!(!is_quiet(&days, at("2026-11-02 08:00")));
+    #[test]
+    fn weekday_hours_close_in_the_evening_and_stay_closed_at_the_weekend() {
+        assert!(is_open(&workdays(), at("2026-10-27 09:00")));
+        assert!(is_open(&workdays(), at("2026-10-27 17:59")));
+        assert!(!is_open(&workdays(), at("2026-10-27 18:00")));
+        assert!(!is_open(&workdays(), at("2026-10-27 08:59")));
+        assert!(!is_open(&workdays(), at("2026-10-31 12:00")));
+    }
+
+    #[test]
+    fn a_closing_time_before_the_opening_time_runs_past_midnight() {
+        assert!(is_open(&night_shift(), at("2026-10-27 23:00")));
+        assert!(is_open(&night_shift(), at("2026-10-28 05:59")));
+        assert!(!is_open(&night_shift(), at("2026-10-28 06:00")));
+    }
+
+    #[test]
+    fn closing_at_24_00_covers_the_last_minute_of_the_day() {
+        let mut hours = workdays();
+
+        hours.days[1].closes = "24:00".into();
+
+        assert!(is_open(&hours, at("2026-10-27 23:59")));
+        assert!(!is_open(&hours, at("2026-10-28 00:00")));
+    }
+
+    #[test]
+    fn the_next_change_is_the_closing_time_while_open_and_the_opening_time_while_closed() {
+        assert_eq!(next_change(&[&workdays()], at("2026-10-27 12:00")), Some(at("2026-10-27 18:00")));
+        assert_eq!(next_change(&[&workdays()], at("2026-10-27 19:00")), Some(at("2026-10-28 09:00")));
+        assert_eq!(next_change(&[&workdays()], at("2026-10-30 19:00")), Some(at("2026-11-02 09:00")));
+        assert_eq!(next_change(&[&default_hours()], at("2026-10-27 12:00")), None);
+    }
+
+    #[test]
+    fn a_group_is_closed_while_the_app_is_closed_unless_it_was_opened_out_of_hours() {
+        let app = workdays();
+        let group = default_hours();
+        let evening = Utc.with_ymd_and_hms(2026, 10, 27, 19, 0, 0).unwrap();
+
+        assert!(!status_of(&app, Some(&group), None, Tz::UTC, evening).open_now);
+        assert!(status_of(&app, Some(&group), Some(evening + Duration::minutes(10)), Tz::UTC, evening).open_now);
+        assert!(!status_of(&app, Some(&group), Some(evening - Duration::minutes(1)), Tz::UTC, evening).open_now);
     }
 }

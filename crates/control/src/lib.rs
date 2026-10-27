@@ -1,5 +1,7 @@
 #![recursion_limit = "512"]
 
+const PROXY_BODY_LIMIT: usize = 25 * 1024 * 1024;
+
 mod account_usage;
 mod activity;
 mod activity_sweep;
@@ -9,8 +11,10 @@ mod artifact_access;
 mod attachments;
 mod auth;
 mod boot;
+mod caldav;
 mod chat_import;
 mod chat_tool_servers;
+mod chat_tool_setup;
 mod chat_tools;
 mod chats;
 mod config;
@@ -19,21 +23,25 @@ mod conversations;
 mod git;
 mod goals;
 mod live_usage;
+mod assistant_actions;
+mod assistant_changes;
 mod assistant_backup;
 mod assistants;
 mod groups;
 mod device;
 mod error;
 mod experiments;
+mod file_arguments;
 mod forge_cache;
 mod forges;
 mod imports;
+mod learned;
 mod instruction_proposals;
 mod instructions;
 mod email;
 mod exercises;
 mod integration_policy;
-mod integration_review;
+mod integration_proxy;
 mod integrations;
 mod issues;
 mod link;
@@ -44,6 +52,7 @@ mod memories;
 mod message_proposals;
 mod conversation_connections;
 mod group_connections;
+mod decision_providers;
 mod model_providers;
 mod provider_usage;
 mod moves;
@@ -54,6 +63,8 @@ mod pricing;
 mod prompts;
 mod rate_limit;
 mod reflections;
+mod response_editor;
+mod response_filter;
 mod schedules;
 mod search;
 mod sessions;
@@ -68,6 +79,7 @@ mod tasks;
 mod terminals;
 mod transcripts;
 mod transcriptions;
+mod usage_history;
 mod usage_limits;
 mod versions;
 mod walkthrough_diff;
@@ -239,8 +251,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/resume", post(usage_limits::resume).delete(usage_limits::cancel_resume))
         .route("/api/v1/conversations/{id}/cancel", post(prompts::cancel))
         .route("/api/v1/conversations/{id}/permission", post(prompts::permission))
-        .route("/api/v1/conversations/{id}/reviews/{request_id}", get(integration_review::items))
-        .route("/api/v1/conversations/{id}/review", post(integration_review::answer))
+        .route("/api/v1/conversations/{id}/responses/{request_id}", get(response_editor::show).post(response_editor::send))
+        .route("/api/v1/conversations/{id}/responses/{request_id}/filter", post(response_editor::filter))
         .route("/api/v1/conversations/{id}/config", post(prompts::config))
         .route("/api/v1/memories", get(memories::list))
         .route("/api/v1/memories/{id}", patch(memories::update).delete(memories::delete))
@@ -256,23 +268,46 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}/find-icon", post(projects::find_icon))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
         .route("/api/v1/transcriptions", post(transcriptions::create).layer(DefaultBodyLimit::max(transcriptions::MAX_AUDIO_BYTES + 1024)))
+        .route("/api/v1/decision-providers", get(decision_providers::list).post(decision_providers::create))
+        .route("/api/v1/decision-providers/test", post(decision_providers::test))
+        .route("/api/v1/decision-providers/{id}", patch(decision_providers::update).delete(decision_providers::delete))
         .route("/api/v1/model-providers", get(model_providers::list).post(model_providers::create))
         .route("/api/v1/model-provider-usage", get(provider_usage::list))
         .route("/api/v1/usage/resets", post(account_usage::use_reset))
+        .route("/api/v1/usage/history", get(usage_history::get))
+        .route("/api/v1/usage/history/import", post(usage_history::import_orchestrator))
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/model-providers/{id}/favourites", put(model_providers::set_favourite))
         .route("/api/v1/chat-tool-servers", get(chat_tool_servers::list).post(chat_tool_servers::create))
         .route("/api/v1/chat-tool-servers/oauth", post(mcp_oauth::start))
+        .route("/api/v1/chat-tool-servers/probe", post(chat_tool_setup::probe))
+        .route("/api/v1/chat-tool-servers/test", post(chat_tool_setup::test))
+        .route("/api/v1/chat-tool-servers/caldav-test", post(caldav::test))
         .route("/api/v1/chat-tool-servers/{id}", patch(chat_tool_servers::patch).delete(chat_tool_servers::delete))
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
         .route("/api/v1/chat-tool-servers/{id}/groups", put(chat_tool_servers::set_groups))
         .route("/api/v1/chat-tool-servers/{id}/lastfm-sign-in", post(lastfm::start_sign_in).delete(lastfm::sign_out))
+        .route("/api/v1/chat-tool-servers/{id}/api-access", get(integration_proxy::grants))
+        .route("/api/v1/integrations/{server_id}/calendars", get(caldav::calendars))
+        .route("/api/v1/integrations/{server_id}/proxy/{*path}", axum::routing::any(integration_proxy::proxy).layer(axum::extract::DefaultBodyLimit::max(PROXY_BODY_LIMIT)))
         .route("/api/v1/integration-calls", get(chat_tool_servers::calls))
         .route("/api/v1/chats", post(chats::create))
         .route("/api/v1/chats/import", post(chat_import::create).layer(DefaultBodyLimit::max(chat_import::MAX_EXPORT_BYTES)))
         .route("/api/v1/assistants", get(assistants::list).post(assistants::create))
+        .route("/api/v1/assistant-changes", get(assistant_changes::list))
+        .route("/api/v1/assistant-changes/{id}/approve", post(assistant_changes::approve))
+        .route("/api/v1/assistant-changes/{id}/decline", post(assistant_changes::decline))
+        .route("/api/v1/assistant-changes/{id}/undo", post(assistant_changes::undo))
+        .route("/api/v1/assistants/builtin/wellness", get(assistant_actions::wellness_assistant))
         .route("/api/v1/assistants/{id}", get(assistants::get).patch(assistants::patch))
+        .route("/api/v1/assistants/{id}/actions", get(assistant_actions::list).post(assistant_actions::create))
+        .route("/api/v1/assistants/{id}/actions/{action_id}", put(assistant_actions::update).delete(assistant_actions::delete))
+        .route("/api/v1/assistants/{id}/actions/{action_id}/run", post(assistant_actions::run_handler))
+        .route("/api/v1/assistants/{id}/actions/{action_id}/reset", post(assistant_actions::reset))
+        .route("/api/v1/assistants/{id}/action-proposals", get(assistant_actions::list_proposals))
+        .route("/api/v1/assistants/{id}/action-proposals/{proposal_id}/approve", post(assistant_actions::approve))
+        .route("/api/v1/assistants/{id}/action-proposals/{proposal_id}/decline", post(assistant_actions::decline))
         .route("/api/v1/assistants/{id}/prompt", post(assistants::prompt))
         .route("/api/v1/assistants/{id}/clear", post(assistants::clear))
         .route("/api/v1/assistants/{id}/files", get(assistants::list_files))
@@ -283,6 +318,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/assistants/{id}/files/{*path}", get(assistants::read_file).put(assistants::write_file).delete(assistants::delete_file))
         .route("/api/v1/groups", get(groups::list).post(groups::create))
         .route("/api/v1/groups/{id}", patch(groups::rename).delete(groups::delete))
+        .route("/api/v1/groups/{id}/hours", put(groups::save_hours))
+        .route("/api/v1/groups/{id}/open", post(groups::open).delete(groups::close_now))
         .route("/api/v1/groups/{id}/instructions", get(instructions::layer).put(instructions::save))
         .route("/api/v1/groups/{id}/folders", post(groups::add_folder))
         .route("/api/v1/groups/{id}/folders/{folder_id}", delete(groups::remove_folder))
@@ -317,7 +354,6 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/extensions", get(instructions::get_extensions).put(instructions::save_extensions))
         .route("/api/v1/experiments", get(experiments::get).put(experiments::save))
         .route("/api/v1/reflections", get(reflections::list))
-        .route("/api/v1/reflections/schedule", get(reflections::get_schedule).post(reflections::set_schedule))
         .route("/api/v1/reflections/{id}", patch(reflections::patch))
         .route("/api/v1/reflections/{id}/redraft", post(reflections::redraft))
         .route("/api/v1/exercises", get(exercises::list))
@@ -336,6 +372,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/wellness/breaks", post(wellness::start_break))
         .route("/api/v1/wellness/breaks/current", delete(wellness::end_break))
         .route("/api/v1/wellness/overview", get(wellness::overview))
+        .route("/api/v1/wellness/learned", get(learned::list))
+        .route("/api/v1/wellness/puzzles", get(wellness::puzzles))
+        .route("/api/v1/wellness/holds", post(wellness::hold))
         .route("/api/v1/wellness/puzzles/{puzzle}/today", put(wellness::mark_puzzle).delete(wellness::unmark_puzzle))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
         .route("/api/v1/worktrees", get(worktrees::list))

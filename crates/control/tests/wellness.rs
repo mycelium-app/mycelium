@@ -22,12 +22,11 @@ async fn save(server: &Server, change: impl FnOnce(&mut Value)) -> (u16, Value) 
     server.user.json(server.user.put("/api/v1/wellness/settings").json(&body)).await
 }
 
-fn always_quiet(body: &mut Value) {
-    body["quiet_hours"] = json!(true);
+fn mycelium_closed(body: &mut Value) {
+    body["hours"]["always_open"] = json!(false);
 
-    for day in body["quiet_days"].as_array_mut().unwrap() {
-        day["enabled"] = json!(true);
-        day["all_day"] = json!(true);
+    for day in body["hours"]["days"].as_array_mut().unwrap() {
+        day["closed"] = json!(true);
     }
 }
 
@@ -37,15 +36,15 @@ async fn settings_round_trip_and_broadcast() {
     let mut stream = server.user.stream().await;
 
     let defaults = settings(&server).await;
-    assert_eq!((defaults["break_after_minutes"].clone(), defaults["quiet_hours"].clone(), defaults["pomodoro"].clone()), (json!(50), json!(false), json!(false)));
-    assert_eq!(defaults["quiet_days"][0]["starts"], "22:00");
-    assert_eq!(defaults["quiet_days"][6]["all_day"], json!(true));
+    assert_eq!((defaults["break_after_minutes"].clone(), defaults["hours"]["always_open"].clone()), (json!(50), json!(true)));
+    assert_eq!(defaults["hours"]["days"][0]["opens"], "09:00");
+    assert_eq!(defaults["hours"]["days"][6]["closed"], json!(true));
 
     let (status, saved) = save(&server, |body| {
         body["break_after_minutes"] = json!(45);
-        body["pomodoro"] = json!(true);
+        body["break_minutes"] = json!(12);
         body["time_zone"] = json!("Europe/London");
-        body["quiet_days"][2]["starts"] = json!("21:30");
+        body["hours"]["days"][2]["opens"] = json!("08:30");
     })
     .await;
 
@@ -53,8 +52,8 @@ async fn settings_round_trip_and_broadcast() {
     stream.until(|message| matches!(message, StreamMessage::WellnessChanged).then_some(())).await;
 
     let reloaded = settings(&server).await;
-    assert_eq!((reloaded["break_after_minutes"].clone(), reloaded["pomodoro"].clone(), reloaded["time_zone"].clone()), (json!(45), json!(true), json!("Europe/London")));
-    assert_eq!(reloaded["quiet_days"][2]["starts"], "21:30");
+    assert_eq!((reloaded["break_after_minutes"].clone(), reloaded["break_minutes"].clone(), reloaded["time_zone"].clone()), (json!(45), json!(12), json!("Europe/London")));
+    assert_eq!(reloaded["hours"]["days"][2]["opens"], "08:30");
 }
 
 #[tokio::test]
@@ -64,8 +63,11 @@ async fn settings_out_of_range_are_refused_with_a_reason() {
     let (status, body) = save(&server, |body| body["break_after_minutes"] = json!(1)).await;
     assert_eq!((status, body["error"].clone()), (400, json!("break_after_invalid")));
 
-    let (status, body) = save(&server, |body| body["quiet_days"][0]["starts"] = json!("late")).await;
-    assert_eq!((status, body["error"].clone()), (400, json!("quiet_time_invalid")));
+    let (status, body) = save(&server, |body| body["hours"]["days"][0]["opens"] = json!("late")).await;
+    assert_eq!((status, body["error"].clone(), body["message"].clone()), (400, json!("hours_time_invalid"), json!("Enter a time like 09:00.")));
+
+    let (status, body) = save(&server, |body| body["hours"]["days"][0]["weekday"] = json!(7)).await;
+    assert_eq!((status, body["error"].clone()), (400, json!("weekday_invalid")));
 
     let (status, body) = save(&server, |body| body["time_zone"] = json!("Mars/Base")).await;
     assert_eq!((status, body["error"].clone()), (400, json!("time_zone_invalid")));
@@ -110,6 +112,14 @@ async fn overview_reports_seven_days_and_breaks() {
     assert!(after["last_break_at"].is_string());
 }
 
+async fn puzzles(server: &Server) -> Value {
+    server.user.json(server.user.get("/api/v1/wellness/puzzles?days=30")).await.1
+}
+
+fn puzzle<'a>(all: &'a Value, name: &str) -> &'a Value {
+    all.as_array().unwrap().iter().find(|puzzle| puzzle["puzzle"] == name).unwrap()
+}
+
 #[tokio::test]
 async fn puzzle_played_today_toggles() {
     let server = Server::start().await;
@@ -117,25 +127,77 @@ async fn puzzle_played_today_toggles() {
     let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today")).await;
     assert_eq!(status, 204);
     server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today")).await;
-    assert_eq!(overview(&server).await["days"][6]["puzzles"], json!(["wordle"]));
+    assert_eq!(puzzle(&puzzles(&server).await, "wordle")["stats"]["played"], json!(1));
+    assert_eq!(puzzle(&puzzles(&server).await, "wordle")["today"]["source"], json!("manual"));
 
     let (status, _) = server.user.json(server.user.delete("/api/v1/wellness/puzzles/wordle/today")).await;
     assert_eq!(status, 204);
-    assert_eq!(overview(&server).await["days"][6]["puzzles"], json!([]));
+    assert_eq!(puzzle(&puzzles(&server).await, "wordle")["today"], Value::Null);
 
     let (status, body) = server.user.json(server.user.put("/api/v1/wellness/puzzles/sudoku/today")).await;
     assert_eq!((status, body["error"].clone()), (404, json!("puzzle_not_found")));
 }
 
 #[tokio::test]
-async fn schedule_due_in_quiet_hours_is_held_until_they_end() {
+async fn a_result_read_from_the_game_is_recorded_and_summarised() {
+    let server = Server::start().await;
+    let reading = json!({"solved": true, "guesses": 4, "source": "read"});
+
+    let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&reading)).await;
+    assert_eq!(status, 204);
+
+    let wordle = puzzles(&server).await;
+    let wordle = puzzle(&wordle, "wordle");
+
+    assert_eq!((wordle["today"]["solved"].clone(), wordle["today"]["guesses"].clone(), wordle["today"]["source"].clone()), (json!(true), json!(4), json!("read")));
+    assert_eq!((wordle["stats"]["played"].clone(), wordle["stats"]["solved"].clone(), wordle["stats"]["average"].clone()), (json!(1), json!(1), json!(4.0)));
+    assert_eq!(wordle["stats"]["distribution"], json!([{"value": 4, "count": 1}]));
+
+    let (status, body) = server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&json!({"source": "guess"}))).await;
+    assert_eq!((status, body["error"].clone()), (400, json!("puzzle_source_invalid")));
+}
+
+#[tokio::test]
+async fn an_assistant_ping_while_mycelium_is_closed_is_held_and_released_when_it_opens() {
+    let server = Server::start().await;
+    let ping = json!({"kind": "ping", "subject": "conversation-1"});
+
+    save(&server, |body| mycelium_closed(body)).await;
+    server.user.json(server.user.post("/api/v1/wellness/holds").json(&ping)).await;
+    assert_eq!(overview(&server).await["held_week"]["pings"], json!(1));
+
+    save(&server, |body| body["hours"]["always_open"] = json!(true)).await;
+    server.user.json(server.user.post("/api/v1/wellness/holds").json(&ping)).await;
+    overview(&server).await;
+
+    let open: i64 = sqlx::query_scalar("select count(*) from quiet_holds where released_at is null").fetch_one(&server.pool).await.unwrap();
+    assert_eq!(open, 0);
+    assert_eq!(overview(&server).await["held_week"]["pings"], json!(1));
+}
+
+#[tokio::test]
+async fn pings_are_not_held_when_the_setting_is_off() {
+    let server = Server::start().await;
+
+    save(&server, |body| {
+        mycelium_closed(body);
+        body["quiet_hold_pings"] = json!(false);
+    })
+    .await;
+    server.user.json(server.user.post("/api/v1/wellness/holds").json(&json!({"kind": "ping", "subject": "conversation-1"}))).await;
+
+    assert_eq!(overview(&server).await["held_week"]["pings"], json!(0));
+}
+
+#[tokio::test]
+async fn schedule_due_while_mycelium_is_closed_is_held_until_it_opens() {
     let server = Server::start_with(|config| config.scheduler_tick = Duration::from_millis(50)).await;
     let link = server.online_node("laptop").await;
     let (status, schedule) = server.user.json(server.user.post("/api/v1/schedules").json(&json!({"node_id": link.id, "agent": "claude", "prompt": "Tidy", "cwd": "/work/app", "cron": "0 6 * * 1", "each_run": "new"}))).await;
     assert_eq!(status, 201, "{schedule}");
     let id: Uuid = schedule["id"].as_str().unwrap().parse().unwrap();
 
-    save(&server, always_quiet).await;
+    save(&server, mycelium_closed).await;
     sqlx::query("update schedules set next_run_at = now() - interval '1 minute' where id = $1").bind(id).execute(&server.pool).await.unwrap();
 
     let held = eventually("a held run", || async {
@@ -151,9 +213,9 @@ async fn schedule_due_in_quiet_hours_is_held_until_they_end() {
     assert_eq!(runs.as_array().unwrap().len(), 1);
     assert_eq!(overview(&server).await["held"], json!(1));
 
-    save(&server, |body| body["quiet_hours"] = json!(false)).await;
+    save(&server, |body| body["hours"]["always_open"] = json!(true)).await;
 
-    eventually("the run once quiet hours end", || async {
+    eventually("the run once Mycelium opens", || async {
         let (_, runs) = server.user.json(server.user.get("/api/v1/schedule-runs")).await;
 
         runs.as_array().unwrap().iter().find(|run| run["outcome"] != "held").cloned()
