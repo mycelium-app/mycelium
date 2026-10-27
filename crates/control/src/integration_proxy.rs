@@ -1,5 +1,5 @@
 use crate::auth::AuthUser;
-use crate::chat_tool_servers::{ServerRow, bearer, list_owned};
+use crate::chat_tool_servers::{ApiSurface, ServerRow, bearer, known_app, list_owned};
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use axum::Json;
@@ -14,7 +14,6 @@ use uuid::Uuid;
 pub const SCOPES: [&str; 2] = ["read", "write"];
 
 const PROXY_TIMEOUT: Duration = Duration::from_secs(120);
-const READ_ACTIONS: [&str; 8] = ["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted"];
 
 pub fn token_scope(server_id: Uuid, scope: &str) -> String {
     format!("integration:{server_id}:{scope}")
@@ -27,13 +26,17 @@ pub fn server_of(path: &str) -> Option<Uuid> {
     after.starts_with("proxy").then(|| Uuid::parse_str(id).ok()).flatten()
 }
 
-pub fn api_base(server: &ServerRow) -> Option<String> {
-    if server.kind != "mcp" || server.settings["app"] != "outline" {
+fn surface(server: &ServerRow) -> Option<&'static ApiSurface> {
+    if server.kind != "mcp" {
         return None;
     }
 
+    known_app(server.settings["app"].as_str()?)?.api.as_ref()
+}
+
+pub fn api_base(server: &ServerRow) -> Option<String> {
     let mut base = url::Url::parse(&server.url).ok()?;
-    base.set_path("/api/");
+    base.set_path(surface(server)?.path);
     base.set_query(None);
     base.set_fragment(None);
 
@@ -65,12 +68,18 @@ pub fn granted_text(base: &str, server_id: Uuid, token_path: &str, scopes: &[Str
     )
 }
 
-fn is_read(method: &Method, path: &str) -> bool {
+fn is_read(surface: &ApiSurface, method: &Method, path: &str) -> bool {
     if method == Method::GET || method == Method::HEAD {
         return true;
     }
 
-    method == Method::POST && path.rsplit('.').next().is_some_and(|action| READ_ACTIONS.contains(&action.trim_end_matches('/')))
+    method == Method::POST && path.rsplit('.').next().is_some_and(|action| surface.post_reads.contains(&action.trim_end_matches('/')))
+}
+
+fn climbs_out(path: &str) -> bool {
+    let decoded = path.replace("%2e", ".").replace("%2E", ".").replace("%2f", "/").replace("%2F", "/").replace("%5c", "\\").replace("%5C", "\\");
+
+    decoded.split(['/', '\\']).any(|segment| segment == "..")
 }
 
 fn permitted(user: &AuthUser, server_id: Uuid, reading: bool) -> bool {
@@ -103,7 +112,15 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     let Some(base) = api_base(server) else {
         return Err(ApiError::bad_request("api_unavailable", "This integration does not offer API access."));
     };
-    let reading = is_read(&method, &path);
+    let Some(surface) = surface(server) else {
+        return Err(ApiError::bad_request("api_unavailable", "This integration does not offer API access."));
+    };
+
+    if climbs_out(&path) {
+        return Err(ApiError::bad_request("path_not_allowed", "That path leaves the integration's API. Use a path inside it."));
+    }
+
+    let reading = is_read(surface, &method, &path);
 
     if !permitted(&user, server_id, reading) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "scope_not_granted", "This token allows reads only. Ask the person for write access."));
@@ -166,13 +183,15 @@ pub async fn grants(State(state): State<AppState>, user: AuthUser, Path(server_i
 mod tests {
     use super::*;
 
+    const OUTLINE: ApiSurface = ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted"] };
+
     #[test]
     fn outline_post_endpoints_that_only_read_count_as_reads() {
-        assert!(is_read(&Method::POST, "documents.list"));
-        assert!(is_read(&Method::POST, "documents.search"));
-        assert!(!is_read(&Method::POST, "documents.create"));
-        assert!(!is_read(&Method::DELETE, "documents.info"));
-        assert!(is_read(&Method::GET, "anything"));
+        assert!(is_read(&OUTLINE, &Method::POST, "documents.list"));
+        assert!(is_read(&OUTLINE, &Method::POST, "documents.search"));
+        assert!(!is_read(&OUTLINE, &Method::POST, "documents.create"));
+        assert!(!is_read(&OUTLINE, &Method::DELETE, "documents.info"));
+        assert!(is_read(&OUTLINE, &Method::GET, "anything"));
     }
 
     #[test]
@@ -181,5 +200,15 @@ mod tests {
 
         assert_eq!(server_of(&format!("/api/v1/integrations/{id}/proxy/documents.list")), Some(id));
         assert_eq!(server_of(&format!("/api/v1/chat-tool-servers/{id}")), None);
+    }
+
+    #[test]
+    fn dot_segments_are_refused_however_they_are_written() {
+        assert!(climbs_out("../auth.info"));
+        assert!(climbs_out("documents.list/../../auth.info"));
+        assert!(climbs_out("%2e%2e/auth.info"));
+        assert!(climbs_out("a%2F..%2Fb"));
+        assert!(!climbs_out("documents.list"));
+        assert!(!climbs_out("files/a..b"));
     }
 }

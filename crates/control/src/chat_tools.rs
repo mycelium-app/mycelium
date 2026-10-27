@@ -244,6 +244,10 @@ impl Toolbox {
             return Ok((expired_text(&server.name), true));
         }
 
+        if crate::file_arguments::any_in(input) {
+            return Ok(("A chat has no folder to read files from, so a file argument cannot be used here. Give the text itself.".to_string(), true));
+        }
+
         match &tool.source {
             Source::Own if tool.original == "walkthrough" => Ok(("A walkthrough is about the changes in a workspace, and this chat has no workspace. Open a conversation on a node to write one.".to_string(), true)),
             Source::Own => mcp::call_in_process(state, self.chat_node, conversation_id, Some(tool_call), &tool.original, input).await,

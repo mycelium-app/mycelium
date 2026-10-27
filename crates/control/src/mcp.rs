@@ -668,7 +668,7 @@ async fn integration_tool_values(state: &AppState, servers: &[ServerRow]) -> Vec
 
     for server in servers.iter().filter(|server| server.integration().is_some()) {
         for tool in server.tool_list() {
-            tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": response_editor::with_filter_property(tool.input_schema)}));
+            tools.push(integration_tool_value(&server.name, &tool.name, &tool.description, tool.input_schema));
         }
     }
 
@@ -676,7 +676,7 @@ async fn integration_tool_values(state: &AppState, servers: &[ServerRow]) -> Vec
         match remote {
             Ok(remote) => {
                 for tool in remote {
-                    tools.push(json!({"name": format!("{}__{}", slug(&server.name), tool.name), "description": format!("{}: {}", server.name, tool.description), "inputSchema": response_editor::with_filter_property(tool.input_schema)}));
+                    tools.push(integration_tool_value(&server.name, &tool.name, &tool.description, tool.input_schema));
                 }
             }
             Err(Some(message)) => tools.push(json!({"name": format!("{}__sign_in_again", slug(&server.name)), "description": format!("{}: {message}", server.name), "inputSchema": {"type": "object"}})),
@@ -685,6 +685,10 @@ async fn integration_tool_values(state: &AppState, servers: &[ServerRow]) -> Vec
     }
 
     tools
+}
+
+fn integration_tool_value(server_name: &str, name: &str, description: &str, input_schema: Value) -> Value {
+    json!({"name": format!("{}__{}", slug(server_name), name), "description": format!("{}: {} {}", server_name, description, crate::file_arguments::ADVERT), "inputSchema": response_editor::with_filter_property(input_schema)})
 }
 
 async fn claimed_conversation(state: &AppState, headers: &HeaderMap, node_id: Uuid) -> ApiResult<Option<(Uuid, String)>> {

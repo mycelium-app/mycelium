@@ -6,6 +6,8 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+pub const ADVERT: &str = "Any text argument can be {\"file\": \"<path in the conversation folder>\"} instead of the text: Mycelium reads the file and sends its exact contents, up to 25 MB. This needs a conversation on a node.";
+
 const LIMIT_BYTES: u64 = 25 * 1024 * 1024;
 
 fn file_of(value: &Value) -> Option<&str> {
@@ -26,6 +28,13 @@ fn files_in(value: &Value, found: &mut Vec<String>) {
         Value::Array(items) => items.iter().for_each(|inner| files_in(inner, found)),
         _ => {}
     }
+}
+
+pub fn any_in(arguments: &Value) -> bool {
+    let mut found = Vec::new();
+    files_in(arguments, &mut found);
+
+    !found.is_empty()
 }
 
 fn replaced(value: &Value, contents: &HashMap<String, String>) -> Value {
@@ -99,6 +108,12 @@ mod tests {
         files_in(&arguments, &mut found);
 
         assert_eq!(found, vec!["b.txt".to_string(), "notes/a.md".to_string()]);
+    }
+
+    #[test]
+    fn any_in_finds_a_file_argument_anywhere() {
+        assert!(any_in(&json!({"a": [{"b": {"file": "x"}}]})));
+        assert!(!any_in(&json!({"a": "x"})));
     }
 
     #[test]

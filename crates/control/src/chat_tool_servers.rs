@@ -15,6 +15,11 @@ pub const OWN_SERVER: &str = "mycelium";
 
 pub const DEFAULT_KEY_HEADER: &str = "authorization";
 
+pub struct ApiSurface {
+    pub path: &'static str,
+    pub post_reads: &'static [&'static str],
+}
+
 pub struct KnownApp {
     pub id: &'static str,
     pub stored_kind: &'static str,
@@ -24,6 +29,7 @@ pub struct KnownApp {
     pub default_path: &'static str,
     pub keeps_path: fn(&str) -> bool,
     pub key_header: &'static str,
+    pub api: Option<ApiSurface>,
 }
 
 pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
@@ -35,6 +41,7 @@ pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
     default_path: "/mcp",
     keeps_path: |path| path.trim_end_matches('/').ends_with("/mcp"),
     key_header: DEFAULT_KEY_HEADER,
+    api: Some(ApiSurface { path: "/api/", post_reads: &["list", "info", "search", "search_titles", "drafts", "viewed", "archived", "deleted"] }),
 }, KnownApp {
     id: "litellm",
     stored_kind: "litellm",
@@ -44,6 +51,7 @@ pub const KNOWN_APPS: [KnownApp; 2] = [KnownApp {
     default_path: "/mcp/",
     keeps_path: |path| !matches!(path, "" | "/"),
     key_header: "x-litellm-api-key",
+    api: None,
 }];
 
 impl KnownApp {
