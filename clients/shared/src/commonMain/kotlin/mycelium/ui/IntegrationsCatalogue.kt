@@ -26,7 +26,7 @@ private val TileMinWidth = 280.dp
 
 internal fun forgeProduct(forge: Forge): String = if (forge.kind == "gitlab") "GitLab" else "GitHub"
 
-data class CatalogueTile(val name: String, val category: IntegrationCategory, val agentsCan: String, val asksFirst: String, val brand: String?, val footer: String, val added: Boolean, val icon: MyIcon, val onChoose: () -> Unit)
+data class CatalogueTile(val name: String, val category: IntegrationCategory, val agentsCan: String, val asksFirst: String, val brand: String?, val detail: String?, val footer: String, val added: Boolean, val icon: MyIcon, val onChoose: () -> Unit)
 
 @Composable
 private fun Tile(tile: CatalogueTile, modifier: Modifier) {
@@ -42,7 +42,7 @@ private fun Tile(tile: CatalogueTile, modifier: Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Label(tile.name, style = Tokens.Type.UiStrong, maxLines = 1)
-                Label(tile.category.label, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(listOfNotNull(tile.category.label, tile.detail).joinToString(" · "), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 
             val brand = tile.brand
@@ -104,7 +104,7 @@ fun IntegrationsCatalogue(integrations: List<Integration>, forges: List<Forge>, 
             else -> "Added, ${existing.accounts.size} accounts"
         }
 
-        CatalogueTile(entry.name, entry.category, entry.agentsCan, entry.asksFirst, entry.brand, footer, existing != null, MyIcon.Server) {
+        CatalogueTile(entry.name, entry.category, entry.agentsCan, entry.asksFirst, entry.brand, entry.detail, footer, existing != null, entry.icon) {
             if (existing != null) onOpen(existing) else onChoose(entry)
         }
     }
@@ -119,7 +119,7 @@ fun IntegrationsCatalogue(integrations: List<Integration>, forges: List<Forge>, 
         val existing = integrations.find { integration -> integration.accounts.any { it.forgeId == forge.id } }
         val footer = if (existing != null) "Added from ${forge.baseUrl.removePrefix("https://")}" else "Uses your ${forge.baseUrl.removePrefix("https://")} forge token"
 
-        CatalogueTile(name, entry.category, entry.agentsCan, entry.asksFirst, entry.brand, footer, existing != null, MyIcon.Forge) {
+        CatalogueTile(name, entry.category, entry.agentsCan, entry.asksFirst, entry.brand, entry.detail, footer, existing != null, MyIcon.Forge) {
             if (existing != null) onOpen(existing) else onAddForge(forge)
         }
     }

@@ -40,6 +40,7 @@ fun IntegrationMark(integration: Integration, size: androidx.compose.ui.unit.Dp 
             val icon = when (integration.key) {
                 "email" -> MyIcon.Send
                 "outline" -> MyIcon.File
+                "caldav" -> MyIcon.Calendar
                 "litellm" -> MyIcon.Cloud
                 else -> MyIcon.Server
             }
