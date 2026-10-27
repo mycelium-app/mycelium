@@ -1,11 +1,12 @@
 use super::repository::credential_env;
 use super::{git, git_with_env};
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use mycelium_proto::link::{CommitOptions, GitCredentials};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub(super) fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Value, String> {
+pub(super) fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Value> {
     let mut all = args.to_vec();
     all.extend(paths.iter().map(String::as_str));
     git(cwd, &all, &[])?;
@@ -13,7 +14,7 @@ pub(super) fn changed(cwd: &Path, args: &[&str], paths: &[String]) -> Result<Val
     Ok(json!({}))
 }
 
-pub(super) fn commit(cwd: &Path, message: &str, options: &CommitOptions) -> Result<Value, String> {
+pub(super) fn commit(cwd: &Path, message: &str, options: &CommitOptions) -> Result<Value> {
     let mut args = vec!["commit"];
 
     if options.amend {
@@ -37,7 +38,7 @@ pub(super) fn commit(cwd: &Path, message: &str, options: &CommitOptions) -> Resu
     changed(cwd, &args, &[])
 }
 
-pub(super) fn push(cwd: &Path, force: bool) -> Result<Value, String> {
+pub(super) fn push(cwd: &Path, force: bool) -> Result<Value> {
     let tracking = git(cwd, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], &[]).is_ok();
     let remotes = String::from_utf8_lossy(&git(cwd, &["remote"], &[])?).lines().map(str::to_string).collect::<Vec<_>>();
     let remote = remotes.iter().find(|name| *name == "origin").or(remotes.first()).cloned();
@@ -50,22 +51,22 @@ pub(super) fn push(cwd: &Path, force: bool) -> Result<Value, String> {
     match (tracking, remote.as_deref()) {
         (true, _) => {}
         (false, Some(remote)) => args.extend(["--set-upstream", remote, "HEAD"]),
-        (false, None) => return Err("This repository has no remote to push to. Add one with git remote add, then push again.".to_string()),
+        (false, None) => bail!("This repository has no remote to push to. Add one with git remote add, then push again."),
     }
 
     changed(cwd, &args, &[])
 }
 
-pub(super) fn undo_last_commit(cwd: &Path) -> Result<Value, String> {
+pub(super) fn undo_last_commit(cwd: &Path) -> Result<Value> {
     let message = String::from_utf8_lossy(&git(cwd, &["log", "-1", "--format=%B"], &[])?).trim_end().to_string();
     git(cwd, &["reset", "--soft", "HEAD~1"], &[])?;
 
     Ok(json!({"message": message}))
 }
 
-pub(super) fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_urls: &[String], credentials: &GitCredentials) -> Result<Value, String> {
+pub(super) fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_urls: &[String], credentials: &GitCredentials) -> Result<Value> {
     if !matches!(action, "fetch" | "pull" | "push") {
-        return Err("Choose fetch, pull or push.".into());
+        bail!("Choose fetch, pull or push.");
     }
 
     let configured = git(cwd, &["remote", "get-url", "origin"], &[])?;
@@ -77,7 +78,7 @@ pub(super) fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_u
     let approved = |candidate: &str| candidate == url || allowed_urls.iter().any(|allowed| allowed == candidate);
 
     if !approved(configured) || (action == "push" && !approved(push_url.trim())) {
-        return Err("The project's remote has changed. Register its current forge repository before using the forge token.".into());
+        bail!("The project's remote has changed. Register its current forge repository before using the forge token.");
     }
 
     let mut env = credential_env(url, credentials)?;
@@ -110,7 +111,7 @@ pub(super) fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_u
         Err(problem) => {
             let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", credentials.username, credentials.password));
 
-            Err(problem.replace(&encoded, "[redacted]").replace(&credentials.password, "[redacted]"))
+            Err(anyhow!(problem.to_string().replace(&encoded, "[redacted]").replace(&credentials.password, "[redacted]")))
         }
     }
 }
@@ -127,7 +128,7 @@ mod tests {
         let dir = repository();
         git(dir.path(), &["remote", "add", "origin", "https://other.example/repo.git"], &[]).unwrap();
         let credentials = GitCredentials { username: "git".into(), password: "test-private-token".into() };
-        let error = remote(dir.path(), "push", false, "https://forge.example/repo.git", &[], &credentials).unwrap_err();
+        let error = remote(dir.path(), "push", false, "https://forge.example/repo.git", &[], &credentials).unwrap_err().to_string();
         assert!(error.contains("remote has changed"));
         assert!(!error.contains(&credentials.password));
     }
@@ -212,7 +213,7 @@ mod tests {
         write(&dir, "a.txt", "one\n");
         commit_all(&dir, "first");
 
-        let error = run(dir.path(), GitCommand::Push { force: false }).unwrap_err();
+        let error = run(dir.path(), GitCommand::Push { force: false }).unwrap_err().to_string();
 
         assert!(error.contains("git remote add"), "{error}");
     }
@@ -270,7 +271,7 @@ mod tests {
     fn committing_nothing_returns_gits_own_message() {
         let dir = repository();
 
-        let error = run(dir.path(), GitCommand::Commit { message: "empty".into(), options: CommitOptions::default() }).unwrap_err();
+        let error = run(dir.path(), GitCommand::Commit { message: "empty".into(), options: CommitOptions::default() }).unwrap_err().to_string();
 
         assert!(error.contains("nothing to commit"), "{error}");
     }

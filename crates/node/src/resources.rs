@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use mycelium_proto::link::{DiskUsage, DockerContainer, DockerUsage, ListeningPort, NodeToControl, ProcessUsage, ResourceSample};
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -314,21 +315,21 @@ impl Sampler {
         }
     }
 
-    pub fn stop(&self, pid: u32, name: &str) -> Result<(), String> {
+    pub fn stop(&self, pid: u32, name: &str) -> Result<()> {
         let seen = self.read_processes();
         let Some(process) = seen.get(&pid) else {
-            return Err(format!("{name} has already exited."));
+            bail!("{name} has already exited.");
         };
 
         if process.stat.name != name {
-            return Err(format!("Process {pid} is no longer {name}. Reload the page and try again."));
+            bail!("Process {pid} is no longer {name}. Reload the page and try again.");
         }
 
         if conversation_of(&seen, pid).is_none() && process.uid != Some(self.own_uid) {
-            return Err(format!("{name} belongs to another user, so Mycelium cannot stop it."));
+            bail!("{name} belongs to another user, so Mycelium cannot stop it.");
         }
 
-        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|error| format!("Could not stop {name}: {error}."))
+        kill(Pid::from_raw(pid as i32), Signal::SIGTERM).map_err(|error| anyhow!("Could not stop {name}: {error}."))
     }
 
     fn docker(&self) -> Option<DockerUsage> {

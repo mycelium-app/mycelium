@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use mycelium_proto::conversation::{ResetCredit, ResetCredits};
 use serde_json::{Value, json};
@@ -15,10 +16,10 @@ pub async fn read_reset_credits(codex: &str, account_dir: &Path) -> Option<Reset
     parse_reset_credits(&result)
 }
 
-pub async fn use_reset(codex: &str, account_dir: &Path, idempotency_key: &str) -> Result<String, String> {
+pub async fn use_reset(codex: &str, account_dir: &Path, idempotency_key: &str) -> Result<String> {
     let result = request(codex, account_dir, "account/rateLimitResetCredit/consume", json!({"idempotencyKey": idempotency_key})).await?;
 
-    result["outcome"].as_str().map(str::to_string).ok_or_else(|| "Codex gave no outcome.".to_string())
+    result["outcome"].as_str().map(str::to_string).ok_or_else(|| anyhow!("Codex gave no outcome."))
 }
 
 fn parse_reset_credits(result: &Value) -> Option<ResetCredits> {
@@ -38,13 +39,13 @@ fn parse_reset_credits(result: &Value) -> Option<ResetCredits> {
     Some(ResetCredits { available_count, credits })
 }
 
-async fn request(codex: &str, account_dir: &Path, method: &str, params: Value) -> Result<Value, String> {
+async fn request(codex: &str, account_dir: &Path, method: &str, params: Value) -> Result<Value> {
     let exchange = exchange(codex, account_dir, method, params);
 
-    tokio::time::timeout(APP_SERVER_TIMEOUT, exchange).await.map_err(|_| "Codex did not answer.".to_string())?
+    tokio::time::timeout(APP_SERVER_TIMEOUT, exchange).await.map_err(|_| anyhow!("Codex did not answer."))?
 }
 
-async fn exchange(codex: &str, account_dir: &Path, method: &str, params: Value) -> Result<Value, String> {
+async fn exchange(codex: &str, account_dir: &Path, method: &str, params: Value) -> Result<Value> {
     let mut child = Command::new(codex)
         .arg("app-server")
         .env("CODEX_HOME", account_dir)
@@ -53,9 +54,9 @@ async fn exchange(codex: &str, account_dir: &Path, method: &str, params: Value) 
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| format!("Codex could not start: {error}"))?;
-    let mut stdin = child.stdin.take().ok_or("Codex has no input.")?;
-    let mut lines = BufReader::new(child.stdout.take().ok_or("Codex has no output.")?).lines();
+        .map_err(|error| anyhow!("Codex could not start: {error}"))?;
+    let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("Codex has no input."))?;
+    let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("Codex has no output."))?).lines();
     let initialize = json!({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "mycelium", "title": "Mycelium", "version": env!("CARGO_PKG_VERSION")}}});
     let initialized = json!({"method": "initialized"});
     let call = json!({"id": 2, "method": method, "params": params});
@@ -68,14 +69,14 @@ async fn exchange(codex: &str, account_dir: &Path, method: &str, params: Value) 
     answer(&mut lines, 2).await
 }
 
-async fn send(stdin: &mut tokio::process::ChildStdin, message: &Value) -> Result<(), String> {
+async fn send(stdin: &mut tokio::process::ChildStdin, message: &Value) -> Result<()> {
     let line = format!("{message}\n");
 
-    stdin.write_all(line.as_bytes()).await.map_err(|error| format!("Codex closed early: {error}"))
+    stdin.write_all(line.as_bytes()).await.map_err(|error| anyhow!("Codex closed early: {error}"))
 }
 
-async fn answer(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>, id: u64) -> Result<Value, String> {
-    while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
+async fn answer(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>, id: u64) -> Result<Value> {
+    while let Some(line) = lines.next_line().await? {
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -85,13 +86,13 @@ async fn answer(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdo
         }
 
         if let Some(error) = message["error"]["message"].as_str() {
-            return Err(error.to_string());
+            bail!("{error}");
         }
 
         return Ok(message["result"].clone());
     }
 
-    Err("Codex closed before answering.".to_string())
+    Err(anyhow!("Codex closed before answering."))
 }
 
 #[cfg(test)]
@@ -161,7 +162,7 @@ done
 
         let outcome = use_reset(&codex, account.path(), "key-1").await;
 
-        assert_eq!(outcome, Ok("reset".to_string()));
+        assert_eq!(outcome.unwrap(), "reset");
         let seen = std::fs::read_to_string(account.path().join("seen")).unwrap();
         let methods: Vec<_> = seen.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).map(|message| message["method"].as_str().unwrap_or_default().to_string()).collect();
         assert_eq!(methods, vec!["initialize", "initialized", "account/rateLimitResetCredit/consume"]);

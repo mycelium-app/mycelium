@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::io::Read;
 use std::os::unix::process::CommandExt;
@@ -81,14 +82,14 @@ fn tail(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
-pub fn run(cwd: &Path, command: Option<&str>, timeout_secs: u32) -> Result<Value, String> {
+pub fn run(cwd: &Path, command: Option<&str>, timeout_secs: u32) -> Result<Value> {
     let command = match command.map(str::trim).filter(|command| !command.is_empty()) {
         Some(command) => command,
-        None => detected(cwd).ok_or_else(|| "No test command is set and none could be found here (Cargo.toml, gradlew or package.json). Set the project's test command.".to_string())?,
+        None => detected(cwd).ok_or_else(|| anyhow!("No test command is set and none could be found here (Cargo.toml, gradlew or package.json). Set the project's test command."))?,
     };
     let seconds = if timeout_secs == 0 { DEFAULT_TIMEOUT_SECS } else { timeout_secs };
-    let mut child = Command::new("sh").args(["-c", &format!("{command} 2>&1")]).current_dir(cwd).process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|cause| format!("Could not start the tests: {cause}"))?;
-    let mut stdout = child.stdout.take().ok_or_else(|| "Could not read the test output.".to_string())?;
+    let mut child = Command::new("sh").args(["-c", &format!("{command} 2>&1")]).current_dir(cwd).process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|cause| anyhow!("Could not start the tests: {cause}"))?;
+    let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("Could not read the test output."))?;
     let reader = std::thread::spawn(move || {
         let mut collected = Vec::new();
         let _ = stdout.read_to_end(&mut collected);
@@ -99,13 +100,13 @@ pub fn run(cwd: &Path, command: Option<&str>, timeout_secs: u32) -> Result<Value
     let mut timed_out = false;
 
     let status = loop {
-        match child.try_wait().map_err(|cause| format!("Could not wait for the tests: {cause}"))? {
+        match child.try_wait().map_err(|cause| anyhow!("Could not wait for the tests: {cause}"))? {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 timed_out = true;
                 let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
 
-                break child.wait().map_err(|cause| format!("Could not stop the tests: {cause}"))?;
+                break child.wait().map_err(|cause| anyhow!("Could not stop the tests: {cause}"))?;
             }
             None => std::thread::sleep(Duration::from_millis(50)),
         }

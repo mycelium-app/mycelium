@@ -1,30 +1,31 @@
 use super::repository::credential_env;
 use super::{MOST_MOVE_BYTES, git, git_with_env};
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use mycelium_proto::link::GitCredentials;
 use serde_json::{Value, json};
 use std::path::Path;
 use uuid::Uuid;
 
-fn branch_and_head(cwd: &Path) -> Result<(String, String), String> {
+fn branch_and_head(cwd: &Path) -> Result<(String, String)> {
     let branch = String::from_utf8_lossy(&git(cwd, &["symbolic-ref", "--short", "-q", "HEAD"], &[1])?).trim().to_string();
 
     if branch.is_empty() {
-        return Err("This folder is not on a branch. Check one out on this node, then try again.".to_string());
+        bail!("This folder is not on a branch. Check one out on this node, then try again.");
     }
 
-    let head = git(cwd, &["rev-parse", "HEAD"], &[]).map_err(|_| "This folder has no commits yet. Commit once on this node, then try again.".to_string())?;
+    let head = git(cwd, &["rev-parse", "HEAD"], &[]).map_err(|_| anyhow!("This folder has no commits yet. Commit once on this node, then try again."))?;
 
     Ok((branch, String::from_utf8_lossy(&head).trim().to_string()))
 }
 
-pub(super) fn working_tree_changes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+pub(super) fn working_tree_changes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
     let real_index = String::from_utf8_lossy(&git(cwd, &["rev-parse", "--path-format=absolute", "--git-path", "index"], &[])?).trim().to_string();
     let scratch = std::env::temp_dir().join(format!("mycelium-index-{}", Uuid::new_v4()));
     let env = [("GIT_INDEX_FILE".to_string(), scratch.to_string_lossy().into_owned())];
 
     let prepared = if Path::new(&real_index).exists() {
-        std::fs::copy(&real_index, &scratch).map(|_| Vec::new()).map_err(|cause| format!("Could not read the folder's index: {cause}."))
+        std::fs::copy(&real_index, &scratch).map(|_| Vec::new()).map_err(|cause| anyhow!("Could not read the folder's index: {cause}."))
     } else {
         git_with_env(cwd, &["read-tree", "HEAD"], &[], &env)
     };
@@ -38,7 +39,7 @@ pub(super) fn working_tree_changes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>,
     changes
 }
 
-pub(super) fn move_plan(cwd: &Path) -> Result<Value, String> {
+pub(super) fn move_plan(cwd: &Path) -> Result<Value> {
     let (branch, head) = branch_and_head(cwd)?;
     let names = working_tree_changes(cwd, &["--name-only", "-z"])?;
     let changed_files = names.split(|byte| *byte == 0).filter(|name| !name.is_empty()).count();
@@ -46,7 +47,7 @@ pub(super) fn move_plan(cwd: &Path) -> Result<Value, String> {
     Ok(json!({"branch": branch, "head": head, "changed_files": changed_files}))
 }
 
-pub(super) fn snapshot(cwd: &Path) -> Result<Value, String> {
+pub(super) fn snapshot(cwd: &Path) -> Result<Value> {
     let (branch, head) = branch_and_head(cwd)?;
     let patch = working_tree_changes(cwd, &["--binary", "--full-index"])?;
     let changed_files = patch.split(|byte| *byte == b'\n').filter(|line| line.starts_with(b"diff --git ")).count();
@@ -57,7 +58,7 @@ pub(super) fn snapshot(cwd: &Path) -> Result<Value, String> {
         None
     } else {
         let scratch = std::env::temp_dir().join(format!("mycelium-bundle-{}", Uuid::new_v4()));
-        let created = git(cwd, &["bundle", "create", &scratch.to_string_lossy(), &branch_ref, "--not", "--remotes"], &[]).and_then(|_| std::fs::read(&scratch).map_err(|cause| format!("Could not read the bundle of unpushed commits: {cause}.")));
+        let created = git(cwd, &["bundle", "create", &scratch.to_string_lossy(), &branch_ref, "--not", "--remotes"], &[]).and_then(|_| std::fs::read(&scratch).map_err(|cause| anyhow!("Could not read the bundle of unpushed commits: {cause}.")));
         let _ = std::fs::remove_file(&scratch);
 
         Some(created?)
@@ -66,7 +67,7 @@ pub(super) fn snapshot(cwd: &Path) -> Result<Value, String> {
     let size = patch.len() + bundle.as_ref().map_or(0, Vec::len);
 
     if size > MOST_MOVE_BYTES {
-        return Err(format!("The unsaved work is {} MB, which is more than a move carries ({} MB). Commit and push it to the forge, then move again.", size.div_ceil(1024 * 1024), MOST_MOVE_BYTES / (1024 * 1024)));
+        bail!("The unsaved work is {} MB, which is more than a move carries ({} MB). Commit and push it to the forge, then move again.", size.div_ceil(1024 * 1024), MOST_MOVE_BYTES / (1024 * 1024));
     }
 
     let engine = base64::engine::general_purpose::STANDARD;
@@ -74,20 +75,20 @@ pub(super) fn snapshot(cwd: &Path) -> Result<Value, String> {
     Ok(json!({"branch": branch, "head": head, "changed_files": changed_files, "patch": engine.encode(&patch), "bundle": bundle.map(|bytes| engine.encode(bytes))}))
 }
 
-pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>, credentials: Option<&GitCredentials>) -> Result<Value, String> {
+pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>, credentials: Option<&GitCredentials>) -> Result<Value> {
     let engine = base64::engine::general_purpose::STANDARD;
     let branch_ref = format!("refs/heads/{branch}");
 
     if branch.starts_with('-') || git(cwd, &["check-ref-format", &branch_ref], &[]).is_err() {
-        return Err(format!("{branch} is not a valid branch name."));
+        bail!("{branch} is not a valid branch name.");
     }
 
     if head.len() < 40 || !head.chars().all(|character| character.is_ascii_hexdigit()) {
-        return Err(format!("{head} is not a commit."));
+        bail!("{head} is not a commit.");
     }
 
     if !git(cwd, &["status", "--porcelain", "--untracked-files=all"], &[])?.is_empty() {
-        return Err("The project folder on this node has uncommitted changes. Commit or discard them there, then try again.".to_string());
+        bail!("The project folder on this node has uncommitted changes. Commit or discard them there, then try again.");
     }
 
     let has_head = || git(cwd, &["cat-file", "-e", &format!("{head}^{{commit}}")], &[]).is_ok();
@@ -99,16 +100,16 @@ pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: O
     }
 
     if let (false, Some(bundle)) = (has_head(), bundle) {
-        let bytes = engine.decode(bundle).map_err(|_| "The snapshot of unpushed commits was damaged in transit.".to_string())?;
+        let bytes = engine.decode(bundle).map_err(|_| anyhow!("The snapshot of unpushed commits was damaged in transit."))?;
         let scratch = std::env::temp_dir().join(format!("mycelium-bundle-{}", Uuid::new_v4()));
-        std::fs::write(&scratch, bytes).map_err(|cause| format!("Could not write the bundle of unpushed commits: {cause}."))?;
+        std::fs::write(&scratch, bytes).map_err(|cause| anyhow!("Could not write the bundle of unpushed commits: {cause}."))?;
         let fetched = git(cwd, &["fetch", "--quiet", &scratch.to_string_lossy(), &branch_ref], &[]);
         let _ = std::fs::remove_file(&scratch);
         fetched?;
     }
 
     if !has_head() {
-        return Err(format!("This node does not have commit {} and could not fetch it. Push the branch to the forge from the other node, then try again.", &head[..12.min(head.len())]));
+        bail!("This node does not have commit {} and could not fetch it. Push the branch to the forge from the other node, then try again.", &head[..12.min(head.len())]);
     }
 
     let existing = git(cwd, &["rev-parse", "--verify", "-q", &branch_ref], &[1]).is_ok_and(|output| !output.is_empty());
@@ -116,7 +117,7 @@ pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: O
     let only_here = String::from_utf8_lossy(&git(cwd, &["rev-list", "--count", &format!("{head}..{branch_ref}")], &[]).unwrap_or_default()).trim().to_string();
 
     if existing && only_here != "0" {
-        return Err(format!("{branch} on this node has commits the other node does not. Rename or push that branch there, then try again."));
+        bail!("{branch} on this node has commits the other node does not. Rename or push that branch there, then try again.");
     }
 
     let previous = String::from_utf8_lossy(&git(cwd, &["symbolic-ref", "--short", "-q", "HEAD"], &[1])?).trim().to_string();
@@ -124,12 +125,12 @@ pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: O
     let branch_before = if existing { Some(String::from_utf8_lossy(&git(cwd, &["rev-parse", &branch_ref], &[])?).trim().to_string()) } else { None };
     git(cwd, &["checkout", "--quiet", "-B", branch, head], &[])?;
 
-    let bytes = engine.decode(patch).map_err(|_| "The snapshot of unsaved work was damaged in transit.".to_string())?;
+    let bytes = engine.decode(patch).map_err(|_| anyhow!("The snapshot of unsaved work was damaged in transit."))?;
     let applied_files = bytes.split(|byte| *byte == b'\n').filter(|line| line.starts_with(b"diff --git ")).count();
 
     if !bytes.is_empty() {
         let scratch = std::env::temp_dir().join(format!("mycelium-patch-{}", Uuid::new_v4()));
-        std::fs::write(&scratch, &bytes).map_err(|cause| format!("Could not write the unsaved work: {cause}."))?;
+        std::fs::write(&scratch, &bytes).map_err(|cause| anyhow!("Could not write the unsaved work: {cause}."))?;
         let applied = git(cwd, &["apply", "--binary", "--whitespace=nowarn", &scratch.to_string_lossy()], &[]);
         let _ = std::fs::remove_file(&scratch);
 
@@ -142,16 +143,16 @@ pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: O
                 let _ = git(cwd, &["branch", "-D", branch], &[]);
             }
 
-            return Err(format!("The unsaved work did not apply on this node: {message}"));
+            bail!("The unsaved work did not apply on this node: {message}");
         }
     }
 
     Ok(json!({"branch": branch, "head": head, "applied_files": applied_files, "previous": previous, "branch_before": branch_before}))
 }
 
-pub(super) fn undo(cwd: &Path, branch: &str, previous: &str, branch_before: Option<&str>) -> Result<Value, String> {
+pub(super) fn undo(cwd: &Path, branch: &str, previous: &str, branch_before: Option<&str>) -> Result<Value> {
     if previous.is_empty() || previous.starts_with('-') || branch.starts_with('-') || branch_before.is_some_and(|sha| sha.starts_with('-')) {
-        return Err("There is nothing to go back to: the branch the folder was on is unknown.".to_string());
+        bail!("There is nothing to go back to: the branch the folder was on is unknown.");
     }
 
     git(cwd, &["reset", "--hard", "--quiet"], &[])?;
@@ -275,7 +276,7 @@ mod tests {
         write(&target, "a.txt", "mine\n");
 
         let snapshot = run(source.path(), GitCommand::Snapshot { session_id: None }).unwrap();
-        let error = run(target.path(), moved(&snapshot)).unwrap_err();
+        let error = run(target.path(), moved(&snapshot)).unwrap_err().to_string();
 
         assert!(error.contains("uncommitted changes"), "{error}");
         assert_eq!(std::fs::read_to_string(target.path().join("a.txt")).unwrap(), "mine\n");
@@ -288,7 +289,7 @@ mod tests {
         let head = String::from_utf8_lossy(&git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap()).trim().to_string();
         let patch = base64::engine::general_purpose::STANDARD.encode("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-not the line\n+replacement\n");
 
-        let error = run(target.path(), GitCommand::Apply { branch: "feature/new".into(), head, patch, bundle: None, credentials: None }).unwrap_err();
+        let error = run(target.path(), GitCommand::Apply { branch: "feature/new".into(), head, patch, bundle: None, credentials: None }).unwrap_err().to_string();
 
         assert!(error.contains("did not apply"), "{error}");
         assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
@@ -371,7 +372,7 @@ mod tests {
         commit_all(&target, "target work");
 
         let snapshot = run(source.path(), GitCommand::Snapshot { session_id: None }).unwrap();
-        let error = run(target.path(), moved(&snapshot)).unwrap_err();
+        let error = run(target.path(), moved(&snapshot)).unwrap_err().to_string();
 
         assert!(error.contains("has commits the other node does not"), "{error}");
         assert!(target.path().join("theirs.txt").exists());
@@ -383,7 +384,7 @@ mod tests {
         let target = clone_of(&origin);
         let head = "0123456789abcdef0123456789abcdef01234567".to_string();
 
-        let error = run(target.path(), GitCommand::Apply { branch: "main".into(), head, patch: String::new(), bundle: None, credentials: None }).unwrap_err();
+        let error = run(target.path(), GitCommand::Apply { branch: "main".into(), head, patch: String::new(), bundle: None, credentials: None }).unwrap_err().to_string();
 
         assert!(error.contains("does not have commit 0123456789ab"), "{error}");
     }
@@ -395,7 +396,7 @@ mod tests {
         commit_all(&dir, "first");
         write(&dir, "big.txt", &"line of text\n".repeat(700_000));
 
-        let error = run(dir.path(), GitCommand::Snapshot { session_id: None }).unwrap_err();
+        let error = run(dir.path(), GitCommand::Snapshot { session_id: None }).unwrap_err().to_string();
 
         assert!(error.contains("Commit and push it to the forge"), "{error}");
     }
@@ -410,7 +411,7 @@ mod tests {
 
         let plan = run(dir.path(), GitCommand::MovePlan).unwrap();
         git(dir.path(), &["checkout", "--detach"], &[]).unwrap();
-        let detached = run(dir.path(), GitCommand::MovePlan).unwrap_err();
+        let detached = run(dir.path(), GitCommand::MovePlan).unwrap_err().to_string();
 
         assert_eq!((plan["branch"].as_str(), plan["changed_files"].as_u64()), (Some("main"), Some(2)));
         assert!(detached.contains("not on a branch"), "{detached}");

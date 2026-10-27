@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::link::NodeToControl;
@@ -172,7 +173,7 @@ pub fn locate(home: &Path, roots: &[PathBuf], session_id: &str) -> Option<(Strin
     })
 }
 
-pub fn adopt(home: &Path, roots: &[PathBuf], target_root: &Path, session_id: &str) -> Result<bool, String> {
+pub fn adopt(home: &Path, roots: &[PathBuf], target_root: &Path, session_id: &str) -> Result<bool> {
     let Some((relative, _)) = locate(home, roots, session_id) else {
         return Ok(false);
     };
@@ -185,23 +186,23 @@ pub fn adopt(home: &Path, roots: &[PathBuf], target_root: &Path, session_id: &st
     let Some(root) = roots.iter().find(|root| source.starts_with(root)) else {
         return Ok(false);
     };
-    let inside_root = source.strip_prefix(root).map_err(|cause| cause.to_string())?;
+    let inside_root = source.strip_prefix(root)?;
     let destination = target_root.join(inside_root);
-    let source_length = std::fs::metadata(&source).map_err(|cause| cause.to_string())?.len();
+    let source_length = std::fs::metadata(&source)?.len();
     let existing_length = std::fs::metadata(&destination).map(|metadata| metadata.len()).unwrap_or(0);
 
     if existing_length >= source_length {
         return Ok(false);
     }
 
-    let parent = destination.parent().ok_or_else(|| "The transcript has no parent folder.".to_string())?;
-    std::fs::create_dir_all(parent).map_err(|cause| cause.to_string())?;
-    std::fs::copy(&source, &destination).map_err(|cause| cause.to_string())?;
+    let parent = destination.parent().ok_or_else(|| anyhow!("The transcript has no parent folder."))?;
+    std::fs::create_dir_all(parent)?;
+    std::fs::copy(&source, &destination)?;
 
     Ok(true)
 }
 
-pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &str) -> Result<(), String> {
+pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &str) -> Result<()> {
     let relative = Path::new(path);
     let plain = relative.components().all(|component| matches!(component, std::path::Component::Normal(_)));
     let full = home.join(relative);
@@ -209,10 +210,10 @@ pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &s
     let in_a_transcript_folder = root.is_some() && path.ends_with(".jsonl");
 
     if !plain || !in_a_transcript_folder || offset < 0 {
-        return Err(format!("{path} is not a place this node keeps transcripts."));
+        bail!("{path} is not a place this node keeps transcripts.");
     }
 
-    let bytes = STANDARD.decode(data).map_err(|_| "A transcript chunk was not valid base64.".to_string())?;
+    let bytes = STANDARD.decode(data).map_err(|_| anyhow!("A transcript chunk was not valid base64."))?;
     let write = || -> std::io::Result<()> {
         use std::io::Write;
 
@@ -237,7 +238,7 @@ pub fn restore(home: &Path, roots: &[PathBuf], path: &str, offset: i64, data: &s
         file.write_all(&bytes)
     };
 
-    write().map_err(|cause| format!("Could not write {path}: {cause}."))
+    write().map_err(|cause| anyhow!("Could not write {path}: {cause}."))
 }
 
 fn workflow_journal(root: &Path, path: &Path) -> Option<WorkflowJournal> {
@@ -546,7 +547,7 @@ mod tests {
         append(&first.join("-work-app").join("abc-123.jsonl"), "one\n");
         let roots = [first, second.clone()];
 
-        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123"), Ok(true));
+        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123").unwrap(), true);
         assert_eq!(std::fs::read_to_string(second.join("-work-app/abc-123.jsonl")).unwrap(), "one\n");
     }
 
@@ -558,7 +559,7 @@ mod tests {
         append(&first.join("2026/10/23").join("rollout-2026-10-23T10-00-00-def-456.jsonl"), "four\n");
         let roots = [first, second.clone()];
 
-        assert_eq!(adopt(dir.path(), &roots, &second, "def-456"), Ok(true));
+        assert_eq!(adopt(dir.path(), &roots, &second, "def-456").unwrap(), true);
         assert!(second.join("2026/10/23/rollout-2026-10-23T10-00-00-def-456.jsonl").is_file());
     }
 
@@ -571,7 +572,7 @@ mod tests {
         append(&second.join("-work-app").join("abc-123.jsonl"), "one\ntwo\n");
         let roots = [first, second.clone()];
 
-        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123"), Ok(false));
+        assert_eq!(adopt(dir.path(), &roots, &second, "abc-123").unwrap(), false);
         assert_eq!(std::fs::read_to_string(second.join("-work-app/abc-123.jsonl")).unwrap(), "one\ntwo\n");
     }
 

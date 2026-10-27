@@ -327,14 +327,38 @@ export class Editor
 
   run(command: Command): void
   {
-    if (command.kind === 'tool') this.setTool(command.tool);
-    else if (command.kind === 'delete') this.deleteSelected();
-    else if (command.kind === 'undo') this.undo();
-    else if (command.kind === 'redo') this.redo();
-    else if (command.kind === 'duplicate') this.duplicateSelected();
-    else if (command.kind === 'fit') this.fit();
-    else if (command.kind === 'zoomIn') this.zoomBy(zoomStep);
-    else if (command.kind === 'zoomOut') this.zoomBy(1 / zoomStep);
+    if (command.kind === 'tool')
+    {
+      this.setTool(command.tool);
+    }
+    else if (command.kind === 'delete')
+    {
+      this.deleteSelected();
+    }
+    else if (command.kind === 'undo')
+    {
+      this.undo();
+    }
+    else if (command.kind === 'redo')
+    {
+      this.redo();
+    }
+    else if (command.kind === 'duplicate')
+    {
+      this.duplicateSelected();
+    }
+    else if (command.kind === 'fit')
+    {
+      this.fit();
+    }
+    else if (command.kind === 'zoomIn')
+    {
+      this.zoomBy(zoomStep);
+    }
+    else if (command.kind === 'zoomOut')
+    {
+      this.zoomBy(1 / zoomStep);
+    }
   }
 
   present(artboardId?: string): void
@@ -396,7 +420,15 @@ export class Editor
       this.base = snapshot;
       this.knownVersion = saved.latest_version;
       this.artifact = { ...artifact, ...saved };
-      this.versions = saved.versions ?? (await api.getArtifact(artifact.id)).versions ?? this.versions;
+      let versions = saved.versions;
+
+      if (versions == null)
+      {
+        const reloaded = await api.getArtifact(artifact.id);
+        versions = reloaded.versions;
+      }
+
+      this.versions = versions ?? this.versions;
       this.saveState = designsEqual(this.history.present, snapshot) ? 'saved' : 'unsaved';
     }
     catch

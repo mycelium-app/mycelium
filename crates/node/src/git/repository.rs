@@ -1,19 +1,20 @@
 use super::git;
 use super::git_with_env;
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use mycelium_proto::link::GitCredentials;
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub(super) fn clone(target: &Path, url: &str, credentials: Option<&GitCredentials>) -> Result<Value, String> {
+pub(super) fn clone(target: &Path, url: &str, credentials: Option<&GitCredentials>) -> Result<Value> {
     let occupied = std::fs::read_dir(target).is_ok_and(|mut entries| entries.next().is_some()) || target.is_file();
 
     if occupied {
-        return Err(format!("{} already exists and is not empty. Choose another folder.", target.display()));
+        bail!("{} already exists and is not empty. Choose another folder.", target.display());
     }
 
-    let parent = target.parent().ok_or_else(|| format!("{} has no parent folder.", target.display()))?;
-    std::fs::create_dir_all(parent).map_err(|cause| format!("Could not create {}: {cause}.", parent.display()))?;
+    let parent = target.parent().ok_or_else(|| anyhow!("{} has no parent folder.", target.display()))?;
+    std::fs::create_dir_all(parent).map_err(|cause| anyhow!("Could not create {}: {cause}.", parent.display()))?;
 
     let env = credentials.map(|credentials| credential_env(url, credentials)).transpose()?.unwrap_or_default();
     let target_text = target.to_string_lossy();
@@ -22,8 +23,8 @@ pub(super) fn clone(target: &Path, url: &str, credentials: Option<&GitCredential
     Ok(json!({"path": target.to_string_lossy()}))
 }
 
-pub(super) fn credential_env(url: &str, credentials: &GitCredentials) -> Result<Vec<(String, String)>, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|_| format!("{url} is not a valid address."))?;
+pub(super) fn credential_env(url: &str, credentials: &GitCredentials) -> Result<Vec<(String, String)>> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| anyhow!("{url} is not a valid address."))?;
     let origin = parsed.origin().ascii_serialization();
     let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", credentials.username, credentials.password));
 
@@ -34,12 +35,12 @@ pub(super) fn credential_env(url: &str, credentials: &GitCredentials) -> Result<
     ])
 }
 
-pub(super) fn register(folder: &Path) -> Result<Value, String> {
+pub(super) fn register(folder: &Path) -> Result<Value> {
     if !folder.is_dir() {
-        return Err(format!("The folder {} does not exist on this node.", folder.display()));
+        bail!("The folder {} does not exist on this node.", folder.display());
     }
 
-    let canonical = folder.canonicalize().map_err(|cause| format!("Could not read {}: {cause}.", folder.display()))?;
+    let canonical = folder.canonicalize().map_err(|cause| anyhow!("Could not read {}: {cause}.", folder.display()))?;
     let repository = git(&canonical, &["rev-parse", "--git-dir"], &[]).is_ok();
     let configured = if repository { git(&canonical, &["config", "--get-regexp", r"^remote\..*\.url$"], &[1]).unwrap_or_default() } else { Vec::new() };
     let remotes: Vec<&str> = std::str::from_utf8(&configured).unwrap_or_default().lines().filter_map(|line| line.split_once(' ').map(|(_, url)| url.trim())).collect();
@@ -47,16 +48,16 @@ pub(super) fn register(folder: &Path) -> Result<Value, String> {
     Ok(json!({"path": canonical.to_string_lossy(), "repository": repository, "remotes": remotes}))
 }
 
-pub(super) fn add_worktree(project: &Path, branch: &str) -> Result<Value, String> {
+pub(super) fn add_worktree(project: &Path, branch: &str) -> Result<Value> {
     if branch.starts_with('-') || git(project, &["check-ref-format", "--branch", branch], &[]).is_err() {
-        return Err(format!("{branch} is not a valid branch name. Use letters, numbers, dashes and slashes."));
+        bail!("{branch} is not a valid branch name. Use letters, numbers, dashes and slashes.");
     }
 
-    let name = project.file_name().ok_or_else(|| format!("{} has no folder name.", project.display()))?.to_string_lossy();
+    let name = project.file_name().ok_or_else(|| anyhow!("{} has no folder name.", project.display()))?.to_string_lossy();
     let folder = project.with_file_name(format!("{name}-worktrees")).join(branch.replace('/', "-"));
 
     if folder.exists() {
-        return Err(format!("{} already exists. Choose another branch name.", folder.display()));
+        bail!("{} already exists. Choose another branch name.", folder.display());
     }
 
     let folder_text = folder.to_string_lossy();
@@ -107,7 +108,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("mine.txt"), "keep").unwrap();
 
-        let error = clone(root.path(), origin.path().to_str().unwrap(), None).unwrap_err();
+        let error = clone(root.path(), origin.path().to_str().unwrap(), None).unwrap_err().to_string();
 
         assert!(error.contains("already exists and is not empty"), "{error}");
         assert!(root.path().join("mine.txt").exists());
@@ -118,7 +119,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
 
         for url in ["ext::sh -c 'touch pwned'", "file:///etc", "--upload-pack=touch pwned", "git@github.com:org/app.git"] {
-            let error = run_in(root.path(), "projects/app", GitCommand::Clone { url: url.into(), credentials: None }).unwrap_err();
+            let error = run_in(root.path(), "projects/app", GitCommand::Clone { url: url.into(), credentials: None }).unwrap_err().to_string();
 
             assert!(error.contains("will not clone it"), "{error}");
         }
@@ -132,7 +133,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let credentials = GitCredentials { username: "oauth2".into(), password: "s3cret-token".into() };
 
-        let error = run_in(root.path(), "projects/org/app", GitCommand::Clone { url: format!("{url}/org/app.git"), credentials: Some(credentials) }).unwrap_err();
+        let error = run_in(root.path(), "projects/org/app", GitCommand::Clone { url: format!("{url}/org/app.git"), credentials: Some(credentials) }).unwrap_err().to_string();
 
         let expected = base64::engine::general_purpose::STANDARD.encode("oauth2:s3cret-token");
         assert!(request.join().unwrap().contains(&format!("Basic {expected}")));
@@ -171,8 +172,8 @@ mod tests {
         assert_eq!(repo["remotes"], serde_json::json!(["git@example.com:a/b.git"]));
         assert_eq!(plain["remotes"], serde_json::json!([]));
         assert!(repo["path"].as_str().unwrap().ends_with("/repo"));
-        assert!(run_in(root.path(), "missing", GitCommand::Register).unwrap_err().contains("does not exist"));
-        assert!(run_in(root.path(), "file.txt", GitCommand::Register).unwrap_err().contains("does not exist"));
+        assert!(run_in(root.path(), "missing", GitCommand::Register).unwrap_err().to_string().contains("does not exist"));
+        assert!(run_in(root.path(), "file.txt", GitCommand::Register).unwrap_err().to_string().contains("does not exist"));
     }
 
     #[test]
@@ -204,11 +205,11 @@ mod tests {
         run(&project, GitCommand::Commit { message: "first".into(), options: CommitOptions::default() }).unwrap();
         run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap();
 
-        let existing = run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap_err();
+        let existing = run_in(root.path(), "app", GitCommand::AddWorktree { branch: "work".into() }).unwrap_err().to_string();
         assert!(existing.contains("already exists"), "{existing}");
 
         for branch in ["--detach", "a b", "x..y", ""] {
-            let error = run_in(root.path(), "app", GitCommand::AddWorktree { branch: branch.into() }).unwrap_err();
+            let error = run_in(root.path(), "app", GitCommand::AddWorktree { branch: branch.into() }).unwrap_err().to_string();
 
             assert!(error.contains("not a valid branch name"), "{branch}: {error}");
         }

@@ -263,7 +263,7 @@ fn stopping_a_process_sends_it_sigterm() {
 
     let stopped = Sampler::new(PathBuf::from("/proc"), vec![]).stop(child.id(), "sleep");
 
-    assert_eq!(stopped, Ok(()));
+    assert!(stopped.is_ok());
     assert_eq!(child.wait().unwrap().signal(), Some(15));
 }
 
@@ -272,8 +272,8 @@ fn stopping_a_process_that_has_exited_or_changed_name_is_refused() {
     let (_directory, root) = proc_with_sockets();
     let sampler = Sampler::new(root, vec![]);
 
-    assert_eq!(sampler.stop(999, "gone"), Err("gone has already exited.".into()));
-    assert_eq!(sampler.stop(300, "nginx"), Err("Process 300 is no longer nginx. Reload the page and try again.".into()));
+    assert_eq!(sampler.stop(999, "gone").unwrap_err().to_string(), "gone has already exited.");
+    assert_eq!(sampler.stop(300, "nginx").unwrap_err().to_string(), "Process 300 is no longer nginx. Reload the page and try again.");
 }
 
 #[test]
@@ -283,5 +283,5 @@ fn stopping_a_process_that_another_user_owns_is_refused() {
 
     let stopped = Sampler::new(root, vec![]).stop(300, "postgres");
 
-    assert_eq!(stopped, Err("postgres belongs to another user, so Mycelium cannot stop it.".into()));
+    assert_eq!(stopped.unwrap_err().to_string(), "postgres belongs to another user, so Mycelium cannot stop it.");
 }

@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
@@ -22,14 +23,14 @@ fn numbers(version: &str) -> Option<Vec<u64>> {
     release.split('.').map(|part| part.parse().ok()).collect()
 }
 
-pub fn asset_name(os: &str, arch: &str) -> Result<String, String> {
+pub fn asset_name(os: &str, arch: &str) -> Result<String> {
     match (os, arch) {
         ("linux", "x86_64") => Ok("mycelium-linux-x86_64".into()),
-        _ => Err(format!("No build for {os} {arch}")),
+        _ => Err(anyhow!("No build for {os} {arch}")),
     }
 }
 
-pub async fn install(client: &reqwest::Client, releases_url: &str, version: &str, asset: &str, target: &Path) -> Result<(), String> {
+pub async fn install(client: &reqwest::Client, releases_url: &str, version: &str, asset: &str, target: &Path) -> Result<()> {
     let base = format!("{}/{version}/{asset}", releases_url.trim_end_matches('/'));
     let binary = download(client, &base).await?;
     let checksum = download(client, &format!("{base}.sha256")).await?;
@@ -37,27 +38,27 @@ pub async fn install(client: &reqwest::Client, releases_url: &str, version: &str
     let actual: String = Sha256::digest(&binary).iter().map(|byte| format!("{byte:02x}")).collect();
 
     if expected != actual {
-        return Err(format!("The download of {asset} {version} did not match its checksum, so it was not installed."));
+        bail!("The download of {asset} {version} did not match its checksum, so it was not installed.");
     }
 
     swap(&binary, target).map_err(|error| match error.kind() {
-        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => NIX_MESSAGE.to_string(),
-        _ => format!("Could not replace {}: {error}", target.display()),
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => anyhow!(NIX_MESSAGE),
+        _ => anyhow!("Could not replace {}: {error}", target.display()),
     })
 }
 
-pub fn running_binary() -> Result<PathBuf, String> {
-    std::env::current_exe().map_err(|error| format!("Could not find the running binary: {error}"))
+pub fn running_binary() -> Result<PathBuf> {
+    std::env::current_exe().map_err(|error| anyhow!("Could not find the running binary: {error}"))
 }
 
-async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
-    let response = client.get(url).send().await.map_err(|error| format!("Could not download {url}: {error}"))?;
+async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
+    let response = client.get(url).send().await.map_err(|error| anyhow!("Could not download {url}: {error}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Could not download {url}: it answered {}", response.status()));
+        bail!("Could not download {url}: it answered {}", response.status());
     }
 
-    let bytes = response.bytes().await.map_err(|error| format!("Could not download {url}: {error}"))?;
+    let bytes = response.bytes().await.map_err(|error| anyhow!("Could not download {url}: {error}"))?;
 
     Ok(bytes.to_vec())
 }
@@ -92,7 +93,7 @@ mod tests {
 
     #[test]
     fn only_linux_x86_64_has_a_build() {
-        assert_eq!(asset_name("linux", "x86_64").as_deref(), Ok("mycelium-linux-x86_64"));
-        assert_eq!(asset_name("macos", "aarch64"), Err("No build for macos aarch64".into()));
+        assert_eq!(asset_name("linux", "x86_64").unwrap(), "mycelium-linux-x86_64");
+        assert_eq!(asset_name("macos", "aarch64").unwrap_err().to_string(), "No build for macos aarch64");
     }
 }

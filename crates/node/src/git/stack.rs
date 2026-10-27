@@ -1,4 +1,5 @@
 use super::git;
+use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,28 +19,28 @@ fn town_program(cwd: &Path, path: &std::ffi::OsStr) -> Option<(PathBuf, bool)> {
     available.then_some((mise, true))
 }
 
-pub(super) fn run_town(cwd: &Path, args: &[&str]) -> Result<Value, String> {
-    let (program, mise) = town_program(cwd, &std::env::var_os("PATH").unwrap_or_default()).ok_or_else(|| "Git Town is not installed on this node or configured through mise in this folder.".to_string())?;
+pub(super) fn run_town(cwd: &Path, args: &[&str]) -> Result<Value> {
+    let (program, mise) = town_program(cwd, &std::env::var_os("PATH").unwrap_or_default()).ok_or_else(|| anyhow!("Git Town is not installed on this node or configured through mise in this folder."))?;
     let mut all = if mise { vec!["exec", "--", GIT_TOWN] } else { Vec::new() };
     all.extend_from_slice(args);
 
     town(cwd, &program, &all)
 }
 
-fn town(cwd: &Path, program: &Path, args: &[&str]) -> Result<Value, String> {
+fn town(cwd: &Path, program: &Path, args: &[&str]) -> Result<Value> {
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output()
-        .map_err(|cause| format!("Git Town could not be started: {cause}."))?;
+        .map_err(|cause| anyhow!("Git Town could not be started: {cause}."))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{}\n{}", stdout.trim(), stderr.trim()).trim().to_string();
 
     if !output.status.success() {
-        return Err(if combined.is_empty() { "Git Town failed without saying why.".into() } else { combined });
+        return Err(anyhow!(if combined.is_empty() { "Git Town failed without saying why.".to_string() } else { combined }));
     }
 
     Ok(json!({"output": combined}))
@@ -53,7 +54,7 @@ struct LocalBranch {
     subject: String,
 }
 
-pub(super) fn stack(cwd: &Path) -> Result<Value, String> {
+pub(super) fn stack(cwd: &Path) -> Result<Value> {
     let current = String::from_utf8_lossy(&git(cwd, &["branch", "--show-current"], &[])?).trim().to_string();
     let listing = git(
         cwd,
@@ -347,8 +348,8 @@ mod tests {
         };
 
         let worked = town(dir.path(), &script("echo synced \"$@\""), &["sync", "--stack"]).unwrap();
-        let failed = town(dir.path(), &script("echo conflict in a.txt >&2; exit 1"), &["sync"]).unwrap_err();
-        let missing = town(dir.path(), &dir.path().join("absent"), &[]).unwrap_err();
+        let failed = town(dir.path(), &script("echo conflict in a.txt >&2; exit 1"), &["sync"]).unwrap_err().to_string();
+        let missing = town(dir.path(), &dir.path().join("absent"), &[]).unwrap_err().to_string();
 
         assert_eq!(worked["output"], "synced sync --stack");
         assert_eq!(failed, "conflict in a.txt");

@@ -8,6 +8,7 @@ mod stack;
 pub(crate) mod test_support;
 
 use crate::changes;
+use anyhow::{Result, anyhow, bail};
 use commits::{changed, commit, push, remote, undo_last_commit};
 use folder::{directories, edit_file, read_file};
 use history::{branches, diff, graph, head, log, scope_diff, show, status, switch};
@@ -23,11 +24,11 @@ use std::process::{Command, Stdio};
 const MOST_DIFF_BYTES: usize = 200 * 1024;
 const MOST_MOVE_BYTES: usize = 8 * 1024 * 1024;
 
-pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value, String> {
+pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value> {
     match command {
         GitCommand::Clone { url, credentials } => {
             if !url.starts_with("https://") && !url.starts_with("http://") {
-                return Err(format!("{url} is not an http or https address, so this node will not clone it."));
+                bail!("{url} is not an http or https address, so this node will not clone it.");
             }
 
             clone(&within(root, cwd)?, &url, credentials.as_ref())
@@ -39,7 +40,7 @@ pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value, Stri
     }
 }
 
-pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
+pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
     match command {
         GitCommand::Status => status(cwd),
         GitCommand::Log { limit } => log(cwd, limit),
@@ -73,24 +74,24 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value, String> {
         GitCommand::ReadFile { path } => read_file(cwd, &path),
         GitCommand::FindLogo => Ok(crate::logo::find(cwd)),
         GitCommand::Head => head(cwd),
-        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::Directories | GitCommand::AddWorktree { .. } => Err("This needs the node's projects folder, not a conversation's folder.".to_string()),
+        GitCommand::Clone { .. } | GitCommand::Register | GitCommand::Directories | GitCommand::AddWorktree { .. } => bail!("This needs the node's projects folder, not a conversation's folder."),
     }
 }
 
-pub(crate) fn git(cwd: &Path, args: &[&str], accepted: &[i32]) -> Result<Vec<u8>, String> {
+pub(crate) fn git(cwd: &Path, args: &[&str], accepted: &[i32]) -> Result<Vec<u8>> {
     git_with_env(cwd, args, accepted, &[])
 }
 
-fn git_with_env(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)]) -> Result<Vec<u8>, String> {
+fn git_with_env(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)]) -> Result<Vec<u8>> {
     git_with_stdin(cwd, args, accepted, env, &[])
 }
 
-pub(crate) fn git_with_input(cwd: &Path, args: &[&str], input: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn git_with_input(cwd: &Path, args: &[&str], input: &[u8]) -> Result<Vec<u8>> {
     git_with_stdin(cwd, args, &[], &[], input)
 }
 
-fn git_with_stdin(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)], input: &[u8]) -> Result<Vec<u8>, String> {
-    let could_not_start = |cause: std::io::Error| format!("Git could not be started: {cause}.");
+fn git_with_stdin(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)], input: &[u8]) -> Result<Vec<u8>> {
+    let could_not_start = |cause: std::io::Error| anyhow!("Git could not be started: {cause}.");
     let mut child = Command::new("git")
         .arg("-C")
         .arg(cwd)
@@ -116,12 +117,12 @@ fn git_with_stdin(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, S
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    Err(if stderr.is_empty() { stdout } else { stderr })
+    Err(anyhow!(if stderr.is_empty() { stdout } else { stderr }))
 }
 
-pub(crate) fn within(root: &Path, requested: &str) -> Result<PathBuf, String> {
+pub(crate) fn within(root: &Path, requested: &str) -> Result<PathBuf> {
     let joined = root.join(requested);
-    let outside = || format!("{} is outside {}. Choose a folder inside it.", joined.display(), root.display());
+    let outside = || anyhow!("{} is outside {}. Choose a folder inside it.", joined.display(), root.display());
 
     if joined.components().any(|component| component == Component::ParentDir) {
         return Err(outside());
@@ -146,7 +147,7 @@ mod tests {
         git(dir.path(), &["init", "-q"], &[]).unwrap();
 
         let hash = git_with_input(dir.path(), &["hash-object", "--stdin"], b"hello\n").unwrap();
-        let refused = git_with_input(dir.path(), &["apply", "--check"], b"not a patch\n").unwrap_err();
+        let refused = git_with_input(dir.path(), &["apply", "--check"], b"not a patch\n").unwrap_err().to_string();
 
         assert_eq!(String::from_utf8(hash).unwrap().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
         assert!(!refused.is_empty());
@@ -158,7 +159,7 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
 
         for requested in ["../escape", "projects/../../escape", elsewhere.path().to_str().unwrap(), ""] {
-            let error = run_in(root.path(), requested, GitCommand::Register).unwrap_err();
+            let error = run_in(root.path(), requested, GitCommand::Register).unwrap_err().to_string();
 
             assert!(error.contains("outside"), "{requested}: {error}");
         }

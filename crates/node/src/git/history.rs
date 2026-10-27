@@ -1,16 +1,17 @@
 use super::{MOST_DIFF_BYTES, MOST_MOVE_BYTES, git};
 use super::moves::working_tree_changes;
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 
-pub(super) fn head(cwd: &Path) -> Result<Value, String> {
+pub(super) fn head(cwd: &Path) -> Result<Value> {
     let branch = git(cwd, &["rev-parse", "--abbrev-ref", "HEAD"], &[]).ok().map(|output| String::from_utf8_lossy(&output).trim().to_string()).filter(|name| !name.is_empty() && name != "HEAD");
 
     Ok(json!({"branch": branch}))
 }
 
-pub(crate) fn status(cwd: &Path) -> Result<Value, String> {
+pub(crate) fn status(cwd: &Path) -> Result<Value> {
     let porcelain = git(cwd, &["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"], &[])?;
     let unstaged = counts(&git(cwd, &["diff", "--numstat", "-z"], &[])?);
     let staged = counts(&git(cwd, &["diff", "--cached", "--numstat", "-z"], &[])?);
@@ -68,7 +69,7 @@ pub(crate) fn status(cwd: &Path) -> Result<Value, String> {
     Ok(json!({"branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind, "files": files, "prepared_message": prepared_message}))
 }
 
-fn prepared_message(cwd: &Path, name: &str) -> Result<Option<String>, String> {
+fn prepared_message(cwd: &Path, name: &str) -> Result<Option<String>> {
     let path = String::from_utf8_lossy(&git(cwd, &["rev-parse", "--git-path", name], &[])?).trim().to_string();
     let Ok(text) = std::fs::read_to_string(cwd.join(path)) else {
         return Ok(None);
@@ -105,11 +106,11 @@ fn counts(numstat: &[u8]) -> HashMap<String, (u64, u64)> {
     found
 }
 
-pub(super) fn log(cwd: &Path, limit: u32) -> Result<Value, String> {
+pub(super) fn log(cwd: &Path, limit: u32) -> Result<Value> {
     let limit = limit.to_string();
     let output = match git(cwd, &["log", "--format=%H%x1f%an%x1f%aI%x1f%s", "-n", &limit], &[]) {
         Ok(output) => output,
-        Err(message) if message.contains("does not have any commits") => Vec::new(),
+        Err(message) if message.to_string().contains("does not have any commits") => Vec::new(),
         Err(message) => return Err(message),
     };
 
@@ -125,7 +126,7 @@ pub(super) fn log(cwd: &Path, limit: u32) -> Result<Value, String> {
     Ok(json!(commits))
 }
 
-pub(super) fn graph(cwd: &Path, limit: u32, skip: u32) -> Result<Value, String> {
+pub(super) fn graph(cwd: &Path, limit: u32, skip: u32) -> Result<Value> {
     let limit = limit.to_string();
     let skip = skip.to_string();
     let output = match git(
@@ -134,7 +135,7 @@ pub(super) fn graph(cwd: &Path, limit: u32, skip: u32) -> Result<Value, String> 
         &[],
     ) {
         Ok(output) => output,
-        Err(message) if message.contains("does not have any commits") => Vec::new(),
+        Err(message) if message.to_string().contains("does not have any commits") => Vec::new(),
         Err(message) => return Err(message),
     };
 
@@ -181,16 +182,16 @@ fn graph_ref(decoration: &str) -> Option<Value> {
     Some(json!({"name": remote, "kind": "remote", "current": false}))
 }
 
-pub(super) fn show(cwd: &Path, hash: &str) -> Result<Value, String> {
+pub(super) fn show(cwd: &Path, hash: &str) -> Result<Value> {
     if hash.len() < 4 || !hash.chars().all(|character| character.is_ascii_hexdigit()) {
-        return Err(format!("{hash} is not a commit."));
+        bail!("{hash} is not a commit.");
     }
 
     let output = git(cwd, &["show", "--format=", "--no-color", "--patch", hash, "--"], &[])?;
     Ok(cut_diff(&output, MOST_DIFF_BYTES))
 }
 
-pub(super) fn branches(cwd: &Path) -> Result<Value, String> {
+pub(super) fn branches(cwd: &Path) -> Result<Value> {
     let current = git(cwd, &["branch", "--show-current"], &[])?;
     let listing = git(
         cwd,
@@ -217,8 +218,8 @@ pub(super) fn branches(cwd: &Path) -> Result<Value, String> {
     Ok(json!({"current": String::from_utf8_lossy(&current).trim(), "local": local, "remote": remote}))
 }
 
-pub(super) fn switch(cwd: &Path, branch: &str, create: bool, track: Option<&str>) -> Result<Value, String> {
-    git(cwd, &["check-ref-format", "--branch", branch], &[]).map_err(|_| format!("{branch} is not a valid branch name."))?;
+pub(super) fn switch(cwd: &Path, branch: &str, create: bool, track: Option<&str>) -> Result<Value> {
+    git(cwd, &["check-ref-format", "--branch", branch], &[]).map_err(|_| anyhow!("{branch} is not a valid branch name."))?;
 
     let output = match (create, track) {
         (true, Some(remote_branch)) => git(cwd, &["switch", "-c", branch, "--track", remote_branch], &[])?,
@@ -229,7 +230,7 @@ pub(super) fn switch(cwd: &Path, branch: &str, create: bool, track: Option<&str>
     Ok(json!({"output": String::from_utf8_lossy(&output)}))
 }
 
-pub(super) fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value, String> {
+pub(super) fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value> {
     let untracked = !staged && !git(cwd, &["ls-files", "--others", "--exclude-standard", "--", path], &[])?.is_empty();
     let output = if untracked {
         git(cwd, &["diff", "--no-index", "--", "/dev/null", path], &[1])?
@@ -242,7 +243,7 @@ pub(super) fn diff(cwd: &Path, path: &str, staged: bool) -> Result<Value, String
     Ok(cut_diff(&output, MOST_DIFF_BYTES))
 }
 
-pub(super) fn scope_diff(cwd: &Path, scope: &str) -> Result<Value, String> {
+pub(super) fn scope_diff(cwd: &Path, scope: &str) -> Result<Value> {
     let output = match scope {
         "uncommitted" => working_tree_changes(cwd, &["--no-color"])?,
         "last_commit" => git(cwd, &["show", "--format=", "--no-color", "--no-renames", "--patch", "HEAD", "--"], &[])?,
@@ -261,7 +262,7 @@ pub(super) fn scope_diff(cwd: &Path, scope: &str) -> Result<Value, String> {
 
             git(cwd, &["diff", "--no-color", "--no-renames", "--no-ext-diff", &base, "HEAD", "--"], &[])?
         }
-        other => return Err(format!("{other} is not a walkthrough scope. Use branch, uncommitted or last_commit.")),
+        other => return Err(anyhow!("{other} is not a walkthrough scope. Use branch, uncommitted or last_commit.")),
     };
     Ok(cut_diff(&output, MOST_MOVE_BYTES))
 }
@@ -423,7 +424,7 @@ mod tests {
         assert!(run(dir.path(), GitCommand::Show { hash: "--output=x".into() }).is_err());
     }
 
-    fn switch_to(dir: &tempfile::TempDir, branch: &str, create: bool, track: Option<&str>) -> Result<Value, String> {
+    fn switch_to(dir: &tempfile::TempDir, branch: &str, create: bool, track: Option<&str>) -> Result<Value> {
         run(dir.path(), GitCommand::Switch { branch: branch.into(), create, track: track.map(String::from) })
     }
 
@@ -476,7 +477,7 @@ mod tests {
         switch_to(&dir, "main", false, None).unwrap();
         write(&dir, "c.txt", "uncommitted\n");
 
-        let refused = switch_to(&dir, "feature", false, None).unwrap_err();
+        let refused = switch_to(&dir, "feature", false, None).unwrap_err().to_string();
 
         assert!(refused.contains("c.txt"), "{refused}");
         assert_eq!(run(dir.path(), GitCommand::Branches).unwrap()["current"], "main");
@@ -549,7 +550,7 @@ mod tests {
     fn a_folder_that_is_not_a_repository_returns_gits_message() {
         let dir = tempfile::tempdir().unwrap();
 
-        let error = run(dir.path(), GitCommand::Status).unwrap_err();
+        let error = run(dir.path(), GitCommand::Status).unwrap_err().to_string();
 
         assert!(error.contains("not a git repository"), "{error}");
     }

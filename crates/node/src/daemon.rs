@@ -242,7 +242,7 @@ impl Daemon {
             let _ = out.send(report());
             let (outcome, error) = match used {
                 Ok(outcome) => (Some(outcome), None),
-                Err(error) => (None, Some(error)),
+                Err(error) => (None, Some(error.to_string())),
             };
             let _ = out.send(NodeToControl::ResetUsed { request_id, outcome, error });
         });
@@ -328,7 +328,7 @@ impl Daemon {
                 tokio::task::spawn_blocking(move || {
                     let message = match crate::assistant_folder::read(&projects_root, &root) {
                         Ok(read) => NodeToControl::FolderFiles { request_id, files: read.files, truncated: read.truncated, error: None },
-                        Err(error) => NodeToControl::FolderFiles { request_id, files: Vec::new(), truncated: false, error: Some(error) },
+                        Err(error) => NodeToControl::FolderFiles { request_id, files: Vec::new(), truncated: false, error: Some(error.to_string()) },
                     };
                     let _ = out.send(message);
                 });
@@ -352,7 +352,7 @@ impl Daemon {
 
                             NodeToControl::GitResult { request_id, ok: true, output, error: None }
                         }
-                        Err(error) => NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some(error) },
+                        Err(error) => NodeToControl::GitResult { request_id, ok: false, output: serde_json::Value::Null, error: Some(error.to_string()) },
                     };
                     let _ = out.send(message);
                 });
@@ -366,7 +366,7 @@ impl Daemon {
 
                 tokio::task::spawn_blocking(move || {
                     let stopped = crate::resources::Sampler::new(proc_root, Vec::new()).stop(pid, &name);
-                    let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err() });
+                    let _ = out.send(NodeToControl::ProcessStopped { request_id, ok: stopped.is_ok(), error: stopped.err().map(|error| error.to_string()) });
                 });
             }
             ControlToNode::UseReset { request_id, agent, account, idempotency_key } => self.use_reset(request_id, agent, account, idempotency_key),
@@ -416,7 +416,7 @@ impl Daemon {
             };
 
             let ok = installed.is_ok();
-            let message = installed.err().unwrap_or_else(|| format!("Updated to {version}"));
+            let message = installed.err().map_or_else(|| format!("Updated to {version}"), |error| error.to_string());
             let _ = out.send(NodeToControl::UpdateResult { ok, message });
 
             if ok {

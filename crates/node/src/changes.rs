@@ -1,5 +1,6 @@
 use crate::git::{git, git_with_input};
 use crate::git::history::status;
+use anyhow::{Result, anyhow, bail};
 use mycelium_proto::link::RowRange;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -35,7 +36,7 @@ struct Row {
     text: String,
 }
 
-pub fn layout(cwd: &Path) -> Result<Value, String> {
+pub fn layout(cwd: &Path) -> Result<Value> {
     let files = refresh(cwd)?;
 
     Ok(json!({"files": files.iter().map(|(path, cached)| {
@@ -57,7 +58,7 @@ pub fn layout(cwd: &Path) -> Result<Value, String> {
     }).collect::<Vec<_>>()}))
 }
 
-pub fn rows(cwd: &Path, ranges: &[RowRange]) -> Result<Value, String> {
+pub fn rows(cwd: &Path, ranges: &[RowRange]) -> Result<Value> {
     let files: HashMap<String, (String, Arc<FileRows>)> = refresh(cwd)?.into_iter().map(|(path, cached)| (path, (cached.fingerprint, cached.rows))).collect();
     let mut answered = Vec::new();
 
@@ -75,21 +76,21 @@ pub fn rows(cwd: &Path, ranges: &[RowRange]) -> Result<Value, String> {
     Ok(json!({"ranges": answered}))
 }
 
-pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &str) -> Result<Value, String> {
+pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &str) -> Result<Value> {
     if !matches!(action, "stage" | "unstage" | "revert") {
-        return Err("Choose stage, unstage or revert.".into());
+        bail!("Choose stage, unstage or revert.");
     }
 
     let files = refresh(cwd)?;
-    let (_, file) = files.iter().find(|(name, _)| name == path).ok_or_else(|| "This file has no changes. Refresh the view.".to_string())?;
+    let (_, file) = files.iter().find(|(name, _)| name == path).ok_or_else(|| anyhow!("This file has no changes. Refresh the view."))?;
 
     if file.fingerprint != fingerprint {
-        return Err("The changes on disk have moved. Refresh the view before changing this hunk.".into());
+        bail!("The changes on disk have moved. Refresh the view before changing this hunk.");
     }
 
     if file.flags[2] {
         if row != 0 || file.rows.hunks.is_empty() || action != "stage" {
-            return Err("Stage an untracked file as a whole, or edit it before staging.".into());
+            bail!("Stage an untracked file as a whole, or edit it before staging.");
         }
 
         git(cwd, &["add", "--", path], &[])?;
@@ -112,14 +113,14 @@ pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &
 
         args.extend(["--", path]);
         let bytes = git(cwd, &args, &[])?;
-        let text = String::from_utf8(bytes).map_err(|_| "This diff is not UTF-8 text.".to_string())?;
+        let text = String::from_utf8(bytes).map_err(|_| anyhow!("This diff is not UTF-8 text."))?;
         let mut parsed = FileRows::default();
         parse(&text, &mut parsed);
         let local = row.checked_sub(offset);
 
         if let Some(index) = local.and_then(|local| parsed.hunks.iter().position(|value| *value == local)) {
             if (staged && action != "unstage") || (!staged && action == "unstage") {
-                return Err("This hunk's staged state has changed. Refresh the view.".into());
+                bail!("This hunk's staged state has changed. Refresh the view.");
             }
 
             let lines: Vec<&str> = text.split_inclusive('\n').collect();
@@ -144,10 +145,10 @@ pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &
         offset += parsed.rows.len() as u32;
     }
 
-    Err("This hunk no longer exists. Refresh the view.".into())
+    Err(anyhow!("This hunk no longer exists. Refresh the view."))
 }
 
-fn refresh(cwd: &Path) -> Result<Vec<(String, Cached)>, String> {
+fn refresh(cwd: &Path) -> Result<Vec<(String, Cached)>> {
     let current = status(cwd)?;
     let head = String::from_utf8_lossy(&git(cwd, &["rev-parse", "HEAD"], &[128]).unwrap_or_default()).trim().to_string();
     let index = stamp(&index_path(cwd));
@@ -201,7 +202,7 @@ fn stamp(path: &Path) -> String {
     format!("{modified}-{}", metadata.len())
 }
 
-fn file_rows(cwd: &Path, path: &str, flags: [bool; 3]) -> Result<FileRows, String> {
+fn file_rows(cwd: &Path, path: &str, flags: [bool; 3]) -> Result<FileRows> {
     let mut built = FileRows::default();
 
     if flags[2] {

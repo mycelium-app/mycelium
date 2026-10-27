@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mycelium_proto::link::FolderFile;
@@ -16,11 +17,11 @@ fn safe_relative(path: &str) -> bool {
     !path.is_empty() && Path::new(path).components().all(|component| matches!(component, Component::Normal(name) if name != SKIPPED))
 }
 
-pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bool) -> Result<(), String> {
+pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bool) -> Result<()> {
     let folder = crate::git::within(projects_root, root)?;
 
     if replace && folder.is_dir() {
-        let entries = std::fs::read_dir(&folder).map_err(|cause| format!("{} cannot be read: {cause}.", folder.display()))?;
+        let entries = std::fs::read_dir(&folder).map_err(|cause| anyhow!("{} cannot be read: {cause}.", folder.display()))?;
 
         for entry in entries.flatten() {
             if entry.file_name() == SKIPPED {
@@ -30,31 +31,31 @@ pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bo
             let path = entry.path();
             let removed = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
 
-            removed.map_err(|cause| format!("{} cannot be cleared: {cause}.", path.display()))?;
+            removed.map_err(|cause| anyhow!("{} cannot be cleared: {cause}.", path.display()))?;
         }
     }
 
-    std::fs::create_dir_all(&folder).map_err(|cause| format!("{} cannot be created: {cause}.", folder.display()))?;
+    std::fs::create_dir_all(&folder).map_err(|cause| anyhow!("{} cannot be created: {cause}.", folder.display()))?;
 
     for file in files {
         if !safe_relative(&file.path) {
-            return Err(format!("{} is not a path inside the assistant folder.", file.path));
+            bail!("{} is not a path inside the assistant folder.", file.path);
         }
 
-        let data = STANDARD.decode(&file.data_base64).map_err(|_| format!("{} is not valid data.", file.path))?;
+        let data = STANDARD.decode(&file.data_base64).map_err(|_| anyhow!("{} is not valid data.", file.path))?;
         let target = folder.join(&file.path);
 
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|cause| format!("{} cannot be created: {cause}.", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|cause| anyhow!("{} cannot be created: {cause}.", parent.display()))?;
         }
 
-        std::fs::write(&target, data).map_err(|cause| format!("{} cannot be written: {cause}.", target.display()))?;
+        std::fs::write(&target, data).map_err(|cause| anyhow!("{} cannot be written: {cause}.", target.display()))?;
     }
 
     Ok(())
 }
 
-pub fn read(projects_root: &Path, root: &str) -> Result<FolderRead, String> {
+pub fn read(projects_root: &Path, root: &str) -> Result<FolderRead> {
     let folder = crate::git::within(projects_root, root)?;
     let mut read = FolderRead { files: Vec::new(), truncated: false };
     let mut total = 0;
@@ -65,8 +66,8 @@ pub fn read(projects_root: &Path, root: &str) -> Result<FolderRead, String> {
     Ok(read)
 }
 
-fn collect(base: &Path, directory: &Path, read: &mut FolderRead, total: &mut u64) -> Result<(), String> {
-    let entries = std::fs::read_dir(directory).map_err(|cause| format!("{} cannot be read: {cause}.", directory.display()))?;
+fn collect(base: &Path, directory: &Path, read: &mut FolderRead, total: &mut u64) -> Result<()> {
+    let entries = std::fs::read_dir(directory).map_err(|cause| anyhow!("{} cannot be read: {cause}.", directory.display()))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -126,7 +127,7 @@ mod tests {
         let outside = write(root.path(), "../elsewhere", &[file("a.md", "x")], true);
         let escaping = write(root.path(), "assistant", &[file("../a.md", "x")], true);
 
-        assert!(outside.unwrap_err().contains("outside"));
+        assert!(outside.unwrap_err().to_string().contains("outside"));
         assert!(escaping.is_err());
         assert!(!root.path().join("a.md").exists());
     }

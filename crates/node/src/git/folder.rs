@@ -1,4 +1,5 @@
 use super::MOST_DIFF_BYTES;
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -6,16 +7,16 @@ use std::path::Path;
 const MOST_READ_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const MOST_LISTED_DIRECTORIES: usize = 500;
 
-pub(super) fn directories(root: &Path, requested: &str) -> Result<Value, String> {
-    let canonical_root = root.canonicalize().map_err(|cause| format!("The projects folder {} cannot be read: {cause}.", root.display()))?;
+pub(super) fn directories(root: &Path, requested: &str) -> Result<Value> {
+    let canonical_root = root.canonicalize().map_err(|cause| anyhow!("The projects folder {} cannot be read: {cause}.", root.display()))?;
     let wanted = if requested.is_empty() { canonical_root.clone() } else { canonical_root.join(requested) };
-    let path = wanted.canonicalize().map_err(|_| format!("{} does not exist on this node. Choose a folder inside {}.", wanted.display(), canonical_root.display()))?;
+    let path = wanted.canonicalize().map_err(|_| anyhow!("{} does not exist on this node. Choose a folder inside {}.", wanted.display(), canonical_root.display()))?;
 
     if !path.starts_with(&canonical_root) {
-        return Err(format!("{} is outside {}. Choose a folder inside it.", path.display(), canonical_root.display()));
+        bail!("{} is outside {}. Choose a folder inside it.", path.display(), canonical_root.display());
     }
 
-    let entries = std::fs::read_dir(&path).map_err(|cause| format!("{} cannot be read: {cause}.", path.display()))?;
+    let entries = std::fs::read_dir(&path).map_err(|cause| anyhow!("{} cannot be read: {cause}.", path.display()))?;
     let mut folders = entries
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
@@ -40,56 +41,56 @@ pub(super) fn directories(root: &Path, requested: &str) -> Result<Value, String>
     Ok(json!({"root": canonical_root.to_string_lossy(), "path": path.to_string_lossy(), "parent": parent, "directories": directories, "truncated": truncated}))
 }
 
-pub(super) fn read_file(cwd: &Path, path: &str) -> Result<Value, String> {
-    let root = cwd.canonicalize().map_err(|cause| format!("The conversation's folder could not be read: {cause}."))?;
-    let outside = || format!("{path} is outside the conversation's folder. Give a path inside it.");
-    let file = root.join(path).canonicalize().map_err(|_| format!("{path} was not found in the conversation's folder."))?;
+pub(super) fn read_file(cwd: &Path, path: &str) -> Result<Value> {
+    let root = cwd.canonicalize().map_err(|cause| anyhow!("The conversation's folder could not be read: {cause}."))?;
+    let outside = || anyhow!("{path} is outside the conversation's folder. Give a path inside it.");
+    let file = root.join(path).canonicalize().map_err(|_| anyhow!("{path} was not found in the conversation's folder."))?;
 
     if !file.starts_with(&root) {
         return Err(outside());
     }
 
-    let size = std::fs::metadata(&file).map_err(|cause| format!("{path} could not be read: {cause}."))?.len();
+    let size = std::fs::metadata(&file).map_err(|cause| anyhow!("{path} could not be read: {cause}."))?.len();
 
     if !file.is_file() {
-        return Err(format!("{path} is not a file."));
+        bail!("{path} is not a file.");
     }
 
     if size > MOST_READ_FILE_BYTES {
-        return Err(format!("{path} is larger than 20 MB. Use a smaller file."));
+        bail!("{path} is larger than 20 MB. Use a smaller file.");
     }
 
-    let bytes = std::fs::read(&file).map_err(|cause| format!("{path} could not be read: {cause}."))?;
+    let bytes = std::fs::read(&file).map_err(|cause| anyhow!("{path} could not be read: {cause}."))?;
 
     Ok(json!({"data": base64::engine::general_purpose::STANDARD.encode(bytes), "size": size}))
 }
 
-pub(super) fn edit_file(cwd: &Path, path: &str, content: Option<&str>, expected: Option<&str>) -> Result<Value, String> {
-    let root = cwd.canonicalize().map_err(|cause| cause.to_string())?;
-    let file = root.join(path).canonicalize().map_err(|_| format!("{path} was not found."))?;
+pub(super) fn edit_file(cwd: &Path, path: &str, content: Option<&str>, expected: Option<&str>) -> Result<Value> {
+    let root = cwd.canonicalize()?;
+    let file = root.join(path).canonicalize().map_err(|_| anyhow!("{path} was not found."))?;
 
     if !file.starts_with(&root) || file.components().any(|part| part.as_os_str() == ".git") {
-        return Err("Choose a file inside the conversation's folder, outside .git.".into());
+        bail!("Choose a file inside the conversation's folder, outside .git.");
     }
 
-    let bytes = std::fs::read(&file).map_err(|cause| cause.to_string())?;
+    let bytes = std::fs::read(&file)?;
 
     if bytes.len() > MOST_DIFF_BYTES || bytes.contains(&0) {
-        return Err("Only text files up to 200 KB can be edited here.".into());
+        bail!("Only text files up to 200 KB can be edited here.");
     }
 
-    let current = String::from_utf8(bytes).map_err(|_| "This file is not UTF-8 text.".to_string())?;
+    let current = String::from_utf8(bytes).map_err(|_| anyhow!("This file is not UTF-8 text."))?;
 
     if let Some(content) = content {
         if expected != Some(current.as_str()) {
-            return Err("The file changed on disk. Reopen the editor before saving.".into());
+            bail!("The file changed on disk. Reopen the editor before saving.");
         }
 
         if content.len() > MOST_DIFF_BYTES {
-            return Err("Only text files up to 200 KB can be edited here.".into());
+            bail!("Only text files up to 200 KB can be edited here.");
         }
 
-        std::fs::write(&file, content).map_err(|cause| cause.to_string())?;
+        std::fs::write(&file, content)?;
 
         return Ok(json!({"content": content}));
     }
@@ -139,7 +140,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
 
-        let error = run_in(root.path(), &outside.path().to_string_lossy(), GitCommand::Directories).unwrap_err();
+        let error = run_in(root.path(), &outside.path().to_string_lossy(), GitCommand::Directories).unwrap_err().to_string();
 
         assert!(error.contains("Choose a folder inside it."), "{error}");
     }
@@ -163,7 +164,7 @@ mod tests {
         let read = edit_file(dir.path(), "a.txt", None, None).unwrap();
         assert_eq!(read["content"], "original\n");
         edit_file(dir.path(), "a.txt", Some("edited\n"), Some("original\n")).unwrap();
-        assert!(edit_file(dir.path(), "a.txt", Some("lost\n"), Some("original\n")).unwrap_err().contains("changed on disk"));
+        assert!(edit_file(dir.path(), "a.txt", Some("lost\n"), Some("original\n")).unwrap_err().to_string().contains("changed on disk"));
         assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "edited\n");
         assert!(edit_file(dir.path(), ".git/config", Some("lost"), None).is_err());
         let outside = tempfile::tempdir().unwrap();
@@ -181,8 +182,8 @@ mod tests {
         std::fs::write(outside.path().join("secret.txt"), "no").unwrap();
 
         let read = run(dir.path(), GitCommand::ReadFile { path: "docs/brief.txt".into() }).unwrap();
-        let escaped = run(dir.path(), GitCommand::ReadFile { path: outside.path().join("secret.txt").to_string_lossy().into_owned() }).unwrap_err();
-        let missing = run(dir.path(), GitCommand::ReadFile { path: "nothing.txt".into() }).unwrap_err();
+        let escaped = run(dir.path(), GitCommand::ReadFile { path: outside.path().join("secret.txt").to_string_lossy().into_owned() }).unwrap_err().to_string();
+        let missing = run(dir.path(), GitCommand::ReadFile { path: "nothing.txt".into() }).unwrap_err().to_string();
 
         assert_eq!(read["data"], base64::engine::general_purpose::STANDARD.encode("hello"));
         assert_eq!(read["size"], 5);
