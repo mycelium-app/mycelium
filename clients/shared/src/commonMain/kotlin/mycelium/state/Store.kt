@@ -57,6 +57,9 @@ import mycelium.api.NodeResources
 import mycelium.api.EventKinds
 import kotlinx.serialization.json.JsonObject
 import mycelium.api.PatchConversationRequest
+import kotlin.time.Clock
+import kotlin.time.Instant
+import mycelium.api.Hours
 import kotlin.io.encoding.Base64
 
 private const val FirstRetryMillis = 1_000L
@@ -161,7 +164,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             mutableWalkthroughNotes.update { it + (message.conversationId to message.notes) }
         }
 
+        if (message is StreamMessage.AssistantActionsChanged) {
+            act { refreshAssistantActions(message.assistantId) }
+        }
+
         if (message is StreamMessage.WellnessChanged) {
+            act { refreshGroups() }
             wellness.reload()
             learning.reload()
         }
@@ -197,8 +205,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val node = before.nodes[updated.nodeId]?.name
         val wantsSound = platform.loadPreference(NotifySoundPreference) != false.toString()
 
-        if (wellness.holdsNotifications()) {
-            wellness.hold(HeldNotification(updated.title, updated.id))
+        val ping = updated.assistantId != null
+
+        val closed = hoursView().closed(updated.groupId)
+
+        if (if (ping) wellness.holdsPings(closed) else wellness.holdsNotifications(closed)) {
+            wellness.hold(HeldNotification(updated.title, updated.id, updated.groupId), ping)
 
             return
         }
@@ -233,6 +245,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         val nodes = api.nodes()
 
         mutableState.update { it.copy(conversations = conversations.associateBy { c -> c.id }, nodes = nodes.associateBy { n -> n.id }) }
+    }
+
+    suspend fun refreshNodes() {
+        val nodes = api.nodes()
+
+        mutableState.update { it.copy(nodes = nodes.associateBy { n -> n.id }) }
     }
 
     suspend fun refreshExperiments() {
@@ -296,16 +314,60 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(groups = groups.associateBy { group -> group.id }) }
     }
 
+    suspend fun saveGroupHours(id: String, hours: Hours) {
+        val group = api.saveGroupHours(id, hours)
+
+        mutableState.update { it.copy(groups = it.groups + (group.id to group)) }
+    }
+
+    suspend fun openGroupOutOfHours(id: String, reason: String) {
+        api.openGroup(id, reason)
+        refreshGroups()
+        wellness.reload()
+    }
+
+    suspend fun closeGroupOpening(id: String) {
+        api.closeGroupOpening(id)
+        refreshGroups()
+        wellness.reload()
+    }
+
+    fun hoursView(now: Instant = Clock.System.now()): HoursView = hoursViewOf(wellness.state.value.settings, state.value.groups.values, now, localTimeOf(platform, now))
+
     suspend fun refreshMemoryBanks() {
         val banks = orNull { api.memoryBanks() } ?: return
 
         mutableState.update { it.copy(memoryBanks = banks.associateBy { bank -> bank.id }) }
     }
 
+    suspend fun loadAssistants() {
+        val assistants = api.assistants()
+
+        mutableState.update { it.copy(assistants = assistants.associateBy { assistant -> assistant.id }) }
+    }
+
     suspend fun refreshAssistants() {
         val assistants = orNull { api.assistants() } ?: return
 
         mutableState.update { it.copy(assistants = assistants.associateBy { assistant -> assistant.id }) }
+    }
+
+    suspend fun refreshAssistantActions(assistantId: String) {
+        val actions = orNull { api.assistantActions(assistantId) } ?: return
+
+        mutableState.update { it.copy(assistantActions = it.assistantActions + (assistantId to actions)) }
+    }
+
+    suspend fun refreshActionProposals(assistantId: String) {
+        val proposals = orNull { api.actionProposals(assistantId) } ?: return
+
+        mutableState.update { it.copy(actionProposals = it.actionProposals + proposals.associateBy { proposal -> proposal.id }) }
+    }
+
+    suspend fun refreshAssistantChanges() {
+        val changes = orNull { api.assistantChanges() } ?: return
+
+        mutableState.update { it.copy(assistantChanges = it.assistantChanges + changes.associateBy { change -> change.id }) }
     }
 
     suspend fun createAssistant(request: mycelium.api.CreateAssistantRequest): mycelium.api.Assistant {
@@ -455,8 +517,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(instructionProposals = it.instructionProposals + (approved.id to approved)) }
     }
 
-    suspend fun declineInstructionProposal(proposal: InstructionProposal, note: String?, redo: Boolean) {
-        val declined = api.declineInstructionProposal(proposal.id, DeclineInstructionProposalRequest(note?.trim()?.takeIf { it.isNotEmpty() }, redo))
+    suspend fun declineInstructionProposal(proposal: InstructionProposal, note: String?, redo: Boolean, notify: Boolean = true) {
+        val declined = api.declineInstructionProposal(proposal.id, DeclineInstructionProposalRequest(note?.trim()?.takeIf { it.isNotEmpty() }, redo, notify))
 
         mutableState.update { it.copy(instructionProposals = it.instructionProposals + (declined.id to declined)) }
     }
@@ -969,35 +1031,11 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     fun act(block: suspend () -> Unit) {
         scope.launch {
             mutableProblem.value = null
+            mutableRetryable.value = null
             guarded(block)
         }
     }
 
-    private suspend fun guarded(block: suspend () -> Unit) {
-        try {
-            block()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: ApiException) {
-            mutableProblem.value = failure.message
-        } catch (_: Exception) {
-            mutableProblem.value = ControlPlaneUnreachable
-        }
-    }
-
-    private suspend fun <T> orNull(block: suspend () -> T?): T? =
-        try {
-            block()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
-            mutableRetryable.value = null
-
-    fun dismissProblem() {
-        mutableProblem.value = null
-    }
     fun load(list: String? = null, block: suspend () -> Unit) {
         scope.launch {
             mutableProblem.value = null
@@ -1030,5 +1068,29 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         load(block = block)
     }
 
-}
+    private suspend fun guarded(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: ApiException) {
+            mutableProblem.value = failure.message
+        } catch (_: Exception) {
+            mutableProblem.value = ControlPlaneUnreachable
+        }
+    }
+
+    private suspend fun <T> orNull(block: suspend () -> T?): T? =
+        try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+
+    fun dismissProblem() {
+        mutableProblem.value = null
         mutableRetryable.value = null
+    }
+}

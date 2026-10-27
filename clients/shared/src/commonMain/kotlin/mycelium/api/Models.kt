@@ -720,7 +720,7 @@ data class Group(
     val name: String,
     val folders: List<GroupFolder> = emptyList(),
     @SerialName("created_at") val createdAt: String,
-    val hours: Hours = Hours(),
+    val hours: Hours = AlwaysOpenHours,
     @SerialName("open_now") val openNow: Boolean = true,
     @SerialName("closes_at") val closesAt: String? = null,
     @SerialName("opens_at") val opensAt: String? = null,
