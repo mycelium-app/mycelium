@@ -182,10 +182,9 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
 
 pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
     let reply = sqlx::query_scalar::<_, Option<String>>(
-        "select payload->'update'->'content'->>'text' from events
+        "select string_agg(payload->'update'->'content'->>'text', '' order by seq) from events
          where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
-           and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)
-         order by seq desc limit 1",
+           and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
@@ -311,7 +310,7 @@ async fn resume_due(state: &AppState) -> ApiResult<()> {
 
         if let Err(cause) = resumed {
             tracing::warn!("could not resume {id} after its usage limit, trying again in a minute: {}", cause.message());
-            sqlx::query("update conversations set resume_at = now() + make_interval(secs => $2), limit_resumes = limit_resumes - 1 where id = $1 and status = 'failed'").bind(id).bind(RESUME_DELAY_SECONDS as f64).execute(&state.pool).await?;
+            sqlx::query("update conversations set resume_at = now() + make_interval(secs => $2), limit_resumes = limit_resumes - 1 where id = $1").bind(id).bind(RESUME_DELAY_SECONDS as f64).execute(&state.pool).await?;
         }
     }
 

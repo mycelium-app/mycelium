@@ -278,7 +278,6 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/model-provider-usage", get(provider_usage::list))
         .route("/api/v1/usage/resets", post(account_usage::use_reset))
         .route("/api/v1/usage/history", get(usage_history::get))
-        .route("/api/v1/usage/history/import", post(usage_history::import_orchestrator))
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
         .route("/api/v1/model-providers/{id}/favourites", put(model_providers::set_favourite))

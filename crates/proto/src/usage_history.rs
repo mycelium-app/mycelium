@@ -69,21 +69,3 @@ pub struct OrchestratorReading {
     #[serde(default)]
     pub seven_resets: Option<i64>,
 }
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ImportOrchestratorUsage {
-    pub agent: AgentId,
-    #[serde(default)]
-    pub account: Option<String>,
-    #[serde(default)]
-    pub node_id: Option<Uuid>,
-    #[serde(default)]
-    pub fine: Vec<OrchestratorReading>,
-    #[serde(default)]
-    pub coarse: Vec<OrchestratorReading>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ImportedUsage {
-    pub imported: i64,
-}

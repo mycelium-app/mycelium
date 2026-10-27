@@ -220,6 +220,27 @@ async fn a_resume_whose_node_is_offline_tries_again_later_without_using_up_an_at
 }
 
 #[tokio::test]
+async fn a_workflow_paused_conversation_whose_node_is_offline_when_due_still_resumes_later() {
+    let server = ticking_server().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "failed", "key": "k1", "agentId": "aaa", "reason": limit_message(2)}) }).await;
+    common::eventually("the conversation to be paused", || async { resume_at(&server, id).await }).await;
+    assert_ne!(server.conversation(id).await["status"], "failed");
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        (nodes[0]["online"] == false).then_some(())
+    })
+    .await;
+
+    make_due(&server, id).await;
+
+    common::eventually("the pause to be put back", || async { resume_at(&server, id).await.filter(|at| *at > Utc::now()) }).await;
+}
+
+#[tokio::test]
 async fn the_default_is_to_resume_automatically_and_the_choice_is_kept() {
     let server = Server::start().await;
 
@@ -243,6 +264,23 @@ async fn the_first_limit_reply_stops_the_conversation_with_a_card_and_resumes_by
     assert_eq!(payload["usage_limit"]["window"], "five_hour");
     let resumes = common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
     assert!(resumes > Utc::now() + Duration::hours(1));
+}
+
+#[tokio::test]
+async fn a_limit_reply_streamed_in_several_chunks_still_stops_the_conversation_with_a_card() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let message = limit_message(2);
+    let (head, tail) = message.split_at(message.len() - 6);
+
+    for (offset, text) in [head, tail].into_iter().enumerate() {
+        link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3 + offset as i64, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}) }).await;
+    }
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 5, stop_reason: "end_turn".into(), usage: None }).await;
+
+    common::eventually("the conversation to fail", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
 }
 
 #[tokio::test]

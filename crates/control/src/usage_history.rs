@@ -6,7 +6,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
 use mycelium_proto::conversation::{AgentId, UsageWindow};
-use mycelium_proto::usage_history::{ImportOrchestratorUsage, ImportedUsage, OrchestratorReading, TokensPerPoint, UsageHistory, UsageHistoryAccount, UsageHistoryWindow, UsageReading};
+use mycelium_proto::usage_history::{OrchestratorReading, TokensPerPoint, UsageHistory, UsageHistoryAccount, UsageHistoryWindow, UsageReading};
 use serde::Deserialize;
 use sqlx::types::Json as Sql;
 use uuid::Uuid;
@@ -249,21 +249,6 @@ async fn account_history(state: &AppState, owner: Uuid, agent: AgentId, account:
 
 fn window_of(name: &str, percent: f64, resets: Option<i64>) -> UsageWindow {
     UsageWindow { name: name.into(), used_percent: percent, resets_at: resets.filter(|epoch| *epoch > 0).and_then(|epoch| DateTime::from_timestamp(epoch, 0)), rate_per_hour: None, runs_out_at: None }
-}
-
-pub async fn import_orchestrator(State(state): State<AppState>, _user: AuthUser, Json(request): Json<ImportOrchestratorUsage>) -> ApiResult<Json<ImportedUsage>> {
-    let account = request.account.as_deref().map(str::trim).unwrap_or_default().to_string();
-    let node_id = match request.node_id {
-        Some(node_id) => Some(node_id),
-        None => sqlx::query_scalar::<_, Uuid>("select n.id from nodes n left join logins l on l.node_id = n.id and l.agent = $1 and coalesce(l.account, '') = $2 where n.revoked_at is null order by (l.node_id is not null) desc, n.created_at limit 1").bind(enum_text(&request.agent)).bind(&account).fetch_optional(&state.pool).await?,
-    };
-    let Some(node_id) = node_id else {
-        return Err(ApiError::conflict("no_node", "Add a node before importing usage readings."));
-    };
-
-    let imported = store_orchestrator_readings(&state, node_id, request.agent, &account, request.coarse.iter().chain(request.fine.iter())).await?;
-
-    Ok(Json(ImportedUsage { imported }))
 }
 
 pub async fn store_orchestrator_readings<'a>(state: &AppState, node_id: Uuid, agent: AgentId, account: &str, readings: impl Iterator<Item = &'a OrchestratorReading>) -> ApiResult<i64> {

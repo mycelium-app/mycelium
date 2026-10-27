@@ -11,21 +11,37 @@ async fn history(server: &Server, query: &str) -> Value {
 }
 
 #[tokio::test]
-async fn imported_orchestrator_readings_become_windows_and_are_marked_as_from_orchestrator() {
-    let server = Server::start().await;
-    let link = server.online_node("laptop").await;
-    let reading = |at: i64, five: f64| json!({"at": at, "five": five, "seven": five / 4.0, "five_resets": 1_790_000_000, "seven_resets": 1_790_400_000});
-    let (status, imported) = server
-        .user
-        .json(server.user.post("/api/v1/usage/history/import").json(&json!({"agent": "claude", "account": "me", "node_id": link.id, "coarse": [reading(1_789_990_000, 10.0), reading(1_789_995_000, 40.0)]})))
-        .await;
+async fn orchestrator_readings_and_imported_conversation_turns_backfill_windows_and_tokens_per_point() {
+    use mycelium_proto::conversation::AgentId;
+    use mycelium_proto::link::NodeToControl;
+    use mycelium_proto::usage_history::OrchestratorReading;
 
-    assert_eq!(status, 200, "{imported}");
-    assert_eq!(imported["imported"], 2);
-    let body = history(&server, "?range=all&account=claude:me").await;
-    let account = &body["accounts"][0];
-    assert_eq!(account["windows"].as_array().unwrap().len(), 1);
-    assert_eq!(account["windows"][0]["peak_percent"], 40.0);
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Old work")).await;
+    sqlx::query("update conversations set account = 'me' where id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
+    let at = |at: i64, five: f64| OrchestratorReading { at, five, seven: five / 4.0, five_resets: Some(1_700_010_000), seven_resets: Some(1_700_400_000) };
+    link.send(NodeToControl::OrchestratorUsage { agent: AgentId::Claude, account: Some("me".into()), fine: vec![], coarse: vec![at(1_700_000_000, 10.0), at(1_700_004_000, 50.0)] }).await;
+    sqlx::query(
+        "insert into usage_turns (conversation_id, owner, node_id, agent, ended_at, day, input_tokens, output_tokens)
+         select id, owner, node_id, 'claude', to_timestamp(1700002000), date '2023-11-14', 3000, 1000 from conversations where id = $1",
+    )
+    .bind(conversation.id)
+    .execute(&server.pool)
+    .await
+    .unwrap();
+
+    let account = common::eventually("the imported readings to appear as a window", || async {
+        let body = history(&server, "?range=all&account=claude:me").await;
+        let account = body["accounts"][0].clone();
+
+        account["windows"].as_array().is_some_and(|windows| !windows.is_empty()).then_some(account)
+    })
+    .await;
+
+    assert_eq!(account["windows"][0]["peak_percent"], 50.0);
+    assert_eq!(account["windows"][0]["tokens"], 4000);
+    assert_eq!(account["tokens_per_point"]["five_hour"], 100.0);
     assert!(account["orchestrator_until"].is_string());
 }
 
