@@ -169,12 +169,10 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     val scope = rememberCoroutineScope()
     var layout by remember(id) { mutableStateOf<ChangesLayout?>(null) }
     var loadFailed by remember(id) { mutableStateOf(false) }
-    var failure by remember(id) { mutableStateOf<String?>(null) }
-    val run = rememberAttempt { failure = it }
+    val runner = rememberAction()
     var editing by remember(id) { mutableStateOf<String?>(null) }
     var original by remember(id) { mutableStateOf("") }
     var draft by remember(id) { mutableStateOf("") }
-    var saving by remember(id) { mutableStateOf(false) }
     val source = remember(id) { RowSource(scope) { ranges -> store.api.gitChangesRows(id, ranges).ranges } }
     val sections = remember(layout) { layout?.let { changeSections(it.files) }.orEmpty() }
 
@@ -203,7 +201,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     }
 
     fun stage(path: String, staging: Boolean) {
-        run {
+        runner {
             if (staging) store.api.gitStage(id, listOf(path)) else store.api.gitUnstage(id, listOf(path))
 
             layout = store.api.gitChangesLayout(id)
@@ -211,7 +209,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     }
 
     Column(modifier.fillMaxWidth()) {
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         editing?.let { path ->
             Column(Modifier.fillMaxWidth().padding(Tokens.Space.S2)) {
@@ -225,19 +223,14 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton({
-                        if (!saving) {
-                            saving = true
-                            run {
-                                try {
-                                    store.api.gitFile(id, path, draft, original)
-                                    layout = store.api.gitChangesLayout(id)
-                                    editing = null
-                                } finally {
-                                    saving = false
-                                }
+                        if (!runner.running) {
+                            runner {
+                                store.api.gitFile(id, path, draft, original)
+                                layout = store.api.gitChangesLayout(id)
+                                editing = null
                             }
                         }
-                    }, text = if (saving) "Saving" else "Save")
+                    }, text = if (runner.running) "Saving" else "Save")
                     MyButton({ editing = null }, text = "Cancel", variant = ButtonVariant.Outline)
                 }
             }
@@ -261,7 +254,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 onStage = { stage(it, true) },
                 onUnstage = { stage(it, false) },
                 onEdit = { path ->
-                    run {
+                    runner {
                         val loaded = store.api.gitFile(id, path)
                         original = loaded.content
                         draft = loaded.content
@@ -269,7 +262,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                     }
                 },
                 onHunk = { section, row, action ->
-                    run {
+                    runner {
                         store.api.gitHunk(id, section.path, row, section.fingerprint, action)
                         layout = store.api.gitChangesLayout(id)
                     }

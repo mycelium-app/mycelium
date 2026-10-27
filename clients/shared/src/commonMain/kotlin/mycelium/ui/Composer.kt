@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
-import org.jetbrains.compose.resources.decodeToImageBitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -695,7 +694,7 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
 
                     val shownRange = previewed
                     val bytes = shownRange?.let(previews::get)
-                    val image = remember(bytes) { bytes?.let { runCatching { it.decodeToImageBitmap() }.getOrNull() } }
+                    val image = remember(bytes) { bytes?.let(::bitmapOf) }
                     val anchor = shownRange?.let { range -> layout?.let { badgeLineRects(it, range).firstOrNull() } }
 
                     if (image != null && anchor != null) {

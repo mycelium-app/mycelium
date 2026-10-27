@@ -97,7 +97,7 @@ val LocalImageJump = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 val LocalImageGallery = staticCompositionLocalOf<List<ThreadImage>> { emptyList() }
 
-private fun bitmapOf(bytes: ByteArray): ImageBitmap? = runCatching { bytes.decodeToImageBitmap() }.getOrNull()
+fun bitmapOf(bytes: ByteArray): ImageBitmap? = runCatching { bytes.decodeToImageBitmap() }.getOrNull()
 
 @Composable
 fun rememberLoadedImage(image: ThreadImage): State<Pair<Boolean, ImageBitmap?>> {

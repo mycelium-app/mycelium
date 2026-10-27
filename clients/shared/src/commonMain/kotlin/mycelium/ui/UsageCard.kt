@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlin.time.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import mycelium.state.evenPacePercent
 import mycelium.state.nextUsageTick
@@ -207,9 +208,15 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
                             working = true
                             failure = null
                             scope.launch {
-                                runCatching { onUseReset(account, attempt) }
-                                    .onSuccess { outcome = resetOutcomeMessage(it); key = null }
-                                    .onFailure { failure = it.message ?: "Codex could not use the reset. Try again." }
+                                try {
+                                    outcome = resetOutcomeMessage(onUseReset(account, attempt))
+                                    key = null
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (problem: Exception) {
+                                    failure = problem.message ?: "Codex could not use the reset. Try again."
+                                }
+
                                 working = false
                             }
                         }

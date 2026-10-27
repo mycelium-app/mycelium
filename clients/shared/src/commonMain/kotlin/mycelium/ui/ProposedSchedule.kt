@@ -12,14 +12,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.launch
 import mycelium.api.ConfirmScheduleRequest
 import mycelium.api.EachRun
 import mycelium.api.Schedule
@@ -72,28 +70,20 @@ fun ProposedScheduleCard(store: Store, schedule: Schedule, state: AppState) {
 
 @Composable
 fun ProposedScheduleDialog(store: Store, schedule: Schedule, state: AppState, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
+    val action = rememberAction()
     val simpleTime = cronTime(schedule.cron)
     var at by remember { mutableStateOf(simpleTime.orEmpty()) }
     var custom by remember { mutableStateOf(schedule.cron) }
     var zone by remember { mutableStateOf(schedule.timeZone) }
     var eachRun by remember { mutableStateOf(schedule.eachRun) }
     var whenError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    var running by remember { mutableStateOf(false) }
 
     fun cron(): String? = if (simpleTime == null) custom.trim().takeIf { it.isNotEmpty() } else cronWithTime(schedule.cron, at)
 
-    fun finish(action: suspend () -> Unit) {
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt {
-                action()
-                onDismiss()
-            }
-            running = false
+    fun finish(change: suspend () -> Unit) {
+        action {
+            change()
+            onDismiss()
         }
     }
 
@@ -102,7 +92,7 @@ fun ProposedScheduleDialog(store: Store, schedule: Schedule, state: AppState, on
 
         whenError = if (edited != null) null else if (simpleTime == null) "Enter the schedule as five cron fields, for example 0 20 * * 1-5." else "Enter the time as hours and minutes, for example 20:00."
 
-        if (running || edited == null) {
+        if (action.running || edited == null) {
             return
         }
 
@@ -149,7 +139,7 @@ fun ProposedScheduleDialog(store: Store, schedule: Schedule, state: AppState, on
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

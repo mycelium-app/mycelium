@@ -12,15 +12,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.Artifact
@@ -406,9 +403,7 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     val colors = MyTheme.colors
     val proposals = LocalMessageProposals.current
     val proposal = proposedMessage(parsed)
-    val scope = rememberCoroutineScope()
-    var running by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    val action = rememberAction()
 
     LaunchedEffect(proposal == null) {
         if (proposals != null && proposal == null) {
@@ -419,17 +414,11 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     fun decide(decision: suspend (MessageProposal) -> Unit) {
         val deciding = proposal
 
-        if (running || deciding == null) {
+        if (action.running || deciding == null) {
             return
         }
 
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt { decision(deciding) }
-            running = false
-        }
+        action { decision(deciding) }
     }
 
     if (proposal != null) {
@@ -445,7 +434,7 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
     Label(parsed.message, style = Tokens.Type.Ui, maxLines = ExcerptLines)
     Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
-    failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+    action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
     if (proposals != null && proposal != null && proposal.waiting) {
         val betweenGroups = proposal.sourceGroup != null && proposal.targetGroup != null && proposal.sourceGroup != proposal.targetGroup
@@ -476,7 +465,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
     val colors = MyTheme.colors
     val proposals = LocalStartProposals.current
     val proposal = proposedStart(parsed)
-    val deciding = rememberDeciding()
+    val action = rememberAction()
     var chosen by remember(proposal?.id) { mutableStateOf<Map<String, StartProposalChoice>>(emptyMap()) }
 
     LaunchedEffect(proposal == null) {
@@ -527,7 +516,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         }
     }
 
-    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
+    action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
     if (proposals != null && proposal != null && proposal.waiting) {
         val missing = proposal.steps.firstNotNullOfOrNull { step ->
@@ -540,9 +529,11 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
 
         fun decide(decision: suspend (StartProposal, Map<String, StartProposalChoice>) -> Unit) {
             if (missing != null) {
-                deciding.failure = missing
+                action.failure = missing
             } else {
-                deciding.decide(proposal) { decision(it, chosen) }
+                if (!action.running) {
+                    action { decision(proposal, chosen) }
+                }
             }
         }
 
@@ -553,7 +544,7 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
                 alternatives = listOf(SplitAlternative("Create and connect", { decide(proposals.connect) })),
                 size = ButtonSize.Sm,
             )
-            MyButton({ deciding.decide(proposal, proposals.decline) }, text = "Don't create", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ if (!action.running) { action { proposals.decline(proposal) } } }, text = "Don't create", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 }
@@ -563,7 +554,7 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     val colors = MyTheme.colors
     val access = LocalApiAccessRequests.current
     val request = requestedAccess(parsed)
-    val deciding = rememberDeciding()
+    val action = rememberAction()
     var ticked by remember(request?.id) { mutableStateOf(request?.scopes.orEmpty().toSet()) }
 
     LaunchedEffect(request == null) {
@@ -588,23 +579,23 @@ private fun RequestApiAccessBody(parsed: MyceliumCall.RequestApiAccess) {
     (request?.hours ?: parsed.hours)?.let { Label("For ${apiAccessDuration(it)}", style = Tokens.Type.Meta, color = colors.textMuted) }
     Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
-    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
+    action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
     if (access != null && request != null && waiting) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
             MyButton(
                 {
                     if (ticked.isEmpty()) {
-                        deciding.failure = "Choose at least one kind of access to approve, or decline the request."
-                    } else {
-                        deciding.decide(request) { access.approve(it, request.scopes.filter { name -> name in ticked }) }
+                        action.failure = "Choose at least one kind of access to approve, or decline the request."
+                    } else if (!action.running) {
+                        action { access.approve(request, request.scopes.filter { name -> name in ticked }) }
                     }
                 },
                 text = "Approve",
                 variant = ButtonVariant.Primary,
                 size = ButtonSize.Sm,
             )
-            MyButton({ deciding.decide(request, access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ if (!action.running) { action { access.decline(request) } } }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 }
@@ -614,7 +605,7 @@ private fun RequestSshAccessBody(parsed: MyceliumCall.RequestSshAccess) {
     val colors = MyTheme.colors
     val access = LocalSshAccessRequests.current
     val request = requestedSshAccess(parsed)
-    val deciding = rememberDeciding()
+    val action = rememberAction()
     val requested = request?.minutes ?: parsed.minutes ?: DefaultSshMinutes
     var chosen by remember(request?.id) { mutableStateOf(requested) }
 
@@ -640,44 +631,18 @@ private fun RequestSshAccessBody(parsed: MyceliumCall.RequestSshAccess) {
 
     Label(parsed.reason, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = ExcerptLines)
 
-    deciding.failure?.let { ErrorBanner(it, onDismiss = { deciding.failure = null }) }
+    action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
     if (access != null && request != null && waiting) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-            MyButton({ deciding.decide(request) { access.approve(it, chosen) } }, text = "Approve", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
-            MyButton({ deciding.decide(request, access.decline) }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ if (!action.running) { action { access.approve(request, chosen) } } }, text = "Approve", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
+            MyButton({ if (!action.running) { action { access.decline(request) } } }, text = "Decline", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
 
     if (access != null && request != null && request.state == "approved") {
-        MyButton({ deciding.decide(request, access.revoke) }, text = "Revoke", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+        MyButton({ if (!action.running) { action { access.revoke(request) } } }, text = "Revoke", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
     }
-}
-
-private class Deciding(private val scope: CoroutineScope) {
-    var running by mutableStateOf(false)
-    var failure by mutableStateOf<String?>(null)
-
-    fun <T : Any> decide(subject: T, decision: suspend (T) -> Unit) {
-        if (running) {
-            return
-        }
-
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt { decision(subject) }
-            running = false
-        }
-    }
-}
-
-@Composable
-private fun rememberDeciding(): Deciding {
-    val scope = rememberCoroutineScope()
-
-    return remember { Deciding(scope) }
 }
 
 @Composable
