@@ -390,6 +390,24 @@ async fn every_workflow_line_becomes_an_event_with_the_line_as_a_json_object() {
 }
 
 #[tokio::test]
+async fn an_ended_workflow_line_keeps_its_state_and_reason_in_the_event() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    let ended = json!({"type": "ended", "state": "stopped", "ended_at": "2026-10-27T00:42:10.000Z", "reason": "Workflow was stopped", "last_line_at": null});
+
+    link.send(NodeToControl::Workflow { conversation_id: conversation.id, run_id: "run-1".into(), line: ended.clone() }).await;
+    link.barrier(conversation.id, 1).await;
+
+    let events = server.events(conversation.id).await;
+    let workflow: Vec<_> = events.iter().filter(|event| event["kind"] == "workflow").collect();
+    assert_eq!(workflow.len(), 1);
+    assert_eq!(workflow[0]["payload"]["line"], ended);
+}
+
+#[tokio::test]
 async fn transcript_chunks_are_copied_under_the_node_and_acknowledged() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

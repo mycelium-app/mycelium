@@ -25,6 +25,8 @@ pub struct TranscriptFollower {
     workflows_scanned: bool,
     running_agents: HashMap<String, HashMap<String, RunningAgent>>,
     planned: HashSet<String>,
+    ended: HashSet<String>,
+    session_lengths: HashMap<String, u64>,
     agent_quiet_limit: std::time::Duration,
     dirty: bool,
     chunks_left: usize,
@@ -95,6 +97,38 @@ fn planned_phases(journal: &Path, run_id: &str) -> Option<Vec<String>> {
     }
 
     (!titles.is_empty()).then_some(titles)
+}
+
+struct WorkflowEnd {
+    state: &'static str,
+    ended_at: Option<String>,
+    reason: Option<String>,
+}
+
+fn text_between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let rest = text.split_once(open)?.1;
+
+    Some(&rest[..rest.find(close)?])
+}
+
+fn workflow_end(journal: &Path, run_id: &str) -> Option<WorkflowEnd> {
+    let session_file = journal.parent()?.parent()?.parent()?.parent()?.with_extension("jsonl");
+    let text = std::fs::read_to_string(session_file).ok()?;
+    let marker = format!("Run ID: {run_id}");
+    let launched = text.lines().find(|line| line.contains(&marker) && line.contains("Task ID: "))?;
+    let task_id: String = launched.split_once("Task ID: ")?.1.chars().take_while(|character| character.is_ascii_alphanumeric()).collect();
+    let task_marker = format!("<task-id>{task_id}</task-id>");
+    let notification = text.lines().rev().find(|line| line.contains(&task_marker) && line.contains("<status>"))?;
+    let state = match text_between(notification, "<status>", "</status>")? {
+        "completed" => "completed",
+        "failed" => "failed",
+        "killed" | "stopped" => "stopped",
+        _ => return None,
+    };
+    let ended_at = serde_json::from_str::<Value>(notification).ok().and_then(|value| value["timestamp"].as_str().map(str::to_string));
+    let reason = text_between(notification, "<summary>", "</summary>").map(str::to_string).filter(|summary| !summary.is_empty());
+
+    Some(WorkflowEnd { state, ended_at, reason })
 }
 
 fn find_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
@@ -220,7 +254,7 @@ impl TranscriptFollower {
     pub fn new(home: PathBuf, roots: Vec<PathBuf>, state_file: PathBuf, out: mpsc::UnboundedSender<NodeToControl>) -> TranscriptFollower {
         let acked = std::fs::read_to_string(&state_file).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
 
-        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, running_agents: HashMap::new(), planned: HashSet::new(), agent_quiet_limit: AGENT_QUIET_LIMIT, dirty: false, chunks_left: CHUNKS_PER_POLL }
+        TranscriptFollower { home, roots, state_file, out, acked, sent: HashMap::new(), workflow_positions: HashMap::new(), workflows_scanned: false, running_agents: HashMap::new(), planned: HashSet::new(), ended: HashSet::new(), session_lengths: HashMap::new(), agent_quiet_limit: AGENT_QUIET_LIMIT, dirty: false, chunks_left: CHUNKS_PER_POLL }
     }
 
     pub fn on_connect(&mut self) {
@@ -331,7 +365,7 @@ impl TranscriptFollower {
             }
         }
 
-        let running = self.running_agents.entry(key).or_default();
+        let running = self.running_agents.entry(key.clone()).or_default();
 
         for line in String::from_utf8_lossy(&bytes[..complete]).lines().filter(|line| !line.trim().is_empty()) {
             let mut line: Value = serde_json::from_str(line).unwrap_or_else(|_| Value::String(line.to_string()));
@@ -394,6 +428,31 @@ impl TranscriptFollower {
         for agent_id in stopped {
             running.remove(&agent_id);
         }
+
+        self.report_end(&key, path, &journal.run_id, conversation_id);
+    }
+
+    fn report_end(&mut self, key: &str, journal: &Path, run_id: &str, conversation_id: Uuid) {
+        if self.ended.contains(key) {
+            return;
+        }
+
+        let Some(session_length) = journal.parent().and_then(Path::parent).and_then(Path::parent).and_then(Path::parent).and_then(|session| std::fs::metadata(session.with_extension("jsonl")).ok()).map(|metadata| metadata.len()) else {
+            return;
+        };
+
+        if self.session_lengths.insert(key.to_string(), session_length) == Some(session_length) {
+            return;
+        }
+
+        let Some(end) = workflow_end(journal, run_id) else {
+            return;
+        };
+
+        self.ended.insert(key.to_string());
+        let last_line_at = std::fs::metadata(journal).and_then(|metadata| metadata.modified()).ok().map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339());
+        let line = serde_json::json!({"type": "ended", "state": end.state, "ended_at": end.ended_at, "reason": end.reason, "last_line_at": last_line_at});
+        let _ = self.out.send(NodeToControl::Workflow { conversation_id, run_id: run_id.to_string(), line });
     }
 
     fn persist(&mut self) {
@@ -693,6 +752,61 @@ mod tests {
         let lines: Vec<Value> = workflow.iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line.clone()) } else { None }).collect();
         assert_eq!(lines, [serde_json::json!({"step": 1}), serde_json::json!({"step": 2})]);
         assert!(workflow.iter().all(|message| matches!(message, NodeToControl::Workflow { conversation_id, run_id, .. } if *conversation_id == conversation && run_id == "run-1")));
+    }
+
+    fn workflow_with_session_lines(session_lines: &[Value]) -> Vec<Value> {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("projects");
+        let session = root.join("proj").join("session-9");
+        let run = session.join("subagents").join("workflows").join("run-1");
+        let conversation = Uuid::from_u128(5);
+        let (mut follower, mut messages) = follower(dir.path(), &root, &dir.path().join("state.json"));
+        append(&run.join("journal.jsonl"), "{\"type\":\"launched\"}\n");
+        append(&session.join("workflows").join("scripts").join("plan-run-1.js"), "meta({ phases: [{ title: 'Implement' }, { title: 'Verify' }] })");
+        follower.poll(true, |_| Some(conversation));
+        drain(&mut messages);
+
+        for line in session_lines {
+            append(&session.with_extension("jsonl"), &format!("{line}\n"));
+        }
+
+        append(&run.join("journal.jsonl"), "{\"type\":\"noted\"}\n");
+        follower.poll(true, |_| Some(conversation));
+
+        drain(&mut messages).into_iter().filter_map(|message| if let NodeToControl::Workflow { line, .. } = message { Some(line) } else { None }).collect()
+    }
+
+    fn launch_line() -> Value {
+        serde_json::json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "Workflow launched in background. Task ID: w9qw46stl\nRun ID: run-1\n"}]}})
+    }
+
+    fn notification_line(status: &str, summary: &str) -> Value {
+        serde_json::json!({"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-27T00:42:10.000Z", "content": format!("<task-notification>\n<task-id>w9qw46stl</task-id>\n<status>{status}</status>\n<summary>{summary}</summary>\n</task-notification>")})
+    }
+
+    #[test]
+    fn a_stopped_workflow_with_no_agents_reports_stopped() {
+        let lines = workflow_with_session_lines(&[launch_line(), notification_line("killed", "Workflow was stopped")]);
+        let ended: Vec<&Value> = lines.iter().filter(|line| line["type"] == "ended").collect();
+
+        assert!(lines.iter().all(|line| line["type"] != "started"));
+        assert_eq!(ended.len(), 1);
+        assert_eq!((ended[0]["state"].as_str(), ended[0]["ended_at"].as_str(), ended[0]["reason"].as_str()), (Some("stopped"), Some("2026-10-27T00:42:10.000Z"), Some("Workflow was stopped")));
+        assert!(ended[0]["last_line_at"].is_string());
+    }
+
+    #[test]
+    fn a_failed_workflow_reports_failed_with_the_reason() {
+        let lines = workflow_with_session_lines(&[launch_line(), notification_line("failed", "Weekly limit reached")]);
+
+        assert!(lines.iter().any(|line| line["type"] == "ended" && line["state"] == "failed" && line["reason"] == "Weekly limit reached"));
+    }
+
+    #[test]
+    fn a_running_workflow_reports_no_end() {
+        let lines = workflow_with_session_lines(&[launch_line()]);
+
+        assert!(lines.iter().all(|line| line["type"] != "ended"));
     }
 
     fn finished_agent_lines(root: &Path, run_files: &[(&str, &str)], journal_line: &str) -> Vec<Value> {
