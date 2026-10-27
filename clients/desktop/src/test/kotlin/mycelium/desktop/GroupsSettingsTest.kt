@@ -103,13 +103,17 @@ class GroupsSettingsTest {
 
     private fun show(groups: String = "$SlopGroup,$WorkGroup") {
         val store = store(groups)
-        rule.setContent { MyceliumTheme(true) { var open by remember { mutableStateOf<String?>(null) }; Box(Modifier.verticalScrollWithBar()) { GroupsSettings(store, open) { open = it } } } }
+        rule.setContent { MyceliumTheme(true) { var open by remember { mutableStateOf<String?>(null) }; Box(Modifier.verticalScrollWithBar()) { GroupsSettings(store, open, { open = it }) } } }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Groups").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun open(name: String) {
         rule.onNodeWithContentDescription("Open the $name group").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Folders in $name").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    private fun tab(name: String) {
+        rule.onNodeWithText(name).performClick()
     }
 
     private fun settings(experiments: String) {
@@ -139,10 +143,10 @@ class GroupsSettingsTest {
 
         rule.onNodeWithText("New group").performClick()
         rule.onNodeWithContentDescription("Group name").performTextInput("homelab")
-        rule.onNodeWithText("Create group").performClick()
+        rule.onNodeWithText("Save").performClick()
 
         assertEquals("""{"name":"homelab"}""", requestTo(HttpMethod.Post, "/groups").third)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Folders in homelab").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -153,7 +157,7 @@ class GroupsSettingsTest {
         rule.onNodeWithText("Rename").performClick()
         rule.onNodeWithContentDescription("New group name").performTextClearance()
         rule.onNodeWithContentDescription("New group name").performTextInput("homelab")
-        rule.onNodeWithText("Rename", substring = false).performClick()
+        rule.onNodeWithText("Save").performClick()
 
         assertEquals("""{"name":"homelab"}""", requestTo(HttpMethod.Patch, "/groups/g1").third)
     }
@@ -187,9 +191,11 @@ class GroupsSettingsTest {
     fun aFolderIsAddedToTheOpenGroupForAnyNode() {
         show()
         open("slop")
+        tab("Folders")
 
-        rule.onNodeWithContentDescription("Folder").performScrollTo().performTextInput("/home/claude/other")
-        rule.onNodeWithText("Add folder").performClick()
+        rule.onNodeWithText("Add folder").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Folder").performTextInput("/home/claude/other")
+        rule.onNodeWithText("Save").performClick()
 
         assertEquals("""{"prefix":"/home/claude/other"}""", requestTo(HttpMethod.Post, "/groups/g1/folders").third)
     }
@@ -198,6 +204,7 @@ class GroupsSettingsTest {
     fun aFolderIsRemovedByItsName() {
         show()
         open("slop")
+        tab("Folders")
 
         rule.onNodeWithContentDescription("More for folder /srv/slop in slop").performScrollTo().performClick()
         rule.onNodeWithText("Remove folder").performClick()
@@ -221,6 +228,7 @@ class GroupsSettingsTest {
     fun theGroupPageListsItsProjectsWithoutAMenu() {
         show()
         open("slop")
+        tab("Projects")
 
         rule.onNodeWithText("mycelium").assertExists()
         assertEquals(0, rule.onAllNodesWithText("Remove from slop").fetchSemanticsNodes().size)
@@ -235,6 +243,17 @@ class GroupsSettingsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open the slop group").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Open the slop group").performScrollTo().performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Folders in slop").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group sections").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun theGroupPageShowsItsPendingProposalAboveItsInstructionsAndNoOtherLayers() {
+        val other = GroupProposal.replace("\"id\":\"p1\"", "\"id\":\"p2\"").replace("\"layer\":\"g1\",\"layer_name\":\"slop\"", "\"layer\":\"global\",\"layer_name\":\"Global\"")
+        val store = store(SlopGroup, proposals = GroupProposal.trimEnd(']') + "," + other.trimStart('['))
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.height(900.dp)) { SettingsScreen(store, Me("u", "sam@example.com", "Sam"), "https://mycelium.test", startOn = SettingsSection.Groups, startGroup = "g1", onSignOut = {}) } } }
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Proposed edit to the slop instructions").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, rule.onAllNodesWithContentDescription("Proposed edit to the Global instructions").fetchSemanticsNodes().size)
+        rule.onNodeWithText("You said: use British English.").assertExists()
     }
 }

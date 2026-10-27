@@ -9,40 +9,26 @@ import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import mycelium.Platform
 import mycelium.api.MyceliumApi
-import mycelium.api.QuietDay
+import mycelium.api.PuzzleResult
+import mycelium.api.PuzzleSummary
+import mycelium.api.AlwaysOpenHours
+import mycelium.api.Hours
 import mycelium.api.WellnessOverview
 import mycelium.api.WellnessSettings
 
-const val PomodoroFocusMinutes = 25
-const val PomodoroBreakMinutes = 5
-const val PomodoroLongBreakMinutes = 15
-const val PomodoroBlocksBeforeLongBreak = 4
-
-val DefaultQuietDays = (0..6).map { QuietDay(it, enabled = true, allDay = it >= 5, starts = "22:00", ends = "08:00") }
 
 val DefaultWellnessSettings = WellnessSettings(
     breakReminders = true,
     breakAfterMinutes = 50,
     snoozeMinutes = 10,
     breakMinutes = 5,
-    pomodoro = false,
-    quietHours = false,
+    hours = AlwaysOpenHours,
     quietHoldNotifications = true,
     quietHoldSchedules = true,
     quietHoldPings = true,
-    quietDays = DefaultQuietDays,
 )
 
 val WeekdayNames = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-
-val Puzzles = listOf(
-    Puzzle("wordle", "Wordle", "https://www.nytimes.com/games/wordle/index.html"),
-    Puzzle("connections", "Connections", "https://www.nytimes.com/games/connections"),
-    Puzzle("daily-orbs", "Daily Orbs", "https://dailyorbs.com"),
-    Puzzle("catfishing", "Catfishing", "https://catfishing.net"),
-)
-
-data class Puzzle(val id: String, val name: String, val url: String)
 
 private fun minutesOf(time: String): Int? {
     val (hours, minutes) = time.split(':').takeIf { it.size == 2 }?.map { it.toIntOrNull() ?: return null } ?: return null
@@ -59,26 +45,34 @@ fun weekdayOf(isoDate: String): Int {
     return (sundayFirst + 6) % 7
 }
 
-fun quietAt(settings: WellnessSettings, localDateTime: String): Boolean {
-    if (!settings.quietHours) {
-        return false
+fun isOpen(hours: Hours, localDateTime: String): Boolean {
+    if (hours.alwaysOpen) {
+        return true
     }
 
-    val today = weekdayOf(localDateTime.substringBefore('T'))
-    val yesterday = (today + 6) % 7
+    val weekday = weekdayOf(localDateTime.substringBefore('T'))
     val now = minutesOf(localDateTime.substringAfter('T').take(5)) ?: return false
 
-    val inToday = settings.quietDays.filter { it.enabled && it.weekday == today }.any { day ->
-        val starts = minutesOf(day.starts) ?: return@any false
-        val ends = minutesOf(day.ends) ?: return@any false
+    return isOpenAt(hours, weekday, now)
+}
 
-        day.allDay || if (ends > starts) now in starts until ends else now >= starts
+internal fun isOpenAt(hours: Hours, weekday: Int, minute: Int): Boolean {
+    if (hours.alwaysOpen) {
+        return true
     }
-    val overnight = settings.quietDays.filter { it.enabled && !it.allDay && it.weekday == yesterday }.any { day ->
-        val starts = minutesOf(day.starts) ?: return@any false
-        val ends = minutesOf(day.ends) ?: return@any false
 
-        ends <= starts && now < ends
+    val yesterday = (weekday + 6) % 7
+    val inToday = hours.days.filter { !it.closed && it.weekday == weekday }.any { day ->
+        val opens = minutesOf(day.opens) ?: return@any false
+        val closes = minutesOf(day.closes) ?: return@any false
+
+        if (closes > opens) minute in opens until closes else minute >= opens
+    }
+    val overnight = hours.days.filter { !it.closed && it.weekday == yesterday }.any { day ->
+        val opens = minutesOf(day.opens) ?: return@any false
+        val closes = minutesOf(day.closes) ?: return@any false
+
+        closes <= opens && minute < closes
     }
 
     return inToday || overnight
@@ -96,7 +90,6 @@ sealed interface BreakPhase {
 
 data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes: Int = 0, val blocksDone: Int = 0) {
     fun remindsAfter(settings: WellnessSettings): Int? = when {
-        settings.pomodoro -> PomodoroFocusMinutes
         settings.breakReminders -> settings.breakAfterMinutes
         else -> null
     }
@@ -124,24 +117,22 @@ data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes
 
     fun dismiss(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
 
-    fun breakLength(settings: WellnessSettings): Int = when {
-        !settings.pomodoro -> settings.breakMinutes
-        (blocksDone + 1) % PomodoroBlocksBeforeLongBreak == 0 -> PomodoroLongBreakMinutes
-        else -> PomodoroBreakMinutes
-    }
+    fun breakLength(settings: WellnessSettings): Int = settings.breakMinutes
 
     fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, activeMinutes = 0, blocksDone = blocksDone + 1)
 
     fun endBreak(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
 }
 
-data class HeldNotification(val title: String, val conversationId: String)
+data class HeldNotification(val title: String, val conversationId: String, val groupId: String? = null)
 
 data class WellnessState(
     val settings: WellnessSettings = DefaultWellnessSettings,
     val overview: WellnessOverview? = null,
     val clock: BreakClock = BreakClock(),
     val held: List<HeldNotification> = emptyList(),
+    val puzzles: List<PuzzleSummary> = emptyList(),
+    val unreadable: Set<String> = emptySet(),
     val loaded: Boolean = false,
 )
 
@@ -163,38 +154,45 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         scope.launch { load() }
     }
 
-    fun quietNow(): Boolean {
+    fun closedNow(): Boolean {
         val local = platform?.localDateTime(Clock.System.now().toEpochMilliseconds()) ?: return false
 
-        return quietAt(mutableState.value.settings, local)
+        return !isOpen(mutableState.value.settings.hours, local)
     }
 
-    fun holdsNotifications(): Boolean {
+    fun holdsNotifications(closed: Boolean): Boolean {
         val current = mutableState.value
 
-        return current.clock.phase == BreakPhase.OnBreak || (current.settings.quietHoldNotifications && quietNow())
+        return current.clock.phase == BreakPhase.OnBreak || (current.settings.quietHoldNotifications && closed)
     }
 
-    fun hold(notification: HeldNotification) {
+    fun holdsPings(closed: Boolean): Boolean {
+        val current = mutableState.value
+
+        return current.clock.phase == BreakPhase.OnBreak || (current.settings.quietHoldPings && closed)
+    }
+
+    fun hold(notification: HeldNotification, ping: Boolean = false) {
         mutableState.update { it.copy(held = it.held + notification) }
+        scope.launch { runCatching { api.holdQuietly(if (ping) "ping" else "notification", notification.conversationId, notification.groupId) } }
     }
 
-    fun releaseHeld(): List<HeldNotification> {
-        if (mutableState.value.held.isEmpty() || holdsNotifications()) {
+    fun releaseHeld(closed: (String?) -> Boolean): List<HeldNotification> {
+        if (mutableState.value.clock.phase == BreakPhase.OnBreak) {
             return emptyList()
         }
 
-        val released = mutableState.value.held
+        val released = mutableState.value.held.filterNot { closed(it.groupId) }
 
-        mutableState.update { it.copy(held = emptyList()) }
+        mutableState.update { it.copy(held = it.held - released.toSet()) }
 
         return released
     }
 
     fun tickActiveMinute() {
-        val quiet = quietNow()
+        val closed = closedNow()
 
-        mutableState.update { it.copy(clock = it.clock.tick(it.settings, quiet)) }
+        mutableState.update { it.copy(clock = it.clock.tick(it.settings, closed)) }
     }
 
     fun heartbeat(seconds: Int) {
@@ -239,10 +237,27 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         }
     }
 
+    suspend fun loadPuzzles() {
+        val puzzles = runCatching { api.puzzles() }.getOrNull() ?: return
+
+        mutableState.update { it.copy(puzzles = puzzles) }
+    }
+
+    fun markUnreadable(puzzle: String) {
+        mutableState.update { it.copy(unreadable = it.unreadable + puzzle) }
+    }
+
     fun setPlayed(puzzle: String, played: Boolean) {
         scope.launch {
             runCatching { api.setPuzzlePlayed(puzzle, played) }
-            load()
+            loadPuzzles()
+        }
+    }
+
+    fun recordResult(puzzle: String, result: PuzzleResult) {
+        scope.launch {
+            runCatching { api.recordPuzzleResult(puzzle, result.copy(source = "read")) }
+            loadPuzzles()
         }
     }
 }

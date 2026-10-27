@@ -24,7 +24,7 @@ internal const val WorkGroupJson = """{"id":"g-work","name":"work","created_at":
 
 internal const val PersonalGroupJson = """{"id":"g-personal","name":"personal","created_at":"2026-10-01T09:00:00Z","hours":{"always_open":true,"days":[]},"open_now":true}"""
 
-internal const val GroupsJson = "[$WorkGroupJson,$PersonalGroupJson]"
+internal const val WellnessGroupsJson = "[$WorkGroupJson,$PersonalGroupJson]"
 
 internal val WellnessOverviewJson = """{"days":[
 {"day":"2026-10-20","viewing_minutes":95,"agent_minutes":140,"breaks":2},
@@ -58,7 +58,7 @@ internal class WellnessRequests {
                 request.method == HttpMethod.Put && path.endsWith("/wellness/settings") -> respond(String(request.body.toByteArray()), HttpStatusCode.OK, json)
                 request.method != HttpMethod.Get && path.contains("/wellness/") && !path.endsWith("/wellness/breaks") -> respond("", HttpStatusCode.NoContent)
                 request.method == HttpMethod.Put && path.endsWith("/hours") -> respond(WorkGroupJson, HttpStatusCode.OK, json)
-                path.endsWith("/groups") -> respond(GroupsJson, HttpStatusCode.OK, json)
+                path.endsWith("/groups") -> respond(WellnessGroupsJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/settings") -> respond(WellnessSettingsJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/puzzles") -> respond(WellnessPuzzlesJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/overview") -> respond(WellnessOverviewJson, HttpStatusCode.OK, json)

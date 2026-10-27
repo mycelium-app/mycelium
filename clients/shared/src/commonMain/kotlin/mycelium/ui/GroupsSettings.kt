@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,20 +25,29 @@ import androidx.compose.ui.unit.dp
 import mycelium.api.Group
 import mycelium.api.InstructionLayer
 import mycelium.state.AppState
+import mycelium.state.Choice
+import mycelium.state.OpeningMinutes
 import mycelium.state.Store
+import mycelium.state.groupStatusText
+import mycelium.state.hoursSummary
 
 private fun folderSummary(group: Group, state: AppState): List<String> =
     group.folders.map { folder -> "${folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"} ${folder.prefix}" }
 
 private const val GroupsList = "groups"
 
-private val GroupTabs = listOf("Instructions", "Folders", "Projects")
+const val GroupHoursTab = "Hours"
+
+private val GroupTabs = listOf("Instructions", "Folders", "Projects", GroupHoursTab)
 
 @Composable
-fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit) {
+fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit, startTab: String? = null, onOpenTimeAndFocus: () -> Unit = {}) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var failure by remember { mutableStateOf<String?>(null) }
+    var openingOutOfHours by remember { mutableStateOf(false) }
+    val view = rememberHoursView(store)
+    val platform = LocalPlatform.current
     var naming by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var renaming by remember { mutableStateOf<String?>(null) }
@@ -46,7 +56,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     var layer by remember { mutableStateOf<InstructionLayer?>(null) }
     var newFolder by remember { mutableStateOf("") }
     var folderNode by remember { mutableStateOf<String?>(null) }
-    var folderNodeMenu by remember { mutableStateOf(false) }
+    var addingFolder by remember { mutableStateOf(false) }
     val attempt = rememberAttempt { failure = it }
     var query by remember { mutableStateOf("") }
     val groups = state.groups.values.filter { it.name.contains(query.trim(), ignoreCase = true) }.sortedBy { it.name.lowercase() }
@@ -57,10 +67,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     val doomed = deleting?.let { state.groups[it] }
 
     LaunchedEffect(Unit) {
-        store.act {
-            store.refreshGroups()
-            store.refreshProjects()
-        }
+        load()
     }
 
     LaunchedEffect(open?.id) {
@@ -83,45 +90,17 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
             BackButton("groups", { onOpenGroup(null) }, showText = true)
 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Label(open.name, Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
+                Column(Modifier.weight(1f)) {
+                    val projectCount = state.projects.values.count { it.groupId == open.id }
+
+                    Label(open.name, Modifier.semantics { heading() }, Tokens.Type.Title)
+                    Label(listOf(if (projectCount == 1) "1 project" else "$projectCount projects", groupStatusText(view, open, platform)).joinToString(" · "), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                }
 
                 RowMenu("${open.name} group") { close ->
                     MenuItem("Rename group", onClick = { close(); renaming = open.id; renamed = open.name; deleting = null })
                     MenuItem("Delete group", onClick = { close(); deleting = open.id; renaming = null })
                 }
-            }
-        }
-
-        if (naming) {
-            Row(Modifier.widthIn(max = Tokens.Size.FormColumn), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                fun create() {
-                    attempt {
-                        val group = store.api.createGroup(newName)
-                        store.refreshGroups()
-                        onOpenGroup(group.id)
-                        naming = false
-                    }
-                }
-
-                TextInput(newName, { newName = it }, label = "Group name", placeholder = "slop", modifier = Modifier.weight(1f), onSubmit = ::create)
-                MyButton(::create, text = "Create group", variant = ButtonVariant.Outline)
-                MyButton({ naming = false }, text = "Cancel", muted = true)
-            }
-        }
-
-        if (forming != null) {
-            Row(Modifier.widthIn(max = Tokens.Size.FormColumn), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                fun rename() {
-                    attempt {
-                        store.api.renameGroup(forming.id, renamed)
-                        store.refreshGroups()
-                        renaming = null
-                    }
-                }
-
-                TextInput(renamed, { renamed = it }, label = "New group name", modifier = Modifier.weight(1f), onSubmit = ::rename)
-                MyButton(::rename, text = "Rename", variant = ButtonVariant.Outline)
-                MyButton({ renaming = null }, text = "Cancel", muted = true)
             }
         }
 
@@ -163,6 +142,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                         Col("Group", 140.dp, weight = 1f),
                         Col("Folders", 100.dp, max = 360.dp, priority = 1),
                         Col("Projects", 72.dp, numeric = true),
+                        Col("Hours", 120.dp, max = 240.dp, priority = 2),
                         ActionColumn,
                     ),
                     groups.size,
@@ -182,6 +162,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                             }
 
                             2 -> TableCell.Text(state.projects.values.count { it.groupId == group.id }.toString(), color = colors.textMuted)
+                            3 -> TableCell.Text(hoursSummary(group.hours), color = colors.textMuted)
                             else -> TableCell.Slot {
                                 RowMenu("${group.name} group") { close ->
                                     MenuItem("Rename", onClick = { close(); renaming = group.id; renamed = group.name; deleting = null })
@@ -193,92 +174,144 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                 )
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Added after the global instructions, for every conversation in ${open.name}.", style = Tokens.Type.Meta, color = colors.textMuted)
+            var tab by remember(open.id) { mutableStateOf(startTab?.takeIf { it in GroupTabs } ?: GroupTabs.first()) }
 
-                layer?.let { held ->
-                    InstructionsEditor(
-                        layer = held,
-                        file = held.path ?: "Stored in Mycelium",
-                        saveLabel = if (held.path != null) "Save and commit" else "Save",
-                        onSave = { text -> attempt { layer = store.api.saveGroupInstructions(open.id, text) } },
-                    )
+            TabRow(GroupTabs, tab, { tab = it }, groupLabel = "Group sections")
+
+            if (tab == GroupTabs[0]) {
+                InstructionProposals(store, layer = open.id)
+
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                    Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                    Label("Added after the global instructions, for every conversation in ${open.name}.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                    layer?.let { held ->
+                        InstructionsEditor(
+                            layer = held,
+                            file = held.path ?: "Stored in Mycelium",
+                            saveLabel = if (held.path != null) "Save and commit" else "Save",
+                            onSave = { text -> attempt { layer = store.api.saveGroupInstructions(open.id, text) } },
+                        )
+                    }
                 }
+
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Folders in ${open.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Conversations without a project, including imported ones, join ${open.name} when their folder is inside one of these.", style = Tokens.Type.Meta, color = colors.textMuted)
+            if (tab == GroupTabs[1]) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Folders in ${open.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                    Label("Conversations without a project, including imported ones, join ${open.name} when their folder is inside one of these.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-                for (folder in open.folders) {
-                    val nodeName = folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"
+                    for (folder in open.folders) {
+                        val nodeName = folder.nodeId?.let { state.nodes[it]?.name ?: "Unknown node" } ?: "Any node"
 
-                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label(folder.prefix, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
-                        Label(nodeName, color = colors.textMuted, maxLines = 1)
-                        RowMenu("folder ${folder.prefix} in ${open.name}") { close ->
-                            MenuItem("Remove folder", onClick = {
-                                close()
-                                attempt { store.api.removeGroupFolder(open.id, folder.id); store.refreshGroups() }
-                            })
-                        }
-                    }
-
-                    Hairline()
-                }
-
-                Row(Modifier.widthIn(max = Tokens.Size.FormColumn).padding(top = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
-                    fun addFolder() {
-                        attempt {
-                            store.api.addGroupFolder(open.id, newFolder, folderNode)
-                            store.refreshGroups()
-                            newFolder = ""
-                        }
-                    }
-
-                    TextInput(newFolder, { newFolder = it }, label = "Folder", placeholder = "/home/sam/code", mono = true, modifier = Modifier.weight(1f), onSubmit = ::addFolder)
-
-                    Box {
-                        val chosen = state.nodes[folderNode]?.name ?: "Any node"
-
-                        MyButton(
-                            { folderNodeMenu = true },
-                            text = chosen,
-                            description = "Node: $chosen",
-                            variant = ButtonVariant.Outline,
-                            trailingIcon = MyIcon.ChevronDown,
-                        )
-
-                        if (folderNodeMenu) {
-                            MenuPopup(onDismiss = { folderNodeMenu = false }) {
-                                MenuLabel("Node")
-                                MenuItem("Any node", onClick = { folderNode = null; folderNodeMenu = false }, checked = folderNode == null)
-
-                                for (node in state.nodes.values.sortedBy { it.name }) {
-                                    MenuItem(node.name, onClick = { folderNode = node.id; folderNodeMenu = false }, checked = node.id == folderNode)
-                                }
+                        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                            Label(folder.prefix, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
+                            Label(nodeName, color = colors.textMuted, maxLines = 1)
+                            RowMenu("folder ${folder.prefix} in ${open.name}") { close ->
+                                MenuItem("Remove folder", onClick = {
+                                    close()
+                                    attempt { store.api.removeGroupFolder(open.id, folder.id); store.refreshGroups() }
+                                })
                             }
                         }
+
+                        Hairline()
                     }
 
-                    MyButton(::addFolder, text = "Add folder", variant = ButtonVariant.Outline)
+                    MyButton({ addingFolder = true; newFolder = ""; folderNode = null }, text = "Add folder", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                }
+
+            }
+
+            if (tab == GroupTabs[2]) {
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    Label("Projects in ${open.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                    Label("Set a project's group from Projects.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                    for (project in state.projects.values.filter { it.groupId == open.id }.sortedBy { it.name }) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                            Label(project.name, Modifier.weight(1f), maxLines = 1)
+                            Label(state.nodes[project.nodeId]?.name.orEmpty(), color = colors.textMuted, maxLines = 1)
+                        }
+
+                        Hairline()
+                    }
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                Label("Projects in ${open.name}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-                Label("Set a project's group from Projects.", style = Tokens.Type.Meta, color = colors.textMuted)
+            if (tab == GroupTabs[3]) {
+                val status = view.groups[open.id]
 
-                for (project in state.projects.values.filter { it.groupId == open.id }.sortedBy { it.name }) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(horizontal = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
-                        Label(project.name, Modifier.weight(1f), maxLines = 1)
-                        Label(state.nodes[project.nodeId]?.name.orEmpty(), color = colors.textMuted, maxLines = 1)
+                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                    HoursEditor(open.name, open.hours) { hours -> attempt { store.saveGroupHours(open.id, hours) } }
+                    Label("Outside these hours ${open.name} leaves the sidebar, every list and the group selector, and its notifications wait. Agents keep working. It is never open while Mycelium is closed.", Modifier.widthIn(max = Tokens.Size.FormColumn), Tokens.Type.Meta, colors.textMuted)
+
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                        MyButton(onOpenTimeAndFocus, text = "Time and focus", variant = ButtonVariant.Outline)
+
+                        if (status != null && !status.open) {
+                            MyButton({ openingOutOfHours = true }, text = "Open for $OpeningMinutes minutes", muted = true)
+                        }
                     }
-
-                    Hairline()
                 }
             }
+        }
+    }
+
+    if (naming) {
+        fun create() {
+            attempt {
+                val group = store.api.createGroup(newName)
+                store.refreshGroups()
+                onOpenGroup(group.id)
+                naming = false
+            }
+        }
+
+        RenameDialog("New group", "Group name", newName, { newName = it }, ::create, { naming = false })
+    }
+
+    if (forming != null) {
+        fun rename() {
+            attempt {
+                store.api.renameGroup(forming.id, renamed)
+                store.refreshGroups()
+                renaming = null
+            }
+        }
+
+        RenameDialog("Rename group", "New group name", renamed, { renamed = it }, ::rename, { renaming = null })
+    }
+
+    if (addingFolder && open != null) {
+        fun addFolder() {
+            attempt {
+                store.api.addGroupFolder(open.id, newFolder, folderNode)
+                store.refreshGroups()
+                addingFolder = false
+            }
+        }
+
+        Dialog({ addingFolder = false }) {
+            Label("Add a folder", Modifier.semantics { heading() }, Tokens.Type.Title)
+            TextInput(newFolder, { newFolder = it }, label = "Folder", placeholder = "/home/sam/code", mono = true, onSubmit = ::addFolder)
+            OptionMenu("Node", listOf(Choice("", "Any node")) + state.nodes.values.sortedBy { it.name }.map { Choice(it.id, it.name) }, folderNode.orEmpty(), { folderNode = it.ifEmpty { null } })
+
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                MyButton({ addingFolder = false }, text = "Cancel", muted = true)
+                MyButton(::addFolder, text = "Save", variant = ButtonVariant.Outline)
+            }
+        }
+    }
+
+    if (openingOutOfHours) {
+        val closed = view.groups.values.filter { !it.open }.map { it.group }
+
+        if (closed.isEmpty()) {
+            openingOutOfHours = false
+        } else {
+            OpenOutOfHoursDialog(store, platform, closed, open?.id, onDismiss = { openingOutOfHours = false }, onOpened = {})
         }
     }
 }

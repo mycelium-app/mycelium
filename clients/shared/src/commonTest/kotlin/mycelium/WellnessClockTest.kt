@@ -40,23 +40,8 @@ class WellnessClockTest {
     }
 
     @Test
-    fun noReminderComesWhenRemindersAreOffAndPomodoroIsOff() {
+    fun noReminderComesWhenRemindersAreOff() {
         assertEquals(BreakPhase.Idle, BreakClock().after(120, settings.copy(breakReminders = false)).phase)
-    }
-
-    @Test
-    fun pomodoroRemindsAfterTwentyFiveMinutesInsteadOfTheInterval() {
-        val pomodoro = settings.copy(pomodoro = true, breakReminders = false)
-
-        assertEquals(BreakPhase.Due, BreakClock().after(25, pomodoro).phase)
-    }
-
-    @Test
-    fun pomodoroTakesALongBreakAfterTheFourthBlock() {
-        val pomodoro = settings.copy(pomodoro = true)
-        val lengths = (1..4).runningFold(BreakClock()) { clock, _ -> clock.startBreak().endBreak() }.dropLast(1).map { it.breakLength(pomodoro) }
-
-        assertEquals(listOf(5, 5, 5, 15), lengths)
     }
 
     @Test

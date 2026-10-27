@@ -4,12 +4,30 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class QuietDay(
-    val weekday: Int,
-    val enabled: Boolean,
-    @SerialName("all_day") val allDay: Boolean,
-    val starts: String,
-    val ends: String,
+data class HoursDay(val weekday: Int, val closed: Boolean, val opens: String, val closes: String)
+
+@Serializable
+data class Hours(
+    @SerialName("always_open") val alwaysOpen: Boolean,
+    val days: List<HoursDay>,
+)
+
+val AlwaysOpenHours = Hours(alwaysOpen = true, days = (0..6).map { HoursDay(it, closed = it >= 5, opens = "09:00", closes = "18:00") })
+
+@Serializable
+data class OpenGroupRequest(val reason: String)
+
+@Serializable
+data class GroupOpening(@SerialName("opened_until") val openedUntil: String)
+
+@Serializable
+data class OutOfHoursOpen(
+    @SerialName("group_id") val groupId: String,
+    @SerialName("group_name") val groupName: String,
+    val reason: String,
+    @SerialName("opened_at") val openedAt: String,
+    val until: String,
+    @SerialName("closed_at") val closedAt: String? = null,
 )
 
 @Serializable
@@ -18,13 +36,11 @@ data class WellnessSettings(
     @SerialName("break_after_minutes") val breakAfterMinutes: Int,
     @SerialName("snooze_minutes") val snoozeMinutes: Int,
     @SerialName("break_minutes") val breakMinutes: Int,
-    val pomodoro: Boolean,
-    @SerialName("quiet_hours") val quietHours: Boolean,
+    val hours: Hours,
     @SerialName("quiet_hold_notifications") val quietHoldNotifications: Boolean,
     @SerialName("quiet_hold_schedules") val quietHoldSchedules: Boolean,
     @SerialName("quiet_hold_pings") val quietHoldPings: Boolean,
     @SerialName("time_zone") val timeZone: String? = null,
-    @SerialName("quiet_days") val quietDays: List<QuietDay>,
 )
 
 @Serializable
@@ -47,7 +63,6 @@ data class WellnessDay(
     @SerialName("viewing_minutes") val viewingMinutes: Long,
     @SerialName("agent_minutes") val agentMinutes: Long,
     val breaks: Long,
-    val puzzles: List<String>,
 )
 
 @Serializable
@@ -57,4 +72,58 @@ data class WellnessOverview(
     @SerialName("current_break") val currentBreak: WellnessBreak? = null,
     @SerialName("quiet_now") val quietNow: Boolean = false,
     val held: Long = 0,
+    @SerialName("held_week") val heldWeek: HeldWeek = HeldWeek(),
+    @SerialName("opened_out_of_hours") val openedOutOfHours: List<OutOfHoursOpen> = emptyList(),
+)
+
+@Serializable
+data class HeldWeek(val notifications: Long = 0, val schedules: Long = 0, val pings: Long = 0)
+
+@Serializable
+data class LearnedItem(
+    val id: String,
+    val text: String,
+    @SerialName("source_kind") val sourceKind: String,
+    @SerialName("conversation_id") val conversationId: String,
+    @SerialName("conversation_title") val conversationTitle: String,
+    @SerialName("message_id") val messageId: Long? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class HoldRequest(val kind: String, val subject: String, @SerialName("group_id") val groupId: String? = null)
+
+@Serializable
+data class PuzzleResult(
+    val solved: Boolean? = null,
+    val guesses: Int? = null,
+    val mistakes: Int? = null,
+    val score: String? = null,
+    val source: String? = null,
+)
+
+@Serializable
+data class PuzzleDay(
+    val day: String,
+    val result: PuzzleResult,
+    @SerialName("recorded_at") val recordedAt: String,
+)
+
+@Serializable
+data class PuzzleBucket(val value: Int, val count: Long)
+
+@Serializable
+data class PuzzleStats(
+    val played: Long = 0,
+    val solved: Long = 0,
+    val average: Double? = null,
+    val distribution: List<PuzzleBucket> = emptyList(),
+)
+
+@Serializable
+data class PuzzleSummary(
+    val puzzle: String,
+    val today: PuzzleResult? = null,
+    val history: List<PuzzleDay> = emptyList(),
+    val stats: PuzzleStats = PuzzleStats(),
 )
