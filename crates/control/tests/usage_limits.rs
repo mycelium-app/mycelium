@@ -47,6 +47,18 @@ async fn choose_automatic_resume(server: &Server) {
     assert_eq!(status, 200);
 }
 
+async fn choose_to_be_asked(server: &Server) {
+    let (status, _) = server.user.json(server.user.put("/api/v1/usage-limit").json(&json!({"on_usage_limit": "ask"}))).await;
+
+    assert_eq!(status, 200);
+}
+
+async fn reply_with_limit(server: &Server, link: &mut NodeLink, id: Uuid, seq: i64, text: &str) {
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: seq + 1, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the conversation to fail", || async { (server.conversation(id).await["status"] == "failed").then_some(()) }).await;
+}
+
 async fn schedule(server: &Server, id: Uuid) -> (u16, Value) {
     server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/resume"))).await
 }
@@ -58,6 +70,7 @@ async fn last_error(server: &Server, id: Uuid) -> Value {
 #[tokio::test]
 async fn a_usage_limit_failure_records_which_window_and_when_it_resets() {
     let server = Server::start().await;
+    choose_to_be_asked(&server).await;
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
 
@@ -84,6 +97,7 @@ async fn another_failure_is_not_a_usage_limit() {
 #[tokio::test]
 async fn choosing_to_resume_schedules_it_a_minute_after_the_reset_and_streams_it() {
     let server = Server::start().await;
+    choose_to_be_asked(&server).await;
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
@@ -206,15 +220,119 @@ async fn a_resume_whose_node_is_offline_tries_again_later_without_using_up_an_at
 }
 
 #[tokio::test]
-async fn the_default_is_to_ask_and_the_choice_is_kept() {
+async fn the_default_is_to_resume_automatically_and_the_choice_is_kept() {
     let server = Server::start().await;
 
     let (_, initial) = server.user.json(server.user.get("/api/v1/usage-limit")).await;
-    choose_automatic_resume(&server).await;
+    choose_to_be_asked(&server).await;
     let (_, chosen) = server.user.json(server.user.get("/api/v1/usage-limit")).await;
 
-    assert_eq!(initial["on_usage_limit"], "ask");
-    assert_eq!(chosen["on_usage_limit"], "resume");
+    assert_eq!(initial["on_usage_limit"], "resume");
+    assert_eq!(chosen["on_usage_limit"], "ask");
+}
+
+#[tokio::test]
+async fn the_first_limit_reply_stops_the_conversation_with_a_card_and_resumes_by_default() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    reply_with_limit(&server, &mut link, id, 3, &limit_message(2)).await;
+
+    let payload = last_error(&server, id).await;
+    assert_eq!(payload["usage_limit"]["window"], "five_hour");
+    let resumes = common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
+    assert!(resumes > Utc::now() + Duration::hours(1));
+}
+
+#[tokio::test]
+async fn a_limit_reply_waits_for_the_person_when_they_chose_to_be_asked() {
+    let server = Server::start().await;
+    choose_to_be_asked(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    reply_with_limit(&server, &mut link, id, 3, &limit_message(2)).await;
+
+    assert_eq!(last_error(&server, id).await["usage_limit"]["window"], "five_hour");
+    assert_eq!(resume_at(&server, id).await, None);
+}
+
+#[tokio::test]
+async fn a_long_answer_that_mentions_a_limit_is_not_a_usage_limit() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let essay = format!("{} Your session limit is shown in the settings. ", "The report is ready.".repeat(40));
+
+    link.send(NodeToControl::AcpUpdate { conversation_id: id, seq: 3, update: json!({"update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": essay}}}) }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 4, stop_reason: "end_turn".into(), usage: None }).await;
+
+    common::eventually("the turn to end", || async { (server.conversation(id).await["status"] == "review").then_some(()) }).await;
+    assert!(server.events(id).await.iter().all(|event| event["kind"] != "error"));
+}
+
+#[tokio::test]
+async fn a_second_limit_reply_before_the_reset_keeps_one_automatic_resume() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    reply_with_limit(&server, &mut link, id, 3, &limit_message(2)).await;
+    common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/prompt")).json(&json!({"text": "cont."}))).await;
+    link.expect_start_session().await;
+    link.start_session(id, "s2").await;
+    link.expect_prompt().await;
+
+    reply_with_limit(&server, &mut link, id, 6, &limit_message(2)).await;
+
+    common::eventually("the resume to be scheduled again", || async { resume_at(&server, id).await }).await;
+}
+
+#[tokio::test]
+async fn a_workflow_agent_that_hits_the_limit_pauses_its_conversation_until_the_reset() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    let failed = json!({"type": "failed", "key": "k1", "agentId": "aaa", "reason": limit_message(2)});
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: failed }).await;
+
+    let resumes = common::eventually("the conversation to be paused", || async { resume_at(&server, id).await }).await;
+    assert!(resumes > Utc::now() + Duration::hours(1));
+    let window = common::eventually("the workflow event to carry the limit", || async {
+        let events = server.events(id).await;
+        events.iter().rev().find(|event| event["kind"] == "workflow").map(|event| event["payload"]["usage_limit"]["window"].clone())
+    })
+    .await;
+    assert_eq!(window, "five_hour");
+}
+
+#[tokio::test]
+async fn a_paused_workflow_resumes_its_conversation_when_the_limit_resets() {
+    let server = ticking_server().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "failed", "key": "k1", "agentId": "aaa", "reason": limit_message(2)}) }).await;
+    common::eventually("the conversation to be paused", || async { resume_at(&server, id).await }).await;
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 5, stop_reason: "end_turn".into(), usage: None }).await;
+    common::eventually("the turn to end", || async { (server.conversation(id).await["status"] == "review").then_some(()) }).await;
+
+    make_due(&server, id).await;
+
+    assert_eq!(link.expect_prompt().await.1, CONTINUE);
+}
+
+#[tokio::test]
+async fn a_workflow_failure_that_is_not_a_usage_limit_leaves_the_conversation_alone() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "failed", "key": "k1", "agentId": "aaa", "reason": "Stopped responding"}) }).await;
+    link.send(NodeToControl::Workflow { conversation_id: id, run_id: "run-1".into(), line: json!({"type": "started", "key": "k2", "agentId": "bbb"}) }).await;
+
+    assert_eq!(resume_at(&server, id).await, None);
 }
 
 #[tokio::test]
@@ -284,6 +402,7 @@ async fn a_goal_stays_active_when_its_usage_limit_will_resume_automatically() {
 #[tokio::test]
 async fn a_goal_stops_on_a_usage_limit_when_the_person_chose_to_be_asked() {
     let server = Server::start().await;
+    choose_to_be_asked(&server).await;
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000}))).await;

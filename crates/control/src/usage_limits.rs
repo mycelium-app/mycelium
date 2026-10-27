@@ -20,6 +20,7 @@ use uuid::Uuid;
 const RESUME_DELAY_SECONDS: i64 = 60;
 const AUTOMATIC_RESUME_CAP: i32 = 3;
 const DUE_BATCH: i64 = 20;
+const LIMIT_REPLY_LENGTH: usize = 400;
 const CONTINUE_TEXT: &str = "The usage limit has reset. Continue from where you stopped.";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,7 +136,7 @@ pub struct Detected {
 
 pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, message: &str) -> ApiResult<Option<Detected>> {
     let row = sqlx::query_as::<_, (String, Option<String>, i32, bool, Option<String>, String)>(
-        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null, u.time_zone, coalesce(s.on_usage_limit, 'ask')
+        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null, u.time_zone, coalesce(s.on_usage_limit, 'resume')
          from conversations c join users u on u.id = c.owner left join user_settings s on s.owner = c.owner where c.id = $1",
     )
     .bind(conversation_id)
@@ -179,8 +180,47 @@ pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, mes
     Ok(Some(Detected { payload: json!({"message": message, "usage_limit": {"window": limit.window, "resets_at": limit.resets_at}}), resume_at, switch_to, account }))
 }
 
+pub async fn inspect_reply(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> ApiResult<Option<(String, Detected)>> {
+    let reply = sqlx::query_scalar::<_, Option<String>>(
+        "select payload->'update'->'content'->>'text' from events
+         where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'sessionUpdate' = 'agent_message_chunk'
+           and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)
+         order by seq desc limit 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .flatten();
+    let Some(message) = reply.map(|text| text.trim().to_string()).filter(|text| text.chars().count() <= LIMIT_REPLY_LENGTH) else {
+        return Ok(None);
+    };
+    let limit = inspect(state, node_id, conversation_id, &message).await?;
+
+    Ok(limit.map(|limit| (message, limit)))
+}
+
+pub async fn inspect_workflow_line(state: &AppState, node_id: Uuid, conversation_id: Uuid, line: &Value) -> ApiResult<Option<Value>> {
+    if !matches!(line["type"].as_str(), Some("failed" | "result")) {
+        return Ok(None);
+    }
+
+    let text = ["message", "reason", "result"].iter().find_map(|field| line[*field].as_str()).map(str::trim).filter(|text| text.chars().count() <= LIMIT_REPLY_LENGTH);
+    let Some(text) = text else {
+        return Ok(None);
+    };
+    let Some(limit) = inspect(state, node_id, conversation_id, text).await? else {
+        return Ok(None);
+    };
+
+    if let Some(at) = limit.resume_at {
+        schedule(state, conversation_id, at).await?;
+    }
+
+    Ok(Some(limit.payload["usage_limit"].clone()))
+}
+
 pub async fn schedule(state: &AppState, conversation_id: Uuid, at: DateTime<Utc>) -> ApiResult<()> {
-    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set resume_at = $2 where id = $1 and status = 'failed' returning {CONVERSATION_COLUMNS}")))
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set resume_at = $2 where id = $1 and resume_at is distinct from $2 returning {CONVERSATION_COLUMNS}")))
         .bind(conversation_id)
         .bind(at)
         .fetch_optional(&state.pool)
@@ -196,14 +236,16 @@ pub async fn schedule(state: &AppState, conversation_id: Uuid, at: DateTime<Utc>
 pub async fn resume(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<ResumeRequest>>) -> ApiResult<StatusCode> {
     let row = find_owned(&state.pool, id, user.id).await?;
 
-    if row.status != "failed" {
+    let limit = latest_limit(&state, id).await?;
+
+    if row.status != "failed" && limit.is_none() {
         return Err(ApiError::conflict("not_failed", "This conversation has not stopped, so there is nothing to resume."));
     }
 
     let chosen = request.and_then(|Json(request)| request.at);
     let at = match chosen {
         Some(at) => at,
-        None => reset_of_latest_failure(&state, id).await?.map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS)).ok_or_else(|| ApiError::conflict("no_reset_time", "Mycelium does not know when the limit resets. Choose a time to resume."))?,
+        None => limit.flatten().map(|at| at + Duration::seconds(RESUME_DELAY_SECONDS)).ok_or_else(|| ApiError::conflict("no_reset_time", "Mycelium does not know when the limit resets. Choose a time to resume."))?,
     };
 
     schedule(&state, id, at.max(Utc::now())).await?;
@@ -225,17 +267,17 @@ pub async fn cancel_resume(State(state): State<AppState>, user: AuthUser, Path(i
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn reset_of_latest_failure(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<DateTime<Utc>>> {
-    let payload = sqlx::query_scalar::<_, Value>("select payload from events where conversation_id = $1 and kind = 'error' order by seq desc limit 1").bind(conversation_id).fetch_optional(&state.pool).await?;
+async fn latest_limit(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Option<DateTime<Utc>>>> {
+    let payload = sqlx::query_scalar::<_, Value>("select payload from events where conversation_id = $1 and kind in ('error', 'workflow') and payload ? 'usage_limit' order by seq desc limit 1").bind(conversation_id).fetch_optional(&state.pool).await?;
 
-    Ok(payload.and_then(|payload| payload["usage_limit"]["resets_at"].as_str().and_then(|at| at.parse().ok())))
+    Ok(payload.map(|payload| payload["usage_limit"]["resets_at"].as_str().and_then(|at| at.parse().ok())))
 }
 
 pub async fn get_setting(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<UsageLimitSetting>> {
     let stored = sqlx::query_scalar::<_, String>("select on_usage_limit from user_settings where owner = $1").bind(user.id).fetch_optional(&state.pool).await?;
     let on_usage_limit = match stored {
         Some(text) => parse_enum(&text)?,
-        None => OnUsageLimit::Ask,
+        None => OnUsageLimit::Resume,
     };
 
     Ok(Json(UsageLimitSetting { on_usage_limit }))
@@ -278,10 +320,6 @@ async fn resume_due(state: &AppState) -> ApiResult<()> {
 
 async fn resume_one(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     let row = find_owned(&state.pool, id, owner).await?;
-
-    if row.status != "failed" {
-        return Ok(());
-    }
 
     if !state.hub.is_online(row.node_id) {
         return Err(node_offline());
