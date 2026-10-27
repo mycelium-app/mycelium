@@ -1,4 +1,5 @@
-use crate::git::{git, status};
+use crate::git::git;
+use crate::git::history::status;
 use mycelium_proto::link::RowRange;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -301,6 +302,7 @@ fn hunk_numbers(line: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::test_support as support;
 
     fn repository(files: u32, lines: u32) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -333,7 +335,7 @@ mod tests {
         change(&dir, 0, 40);
         std::fs::write(dir.path().join("new.txt"), "a\nb\nc\n").unwrap();
 
-        let layout = layout(dir.path()).unwrap();
+        let layout = super::layout(dir.path()).unwrap();
         let first = entry(&layout, "f000.txt");
         let untracked = entry(&layout, "new.txt");
 
@@ -363,10 +365,10 @@ mod tests {
         let dir = repository(2, 5);
         change(&dir, 0, 5);
         change(&dir, 1, 5);
-        let before = layout(dir.path()).unwrap();
+        let before = super::layout(dir.path()).unwrap();
 
         change(&dir, 1, 7);
-        let after = layout(dir.path()).unwrap();
+        let after = super::layout(dir.path()).unwrap();
 
         assert_eq!(entry(&before, "f000.txt")["fingerprint"], entry(&after, "f000.txt")["fingerprint"]);
         assert_ne!(entry(&before, "f001.txt")["fingerprint"], entry(&after, "f001.txt")["fingerprint"]);
@@ -382,15 +384,43 @@ mod tests {
         }
 
         let started = std::time::Instant::now();
-        let cold = layout(dir.path()).unwrap();
+        let cold = super::layout(dir.path()).unwrap();
         let cold_time = started.elapsed();
         let started = std::time::Instant::now();
-        let warm = layout(dir.path()).unwrap();
+        let warm = super::layout(dir.path()).unwrap();
         let warm_time = started.elapsed();
         let total: u64 = cold["files"].as_array().unwrap().iter().map(|file| file["rows"].as_u64().unwrap()).sum();
 
         eprintln!("layout of 200 files and {total} rows: cold {cold_time:?}, warm {warm_time:?}");
         assert_eq!(cold, warm);
         assert_eq!(total, 200 * 201);
+    }
+
+    #[test]
+    fn one_hunk_can_be_staged_unstaged_or_reverted_without_changing_the_other() {
+        let dir = support::repository();
+        let original = (1..30).map(|line| format!("line {line}\n")).collect::<String>();
+        support::write(&dir, "a.txt", &original);
+        support::commit_all(&dir, "initial");
+        let edited = original.replace("line 2\n", "first edit\n").replace("line 25\n", "second edit\n");
+        support::write(&dir, "a.txt", &edited);
+        let layout = super::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        let fingerprint = file["fingerprint"].as_str().unwrap();
+        assert_eq!(file["hunks"].as_array().unwrap().len(), 2);
+        apply_hunk(dir.path(), "a.txt", 0, fingerprint, "stage").unwrap();
+        let staged = String::from_utf8(git(dir.path(), &["diff", "--cached"], &[]).unwrap()).unwrap();
+        assert!(staged.contains("first edit"));
+        assert!(!staged.contains("second edit"));
+        assert!(apply_hunk(dir.path(), "a.txt", 0, fingerprint, "revert").is_err());
+        let layout = super::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        apply_hunk(dir.path(), "a.txt", 0, file["fingerprint"].as_str().unwrap(), "unstage").unwrap();
+        assert!(git(dir.path(), &["diff", "--cached"], &[]).unwrap().is_empty());
+        let layout = super::layout(dir.path()).unwrap();
+        let file = &layout["files"][0];
+        let second_row = file["hunks"][1].as_u64().unwrap() as u32;
+        apply_hunk(dir.path(), "a.txt", second_row, file["fingerprint"].as_str().unwrap(), "revert").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), original.replace("line 2\n", "first edit\n"));
     }
 }
