@@ -268,7 +268,7 @@ impl Daemon {
     pub fn handle(&self, message: ControlToNode) {
         match message {
             ControlToNode::Ack { conversation_id, seq } => self.with_session(conversation_id, |session| session.ack(seq)),
-            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, env),
+            ControlToNode::StartSession { conversation_id, agent, cwd, resume, fork, account, instructions, reload, env } => self.start_session(conversation_id, agent, &cwd, resume, fork, account, instructions, reload, env),
             ControlToNode::SecretsChanged { conversation_id, env } => self.rewrite_secrets(conversation_id, &env),
             ControlToNode::Instructions { revision, global, take_over } => self.hold_instructions(revision, global, take_over),
             ControlToNode::Prompt { conversation_id, prompt_id, text, attachments } => self.prompt(conversation_id, prompt_id, text, attachments),
@@ -523,11 +523,11 @@ impl Daemon {
         }
     }
 
-    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, secrets: Vec<(String, String)>) {
+    fn start_session(&self, conversation_id: Uuid, agent: AgentId, cwd: &str, resume: Option<String>, fork: bool, account: Option<String>, instructions: Option<String>, reload: bool, secrets: Vec<(String, String)>) {
         let existing = self.session_handles();
         let running_here = existing.iter().find(|(id, handle)| *id == conversation_id && handle.running());
         if let Some((_, handle)) = running_here {
-            if handle.launched_as(agent, &account) && !self.secrets_differ_from_launch(conversation_id, &secrets) {
+            if !reload && handle.launched_as(agent, &account) && !self.secrets_differ_from_launch(conversation_id, &secrets) {
                 return;
             }
 

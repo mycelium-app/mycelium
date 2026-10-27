@@ -1,4 +1,4 @@
-use crate::assistants::INSTRUCTIONS_PATH;
+use crate::assistants::{self, INSTRUCTIONS_PATH};
 use crate::auth::AuthUser;
 use crate::chats::{RICH_MARKDOWN_INSTRUCTIONS, generated_ui_instructions};
 use crate::mcp::tools_instructions;
@@ -19,6 +19,11 @@ use uuid::Uuid;
 
 const GLOBAL: &str = "global";
 const DEFAULT_PATH: &str = "AGENTS.md";
+const ASSISTANT_PREFIX: &str = "assistant:";
+
+pub fn assistant_layer(id: Uuid) -> String {
+    format!("{ASSISTANT_PREFIX}{id}")
+}
 
 #[derive(sqlx::FromRow)]
 struct SourceRow {
@@ -38,15 +43,20 @@ pub struct Layer {
     pub key: String,
     pub name: String,
     group_id: Option<Uuid>,
+    assistant_id: Option<Uuid>,
 }
 
 impl Layer {
     fn global() -> Layer {
-        Layer { key: GLOBAL.to_string(), name: "Global".to_string(), group_id: None }
+        Layer { key: GLOBAL.to_string(), name: "Global".to_string(), group_id: None, assistant_id: None }
     }
 
     fn of_group(group: GroupRow) -> Layer {
-        Layer { key: group.id.to_string(), name: group.name, group_id: Some(group.id) }
+        Layer { key: group.id.to_string(), name: group.name, group_id: Some(group.id), assistant_id: None }
+    }
+
+    fn of_assistant(id: Uuid, name: String) -> Layer {
+        Layer { key: assistant_layer(id), name, group_id: None, assistant_id: Some(id) }
     }
 
     fn path(&self, global_path: &str) -> String {
@@ -82,6 +92,15 @@ pub async fn current_revision(state: &AppState) -> ApiResult<Option<String>> {
     Ok(sqlx::query_scalar::<_, String>("select id from instruction_versions order by seq desc limit 1").fetch_optional(&state.pool).await?)
 }
 
+pub async fn on_older_revision(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+    let Some(current) = current_revision(state).await? else {
+        return Ok(false);
+    };
+    let held = sqlx::query_scalar::<_, Option<String>>("select instructions_revision from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.flatten();
+
+    Ok(held.as_deref() != Some(current.as_str()))
+}
+
 async fn layers_of(state: &AppState, user: &AuthUser) -> ApiResult<Vec<Layer>> {
     let groups = sqlx::query_as::<_, GroupRow>("select id, name, created_at from groups where owner = $1 order by lower(name), id").bind(user.id).fetch_all(&state.pool).await?;
     let mut layers = vec![Layer::global()];
@@ -93,6 +112,13 @@ async fn layers_of(state: &AppState, user: &AuthUser) -> ApiResult<Vec<Layer>> {
 pub async fn find_layer(state: &AppState, user: &AuthUser, key: &str) -> ApiResult<Layer> {
     if key == GLOBAL {
         return Ok(Layer::global());
+    }
+
+    if let Some(assistant_id) = key.strip_prefix(ASSISTANT_PREFIX) {
+        let id = assistant_id.parse::<Uuid>().map_err(|_| ApiError::not_found("That instructions layer"))?;
+        let assistant = assistants::load(state, user.id, id).await?;
+
+        return Ok(Layer::of_assistant(id, assistant.name));
     }
 
     let id = key.parse::<Uuid>().map_err(|_| ApiError::not_found("That instructions layer"))?;
@@ -213,20 +239,12 @@ async fn conversation_layers(state: &AppState, conversation_id: Uuid, with_globa
     Ok(global.into_iter().chain(group).chain(assistant).filter(|text| !text.trim().is_empty()).collect())
 }
 
-const TEACH_ME_INSTRUCTIONS: &str = "Teach me mode is on for this conversation. The person wants to learn, not to receive finished code. Answer with hints, explanations and questions that lead them to the solution, and show at most a short fragment where it clarifies a point. Do not edit, create or delete files, and do not run commands that change anything. If they ask you to just do it, offer to explain the approach first and tell them they can switch Teach me off.";
+const TEACH_ME_INSTRUCTIONS: &str = "Teach me mode is on for this conversation. The person wants to learn, not to receive finished code. Answer with hints, explanations and questions that lead them to the solution, and show at most a short fragment where it clarifies a point. Do not edit, create or delete files, and do not run commands that change anything. If they ask you to just do it, offer to explain the approach first and tell them they can switch Teach me off. When they show they have understood something, call note_learned once with a sentence naming it.";
 
 pub async fn teach_me_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
     let on = sqlx::query_scalar::<_, bool>("select teach_me from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.unwrap_or(false);
 
     Ok(on.then(|| TEACH_ME_INSTRUCTIONS.to_string()))
-}
-
-const EXERCISE_REVIEW_INSTRUCTIONS: &str = "This conversation is reviewing the person's solution to a practice exercise. Never edit, create or delete files. Read the changes, comment on specific lines, and ask a question where a hint will teach more than an answer. Call save_exercise_review once with a short summary and the comments.";
-
-pub async fn exercise_review_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
-    let reviewing = sqlx::query_scalar::<_, bool>("select exists (select 1 from exercises where conversation_id = $1 and reviewing)").bind(conversation_id).fetch_one(&state.pool).await?;
-
-    Ok(reviewing.then(|| EXERCISE_REVIEW_INSTRUCTIONS.to_string()))
 }
 
 pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<String>> {
@@ -237,7 +255,6 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let extensions = extensions_of(state, owner).await?;
     let teach_me = teach_me_layer(state, conversation_id).await?;
-    let exercise_review = exercise_review_layer(state, conversation_id).await?;
     let layers: Vec<String> = conversation_layers(state, conversation_id, false)
         .await?
         .into_iter()
@@ -245,7 +262,6 @@ pub async fn session_layer(state: &AppState, conversation_id: Uuid) -> ApiResult
         .chain(extensions.rich_markdown.then(|| RICH_MARKDOWN_INSTRUCTIONS.to_string()))
         .chain(extensions.mycelium_tools.then(tools_instructions))
         .chain(teach_me)
-        .chain(exercise_review)
         .collect();
 
     Ok((!layers.is_empty()).then(|| layers.join("\n\n")))
@@ -267,7 +283,29 @@ pub async fn get(State(state): State<AppState>, user: AuthUser) -> ApiResult<Jso
     Ok(Json(describe(&state, &user).await?))
 }
 
+pub async fn record_assistant_version(state: &AppState, assistant_id: Uuid, text: &str) -> ApiResult<()> {
+    let key = assistant_layer(assistant_id);
+    let unchanged = latest(state, &key).await?.is_some_and(|version| version.text == text);
+
+    if unchanged {
+        return Ok(());
+    }
+
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from assistants where id = $1").bind(assistant_id).fetch_one(&state.pool).await?;
+    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
+
+    record(state, &user, &Layer::of_assistant(assistant_id, String::new()), text, None).await
+}
+
 pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str) -> ApiResult<()> {
+    if let Some(assistant_id) = layer.assistant_id {
+        assistants::store_file(state, assistant_id, INSTRUCTIONS_PATH, text.as_bytes()).await?;
+        assistants::publish(state, user.id, assistant_id).await?;
+        crate::assistant_backup::trigger(state, user.id, assistant_id);
+
+        return Ok(());
+    }
+
     let unchanged = latest(state, &layer.key).await?.is_some_and(|version| version.text == text);
 
     if !unchanged {

@@ -165,7 +165,7 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -183,6 +183,7 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
     .bind(request.side_kind.as_ref().map(enum_text))
     .bind(&worktree_branch)
     .bind(assistant_id)
+    .bind(request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()))
     .fetch_one(&mut *tx)
     .await?;
 
@@ -198,7 +199,7 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
 
     let instructions = instructions::session_layer(state, row.id).await?;
     let env = assistants::secret_env(state, row.id).await?;
-    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: fork_of.clone(), fork: fork_of.is_some(), account: account.map(str::to_string), instructions, env });
+    let started = state.hub.send(request.node_id, ControlToNode::StartSession { conversation_id: row.id, agent: request.agent, cwd, resume: fork_of.clone(), fork: fork_of.is_some(), account: account.map(str::to_string), instructions, reload: false, env });
 
     if !started {
         sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
@@ -264,6 +265,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         prompt,
         parent_id: Some(id),
         side_kind: Some(request.kind),
+        model: None,
     };
     let conversation = start(&state, &user, started).await?;
 

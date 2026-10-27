@@ -241,7 +241,7 @@ fn seq_of(message: &NodeToControl) -> Option<i64> {
 }
 
 async fn start_conversation(connection: &mut Connection, conversation: Uuid) {
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
     connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
 }
 
@@ -294,7 +294,7 @@ async fn a_prompt_streams_updates_then_turn_end_and_keeps_reading_the_late_updat
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(1);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
     let started = connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
     let NodeToControl::SessionStarted { acp_session_id, modes, .. } = started else {
         unreachable!();
@@ -555,7 +555,7 @@ async fn at_the_session_limit_the_least_recently_used_idle_session_is_closed_to_
     prompt(&connection, first, "hello");
     connection.next_matching(|message| update_text(message).as_deref() == Some("late")).await;
 
-    connection.send(ControlToNode::StartSession { conversation_id: third, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: third, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
 
     let closed = connection.next_matching(|message| matches!(message, NodeToControl::SessionClosed { .. })).await;
     assert!(matches!(closed, NodeToControl::SessionClosed { conversation_id } if conversation_id == second));
@@ -576,7 +576,7 @@ async fn at_the_session_limit_with_every_session_busy_the_new_one_is_refused_wit
     prompt(&connection, busy, "do something slow");
     connection.next_matching(|message| update_text(message).as_deref() == Some("working")).await;
 
-    connection.send(ControlToNode::StartSession { conversation_id: refused, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: refused, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -593,7 +593,7 @@ async fn a_missing_folder_fails_the_session_with_a_reason() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(6);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -610,7 +610,7 @@ async fn an_account_the_node_does_not_hold_fails_the_session_with_a_reason() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(8);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: Some("nobody@example.com".into()), instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: Some("nobody@example.com".into()), instructions: None, reload: false, env: vec![] });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -632,7 +632,7 @@ async fn a_folder_outside_the_projects_root_is_refused() {
 
     for (index, cwd) in escapes.into_iter().enumerate() {
         let conversation = Uuid::from_u128(100 + index as u128);
-        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: cwd.clone(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: cwd.clone(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
 
         let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { conversation_id, .. } if *conversation_id == conversation)).await;
         let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -649,7 +649,7 @@ async fn an_agent_that_is_not_installed_fails_the_session() {
     let _daemon = fixture.start_daemon();
     let mut connection = control.accept().await;
 
-    connection.send(ControlToNode::StartSession { conversation_id: Uuid::from_u128(7), agent: AgentId::Codex, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: Uuid::from_u128(7), agent: AgentId::Codex, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
 
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let NodeToControl::SessionFailed { message, .. } = failed else {
@@ -683,7 +683,7 @@ async fn a_session_started_while_the_previous_one_is_closing_replaces_it_and_tak
     start_conversation(&mut connection, conversation).await;
 
     connection.send(ControlToNode::CloseSession { conversation_id: conversation });
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
     connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
     prompt(&connection, conversation, "hello");
 
@@ -701,7 +701,7 @@ async fn secrets_live_in_a_private_file_that_follows_changes_and_a_changed_start
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(19);
     let file = fixture.session_dir(conversation).join("secrets.env");
-    let start = |token: &str| ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![("TOKEN".into(), token.into())] };
+    let start = |token: &str| ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![("TOKEN".into(), token.into())] };
 
     connection.send(start("it's one"));
     connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
@@ -719,6 +719,29 @@ async fn secrets_live_in_a_private_file_that_follows_changes_and_a_changed_start
 }
 
 #[tokio::test]
+async fn a_reload_start_closes_the_idle_session_and_resumes_it_with_the_same_session_id() {
+    let mut control = ControlServer::start().await;
+    let mut fixture = Fixture::new(&control.url);
+    let agent = fake_acp();
+    fixture.options.agent_commands = Arc::new(move |_| vec![agent.clone()]);
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+    let conversation = Uuid::from_u128(19);
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: Some("old".into()), reload: false, env: vec![] });
+    let started = connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    let NodeToControl::SessionStarted { acp_session_id, .. } = started else { panic!("expected a started session") };
+
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "demo".into(), resume: Some(acp_session_id.clone()), fork: false, account: None, instructions: Some("new".into()), reload: true, env: vec![] });
+    let resumed = connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
+    let NodeToControl::SessionStarted { acp_session_id: resumed_id, .. } = resumed else { panic!("expected a resumed session") };
+    prompt(&connection, conversation, "hello");
+    let reply = connection.next_matching(|message| update_text(message).is_some()).await;
+
+    assert_eq!(resumed_id, acp_session_id);
+    assert_eq!(update_text(&reply).unwrap(), "one");
+}
+
+#[tokio::test]
 async fn a_session_started_for_another_agent_replaces_the_running_one() {
     let mut control = ControlServer::start().await;
     let mut fixture = Fixture::new(&control.url);
@@ -729,7 +752,7 @@ async fn a_session_started_for_another_agent_replaces_the_running_one() {
     let conversation = Uuid::from_u128(19);
     start_conversation(&mut connection, conversation).await;
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Codex, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Codex, cwd: "demo".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
     connection.next_matching(|message| matches!(message, NodeToControl::SessionStarted { .. })).await;
     prompt(&connection, conversation, "hello");
 
@@ -1035,7 +1058,7 @@ async fn repeated_refusals_for_one_conversation_use_increasing_seqs() {
 
     let mut seqs = Vec::new();
     for _ in 0..3 {
-        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+        connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
         let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
         seqs.push(seq_of(&failed).unwrap());
     }
@@ -1051,7 +1074,7 @@ async fn a_session_started_after_a_refusal_continues_above_the_refusal_seq() {
     let mut connection = control.accept().await;
     let conversation = Uuid::from_u128(15);
 
-    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, env: vec![] });
+    connection.send(ControlToNode::StartSession { conversation_id: conversation, agent: AgentId::Claude, cwd: "nowhere".into(), resume: None, fork: false, account: None, instructions: None, reload: false, env: vec![] });
     let failed = connection.next_matching(|message| matches!(message, NodeToControl::SessionFailed { .. })).await;
     let refused_at = seq_of(&failed).unwrap();
 

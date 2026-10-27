@@ -323,7 +323,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
 
             let natively = agent == AgentId::Claude && source.acp_session_id.is_some();
             let instructions = instructions::session_layer(state, forked.id).await.map_err(|error| reason(error.message()))?;
-            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions, env: Vec::new() });
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id: forked.id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: natively, account: source.account.clone(), instructions, reload: false, env: Vec::new() });
 
             match wait_for_session(state, target_node_id, forked.id, &target_name).await {
                 Ok(()) => {
@@ -346,7 +346,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
 
             sqlx::query("update conversations set node_id = $2, cwd = $3, project_id = $4, updated_at = now() where id = $1").bind(conversation_id).bind(target_node_id).bind(&target_cwd).bind(target_project.id).execute(&state.pool).await.map_err(|error| reason(ApiError::from(error).message()))?;
             let instructions = instructions::session_layer(state, conversation_id).await.map_err(|error| reason(error.message()))?;
-            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions, env: Vec::new() });
+            state.hub.send(target_node_id, ControlToNode::StartSession { conversation_id, agent, cwd: target_cwd.clone(), resume: source.acp_session_id.clone(), fork: false, account: source.account.clone(), instructions, reload: false, env: Vec::new() });
 
             match wait_for_session(state, target_node_id, conversation_id, &target_name).await {
                 Ok(()) => {

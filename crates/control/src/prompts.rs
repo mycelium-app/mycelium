@@ -71,7 +71,8 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         None => text.clone(),
     };
     let loaded = attachments::for_node(state, &attachments).await?;
-    let starts_session = !state.hub.has_session(node_id, conversation_id) || state.hub.secrets_stale(conversation_id);
+    let reloads = state.hub.has_session(node_id, conversation_id) && instructions::on_older_revision(state, conversation_id).await?;
+    let starts_session = !state.hub.has_session(node_id, conversation_id) || state.hub.secrets_stale(conversation_id) || reloads;
     let session = match starts_session {
         true => Some((instructions::session_layer(state, conversation_id).await?, crate::assistants::secret_env(state, conversation_id).await?, parse_enum(&agent)?)),
         false => None,
@@ -93,7 +94,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         .execute(&mut *tx)
         .await?;
 
-    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = 'working', agent_active = true, last_activity_at = now(), updated_at = now() where id = $1 returning {CONVERSATION_COLUMNS}")))
+    let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set status = 'working', agent_active = true, last_activity_at = now(), updated_at = now(), resume_at = null where id = $1 returning {CONVERSATION_COLUMNS}")))
         .bind(conversation_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -105,7 +106,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         }
 
         state.hub.secrets_fresh(conversation_id);
-        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, env });
+        state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, reload: reloads, env });
     }
 
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: sent_text.clone(), attachments });
@@ -238,7 +239,7 @@ pub async fn retry_failed(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<
     state.add_session(row.node_id, id).await?;
     let instructions = instructions::session_layer(state, id).await?;
     let env = crate::assistants::secret_env(state, id).await?;
-    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions, env });
+    state.hub.send(row.node_id, ControlToNode::StartSession { conversation_id: id, agent: parse_enum(&row.agent)?, cwd: row.cwd.clone(), resume: row.acp_session_id.clone(), fork: false, account: row.account.clone(), instructions, reload: false, env });
     state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
     pump(state, id, true).await?;
 

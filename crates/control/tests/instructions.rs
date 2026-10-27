@@ -359,6 +359,38 @@ async fn sessions_started_before_the_latest_save_are_counted_as_on_an_older_vers
 }
 
 #[tokio::test]
+async fn an_idle_session_on_an_older_revision_is_reloaded_before_the_next_prompt_and_only_then() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let project = project_in(&server, &mut link, "app", None).await;
+    save(&server, "global", "# One").await;
+    expect_instructions(&mut link).await;
+    let (conversation, _) = start_in(&server, &mut link, project).await;
+    link.start_session(conversation, "acp-1").await;
+    save(&server, "global", "# Two").await;
+    expect_instructions(&mut link).await;
+
+    let prompt_url = format!("/api/v1/conversations/{conversation}/prompt");
+    let (status, _) = server.user.json(server.user.post(&prompt_url).json(&json!({"text": "first"}))).await;
+    assert_eq!(status, 204);
+
+    match link.next().await {
+        ControlToNode::StartSession { reload, resume, .. } => assert_eq!((reload, resume.as_deref()), (true, Some("acp-1"))),
+        other => panic!("expected a reload before the prompt, got {other:?}"),
+    }
+
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "first");
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation, seq: 1, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(conversation, 2).await;
+
+    let (status, _) = server.user.json(server.user.post(&prompt_url).json(&json!({"text": "second"}))).await;
+    assert_eq!(status, 204);
+    let (_, text) = link.expect_prompt().await;
+    assert_eq!(text, "second");
+}
+
+#[tokio::test]
 async fn memories_remembered_into_the_group_are_recalled_only_by_its_projects() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
@@ -1002,6 +1034,25 @@ async fn declining_records_the_note_and_tells_the_agent_and_redo_asks_it_to_prop
     let (_, redo_message) = link.expect_prompt().await;
     assert_eq!(redone["state"], json!("declined"));
     assert!(redo_message.contains("propose it again on the current text"), "{redo_message}");
+}
+
+#[tokio::test]
+async fn declining_without_telling_the_agent_sends_it_no_message() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let token = link.token.clone();
+    let conversation = conversation_with_session(&server, &mut link, "/anywhere").await;
+    propose(&server, &token, conversation, json!({"text": "First", "base_revision": "none", "reason": "because"})).await;
+    let first = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+
+    let (status, declined) = server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{first}/decline")).json(&json!({"notify": false}))).await;
+    propose(&server, &token, conversation, json!({"text": "Second", "base_revision": "none", "reason": "because"})).await;
+    let second = proposals(&server).await[0]["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.post(&format!("/api/v1/instruction-proposals/{second}/decline")).json(&json!({"redo": true}))).await;
+    let (_, message) = link.expect_prompt().await;
+
+    assert_eq!((status, declined["state"].clone()), (200, json!("declined")));
+    assert!(message.contains("propose it again on the current text"), "the first prompt the agent saw was {message}");
 }
 
 #[tokio::test]
