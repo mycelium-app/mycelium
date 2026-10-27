@@ -212,6 +212,17 @@ const SILENT_ROUTES: &[&str] = &[
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
     "PUT /api/v1/artifacts/{id}/data/{key}",
     "PUT /internal/artifacts/by-slug/{slug}/data/{key}",
+    "POST /api/v1/chat-tool-servers/probe",
+    "POST /api/v1/chat-tool-servers/test",
+    "POST /api/v1/chat-tool-servers/caldav-test",
+    "POST /api/v1/decision-providers",
+    "POST /api/v1/decision-providers/test",
+    "PATCH /api/v1/decision-providers/{id}",
+    "DELETE /api/v1/decision-providers/{id}",
+    "PUT /api/v1/groups/{id}/hours",
+    "POST /api/v1/groups/{id}/open",
+    "DELETE /api/v1/groups/{id}/open",
+    "POST /api/v1/nodes/{id}/ssh-tokens",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {

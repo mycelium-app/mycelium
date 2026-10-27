@@ -85,7 +85,7 @@ async fn tools_list_includes_a_connected_servers_tools_under_a_prefixed_name_and
     assert!(names(&listed).contains(&"recall".to_string()));
 
     let tool = listed["result"]["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "lab__get_weather").unwrap();
-    assert_eq!(tool["description"], "Lab: Get the weather.");
+    assert!(tool["description"].as_str().unwrap().starts_with("Lab: Get the weather. Any text argument can be {\"file\""));
 
     let called = mcp(&server, &token, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "lab__get_weather", "arguments": {"city": "Oslo"}}})).await;
     assert_eq!(called["result"]["content"][0]["text"], "Sunny in Oslo");
