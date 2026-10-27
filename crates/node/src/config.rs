@@ -97,24 +97,32 @@ impl NodeConfig {
     }
 
     pub fn ssh_url(&self, node: &str) -> Result<String> {
-        let socket_base = self.socket_base()?;
-
-        Ok(format!("{socket_base}/api/v1/nodes/{}/ssh", percent_encode(node)))
+        ssh_url_at(&self.control_plane, node)
     }
 
     fn socket_base(&self) -> Result<String> {
-        let base = self.control_plane.trim_end_matches('/');
-
-        if let Some(rest) = base.strip_prefix("https://") {
-            return Ok(format!("wss://{rest}"));
-        }
-
-        if let Some(rest) = base.strip_prefix("http://") {
-            return Ok(format!("ws://{rest}"));
-        }
-
-        anyhow::bail!("The control plane address {base} must start with https:// or http://.");
+        socket_base_of(&self.control_plane)
     }
+}
+
+pub fn ssh_url_at(control_plane: &str, node: &str) -> Result<String> {
+    let socket_base = socket_base_of(control_plane)?;
+
+    Ok(format!("{socket_base}/api/v1/nodes/{}/ssh", percent_encode(node)))
+}
+
+fn socket_base_of(control_plane: &str) -> Result<String> {
+    let base = control_plane.trim_end_matches('/');
+
+    if let Some(rest) = base.strip_prefix("https://") {
+        return Ok(format!("wss://{rest}"));
+    }
+
+    if let Some(rest) = base.strip_prefix("http://") {
+        return Ok(format!("ws://{rest}"));
+    }
+
+    anyhow::bail!("The control plane address {base} must start with https:// or http://.");
 }
 
 pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {

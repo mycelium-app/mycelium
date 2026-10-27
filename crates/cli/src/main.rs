@@ -40,6 +40,8 @@ enum Command {
         node: String,
         #[arg(long)]
         token_file: PathBuf,
+        #[arg(long)]
+        control_plane: Option<String>,
     },
     /// Print the version
     Version,
@@ -85,7 +87,7 @@ async fn main() -> Result<()> {
         }
         Command::Node { command: NodeCommand::Status } => mycelium_node::status().await,
         Command::Keeper { dir, command } => mycelium_keeper::run(dir, command).await,
-        Command::SshProxy { node, token_file } => mycelium_node::ssh_proxy::run(node, token_file).await,
+        Command::SshProxy { node, token_file, control_plane } => mycelium_node::ssh_proxy::run(node, token_file, control_plane).await,
         Command::Version => {
             println!("{VERSION}");
 

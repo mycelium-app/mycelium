@@ -306,3 +306,26 @@ async fn declining_tells_the_agent_and_mints_nothing() {
     let (status, body) = approve(&fixture.server, &id, json!({})).await;
     assert_eq!((status, body["error"].clone()), (409, json!("request_not_requested")));
 }
+
+#[tokio::test]
+async fn a_person_mints_a_short_token_for_their_node_and_it_opens_a_session_without_a_conversation() {
+    let mut fixture = fixture().await;
+    let (status, minted) = fixture.server.user.json(fixture.server.user.post(&format!("/api/v1/nodes/{}/ssh-tokens", fixture.target.id))).await;
+    assert_eq!(status, 200, "{minted}");
+    let token = minted["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("myc_ssh_"));
+
+    let (mut person, session_id) = open_session(&mut fixture, &token).await;
+    person.send(Message::Binary(b"SSH-2.0-zed".to_vec().into())).await.unwrap();
+
+    assert_eq!(fixture.target.next().await, ControlToNode::SshData { session_id, data: STANDARD.encode(b"SSH-2.0-zed") });
+    assert_eq!(refusal(open(&fixture.server, &fixture.agent_node.id.to_string(), Some(&token)).await), 403);
+}
+
+#[tokio::test]
+async fn a_token_for_a_node_that_does_not_exist_is_not_minted() {
+    let fixture = fixture().await;
+    let (status, _) = fixture.server.user.json(fixture.server.user.post(&format!("/api/v1/nodes/{}/ssh-tokens", Uuid::new_v4()))).await;
+
+    assert_eq!(status, 404);
+}

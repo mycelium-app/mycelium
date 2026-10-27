@@ -9,7 +9,7 @@ use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use mycelium_proto::api::{ApproveSshAccessRequest, SshAccessRequest, SshAccessState};
+use mycelium_proto::api::{ApproveSshAccessRequest, SshAccessRequest, SshAccessState, SshToken};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use std::collections::HashMap;
@@ -24,6 +24,8 @@ const MIN_MINUTES: i64 = 5;
 const MAX_MINUTES: i64 = 240;
 const LISTED: i64 = 100;
 const TOKEN_PREFIX: &str = "myc_ssh_";
+const PERSON_TOKEN_MINUTES: i64 = 10;
+const PERSON_SESSION_HOURS: i64 = 12;
 const NODE_WATCH: Duration = Duration::from_secs(5);
 
 const REQUEST_COLUMNS: &str = "r.id, r.conversation_id, r.node_id, n.name as node_name, r.minutes, r.reason, r.state, r.created_at, r.decided_at, r.expires_at";
@@ -133,6 +135,21 @@ pub async fn request(state: &AppState, conversation_id: Uuid, node: &str, minute
         .await?;
 
     Ok(Ok(publish(state, owner, find_owned(state, id, owner).await?)))
+}
+
+pub async fn mint_for_person(State(state): State<AppState>, user: AuthUser, Path(node_id): Path<Uuid>) -> ApiResult<Json<SshToken>> {
+    let exists = sqlx::query_scalar::<_, bool>("select exists (select 1 from nodes where id = $1 and revoked_at is null)").bind(node_id).fetch_one(&state.pool).await?;
+
+    if !exists {
+        return Err(ApiError::not_found("That node"));
+    }
+
+    let secret = new_token();
+    let expires_at = chrono::Utc::now() + chrono::Duration::minutes(PERSON_TOKEN_MINUTES);
+    sqlx::query("delete from person_ssh_tokens where expires_at < now()").execute(&state.pool).await?;
+    sqlx::query("insert into person_ssh_tokens (owner, node_id, token_hash, expires_at) values ($1, $2, $3, $4)").bind(user.id).bind(node_id).bind(hash_token(&secret)).bind(expires_at).execute(&state.pool).await?;
+
+    Ok(Json(SshToken { token: format!("{TOKEN_PREFIX}{secret}"), expires_at }))
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<SshAccessRequest>>> {
@@ -282,7 +299,15 @@ pub async fn connect(State(state): State<AppState>, Path(node): Path<String>, he
         .bind(hash_token(secret))
         .fetch_optional(&state.pool)
         .await?;
-        let (request_id, owner, conversation_id, target, target_name, expires_at) = grant.ok_or_else(ApiError::unauthorised)?;
+        let person = match grant {
+            Some(_) => None,
+            None => sqlx::query_as::<_, (Uuid, Uuid, String)>("select t.id, t.node_id, n.name from person_ssh_tokens t join nodes n on n.id = t.node_id where t.token_hash = $1 and t.expires_at > now()").bind(hash_token(secret)).fetch_optional(&state.pool).await?,
+        };
+        let (request_id, agent_grant, target, target_name, expires_at) = match (grant, person) {
+            (Some((request_id, owner, conversation_id, target, target_name, expires_at)), _) => (request_id, Some((owner, conversation_id)), target, target_name, expires_at),
+            (None, Some((token_id, target, target_name))) => (token_id, None, target, target_name, chrono::Utc::now() + chrono::Duration::hours(PERSON_SESSION_HOURS)),
+            (None, None) => return Err(ApiError::unauthorised()),
+        };
 
         if node != target.to_string() && !node.eq_ignore_ascii_case(&target_name) {
             return Err(ApiError::new(StatusCode::FORBIDDEN, "ssh_wrong_node", "This access covers another node."));
@@ -293,8 +318,13 @@ pub async fn connect(State(state): State<AppState>, Path(node): Path<String>, he
         }
 
         let session_id = Uuid::new_v4();
-        sqlx::query("insert into ssh_sessions (id, request_id, owner, conversation_id, node_id) values ($1, $2, $3, $4, $5)").bind(session_id).bind(request_id).bind(owner).bind(conversation_id).bind(target).execute(&state.pool).await?;
-        tracing::info!("ssh session {session_id} started under request {request_id} from conversation {conversation_id} to node {target}");
+
+        if let Some((owner, conversation_id)) = agent_grant {
+            sqlx::query("insert into ssh_sessions (id, request_id, owner, conversation_id, node_id) values ($1, $2, $3, $4, $5)").bind(session_id).bind(request_id).bind(owner).bind(conversation_id).bind(target).execute(&state.pool).await?;
+            tracing::info!("ssh session {session_id} started under request {request_id} from conversation {conversation_id} to node {target}");
+        } else {
+            tracing::info!("ssh session {session_id} started under a person's token {request_id} to node {target}");
+        }
 
         let (to_agent, from_node) = mpsc::unbounded_channel::<Toward>();
         relays().insert(session_id, Relay { node_id: target, request_id, to_agent });

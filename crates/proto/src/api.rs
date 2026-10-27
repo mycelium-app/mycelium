@@ -114,6 +114,12 @@ pub struct HarnessModels {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SshToken {
+    pub token: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DrainRequest {
     pub draining: bool,
 }

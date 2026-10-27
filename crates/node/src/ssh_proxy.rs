@@ -13,10 +13,12 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const SSH_TOKEN_PREFIX: &str = "myc_ssh_";
 const READ_BYTES: usize = 32 * 1024;
 
-pub async fn run(node: String, token_file: PathBuf) -> Result<()> {
-    let config = NodeConfig::load(&config::config_path())?;
+pub async fn run(node: String, token_file: PathBuf, control_plane: Option<String>) -> Result<()> {
     let token = read_token(&token_file)?;
-    let url = config.ssh_url(&node)?;
+    let url = match control_plane {
+        Some(control_plane) => config::ssh_url_at(&control_plane, &node)?,
+        None => NodeConfig::load(&config::config_path())?.ssh_url(&node)?,
+    };
     let mut request = url.as_str().into_client_request()?;
     request.headers_mut().insert("Authorization", format!("Bearer {token}").parse()?);
 
