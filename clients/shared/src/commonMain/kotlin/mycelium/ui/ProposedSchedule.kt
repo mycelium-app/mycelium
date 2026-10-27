@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -57,7 +58,7 @@ fun ProposedScheduleCard(store: Store, schedule: Schedule, state: AppState) {
         Label(schedule.prompt, maxLines = 3)
         Label("${describeInWords(schedule.cron, schedule.timeZone)}. ${eachRunName(schedule.eachRun)}. Next run ${until(schedule.nextRunAt)}, ${whereItRuns(schedule, state)}.", color = colors.textMuted)
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton({ store.act { store.confirmSchedule(schedule, ConfirmScheduleRequest()) } }, text = "Confirm schedule", variant = ButtonVariant.Outline)
             MyButton({ reviewing = true }, text = "Change", description = "Change the proposed schedule")
             MyButton({ store.act { store.declineSchedule(schedule) } }, text = "Decline", description = "Decline the proposed schedule", muted = true)
@@ -150,7 +151,7 @@ fun ProposedScheduleDialog(store: Store, schedule: Schedule, state: AppState, on
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton({ finish { store.declineSchedule(schedule) } }, text = "Decline", description = "Decline the proposed schedule", muted = true)
             MyButton(::confirm, text = "Confirm", description = "Confirm the schedule", variant = ButtonVariant.Outline)

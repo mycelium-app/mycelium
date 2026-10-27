@@ -7,6 +7,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -222,7 +223,7 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                     cursorBrush = SolidColor(colors.text),
                     modifier = Modifier.fillMaxWidth().height(240.dp).verticalScroll(rememberScrollState()).semantics { contentDescription = "Edit $path" },
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton({
                         if (!saving) {
                             saving = true

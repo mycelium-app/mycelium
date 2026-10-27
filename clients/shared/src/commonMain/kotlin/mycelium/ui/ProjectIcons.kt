@@ -203,7 +203,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton({ choice = null; logo = null; failure = null }, text = "No icon", muted = true, selected = choice == null && logo == null)
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::save, text = "Save", variant = ButtonVariant.Outline)

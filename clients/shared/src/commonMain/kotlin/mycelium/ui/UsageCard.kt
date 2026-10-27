@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -191,7 +192,7 @@ private fun BankedResets(account: AgentAccount, banked: ResetCredits, localDateT
             Label("Codex resets the current usage limits for ${account.label}. You have ${banked.availableCount} banked. This cannot be undone.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
             failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({ key = null; failure = null }, text = "Cancel", muted = true)
                 MyButton(
                     {

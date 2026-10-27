@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
@@ -92,7 +93,7 @@ private fun GroupConnectionsBlock(store: Store) {
             failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
             OptionMenu("First group", choices, first, { first = it })
             OptionMenu("Second group", choices, second, { second = it })
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({
                     if (first == second) {
                         failure = "Choose two different groups."

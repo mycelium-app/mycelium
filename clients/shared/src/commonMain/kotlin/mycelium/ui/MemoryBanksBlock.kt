@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -119,7 +120,7 @@ fun MemoryBanksBlock(store: Store) {
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton(::save, text = if (draft.editing == null) "Create bank" else "Save bank", variant = ButtonVariant.Outline)
                 MyButton({ drafting = null }, text = "Cancel", muted = true)
             }
@@ -130,7 +131,7 @@ fun MemoryBanksBlock(store: Store) {
         Dialog(onDismiss = { deleting = null }) {
             Label("Delete the ${bank.name} bank?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
             failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({
                     attempt {
                         store.api.deleteMemoryBank(bank.id)

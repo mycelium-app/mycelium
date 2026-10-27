@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -80,7 +81,7 @@ fun ArtifactAccessDialog(artifact: Artifact, store: Store, state: AppState, onDi
             }
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Close", muted = true)
             MyButton({
                 store.act {
@@ -111,7 +112,7 @@ fun ArtifactAccessRequestCard(request: ArtifactAccessRequest, store: Store, stat
                 }
             }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({ store.act { store.decideArtifactAccessRequest(request, false) } }, text = "Decline", muted = true)
                 MyButton({ store.act { store.decideArtifactAccessRequest(request, true, project) } }, text = "Approve", variant = ButtonVariant.Outline)
             }

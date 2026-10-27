@@ -471,7 +471,7 @@ internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp 
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             onCancel?.let { MyButton(it, text = "Cancel", muted = true) }
             MyButton({ submit(answer) }, text = "Send answer", variant = ButtonVariant.Outline)
         }
@@ -562,7 +562,7 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
 
         failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::submit, text = "Add task", variant = ButtonVariant.Outline)
         }

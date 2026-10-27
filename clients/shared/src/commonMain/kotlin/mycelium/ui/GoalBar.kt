@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -146,7 +147,7 @@ private fun GoalDialog(held: Goal?, onSet: (String, GoalLimits) -> Unit, onDismi
         TextInput(fiveHour, { fiveHour = it }, label = "Stop when the account's 5-hour window reaches", placeholder = "80%", error = fiveHourError, onSubmit = ::submit)
         TextInput(weekly, { weekly = it }, label = "Stop when the account's weekly window reaches", placeholder = "80%", error = weeklyError, onSubmit = ::submit)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::submit, text = "Set goal", variant = ButtonVariant.Outline)
         }

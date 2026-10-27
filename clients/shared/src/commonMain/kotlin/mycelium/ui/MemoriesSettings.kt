@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -169,7 +170,7 @@ fun MemoriesSettings(store: Store) {
 
             Label("Move to bank", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
             OptionMenu("Bank", choices, destination ?: noBank, { destination = it.takeIf { id -> id != noBank } })
-            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({
                     store.act {
                         val moved = store.api.moveMemory(memory.id, destination)

@@ -180,7 +180,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                         TextInput(sourceRepository, { sourceRepository = it }, label = "Repository", placeholder = "owner/name", mono = true)
                         TextInput(sourcePath, { sourcePath = it }, label = "Path of the global file", placeholder = "AGENTS.md", mono = true)
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                             MyButton(
                                 {
                                     val forgeId = sourceForge

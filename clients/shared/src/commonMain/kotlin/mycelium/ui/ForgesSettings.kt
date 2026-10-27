@@ -3,6 +3,7 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -180,7 +181,7 @@ fun ForgesSettings(store: Store) {
 
                 failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton(::connect, text = "Connect", variant = ButtonVariant.Outline)
                     MyButton(
                         {

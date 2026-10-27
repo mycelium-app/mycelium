@@ -259,7 +259,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             IndeterminateProgress(if (cloning) "Cloning ${repository?.fullName.orEmpty()}" else if (creating) "Creating ${created.trim()}" else "Registering $folder")
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::submit, text = action, variant = ButtonVariant.Outline)
         }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -271,7 +272,7 @@ fun MyButton(
             }
 
             if (text != null) {
-                Label(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle, color = contentColor, maxLines = 1)
+                Label(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle, color = contentColor, maxLines = 1, overflow = TextOverflow.Visible)
             }
 
             if (trailingIcon != null) {
@@ -680,7 +681,7 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 
         failure?.let { ErrorBanner(it, onDismiss = onDismissFailure) }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(onSave, text = "Save", variant = ButtonVariant.Outline)
         }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -229,7 +230,7 @@ fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (
 
                     error?.let { Label(it, color = colors.statusFailed, style = Tokens.Type.MetaStrong) }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                         MyButton({ answer(true) }, text = "Approve $subject", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
                         MyButton({ answer(false) }, text = "Deny", variant = ButtonVariant.Outline, size = ButtonSize.Lg)
                     }

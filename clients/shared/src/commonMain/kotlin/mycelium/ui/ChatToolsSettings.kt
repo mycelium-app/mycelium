@@ -2,6 +2,7 @@ package mycelium.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
@@ -375,7 +376,7 @@ fun ChatToolsSettings(store: Store) {
                         Label("Finish signing in in your browser.", style = Tokens.Type.Meta, color = colors.textMuted)
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                         MyButton(::add, text = "Connect integration", variant = ButtonVariant.Outline)
 
                         if (kind == McpType || kind == OutlineType) {

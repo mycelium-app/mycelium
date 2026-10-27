@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -198,7 +199,7 @@ fun HistoryToolbar(
             Label(if (mode == Naming.Save) "Name this view" else "Rename view", Modifier.semantics { heading() }, Tokens.Type.Title)
             TextInput(name, { name = it; problem = null }, label = "View name", error = problem, onSubmit = confirm)
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({ naming = null }, text = "Cancel", muted = true)
                 MyButton(confirm, text = if (mode == Naming.Save) "Save view" else "Rename", variant = ButtonVariant.Primary)
             }

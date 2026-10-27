@@ -245,7 +245,7 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
             Label("Stop $name?", Modifier.semantics { heading() }, Tokens.Type.Title)
             Label("Mycelium asks $name (process ${process.pid}) on ${node.name} to shut down. Work it has not saved may be lost, and a process that ignores the request keeps running.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({ stopping = null }, text = "Cancel", muted = true)
                 MyButton(
                     {

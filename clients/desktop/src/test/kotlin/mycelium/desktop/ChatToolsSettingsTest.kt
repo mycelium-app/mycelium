@@ -1,6 +1,9 @@
 package mycelium.desktop
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -122,6 +125,22 @@ class ChatToolsSettingsTest {
         assertEquals("""{"name":"GitHub","url":"https://gh.test/mcp","bearer_token":"ghp-secret"}""", bodies.last { it.isNotEmpty() })
         rule.onAllNodesWithText("ghp-secret").assertCountEquals(0)
         rule.onAllNodesWithText("No token")[0].assertExists()
+    }
+
+    @Test
+    fun theAddFormShowsEveryButtonInFullAtPhoneWidth() {
+        val store = store()
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(320.dp)) { Scrolling { ChatToolsSettings(store) } } } }
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Any MCP server").performClick()
+
+        for (label in listOf("Connect integration", "Sign in with OAuth", "Cancel")) {
+            val bounds = rule.onNodeWithText(label).assertExists().fetchSemanticsNode().boundsInRoot
+
+            assertTrue(bounds.left >= 0f && bounds.right <= with(rule.density) { 320.dp.toPx() }, "$label stays inside 320dp: $bounds")
+            assertTrue(bounds.height < with(rule.density) { 36.dp.toPx() }, "$label stays on one line: $bounds")
+        }
     }
 
     @Test

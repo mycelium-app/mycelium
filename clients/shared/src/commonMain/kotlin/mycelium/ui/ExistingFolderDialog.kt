@@ -88,7 +88,7 @@ fun ExistingFolderDialog(store: Store, state: AppState, repository: Repository, 
             IndeterminateProgress("Checking $folder")
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::submit, text = "Use folder", variant = ButtonVariant.Outline)
         }

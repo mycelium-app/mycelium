@@ -26,6 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -736,7 +737,7 @@ private fun ConversationRow(row: Conversation, node: NodeSummary?, project: Proj
                 Label("Rename conversation", Modifier.semantics { heading() }, Tokens.Type.Title)
                 TextInput(title, { title = it }, label = "Conversation name", placeholder = "Leave empty to use the suggested title", onSubmit = save)
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End)) {
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton({ renaming = false }, text = "Cancel", muted = true)
                     MyButton(save, text = "Save", variant = ButtonVariant.Outline)
                 }
