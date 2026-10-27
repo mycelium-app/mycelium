@@ -23,12 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import mycelium.Connection
 import mycelium.Platform
-import mycelium.api.ApiException
 import mycelium.api.DeviceKind
 import mycelium.api.DeviceRequest
 import mycelium.api.DeviceResponse
@@ -72,7 +70,7 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
 
         error = null
         job = scope.launch {
-            try {
+            error = attempt("Could not reach $normalised. Check the address and your connection, then try again.") {
                 val api = MyceliumApi(normalised)
                 val info = platform.device()
                 val request = DeviceRequest(DeviceKind.Client, info.label, info.hostname, info.os, info.arch)
@@ -85,14 +83,6 @@ fun SignInScreen(platform: Platform, savedAddress: String?, notice: String?, onS
 
                 platform.saveConnection(Connection(normalised, token.token))
                 onSignedIn(signedIn, me)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (rejected: SignInRejected) {
-                error = rejected.message
-            } catch (failure: ApiException) {
-                error = failure.message
-            } catch (_: Exception) {
-                error = "Could not reach $normalised. Check the address and your connection, then try again."
             }
 
             device = null
@@ -170,18 +160,14 @@ fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (
     var outcome by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(code) {
-        try {
+        error = attempt("Could not reach the control plane. Check your connection and reload the page.") {
             pending = api.pendingDevice(code)
-        } catch (failure: ApiException) {
-            error = failure.message
-        } catch (_: Exception) {
-            error = "Could not reach the control plane. Check your connection and reload the page."
         }
     }
 
     fun answer(approve: Boolean) {
         scope.launch {
-            try {
+            error = attempt {
                 if (approve) api.approveDevice(code) else api.denyDevice(code)
                 val signingInApp = pending?.kind == DeviceKind.Client
                 outcome = when {
@@ -194,10 +180,6 @@ fun ApproveScreen(api: MyceliumApi, code: String, returnTo: String?, onReturn: (
                 if (approve && signingInApp) {
                     onClose()
                 }
-            } catch (failure: ApiException) {
-                error = failure.message
-            } catch (_: Exception) {
-                error = "Could not reach the control plane. Check your connection and try again."
             }
         }
     }

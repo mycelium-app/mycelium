@@ -60,13 +60,6 @@ data class Display(
 )
 
 @Composable
-fun TextStyle.scaledForCode(): TextStyle {
-    val scale = LocalAppearance.current.display.codeSize.scale
-
-    return if (scale == 1f) this else copy(fontSize = fontSize * scale, lineHeight = lineHeight * scale)
-}
-
-@Composable
 fun readingMeasure(): Dp = LocalAppearance.current.display.chatWidth.measure
 
 @Composable

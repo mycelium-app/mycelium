@@ -83,6 +83,7 @@ import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import mycelium.api.ApiException
+import mycelium.api.ControlPlaneUnreachable
 import mycelium.api.ConversationStatus
 
 val ControlShape = RoundedCornerShape(Tokens.Radius.Control)
@@ -513,22 +514,25 @@ fun TabRow(options: List<String>, selected: String, onSelect: (String) -> Unit, 
     }
 }
 
+suspend fun attempt(unreachable: String = ControlPlaneUnreachable, block: suspend () -> Unit): String? =
+    try {
+        block()
+        null
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (problem: ApiException) {
+        problem.message
+    } catch (_: Exception) {
+        unreachable
+    }
+
 @Composable
 fun rememberAttempt(onFailure: (String?) -> Unit): (suspend () -> Unit) -> Unit {
     val scope = rememberCoroutineScope()
 
     return { block ->
         scope.launch {
-            try {
-                block()
-                onFailure(null)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                onFailure(problem.message)
-            } catch (_: Exception) {
-                onFailure("Could not reach the control plane. Check your connection and try again.")
-            }
+            onFailure(attempt(block = block))
         }
     }
 }

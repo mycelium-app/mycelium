@@ -20,6 +20,7 @@ import mycelium.Platform
 import mycelium.api.Directories
 import mycelium.api.Experiments
 import mycelium.api.ApiException
+import mycelium.api.ControlPlaneUnreachable
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
 import mycelium.api.PatchArtifactRequest
@@ -850,7 +851,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     suspend fun attachmentBytes(sha256: String): ByteArray? {
         attachmentCache[sha256]?.let { return it }
 
-        val bytes = runCatching { api.attachmentBytes(sha256) }.getOrNull() ?: return null
+        val bytes = orNull { api.attachmentBytes(sha256) } ?: return null
 
         if (attachmentCache.size >= MaxCachedAttachments) {
             attachmentCache.clear()
@@ -872,7 +873,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private suspend fun cachedPreview(key: String, fetch: suspend () -> ByteArray): ByteArray? {
         previewCache[key]?.let { return it }
 
-        val bytes = runCatching { fetch() }.getOrNull() ?: return null
+        val bytes = orNull { fetch() } ?: return null
 
         if (previewCache.size >= MaxCachedPreviews) {
             previewCache.remove(previewCache.keys.first())
@@ -975,7 +976,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         } catch (failure: ApiException) {
             mutableProblem.value = failure.message
         } catch (_: Exception) {
-            mutableProblem.value = "Could not reach the control plane. Check your connection and try again."
+            mutableProblem.value = ControlPlaneUnreachable
         }
     }
 

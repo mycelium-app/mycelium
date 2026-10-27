@@ -22,9 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
 import mycelium.api.Group
@@ -153,20 +151,13 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
         running = true
 
         scope.launch {
-            try {
+            failure = attempt {
                 val created = store.createProject(request)
                 val chosen = groupId
 
                 onCreated(if (chosen == null) created else store.setProjectGroup(created.id, chosen))
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            } finally {
-                running = false
             }
+            running = false
         }
     }
 

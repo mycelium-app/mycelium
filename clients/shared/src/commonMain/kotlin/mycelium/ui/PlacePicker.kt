@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,8 +17,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.CancellationException
-import mycelium.api.ApiException
 import mycelium.api.NodeSummary
 import mycelium.api.Project
 import mycelium.state.AppState
@@ -45,24 +44,40 @@ fun Place.target(state: AppState): PlaceTarget? {
     return if (node != null && chosen != null) PlaceTarget(node, chosen, project) else null
 }
 
-suspend fun attempt(block: suspend () -> Unit): String? =
-    try {
-        block()
-        null
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (problem: ApiException) {
-        problem.message
-    } catch (_: Exception) {
-        "Could not reach the control plane. Check your connection and try again."
+@Composable
+fun NoNodeNotice(color: Color, modifier: Modifier = Modifier) {
+    Label("No node is online. Join a node from Nodes, or wait for one to reconnect.", modifier, color = color)
+}
+
+@Composable
+fun NoAgentNotice(node: NodeSummary) {
+    Label("No agent is installed on ${node.name}. Install Claude Code or Codex there, then try again.", color = MyTheme.colors.statusFailed)
+}
+
+@Composable
+fun NodeChooser(nodes: List<NodeSummary>, node: NodeSummary, onChoose: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+
+    Box {
+        MyButton({ open = true }, text = node.name, icon = nodeIcon(node), description = "Node: ${node.name}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
+
+        if (open) {
+            MenuPopup(onDismiss = { open = false }) {
+                MenuLabel("Run on")
+
+                for (option in nodes) {
+                    MenuItem(option.name, onClick = { onChoose(option.id); open = false }, checked = option.id == node.id, leading = nodeIcon(option))
+                }
+            }
+        }
     }
+}
 
 @Composable
 fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean, cwdError: String? = null) {
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var projectMenu by remember { mutableStateOf(false) }
-    var nodeMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         store.act { store.refreshProjects() }
@@ -99,7 +114,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
     }
 
     if (node == null) {
-        Label("No node is online. Join a node from Nodes, or wait for one to reconnect.", color = colors.statusFailed)
+        NoNodeNotice(colors.statusFailed)
 
         return
     }
@@ -108,19 +123,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Node", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
-            Box {
-                MyButton({ nodeMenu = true }, text = node.name, icon = nodeIcon(node), description = "Node: ${node.name}", variant = ButtonVariant.Outline, trailingIcon = MyIcon.ChevronDown)
-
-                if (nodeMenu) {
-                    MenuPopup(onDismiss = { nodeMenu = false }) {
-                        MenuLabel("Run on")
-
-                        for (option in nodes) {
-                            MenuItem(option.name, onClick = { place.nodeId = option.id; nodeMenu = false }, checked = option.id == node.id, leading = nodeIcon(option))
-                        }
-                    }
-                }
-            }
+            NodeChooser(nodes, node) { place.nodeId = it }
         }
 
         FolderField(store, node, place.cwd, { place.cwd = it }, label = "Folder", placeholder = "/home/you/project", error = cwdError)
@@ -130,7 +133,7 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
         Label("Agent", style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
         if (agents.isEmpty()) {
-            Label("No agent is installed on ${node.name}. Install Claude Code or Codex there, then try again.", color = colors.statusFailed)
+            NoAgentNotice(node)
         } else {
             Segmented(agents.map { agentName(it.agent) }, agentName(target?.agent.orEmpty()), { picked -> place.agent = agents.first { agentName(it.agent) == picked }.agent }, groupLabel = "Agent")
         }

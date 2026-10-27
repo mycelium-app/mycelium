@@ -9,7 +9,7 @@ import mycelium.api.DeviceResponse
 import mycelium.api.DeviceTokenResponse
 import mycelium.api.MyceliumApi
 
-class SignInRejected(override val message: String) : Exception(message)
+class SignInRejected(message: String) : ApiException(0, "sign_in_rejected", message)
 
 suspend fun signInWithDeviceCode(
     api: MyceliumApi,

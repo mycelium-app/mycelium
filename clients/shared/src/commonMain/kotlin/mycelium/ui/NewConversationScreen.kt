@@ -47,7 +47,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var prompt by remember { mutableStateOf(TextFieldValue("")) }
     val attached = rememberAttachmentDrafts()
     var cwdError by remember { mutableStateOf<String?>(null) }
-    var nodeMenu by remember { mutableStateOf(false) }
     var chosenProject by remember { mutableStateOf(projectId) }
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
@@ -132,7 +131,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
 
         if (node == null) {
-            Label("No node is online. Join a node from Nodes, or wait for one to reconnect.", Modifier.padding(Tokens.Space.S4), color = colors.textMuted)
+            NoNodeNotice(colors.textMuted, Modifier.padding(Tokens.Space.S4))
 
             return@Column
         }
@@ -180,36 +179,12 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     )
 
                     if (agents.isEmpty()) {
-                        Label("No agent is installed on ${node.name}. Install Claude Code or Codex there, then try again.", color = colors.statusFailed)
+                        NoAgentNotice(node)
                     }
 
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
                         if (project == null) {
-                            Box {
-                                MyButton(
-                                    { nodeMenu = true },
-                                    text = node.name,
-                                    icon = nodeIcon(node),
-                                    description = "Node: ${node.name}",
-                                    variant = ButtonVariant.Outline,
-                                    trailingIcon = MyIcon.ChevronDown,
-                                )
-
-                                if (nodeMenu) {
-                                    MenuPopup(onDismiss = { nodeMenu = false }) {
-                                        MenuLabel("Run on")
-
-                                        for (option in nodes) {
-                                            MenuItem(
-                                                option.name,
-                                                onClick = { nodeId = option.id; nodeMenu = false },
-                                                checked = option.id == node.id,
-                                                leading = nodeIcon(option),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            NodeChooser(nodes, node) { nodeId = it }
                         }
 
                         if (project != null) {

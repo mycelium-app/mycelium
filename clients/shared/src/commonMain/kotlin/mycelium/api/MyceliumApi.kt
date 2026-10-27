@@ -33,7 +33,9 @@ import kotlinx.serialization.json.JsonObject
 private const val OlderUnknownRouteMessage = "That address was not found. Check the address and try again."
 private const val UnknownRouteMessage = "This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."
 
-class ApiException(val status: Int, val code: String, override val message: String) : Exception(message)
+const val ControlPlaneUnreachable = "Could not reach the control plane. Check your connection and try again."
+
+open class ApiException(val status: Int, val code: String, override val message: String) : Exception(message)
 
 sealed interface DevicePoll {
     data object Pending : DevicePoll
@@ -486,9 +488,6 @@ class MyceliumApi(
         call("/instruction-proposals/$id/decline") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun conversationConnections(): List<ConversationConnection> = call("/conversation-connections") { client.get(it) { authorise() } }.body()
-
-    suspend fun connectConversations(request: CreateConversationConnectionRequest): ConversationConnection =
-        call("/conversation-connections") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun revokeConversationConnection(id: String): ConversationConnection =
         call("/conversation-connections/$id") { client.delete(it) { authorise() } }.body()

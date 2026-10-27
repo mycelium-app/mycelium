@@ -15,9 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import mycelium.api.ApiException
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Repository
 import mycelium.state.AppState
@@ -52,18 +50,11 @@ fun ExistingFolderDialog(store: Store, state: AppState, repository: Repository, 
         running = true
 
         scope.launch {
-            try {
+            failure = attempt {
                 store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName, folder.trim()))
                 onDismiss()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (problem: ApiException) {
-                failure = problem.message
-            } catch (_: Exception) {
-                failure = "Could not reach the control plane. Check your connection and try again."
-            } finally {
-                running = false
             }
+            running = false
         }
     }
 

@@ -19,8 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CancellationException
-import mycelium.api.ApiException
 import mycelium.api.Directories
 import mycelium.api.NodeSummary
 import mycelium.state.Store
@@ -36,19 +34,13 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
     LaunchedEffect(nodeId, requested) {
         failure = null
 
-        try {
-            listing = store.directories(nodeId, requested)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (problem: ApiException) {
-            if (requested.isNotEmpty() && !fellBack) {
-                fellBack = true
-                requested = ""
-            } else {
-                failure = problem.message
-            }
-        } catch (_: Exception) {
-            failure = "Could not reach the control plane. Check your connection and try again."
+        val problem = attempt { listing = store.directories(nodeId, requested) }
+
+        if (problem != null && requested.isNotEmpty() && !fellBack) {
+            fellBack = true
+            requested = ""
+        } else {
+            failure = problem
         }
     }
 
