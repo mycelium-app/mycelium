@@ -10,7 +10,8 @@ use chrono_tz::Tz;
 use mycelium_proto::api::{Break, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Mutex;
 use uuid::Uuid;
 
 const PUZZLES: [&str; 4] = ["wordle", "connections", "daily-orbs", "catfishing"];
@@ -468,6 +469,42 @@ pub async fn hold(State(state): State<AppState>, user: AuthUser, Json(request): 
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+const BOUNDARY_TICK_SECONDS: u64 = 30;
+
+pub async fn announce_boundaries(state: AppState) {
+    let seen: Mutex<HashMap<Uuid, BTreeSet<Uuid>>> = Mutex::new(HashMap::new());
+
+    crate::boot::run_while_ready(&state, "announce groups opening and closing", state.config.scheduler_tick.min(std::time::Duration::from_secs(BOUNDARY_TICK_SECONDS)), || announce_changes(&state, &seen)).await;
+}
+
+async fn announce_changes(state: &AppState, seen: &Mutex<HashMap<Uuid, BTreeSet<Uuid>>>) -> ApiResult<()> {
+    let owners = sqlx::query_scalar::<_, Uuid>("select distinct owner from hours").fetch_all(&state.pool).await?;
+
+    for owner in owners {
+        let groups = sqlx::query_scalar::<_, Uuid>("select id from groups where owner = $1").bind(owner).fetch_all(&state.pool).await?;
+        let mut closed = BTreeSet::new();
+
+        if closure(state, owner, None).await?.is_some() {
+            closed.insert(Uuid::nil());
+        }
+
+        for group in groups {
+            if closure(state, owner, Some(group)).await?.is_some() {
+                closed.insert(group);
+            }
+        }
+
+        let before = seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(owner, closed.clone());
+
+        if before.is_some_and(|before| before != closed) {
+            release_holds(state, owner).await?;
+            state.publish(Some(owner), StreamMessage::WellnessChanged);
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn release_holds(state: &AppState, owner: Uuid) -> ApiResult<()> {

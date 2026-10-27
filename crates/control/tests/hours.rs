@@ -164,3 +164,30 @@ async fn a_group_may_close_at_24_00_and_keeps_it_when_read_back() {
     assert_eq!(status, 200, "{saved}");
     assert_eq!((saved["hours"]["days"][3]["closes"].clone(), saved["open_now"].clone()), (json!("24:00"), json!(true)));
 }
+
+#[tokio::test]
+async fn the_stream_announces_a_group_opening_or_closing_by_its_hours() {
+    let server = Server::start_with(|config| config.scheduler_tick = std::time::Duration::from_millis(50)).await;
+    let mut stream = server.user.stream().await;
+    let id = make_group(&server, "work").await;
+    let days: Vec<Value> = (0..7).map(|weekday| json!({"weekday": weekday, "closed": false, "opens": "00:00", "closes": "24:00"})).collect();
+
+    server.user.json(server.user.put(&format!("/api/v1/groups/{id}/hours")).json(&json!({"always_open": false, "days": days}))).await;
+    stream.until(|message| matches!(message, StreamMessage::WellnessChanged).then_some(())).await;
+
+    let mut announced = false;
+
+    for attempt in 0..40 {
+        sqlx::query("update hours set closed = $2 where group_id = $1").bind(id).bind(attempt % 2 == 0).execute(&server.pool).await.unwrap();
+
+        let heard = tokio::time::timeout(std::time::Duration::from_millis(400), stream.until(|message| matches!(message, StreamMessage::WellnessChanged).then_some(()))).await;
+
+        if heard.is_ok() {
+            announced = true;
+
+            break;
+        }
+    }
+
+    assert!(announced);
+}

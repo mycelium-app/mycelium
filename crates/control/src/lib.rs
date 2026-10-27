@@ -128,6 +128,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(workflows::run_regularly(state.clone()));
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
+    tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
