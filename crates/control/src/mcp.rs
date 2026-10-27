@@ -415,6 +415,18 @@ pub fn tool_definitions() -> Value {
             },
         },
         {
+            "name": "open_outline",
+            "description": "Show an Outline document beside this conversation, in Outline's own page, so the person can read it as you work. It only opens a page and needs no approval.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "document": {"type": "string", "description": "The document's id, urlId or address."},
+                    "integration": {"type": "string", "description": "The Outline integration's name or id. Needed only when this conversation has more than one."},
+                },
+                "required": ["document"],
+            },
+        },
+        {
             "name": "find_conversations",
             "description": "Look up the person's other conversations, most recent first, to find the one to message with send_to_conversation. Archived conversations are left out. It only reads and needs no approval.",
             "inputSchema": {
@@ -1317,6 +1329,23 @@ pub async fn handle(State(state): State<AppState>, node: AuthNode, headers: Head
                     match result {
                         Ok(project) => reply(&id, tool_text(&format!("Set the logo for project {} ({}).", project.name, project.id), false)),
                         Err(error) => reply(&id, tool_text(error.message(), true)),
+                    }
+                }
+                Some("open_outline") => {
+                    let document = arguments.get("document").and_then(Value::as_str).map(str::trim).filter(|document| !document.is_empty());
+                    let Some(document) = document else {
+                        return Ok(failure(&id, INVALID_PARAMS, "open_outline needs the document's id, urlId or address."));
+                    };
+                    let Some((conversation_id, _)) = claimed_conversation(&state, &headers, node.id).await? else {
+                        return Ok(reply(&id, tool_text("Open a page from a conversation.", true)));
+                    };
+                    let owner = node_owner(&state, node.id).await?;
+                    let group = group_of(&state, &headers, node.id).await?.map(|(id, _)| id);
+                    let integration = arguments.get("integration").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty());
+
+                    match crate::open_outline::open(&state, owner, conversation_id, group, document, integration).await? {
+                        Ok(text) => reply(&id, tool_text(&text, false)),
+                        Err(message) => reply(&id, tool_text(&message, true)),
                     }
                 }
                 Some("find_conversations") => {
