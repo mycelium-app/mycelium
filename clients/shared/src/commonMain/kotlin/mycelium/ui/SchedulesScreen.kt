@@ -15,7 +15,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
@@ -24,7 +23,6 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.launch
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.EachRun
 import mycelium.api.PatchScheduleRequest
@@ -214,7 +212,7 @@ private fun ScheduleActions(schedule: Schedule, store: Store, state: AppState) {
 
 @Composable
 internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = null, assistantId: String? = null, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
+    val runner = rememberAction()
     val place = remember { Place() }
     val timeZone = editing?.timeZone ?: LocalPlatform.current?.timeZone() ?: "UTC"
     val start = remember { editing?.let { cadenceOf(it.cron) } ?: Cadence() }
@@ -242,26 +240,18 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
     var promptError by remember { mutableStateOf<String?>(null) }
     var whenError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    var running by remember { mutableStateOf(false) }
 
-    fun finish(action: suspend () -> Unit) {
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt {
-                action()
-                onDismiss()
-            }
-            running = false
+    fun finish(change: suspend () -> Unit) {
+        runner {
+            change()
+            onDismiss()
         }
     }
 
     fun submit() {
         val target = place.target(state)
 
-        if (running || (editing == null && !forAssistant && target == null)) {
+        if (runner.running || (editing == null && !forAssistant && target == null)) {
             return
         }
 
@@ -423,7 +413,7 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

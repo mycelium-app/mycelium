@@ -15,14 +15,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.launch
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Forge
 import mycelium.api.Group
@@ -65,7 +63,6 @@ private fun StepHeading(number: Int, title: String, filled: Boolean = true) {
 
 @Composable
 fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCreated: (Project) -> Unit) {
-    val scope = rememberCoroutineScope()
     val nodes = state.nodes.values.filter { it.online }.sortedBy { it.name }
     var source by remember { mutableStateOf(ProjectSources.first()) }
     var query by remember { mutableStateOf("") }
@@ -78,14 +75,13 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     var nodeId by remember { mutableStateOf<String?>(null) }
     var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
     var groupId by remember { mutableStateOf<String?>(null) }
-    var running by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    val action = rememberAction()
 
     val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val cloning = source == ForgeRepository
     val creating = source == NewRepository
     val forge = forges.firstOrNull { it.id == forgeId } ?: forges.firstOrNull()
-    val action = when {
+    val submitLabel = when {
         cloning -> "Clone and open"
         creating -> "Create and open"
         else -> "Register and open"
@@ -109,32 +105,32 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
     }
 
     fun submit() {
-        if (running) {
+        if (action.running) {
             return
         }
 
         if (node == null) {
-            failure = "Choose the node to set up on. Join a node from Nodes if none is online."
+            action.failure = "Choose the node to set up on. Join a node from Nodes if none is online."
             return
         }
 
         if (cloning && repository == null) {
-            failure = "Choose the repository to clone."
+            action.failure = "Choose the repository to clone."
             return
         }
 
         if (creating && forge == null) {
-            failure = "Connect a forge in Settings, then create the repository."
+            action.failure = "Connect a forge in Settings, then create the repository."
             return
         }
 
         if (creating && !created.trim().contains('/')) {
-            failure = "Enter the new repository as owner/name, for example acme-org/restore-tool."
+            action.failure = "Enter the new repository as owner/name, for example acme-org/restore-tool."
             return
         }
 
         if (!cloning && !creating && folder.isBlank()) {
-            failure = "Enter the folder on the node, for example work/app."
+            action.failure = "Enter the folder on the node, for example work/app."
             return
         }
 
@@ -147,17 +143,11 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             CreateProjectRequest(node.id, path = folder.trim())
         }
 
-        failure = null
-        running = true
+        action {
+            val project = store.createProject(request)
+            val chosen = groupId
 
-        scope.launch {
-            failure = attempt {
-                val created = store.createProject(request)
-                val chosen = groupId
-
-                onCreated(if (chosen == null) created else store.setProjectGroup(created.id, chosen))
-            }
-            running = false
+            onCreated(if (chosen == null) project else store.setProjectGroup(project.id, chosen))
         }
     }
 
@@ -169,7 +159,7 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 for (option in ProjectSources) {
                     MyButton(
-                        { source = option; failure = null },
+                        { source = option; action.failure = null },
                         text = option,
                         variant = ButtonVariant.Outline,
                         size = ButtonSize.Sm,
@@ -253,15 +243,15 @@ fun NewProjectDialog(store: Store, state: AppState, onDismiss: () -> Unit, onCre
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
-        if (running) {
+        if (action.running) {
             IndeterminateProgress(if (cloning) "Cloning ${repository?.fullName.orEmpty()}" else if (creating) "Creating ${created.trim()}" else "Registering $folder")
         }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
-            MyButton(::submit, text = action, variant = ButtonVariant.Outline)
+            MyButton(::submit, text = submitLabel, variant = ButtonVariant.Outline)
         }
     }
 }

@@ -39,7 +39,7 @@ import kotlin.time.Duration.Companion.minutes
 
 val LocalHoursView = staticCompositionLocalOf<HoursView?> { null }
 
-private const val MinuteMillis = 60_000L
+internal const val MinuteMillis = 60_000L
 
 @Composable
 fun rememberHoursView(store: Store): HoursView {

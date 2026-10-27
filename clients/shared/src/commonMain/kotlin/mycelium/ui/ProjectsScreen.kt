@@ -33,6 +33,7 @@ import mycelium.state.AppState
 import mycelium.state.lastActivity
 import mycelium.state.Store
 import mycelium.state.inGroup
+import mycelium.state.instantOrNull
 import mycelium.state.projectsOfRepository
 import mycelium.state.registeredFolders
 import mycelium.state.setUpRepositories
@@ -52,7 +53,7 @@ private sealed interface ProjectRow {
 private class RepositoryRow(val repository: Repository, override val at: Instant?) : ProjectRow
 
 private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow {
-    override val at = runCatching { Instant.parse(updatedAt) }.getOrNull()
+    override val at = instantOrNull(updatedAt)
 }
 
 private const val RepositoriesList = "repositories"
@@ -122,11 +123,11 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
     }
     val repositories = setUpListed + notSetUp
     val initialised = setUpListed.map { repository ->
-        val active = projectsOfRepository(visibleProjects, repository).mapNotNull { runCatching { Instant.parse(lastActivity(it, state.conversations.values)) }.getOrNull() }.maxOrNull()
+        val active = projectsOfRepository(visibleProjects, repository).mapNotNull { instantOrNull(lastActivity(it, state.conversations.values)) }.maxOrNull()
 
         RepositoryRow(repository, active)
     } + folders.map { FolderRow(it, lastActivity(it, state.conversations.values)) }
-    val rows = initialised.sortedByDescending { it.at ?: Instant.DISTANT_PAST } + notSetUp.map { RepositoryRow(it, it.updatedAt?.let { at -> runCatching { Instant.parse(at) }.getOrNull() }) }.sortedByDescending { it.at ?: Instant.DISTANT_PAST }
+    val rows = initialised.sortedByDescending { it.at ?: Instant.DISTANT_PAST } + notSetUp.map { RepositoryRow(it, it.updatedAt?.let(::instantOrNull)) }.sortedByDescending { it.at ?: Instant.DISTANT_PAST }
     val chosenNode = state.nodes[nodeFilter]
 
     Column(Modifier.fillMaxSize()) {

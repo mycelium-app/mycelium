@@ -27,7 +27,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import mycelium.Platform
 import mycelium.api.WellnessDay
 import mycelium.state.BreakPhase
@@ -36,15 +35,14 @@ import mycelium.state.Store
 import mycelium.state.WellnessState
 import mycelium.state.weekdayOf
 import mycelium.state.clockOf
+import mycelium.state.instantOrNull
 import mycelium.state.localTimeOf
-import kotlin.time.Instant
 import mycelium.state.WeekdayNames
 
 private const val WellnessTabName = "Overview"
 private const val SkillsTabName = "Skills"
 private const val ReflectionsTabName = "Reflections"
 private const val PuzzlesTabName = "Puzzles"
-private const val MinuteMillis = 60_000L
 private val ChartHeight = 120.dp
 
 fun durationText(minutes: Long): String = when {
@@ -53,33 +51,30 @@ fun durationText(minutes: Long): String = when {
     else -> "${minutes / 60} h ${minutes % 60} min"
 }
 
-fun countdownText(seconds: Long): String {
-    val left = seconds.coerceAtLeast(0)
-
-    return "${(left / 60).toString().padStart(2, '0')}:${(left % 60).toString().padStart(2, '0')}"
-}
-
 @Composable
 fun WellnessPresence(store: Store, platform: Platform) {
     val wellness by store.wellness.state.collectAsState()
     var focused by remember { mutableStateOf(platform.windowFocused()) }
     val due = wellness.clock.phase == BreakPhase.Due
+    val now = rememberNow(MinuteMillis)
+    val mountedAt = remember { now }
 
-    LaunchedEffect(store) {
-        while (true) {
-            delay(MinuteMillis)
-            focused = platform.windowFocused()
+    LaunchedEffect(store, now) {
+        if (now == mountedAt) {
+            return@LaunchedEffect
+        }
 
-            if (store.viewing != null && focused) {
-                store.wellness.heartbeat(60)
-                store.wellness.tickActiveMinute()
-            }
+        focused = platform.windowFocused()
 
-            store.wellness.releaseHeld { store.hoursView().closed(it) }.takeIf { it.isNotEmpty() }?.let { released ->
-                val single = released.singleOrNull()
+        if (store.viewing != null && focused) {
+            store.wellness.heartbeat(60)
+            store.wellness.tickActiveMinute()
+        }
 
-                platform.notify(single?.title ?: "While you were away", if (single == null) "${released.size} agents finished" else "Finished", single?.conversationId.orEmpty(), false)
-            }
+        store.wellness.releaseHeld { store.hoursView().closed(it) }.takeIf { it.isNotEmpty() }?.let { released ->
+            val single = released.singleOrNull()
+
+            platform.notify(single?.title ?: "While you were away", if (single == null) "${released.size} agents finished" else "Finished", single?.conversationId.orEmpty(), false)
         }
     }
 
@@ -190,12 +185,12 @@ private fun OpenedOutOfHours(wellness: WellnessState) {
             openings.size,
             { row, column ->
                 val opening = openings[row]
-                val local = localTimeOf(platform, Instant.parse(opening.openedAt))
+                val local = instantOrNull(opening.openedAt)?.let { localTimeOf(platform, it) }
 
                 when (column) {
                     0 -> TableCell.Text(opening.reason)
                     1 -> TableCell.Text(opening.groupName, color = muted)
-                    else -> TableCell.Text("${WeekdayNames[weekdayOf(local.substringBefore('T'))]} ${clockOf(local)}", color = muted)
+                    else -> TableCell.Text(local?.let { "${WeekdayNames[weekdayOf(it.substringBefore('T'))]} ${clockOf(it)}" }.orEmpty(), color = muted)
                 }
             },
             rowKey = { openings[it].openedAt },

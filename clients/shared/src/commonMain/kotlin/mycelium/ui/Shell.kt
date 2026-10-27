@@ -9,7 +9,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import mycelium.api.ModelProviderUsage
 import mycelium.api.UseResetRequest
@@ -552,14 +551,11 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     LaunchedEffect(store, usageOpen) {
         if (usageOpen) {
             while (true) {
-                try {
+                attempt {
                     providerUsage = store.api.modelProviderUsage()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
                 }
 
-                delay(60_000L)
+                delay(MinuteMillis)
             }
         }
     }

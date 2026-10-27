@@ -421,12 +421,10 @@ private fun AnswerTaskDialog(store: Store, task: Task, onDismiss: () -> Unit) {
 internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp = Tokens.Space.S4, onCancel: (() -> Unit)? = null) {
     var answer by remember { mutableStateOf("") }
     var answerError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val run = rememberAttempt { failure = it }
-    var running by remember { mutableStateOf(false) }
+    val action = rememberAction()
 
     fun submit(text: String) {
-        if (running) {
+        if (action.running) {
             return
         }
 
@@ -436,15 +434,8 @@ internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp 
             return
         }
 
-        failure = null
-        running = true
-
-        run {
-            try {
-                send(text.trim())
-            } finally {
-                running = false
-            }
+        action {
+            send(text.trim())
         }
     }
 
@@ -459,7 +450,7 @@ internal fun AnswerForm(task: Task, send: suspend (String) -> Unit, spacing: Dp 
 
         TextInput(answer, { answer = it }, label = "Answer", placeholder = "Your answer", error = answerError, onSubmit = { submit(answer) })
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             onCancel?.let { MyButton(it, text = "Cancel", muted = true) }
@@ -477,14 +468,12 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
     val dependencies = state.tasks.values.filter { it.status == TaskStatuses.Open || it.status == TaskStatuses.Claimed }.sortedBy { it.createdAt }
     var titleError by remember { mutableStateOf<String?>(null) }
     var cwdError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val run = rememberAttempt { failure = it }
-    var running by remember { mutableStateOf(false) }
+    val action = rememberAction()
 
     fun submit() {
         val target = place.target(state)
 
-        if (running || target == null) {
+        if (action.running || target == null) {
             return
         }
 
@@ -506,16 +495,9 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
             dependsOn = dependencies.map { it.id }.filter { it in dependsOn },
         )
 
-        failure = null
-        running = true
-
-        run {
-            try {
-                store.createTask(request)
-                onDismiss()
-            } finally {
-                running = false
-            }
+        action {
+            store.createTask(request)
+            onDismiss()
         }
     }
 
@@ -550,7 +532,7 @@ private fun AddTaskDialog(store: Store, state: AppState, onDismiss: () -> Unit) 
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

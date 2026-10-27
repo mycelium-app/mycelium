@@ -131,9 +131,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
     var choice by remember { mutableStateOf(projects.firstOrNull()?.icon) }
     var logo by remember { mutableStateOf<PickedFile?>(null) }
     var query by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val run = rememberAttempt { failure = it; running = false }
+    val action = rememberAction()
     val shown = ProjectIconSet.filter { it.name.contains(query.trim().replace(' ', '-'), ignoreCase = true) }
 
     fun pickLogo(picked: List<PickedFile>) {
@@ -141,7 +139,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
         val named = PickedFile(file.name, mediaTypeOf(file.name, file.bytes, file.mediaType), file.bytes)
         val refused = projectLogoProblem(named)
 
-        failure = refused
+        action.failure = refused
 
         if (refused == null) {
             logo = named
@@ -150,14 +148,11 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
     }
 
     fun save() {
-        if (running) {
+        if (action.running) {
             return
         }
 
-        failure = null
-        running = true
-
-        run {
+        action {
             val chosenLogo = logo
 
             for (project in projects) {
@@ -187,7 +182,7 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
                 for (icon in shown) {
                     val selected = logo == null && icon.name == choice
 
-                    IconChoice(icon, selected, onClick = { choice = icon.name; logo = null; failure = null })
+                    IconChoice(icon, selected, onClick = { choice = icon.name; logo = null; action.failure = null })
                 }
             }
 
@@ -196,10 +191,10 @@ fun ProjectIconDialog(store: Store, projects: List<Project>, name: String, onDis
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            MyButton({ choice = null; logo = null; failure = null }, text = "No icon", muted = true, selected = choice == null && logo == null)
+            MyButton({ choice = null; logo = null; action.failure = null }, text = "No icon", muted = true, selected = choice == null && logo == null)
             MyButton(onDismiss, text = "Cancel", muted = true)
             MyButton(::save, text = "Save", variant = ButtonVariant.Outline)
         }

@@ -9,13 +9,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.launch
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Repository
 import mycelium.state.AppState
@@ -23,38 +21,30 @@ import mycelium.state.Store
 
 @Composable
 fun ExistingFolderDialog(store: Store, state: AppState, repository: Repository, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
     val nodes = state.nodes.values.filter { it.online }.sortedBy { it.name }
     var nodeId by remember { mutableStateOf<String?>(null) }
     var folder by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
+    val action = rememberAction()
     val node = nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
 
     fun submit() {
-        if (running) {
+        if (action.running) {
             return
         }
 
         if (node == null) {
-            failure = "Choose the node that holds the folder. Join a node from Nodes if none is online."
+            action.failure = "Choose the node that holds the folder. Join a node from Nodes if none is online."
             return
         }
 
         if (folder.isBlank()) {
-            failure = "Enter the folder on the node, for example work/${repository.name}."
+            action.failure = "Enter the folder on the node, for example work/${repository.name}."
             return
         }
 
-        failure = null
-        running = true
-
-        scope.launch {
-            failure = attempt {
-                store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName, folder.trim()))
-                onDismiss()
-            }
-            running = false
+        action {
+            store.createProject(CreateProjectRequest(node.id, repository.forgeId, repository.fullName, folder.trim()))
+            onDismiss()
         }
     }
 
@@ -82,9 +72,9 @@ fun ExistingFolderDialog(store: Store, state: AppState, repository: Repository, 
             FolderField(store, node, folder, { folder = it }, label = "Folder on the node", placeholder = "work/${repository.name}", onSubmit = ::submit)
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        action.failure?.let { ErrorBanner(it, onDismiss = { action.failure = null }) }
 
-        if (running) {
+        if (action.running) {
             IndeterminateProgress("Checking $folder")
         }
 
