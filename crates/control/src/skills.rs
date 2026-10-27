@@ -4,11 +4,12 @@ use crate::state::AppState;
 use crate::store::enum_text;
 use crate::wellness;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use chrono::{Duration, NaiveDate, Utc};
 use mycelium_proto::api::{HiddenSkillRequest, Skill};
 use mycelium_proto::conversation::EventKind;
+use serde::Deserialize;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::{BTreeMap, HashMap};
@@ -43,6 +44,12 @@ const LANGUAGES: [(&str, &str); 24] = [
     ("toml", "TOML"),
     ("md", "Markdown"),
 ];
+
+#[derive(Deserialize)]
+pub struct ListQuery {
+    #[serde(default)]
+    hidden: bool,
+}
 
 #[derive(Default, Clone, Copy)]
 struct Counts {
@@ -179,7 +186,7 @@ async fn backfill(state: &AppState, owner: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Skill>>> {
+pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Skill>>> {
     backfill(&state, user.id).await?;
 
     let zone = wellness::zone_of(&state, user.id, None).await?;
@@ -187,17 +194,26 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     let since = today - Duration::days(WINDOW_DAYS);
     let rows = sqlx::query_as::<_, (NaiveDate, String, String, i32, i32)>(
         "select day, kind, name, agent_lines, own_lines from skill_lines s
-         where owner = $1 and day > $2 and not exists (select 1 from hidden_skills h where h.owner = s.owner and h.kind = s.kind and h.name = s.name)",
+         where owner = $1 and day > $2 and exists (select 1 from hidden_skills h where h.owner = s.owner and h.kind = s.kind and h.name = s.name) = $3",
     )
     .bind(user.id)
     .bind(since)
+    .bind(query.hidden)
     .fetch_all(&state.pool)
     .await?;
 
     let mut skills: BTreeMap<(String, String), Skill> = BTreeMap::new();
 
+    if query.hidden {
+        let hidden = sqlx::query_as::<_, (String, String)>("select kind, name from hidden_skills where owner = $1").bind(user.id).fetch_all(&state.pool).await?;
+
+        for (kind, name) in hidden {
+            skills.insert((kind.clone(), name.clone()), Skill { kind, name, own_lines: 0, agent_lines: 0, own_share: None, weekly_own_lines: vec![0; SERIES_WEEKS], last_practised: None, hidden: true });
+        }
+    }
+
     for (day, kind, name, agent, own) in rows {
-        let skill = skills.entry((kind.clone(), name.clone())).or_insert_with(|| Skill { kind, name, own_lines: 0, agent_lines: 0, own_share: None, weekly_own_lines: vec![0; SERIES_WEEKS], last_practised: None });
+        let skill = skills.entry((kind.clone(), name.clone())).or_insert_with(|| Skill { kind, name, own_lines: 0, agent_lines: 0, own_share: None, weekly_own_lines: vec![0; SERIES_WEEKS], last_practised: None, hidden: query.hidden });
         let weeks_ago = ((today - day).num_days().max(0) / 7) as usize;
 
         skill.own_lines += i64::from(own);

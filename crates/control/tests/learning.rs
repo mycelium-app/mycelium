@@ -13,6 +13,16 @@ async fn started_conversation(server: &Server, link: &mut NodeLink) -> Uuid {
     conversation.id
 }
 
+async fn prompt_after_the_folder_is_copied_up(link: &mut NodeLink) -> (Uuid, String) {
+    loop {
+        match link.next().await {
+            ControlToNode::ReadFolder { request_id, .. } => link.send(NodeToControl::FolderFiles { request_id, files: vec![], truncated: false, error: None }).await,
+            ControlToNode::Prompt { prompt_id, text, .. } => return (prompt_id, text),
+            other => panic!("expected prompt, got {other:?}"),
+        }
+    }
+}
+
 async fn teach_me(server: &Server, id: Uuid, on: bool) -> (u16, Value) {
     server.user.json(server.user.patch(&format!("/api/v1/conversations/{id}")).json(&json!({"teach_me": on}))).await
 }
@@ -305,7 +315,7 @@ async fn save_reflection_keeps_edited_sections() {
 
     let (status, redraft) = server.user.json(server.user.post(&format!("/api/v1/reflections/{id}/redraft"))).await;
     assert_eq!(status, 202, "{redraft}");
-    let (_, redraft_prompt) = link.expect_prompt().await;
+    let (_, redraft_prompt) = prompt_after_the_folder_is_copied_up(&mut link).await;
     assert!(redraft_prompt.contains("the week containing 2026-10-26"), "{redraft_prompt}");
     assert_eq!(scheduled.to_string(), redraft["conversation_id"]);
     save_reflection(&server, &token, scheduled, json!({"week": "2026-10-26", "done": "Shipped B", "learned": "L2", "waiting": "W2", "next_week": "N2"})).await;

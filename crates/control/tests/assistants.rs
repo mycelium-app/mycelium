@@ -86,7 +86,7 @@ async fn allow_calls(server: &Server, id: &str, count: usize) {
             open.map(|event| event["payload"].clone())
         })
         .await;
-        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": "allow_once"}))).await;
+        let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/permission")).json(&json!({"request_id": request["request_id"], "option_id": "approve"}))).await;
         assert_eq!(status, 204, "{body}");
 
         common::eventually("the call to be allowed", || async { server.events(id.parse().unwrap()).await.iter().any(|event| event["kind"] == "permission_resolved" && event["payload"]["request_id"] == request["request_id"]).then_some(()) }).await;

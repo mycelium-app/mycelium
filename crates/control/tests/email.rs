@@ -340,7 +340,7 @@ async fn an_agent_deleting_mail_waits_for_the_person_and_runs_once_allowed() {
         assert!(mail.removed.lock().unwrap().is_empty());
         assert_eq!(server.conversation(conversation).await["status"], "input");
 
-        server.answer(conversation, &request, "allow_once").await;
+        server.answer(conversation, &request, "approve").await;
     });
 
     assert_eq!(reply["isError"], false);
@@ -359,7 +359,7 @@ async fn an_agent_deleting_mail_is_refused_when_the_person_declines() {
     let (reply, ()) = tokio::join!(agent_call(&server, &token, conversation, 1, "delete_message", json!({"id": "5"})), async {
         let request = server.open_request(conversation).await;
 
-        server.answer(conversation, &request, "reject_once").await;
+        server.answer(conversation, &request, "deny").await;
     });
 
     assert_eq!(reply["isError"], true);

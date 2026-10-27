@@ -1,5 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::integration_proxy;
 use crate::prompts;
 use crate::state::{AppState, hash_token, new_token};
 use axum::Json;
@@ -13,7 +14,7 @@ use mycelium_proto::stream::StreamMessage;
 use std::sync::atomic::{AtomicI64, Ordering};
 use uuid::Uuid;
 
-pub const SCOPES: [&str; 4] = ["conversations:read", "conversations:write", "nodes:read", "settings:read"];
+pub const SCOPES: [&str; 5] = ["conversations:read", "conversations:write", "nodes:read", "settings:read", "assistants"];
 
 const DEFAULT_HOURS: i64 = 4;
 const MIN_HOURS: i64 = 1;
@@ -24,7 +25,7 @@ const PURGE_INTERVAL_SECONDS: i64 = 3600;
 static LAST_PURGE: AtomicI64 = AtomicI64::new(0);
 const TOKEN_LABEL: &str = "Agent access";
 
-const REQUEST_COLUMNS: &str = "id, conversation_id, scopes, hours, reason, state, created_at, decided_at";
+const REQUEST_COLUMNS: &str = "id, conversation_id, scopes, hours, reason, state, created_at, decided_at, server_id, (select name from chat_tool_servers s where s.id = api_access_requests.server_id) as integration";
 
 enum Need {
     Anyone,
@@ -42,6 +43,8 @@ struct RequestRow {
     state: String,
     created_at: chrono::DateTime<chrono::Utc>,
     decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    server_id: Option<Uuid>,
+    integration: Option<String>,
 }
 
 impl RequestRow {
@@ -52,7 +55,7 @@ impl RequestRow {
             _ => ApiAccessState::Requested,
         };
 
-        ApiAccessRequest { id: self.id, conversation_id: self.conversation_id, scopes: self.scopes, hours: self.hours, reason: self.reason, state, created_at: self.created_at, decided_at: self.decided_at }
+        ApiAccessRequest { id: self.id, conversation_id: self.conversation_id, scopes: self.scopes, hours: self.hours, reason: self.reason, state, created_at: self.created_at, decided_at: self.decided_at, server_id: self.server_id, integration: self.integration }
     }
 }
 
@@ -69,6 +72,12 @@ fn need(method: &Method, route: &str) -> Need {
         }
 
         return Need::Scope(if reading { "conversations:read" } else { "conversations:write" });
+    }
+
+    let assistant_route = route == "/api/v1/assistants" || route.strip_prefix("/api/v1/assistants/").is_some_and(|rest| rest == "{id}");
+
+    if assistant_route && (reading || method == Method::POST || method == Method::PATCH) {
+        return Need::Scope("assistants");
     }
 
     if !reading {
@@ -97,11 +106,15 @@ pub async fn gate_scoped_tokens(State(state): State<AppState>, request: Request,
     };
 
     let method = request.method().clone();
+    let path = request.uri().path().to_string();
     let route = request.extensions().get::<MatchedPath>().map(|matched| matched.as_str().to_string()).unwrap_or_else(|| request.uri().path().to_string());
-    let allowed = match need(&method, &route) {
-        Need::Anyone => true,
-        Need::Scope(scope) => scopes.iter().any(|granted| granted == scope),
-        Need::Full => false,
+    let allowed = match integration_proxy::server_of(&path) {
+        Some(server_id) => scopes.iter().any(|granted| granted.starts_with(&integration_proxy::token_scope(server_id, ""))),
+        None => match need(&method, &route) {
+            Need::Anyone => true,
+            Need::Scope(scope) => scopes.iter().any(|granted| granted == scope),
+            Need::Full => false,
+        },
     };
 
     let response = if allowed {
@@ -160,8 +173,17 @@ pub(crate) async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: U
     let _ = prompts::prompt(State(state.clone()), user, Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
 }
 
-pub async fn request(state: &AppState, conversation_id: Uuid, scopes: &[String], hours: Option<i64>, reason: &str) -> ApiResult<Result<ApiAccessRequest, String>> {
+pub async fn request(state: &AppState, conversation_id: Uuid, scopes: &[String], hours: Option<i64>, reason: &str, integration: Option<&str>) -> ApiResult<Result<ApiAccessRequest, String>> {
     let hours = hours.unwrap_or(DEFAULT_HOURS);
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let server = match integration {
+        Some(wanted) => match integration_proxy::find_with_api(state, owner, wanted).await? {
+            Ok(server) => Some(server),
+            Err(message) => return Ok(Err(message)),
+        },
+        None => None,
+    };
+    let allowed: Vec<&str> = if server.is_some() { integration_proxy::SCOPES.to_vec() } else { SCOPES.to_vec() };
 
     if !(MIN_HOURS..=MAX_HOURS).contains(&hours) {
         return Ok(Err(format!("Nothing was requested. hours is {MIN_HOURS} to {MAX_HOURS}.")));
@@ -172,8 +194,8 @@ pub async fn request(state: &AppState, conversation_id: Uuid, scopes: &[String],
     for scope in scopes {
         let scope = scope.trim();
 
-        if !SCOPES.contains(&scope) {
-            return Ok(Err(format!("Nothing was requested. {scope} is not a scope. Use {}.", SCOPES.join(", "))));
+        if !allowed.contains(&scope) {
+            return Ok(Err(format!("Nothing was requested. {scope} is not a scope. Use {}.", allowed.join(", "))));
         }
 
         if !wanted.iter().any(|known| known == scope) {
@@ -182,16 +204,16 @@ pub async fn request(state: &AppState, conversation_id: Uuid, scopes: &[String],
     }
 
     if wanted.is_empty() {
-        return Ok(Err(format!("Nothing was requested. Give scopes, from {}.", SCOPES.join(", "))));
+        return Ok(Err(format!("Nothing was requested. Give scopes, from {}.", allowed.join(", "))));
     }
 
-    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-    let row = sqlx::query_as::<_, RequestRow>(sqlx::AssertSqlSafe(format!("insert into api_access_requests (owner, conversation_id, scopes, hours, reason) values ($1, $2, $3, $4, $5) returning {REQUEST_COLUMNS}")))
+    let row = sqlx::query_as::<_, RequestRow>(sqlx::AssertSqlSafe(format!("insert into api_access_requests (owner, conversation_id, scopes, hours, reason, server_id) values ($1, $2, $3, $4, $5, $6) returning {REQUEST_COLUMNS}")))
         .bind(owner)
         .bind(conversation_id)
         .bind(&wanted)
         .bind(hours as i32)
         .bind(crate::store::text_without_nul(reason))
+        .bind(server)
         .fetch_one(&state.pool)
         .await?;
 
@@ -228,6 +250,10 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::conflict("no_node", "This conversation does not run on a node, so there is nowhere to save the token. Decline the request."));
     };
 
+    let granted: Vec<String> = match found.server_id {
+        Some(server_id) => scopes.iter().map(|scope| integration_proxy::token_scope(server_id, scope)).collect(),
+        None => scopes.clone(),
+    };
     let secret = new_token();
     let mut tx = state.pool.begin().await?;
     let claimed = sqlx::query("update api_access_requests set state = 'approved', decided_at = now(), scopes = $2 where id = $1 and state = 'requested'").bind(id).bind(&scopes).execute(&mut *tx).await?;
@@ -242,7 +268,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     .bind(user.id)
     .bind(TOKEN_LABEL)
     .bind(hash_token(&secret))
-    .bind(&scopes)
+    .bind(&granted)
     .bind(found.hours)
     .bind(found.conversation_id)
     .fetch_one(&mut *tx)
@@ -276,8 +302,8 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 }
 
 pub async fn token_saved(state: &AppState, node_id: Uuid, conversation_id: Uuid, path: Option<String>) -> ApiResult<()> {
-    let delivered = sqlx::query_as::<_, (Uuid, Uuid, Vec<String>, chrono::DateTime<chrono::Utc>)>(
-        "select r.owner, t.id, t.scopes, t.expires_at
+    let delivered = sqlx::query_as::<_, (Uuid, Uuid, Vec<String>, chrono::DateTime<chrono::Utc>, Option<Uuid>)>(
+        "select r.owner, t.id, t.scopes, t.expires_at, r.server_id
          from api_access_requests r join client_tokens t on t.id = r.token_id join conversations c on c.id = r.conversation_id
          where r.conversation_id = $1 and c.node_id = $2 and r.state = 'approved' and t.revoked_at is null
          order by r.decided_at desc limit 1",
@@ -286,13 +312,19 @@ pub async fn token_saved(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .bind(node_id)
     .fetch_optional(&state.pool)
     .await?;
-    let Some((owner, token_id, scopes, expires_at)) = delivered else {
+    let Some((owner, token_id, scopes, expires_at, server_id)) = delivered else {
         return Ok(());
     };
 
     let text = match path {
         Some(path) => {
             let base = state.config.public_url.trim_end_matches('/');
+
+            if let Some(server_id) = server_id {
+                tell_agent(state, owner, conversation_id, integration_proxy::granted_text(base, server_id, &path, &scopes, expires_at)).await;
+
+                return Ok(());
+            }
 
             format!(
                 "I approved API access for this conversation until {} UTC, for {}. The token is in the file {path}. Read it from there when you need it and never copy it into a message, a file or a commit. Send it as an Authorization: Bearer header to {base}/api/v1/. It stops working at that time, or sooner if I revoke it.",

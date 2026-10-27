@@ -158,6 +158,19 @@ async fn a_result_read_from_the_game_is_recorded_and_summarised() {
 }
 
 #[tokio::test]
+async fn an_unfinished_game_is_played_but_stays_out_of_the_average() {
+    let server = Server::start().await;
+
+    server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&json!({"guesses": 2, "source": "read"}))).await;
+
+    let all = puzzles(&server).await;
+    let wordle = puzzle(&all, "wordle");
+
+    assert_eq!((wordle["stats"]["played"].clone(), wordle["stats"]["average"].clone(), wordle["stats"]["distribution"].clone()), (json!(1), Value::Null, json!([])));
+    assert_eq!(wordle["day"].as_str().map(str::len), Some(10));
+}
+
+#[tokio::test]
 async fn an_assistant_ping_while_mycelium_is_closed_is_held_and_released_when_it_opens() {
     let server = Server::start().await;
     let ping = json!({"kind": "ping", "subject": "conversation-1"});

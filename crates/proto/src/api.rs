@@ -2402,6 +2402,7 @@ pub struct PuzzleStats {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PuzzleSummary {
     pub puzzle: String,
+    pub day: String,
     pub today: Option<PuzzleResult>,
     pub history: Vec<PuzzleDay>,
     pub stats: PuzzleStats,

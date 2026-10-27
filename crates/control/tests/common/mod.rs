@@ -452,7 +452,7 @@ impl Server {
         let (reply, ()) = tokio::join!(self.agent_mcp(token, conversation_id, body), async {
             let request = self.open_request(conversation_id).await;
 
-            self.answer(conversation_id, &request, "allow_once").await;
+            self.answer(conversation_id, &request, "approve").await;
         });
 
         reply

@@ -121,6 +121,10 @@ async fn authorisation_of(state: &AppState, mcp_url: &url::Url) -> Option<Author
     })
 }
 
+pub(crate) async fn offers_sign_in(state: &AppState, mcp_url: &url::Url) -> bool {
+    authorisation_of(state, mcp_url).await.is_some()
+}
+
 fn redirect_uri(state: &AppState) -> String {
     format!("{}/integrations/oauth/callback", state.config.public_url)
 }

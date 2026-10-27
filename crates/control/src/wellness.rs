@@ -429,7 +429,7 @@ pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query)
         .map(|name| {
             let own: Vec<&PuzzleRow> = rows.iter().filter(|row| row.0 == *name).collect();
             let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, guesses: row.3, mistakes: row.4, score: row.5.clone(), source: Some(row.6.clone()) };
-            let values: Vec<i32> = own.iter().filter(|row| row.2 != Some(false)).filter_map(|row| row.3.or(row.4)).collect();
+            let values: Vec<i32> = own.iter().filter(|row| row.2 == Some(true)).filter_map(|row| row.3.or(row.4)).collect();
             let mut distribution: BTreeMap<i32, i64> = BTreeMap::new();
 
             for value in &values {
@@ -438,6 +438,7 @@ pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query)
 
             PuzzleSummary {
                 puzzle: name.to_string(),
+                day: today.to_string(),
                 today: own.iter().find(|row| row.1 == today).map(|row| result(row)),
                 history: own.iter().map(|row| PuzzleDay { day: row.1.to_string(), result: result(row), recorded_at: row.7 }).collect(),
                 stats: PuzzleStats {
