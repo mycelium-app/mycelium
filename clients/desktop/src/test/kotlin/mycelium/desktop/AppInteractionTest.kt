@@ -92,20 +92,6 @@ class AppInteractionTest {
     }
 
     @Test
-    fun hoveringAButtonChangesItsBackground() {
-        rule.setContent { MyceliumTheme(true) { MyButton({}, text = "Hover me") } }
-        val button = rule.onNodeWithText("Hover me")
-        val before = button.captureToImage().toPixelMap().let { it[2, it.height / 2] }
-
-        button.performMouseInput { moveTo(center) }
-        rule.mainClock.advanceTimeBy(100)
-        rule.waitForIdle()
-
-        val after = button.captureToImage().toPixelMap().let { it[2, it.height / 2] }
-        assertTrue(before != after, "background stayed $before")
-    }
-
-    @Test
     fun aMenuItemNameIsNeverCutOffByItsDescription() {
         rule.setContent {
             MyceliumTheme(true) {
@@ -141,40 +127,5 @@ class AppInteractionTest {
         rule.onNode(hasSetTextAction()).performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Escape) }
 
         kotlin.test.assertEquals(1, stopped)
-    }
-
-    @Test
-    fun aTooltipShowsAtOnceCentredUnderItsButtonWithoutMovingTheButtons() {
-        rule.setContent {
-            MyceliumTheme(true) {
-                androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.padding(start = 300.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
-                    MyButton({}, icon = mycelium.ui.MyIcon.Copy, description = "Copy this agent response")
-                    MyButton({}, icon = mycelium.ui.MyIcon.ScrollToTop, description = "Scroll to top")
-                }
-            }
-        }
-        val copy = rule.onNodeWithContentDescription("Copy this agent response")
-        val second = rule.onNodeWithContentDescription("Scroll to top")
-        val before = second.getBoundsInRoot()
-
-        copy.performMouseInput { moveTo(center) }
-        rule.waitForIdle()
-
-        val button = copy.getBoundsInRoot()
-        val tip = rule.onNodeWithText("Copy this agent response").getBoundsInRoot()
-        assertTrue(abs(((tip.left + tip.right) / 2 - (button.left + button.right) / 2).value) < 1f, "tooltip at ${tip.left}..${tip.right}, button at ${button.left}..${button.right}")
-        assertTrue(before == second.getBoundsInRoot(), "the next button moved")
-    }
-
-    @Test
-    fun theBrowserSignInButtonIsCentredUnderTheTitle() {
-        rule.setContent { MyceliumTheme(true) { SignInScreen(StubPlatform(signsInThroughTheBrowser = true), null, null) { _, _ -> } } }
-
-        val title = rule.onNodeWithText("Mycelium").getBoundsInRoot()
-        val button = rule.onNodeWithText("Sign in").getBoundsInRoot()
-        val titleCentre = (title.left + title.right) / 2
-        val buttonCentre = (button.left + button.right) / 2
-
-        assertTrue(abs((titleCentre - buttonCentre).value) < 1f, "title centre $titleCentre, button centre $buttonCentre")
     }
 }

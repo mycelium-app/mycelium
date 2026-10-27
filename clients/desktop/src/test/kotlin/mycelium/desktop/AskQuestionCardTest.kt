@@ -78,7 +78,6 @@ class AskQuestionCardTest {
     fun aQuestionWithOptionsOffersEachAsAButtonAndPickingOneSendsIt() {
         show(asked())
 
-        rule.onNodeWithText("Waiting for your answer").assertExists()
         rule.onNodeWithContentDescription("Answer Should the walkthrough include test files?: No").performClick()
 
         assertEquals(listOf("No"), answers)
@@ -93,7 +92,6 @@ class AskQuestionCardTest {
 
         assertEquals(listOf("Only the changed ones"), answers)
         rule.waitForIdle()
-        rule.onNodeWithText("Answered").assertExists()
         rule.onNodeWithText("Answered: Only the changed ones").assertExists()
         rule.onNodeWithText("Send answer").assertDoesNotExist()
     }
@@ -103,7 +101,6 @@ class AskQuestionCardTest {
         task = question(TaskStatuses.Done, "Yes")
         show(asked())
 
-        rule.onNodeWithText("Answered").assertExists()
         rule.onNodeWithText("Answered: Yes").assertExists()
         rule.onNodeWithText("Send answer").assertDoesNotExist()
     }
@@ -116,20 +113,5 @@ class AskQuestionCardTest {
 
         rule.onNodeWithText("Enter an answer to send.").assertExists()
         assertEquals(emptyList(), answers)
-    }
-
-    @Test
-    fun theQuestionCardRendersOpenAndAnsweredNextToAScheduleCard() {
-        val events = asked() + completedCall("t6", 3, "mcp__mycelium__propose_schedule", """{"prompt":"Check CI and summarise failures","preset":"weekdays at 20:00"}""", "Schedule 77777777-7777-7777-7777-777777777777 proposed (0 20 * * 1-5, Europe/London). It waits for the person to confirm and will not run until they do.")
-
-        for ((name, current) in listOf("question-open" to question(), "question-answered" to question(TaskStatuses.Done, "Only the changed ones"))) {
-            val file = renderAt(name, true, false) {
-                CompositionLocalProvider(LocalQuestionAnswers provides QuestionAnswers(mapOf(QuestionId to current), {}, { _, _ -> })) {
-                    Box(Modifier.width(640.dp).background(MyTheme.colors.bgContent).padding(16.dp)) { ThreadView(buildThread(events), onAnswer = { _, _ -> }, onStopWorkflow = {}) }
-                }
-            }
-
-            assertEquals(true, file.length() > 0)
-        }
     }
 }

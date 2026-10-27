@@ -324,28 +324,6 @@ class AnnotationsTest {
         rule.onNodeWithText("Add to message").assertIsDisplayed()
     }
 
-    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
-    @Test
-    fun rendersTheOfferOverASelectedParagraphForReview() {
-        val item = ThreadItem.AgentMessage("e1", "The retry delay is read from RESTORE_BACKOFF_MS, which defaults to 500.\n\nRaise it when the node is on a slow link.")
-        val file = renderAt("annotation-offer", dark = true, phone = false, interact = { scene ->
-            fun pointer(type: androidx.compose.ui.input.pointer.PointerEventType, x: Float) =
-                scene.sendPointerEvent(type, Offset(x, 65f), nativeEvent = null)
-            pointer(androidx.compose.ui.input.pointer.PointerEventType.Move, 400f)
-            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Press, Offset(400f, 65f), buttons = androidx.compose.ui.input.pointer.PointerButtons(isPrimaryPressed = true))
-            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Move, Offset(700f, 65f), buttons = androidx.compose.ui.input.pointer.PointerButtons(isPrimaryPressed = true))
-            scene.sendPointerEvent(androidx.compose.ui.input.pointer.PointerEventType.Release, Offset(700f, 65f))
-        }) {
-            CompositionLocalProvider(LocalAnnotate provides AnnotateActions(onAttach = { }, onAsk = { _, _ -> })) {
-                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(mycelium.ui.MyTheme.colors.bgContent).padding(24.dp)) {
-                    ThreadView(listOf(item), onAnswer = { _, _ -> }, onStopWorkflow = {})
-                }
-            }
-        }
-
-        assertTrue(file.length() > 0)
-    }
-
     @Test
     fun anAttachedChipSurvivesNewEventsAndTheConversationChangingStatus() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")

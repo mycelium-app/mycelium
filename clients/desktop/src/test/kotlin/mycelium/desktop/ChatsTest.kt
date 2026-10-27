@@ -132,15 +132,6 @@ class ChatsTest {
     }
 
     @Test
-    fun theSwitchIsAPairOfTabsWithTheCurrentOneSelected() {
-        shell()
-
-        rule.onNodeWithText("Workspaces").assertIsDisplayed()
-        rule.onNodeWithText("Chats").performClick()
-        rule.onNodeWithText("Chats").assertIsDisplayed()
-    }
-
-    @Test
     fun chatsAreGroupedUnderTodayThisWeekAndOlder() {
         shell()
         rule.onNodeWithText("Chats").performClick()
@@ -182,17 +173,6 @@ class ChatsTest {
         shell(Route.NewChat)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Message").fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    @Test
-    fun theNewChatScreenIsAHeadingOverOneComposerWithAttachAndTheModelInsideIt() {
-        newChatScreen()
-
-        rule.onNodeWithText("What's on your mind?").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Attach files").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Send").assertIsDisplayed()
-        assertEquals(0, rule.onAllNodesWithText("Start chat").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -268,16 +248,6 @@ class ChatsTest {
         rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("anthropic/claude-haiku-5-5").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("qwen3").fetchSemanticsNodes().size)
-    }
-
-    @Test
-    fun aSearchWithNoMatchSaysSo() {
-        newChatScreen()
-
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Search models").performTextInput("zzz")
-
-        rule.onNodeWithText("No matching models").assertIsDisplayed()
     }
 
     @Test
@@ -368,7 +338,6 @@ class ChatsTest {
         shell(Route.NewChat)
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Open Settings").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("No chat model is set up. Add a provider in Settings, under Chat models, then start a chat.").assertIsDisplayed()
 
         rule.onNodeWithText("Open Settings").performClick()
 

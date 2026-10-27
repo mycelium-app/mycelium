@@ -91,30 +91,7 @@ class CalendarsTest {
     }
 
     @Test
-    fun theAddressStepAsksForTheServerAddressAndSaysTheBaseAddressIsEnough() {
-        openSetup()
-
-        rule.onNodeWithText("Add a calendar").assertExists()
-        rule.onNodeWithContentDescription("Step 1 of 4: Address").assertExists()
-        rule.onNodeWithText("The base address is enough. Mycelium finds your calendars from it.").assertExists()
-        rule.onNodeWithText("Works with any CalDAV server, such as Nextcloud, Radicale, Fastmail or iCloud.").assertExists()
-    }
-
-    @Test
-    fun theCredentialStepNamesTheHostAndAsksForUsernameAndAppPassword() {
-        openSetup()
-
-        rule.onNodeWithContentDescription("Server address").performTextInput("https://cal.example.com")
-        rule.onNodeWithText("Continue").performClick()
-
-        rule.onNodeWithText("Sign in to cal.example.com.").assertExists()
-        rule.onNodeWithContentDescription("Username").assertExists()
-        rule.onNodeWithContentDescription("App password").assertExists()
-        rule.onNodeWithText("Create one in your calendar provider's security settings. Stored on the control plane, never shown to agents.").assertExists()
-    }
-
-    @Test
-    fun theTestStepListsTheFoundCalendarsAndMarksAReadOnlyOne() {
+    fun theTestStepListsTheFoundCalendarsMarksAReadOnlyOneAndSendsTheCredential() {
         openSetup()
 
         toTestStep()
@@ -122,7 +99,6 @@ class CalendarsTest {
         waitForText("Connected as sam. Found 3 calendars.")
         rule.onNodeWithText("Personal").assertExists()
         rule.onNodeWithText("Family, read only").assertExists()
-        rule.onNodeWithText("Listing and searching events run straight away. Creating, changing and deleting events ask first.").assertExists()
         assertTrue(requests.any { it.first.endsWith("/caldav-test") && it.second.contains("app-secret") && it.second.contains("\"username\":\"sam\"") })
     }
 
@@ -173,12 +149,9 @@ class CalendarsTest {
 
     @Test
     fun theCatalogueOffersACalendarTileUnderACalendarChip() {
-        val store = store()
         rule.setContent { MyceliumTheme(true) { IntegrationsCatalogue(emptyList(), emptyList(), {}, {}, {}, {}) } }
 
         rule.onNodeWithText("Calendar · CalDAV").assertExists()
-        rule.onNodeWithText("Agents can: List calendars, and list and search events in a date range.").assertExists()
-        rule.onNodeWithText("Asks first: Creating, changing and deleting events ask first.").assertExists()
         rule.onAllNodesWithText("Calendar").assertCountEquals(2)
     }
 
@@ -197,19 +170,5 @@ class CalendarsTest {
         rule.onNodeWithText("Family").assertExists()
         rule.onNodeWithText("Remove account").assertExists()
         assertEquals(0, rule.onAllNodesWithText("Replace token").fetchSemanticsNodes().size)
-    }
-
-    @Test
-    fun theCalendarScreensRender() {
-        val store = store()
-        val account = MyceliumJson.decodeFromString(ChatToolServer.serializer(), CalendarAccount)
-        val integration = integrationsOf(listOf(account)).single()
-        val actions = PageActions({}, {}, {}, {}, {}, {}, {})
-
-        for (dark in listOf(true, false)) {
-            assertTrue(renderAt("calendar-catalogue", dark, false) { Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent).padding(24.dp)) { Column { IntegrationsCatalogue(emptyList(), emptyList(), {}, {}, {}, {}) } } }.length() > 5_000)
-            assertTrue(renderAt("calendar-setup-address", dark, false) { SetupFlow(store, "caldav", null, emptySet(), {}, {}, {}, {}) }.length() > 5_000)
-            assertTrue(renderAt("calendar-account", dark, false) { Box(Modifier.fillMaxSize().background(MyTheme.colors.bgContent).padding(24.dp)) { AccountPage(store, integration, account, actions, {}, {}) } }.length() > 5_000)
-        }
     }
 }

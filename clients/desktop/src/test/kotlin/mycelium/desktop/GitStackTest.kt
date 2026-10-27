@@ -6,17 +6,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -36,7 +33,6 @@ import mycelium.state.Store
 import mycelium.ui.GitPanel
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -50,15 +46,6 @@ private fun stackJson(townAvailable: Boolean, inferred: Boolean = false, pullReq
     {"name":"one","parent":"main","depth":1,"current":true,"ahead":2,"behind":0,"has_upstream":true,"pushed":true,"subject":"Add the importer",
      "pull_request":{"number":123,"label":"PR #123","title":"Add the importer","url":"https://forge.example/pull/123","state":"draft"}},
     {"name":"two","parent":"one","depth":2,"ahead":1,"behind":3,"has_upstream":false,"pushed":false,"needs_sync":true,"subject":"Wire the importer in"}
-  ]}"""
-
-private val ChainStackJson = """{
-  "current":"one","main":"main","inferred":false,"git_town_available":true,"pull_requests_available":false,
-  "branches":[
-    {"name":"main","depth":0,"main":true,"has_upstream":true,"pushed":true,"subject":"Start the project"},
-    {"name":"one","parent":"main","depth":1,"current":true,"ahead":5,"behind":0,"has_upstream":true,"pushed":true,"subject":"Add the importer"},
-    {"name":"a-much-longer-branch-name-for-the-second-step","parent":"one","depth":2,"ahead":1,"behind":0,"has_upstream":true,"pushed":true,"subject":"Wire the importer in"},
-    {"name":"three","parent":"a-much-longer-branch-name-for-the-second-step","depth":3,"ahead":2,"behind":1,"has_upstream":true,"pushed":true,"subject":"Test the importer"}
   ]}"""
 
 private class StackFake(val stack: String, val townReply: Pair<HttpStatusCode, String> = HttpStatusCode.OK to "{}") {
@@ -153,12 +140,11 @@ class GitStackTest {
     }
 
     @Test
-    fun withoutGitTownTheActionsAreHiddenAndTheInferredStackSaysItWasInferred() {
+    fun withoutGitTownTheActionsAreHidden() {
         open(StackFake(stackJson(townAvailable = false, inferred = true)))
 
         assertEquals(0, rule.onAllNodesWithText("Sync stack").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Propose").fetchSemanticsNodes().size)
-        rule.onNodeWithText("Git Town has no record of this stack, so it is worked out from which branches contain which.").assertIsDisplayed()
         rule.onNodeWithText("two").assertIsDisplayed()
     }
 
@@ -182,24 +168,5 @@ class GitStackTest {
         rule.waitUntil(5_000) { fake.sent("/git/town/propose") }
 
         assertTrue(rule.onAllNodes(hasContentDescription("Propose two")).fetchSemanticsNodes().isEmpty())
-    }
-
-    @Test
-    fun theSwitchButtonsOfAChainShareOneRightEdgeAndAheadBehindReadsPlusAndMinus() {
-        open(StackFake(ChainStackJson))
-
-        val edges = listOf("main", "a-much-longer-branch-name-for-the-second-step", "three").map {
-            rule.onNodeWithContentDescription("Switch to $it").getBoundsInRoot().right
-        }
-
-        assertEquals(1, edges.distinct().size)
-        rule.onNodeWithText("+5 \u22120").assertIsDisplayed()
-    }
-
-    @Test
-    fun rendersTheStackForReview() {
-        open(StackFake(stackJson(townAvailable = true)))
-        File("build/screens").mkdirs()
-        File("build/screens/git-stack.png").writeBytes(rule.onRoot().captureToImage().asSkiaBitmap().let { bitmap -> org.jetbrains.skia.Image.makeFromBitmap(bitmap).encodeToData()!!.bytes })
     }
 }

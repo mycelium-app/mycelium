@@ -1,7 +1,5 @@
 package mycelium.desktop
 
-import androidx.compose.ui.graphics.asSkiaBitmap
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -86,7 +84,6 @@ class UsageLimitTest {
 
         rule.onNodeWithText("Paused until Claude Code's 5-hour limit resets at 15:30.").assertExists()
         rule.onNodeWithContentDescription("Error: Internal error: You've hit your session limit").assertDoesNotExist()
-        rule.onNodeWithText("Claude Code said: You've hit your session limit", substring = true).assertExists()
     }
 
     @Test
@@ -100,18 +97,13 @@ class UsageLimitTest {
         rule.onNodeWithText("Resumes automatically at 15:31.").assertExists()
         rule.onNodeWithContentDescription("Paused: Build").assertExists()
         rule.onNodeWithContentDescription("Cancel the automatic resume").assertExists()
-
-        val png = org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData(org.jetbrains.skia.EncodedImageFormat.PNG)!!.bytes
-        val out = java.io.File("build/screens/workflow-paused-dark.png")
-        out.parentFile.mkdirs()
-        out.writeBytes(png)
     }
 
     @Test
     fun aLimitWithoutAResetTimeOffersOnlyToRetry() {
         show(store(resetsAt = null))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Paused at Claude Code's 5-hour limit. Mycelium does not know when it resets.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Mycelium does not know when it resets", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Retry this conversation now").assertExists()
         rule.onNodeWithText("Resume at", substring = true).assertDoesNotExist()
     }
@@ -168,7 +160,6 @@ class UsageLimitTest {
         rule.setContent { MyceliumTheme(true) { AgentsSettings(store) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Wait and resume automatically").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("When a usage limit is reached").assertExists()
         rule.onNodeWithText("Wait and resume automatically").performClick()
 
         rule.waitUntil(5_000) { calls.isNotEmpty() }

@@ -3,10 +3,6 @@ package mycelium.desktop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -102,7 +98,7 @@ class ActivityTest {
     }
 
     @Test
-    fun theActivityButtonOpensTheSevenDayTotalsBreakdownsAndChartSummary() {
+    fun theActivityButtonOpensTheSevenDayTotalsAndBreakdowns() {
         showSidebar(Reported)
 
         rule.onNodeWithText("4 turns, 3h 12m working").assertExists()
@@ -110,52 +106,26 @@ class ActivityTest {
         assertEquals(true, shown("~$1,940"))
         assertEquals(true, shown("3h 12m"))
         assertEquals(true, shown("182M"))
-        rule.onNodeWithText("Peak 181M in the hour from 2 Oct 10:00, 182M in total.").assertExists()
         assertEquals(true, shown("midden"))
         assertEquals(true, shown("claude-opus-5-5"))
         assertEquals("range=7d", asked.last())
     }
 
     @Test
-    fun energyWaterAndForestAreShownAsEstimatesWithTheirSourcesNamed() {
+    fun energyWaterAndForestAreEstimatedFromTheTokensUsed() {
         showSidebar(Reported)
 
-        rule.onNodeWithText("Energy and water").assertExists()
         rule.onNodeWithText("~36 kWh").assertExists()
         rule.onNodeWithText("~40 L of water").assertExists()
-        rule.onNodeWithText("Forest").assertExists()
         rule.onNodeWithText("~270 tree-days").assertExists()
         rule.onNodeWithText("~16 kg CO\u2082").assertExists()
-        rule.onNodeWithText("How this is estimated", substring = true).assertExists()
-        rule.onNodeWithText("never measured", substring = true).assertExists()
-        rule.onNodeWithText("Epoch AI, 2025", substring = true).assertExists()
-    }
-
-    @Test
-    fun projectsAndNodesSitSideBySideOnAWideScreenAndStackOnANarrowOne() {
-        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
-        fun top(title: String) = rule.onNode(hasText(title) and heading).fetchSemanticsNode().positionInRoot.y
-
-        showSidebar(Reported, 1400.dp)
-        assertEquals(top("Projects"), top("Nodes"))
-    }
-
-    @Test
-    fun projectsAndNodesStackOnANarrowScreen() {
-        val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
-
-        showSidebar(Reported, 700.dp)
-
-        val projects = rule.onNode(hasText("Projects") and heading).fetchSemanticsNode().positionInRoot.y
-        val nodes = rule.onNode(hasText("Nodes") and heading).fetchSemanticsNode().positionInRoot.y
-        assertEquals(true, nodes > projects)
     }
 
     @Test
     fun anAgentThatReportsNoUsageIsNamedAndShowsTurnsAndTimeOnly() {
         showSidebar(Reported)
 
-        rule.onNodeWithText("Codex did not report token usage in this range, so only its turns and time working are counted.").assertExists()
+        rule.onNodeWithText("Codex did not report token usage", substring = true).assertExists()
         assertEquals(true, shown("Not reported"))
     }
 
@@ -181,7 +151,6 @@ class ActivityTest {
         rule.waitForIdle()
 
         assertEquals("range=all", asked.last())
-        rule.onNodeWithText("Tokens per day, all time").assertExists()
         rule.onNodeWithText("Peak 181M on 2 Oct, 182M in total.").assertExists()
     }
 

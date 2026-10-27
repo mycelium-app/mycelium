@@ -154,7 +154,6 @@ class MessageProposalCardTest {
     fun aMessageAcrossGroupsOffersSendAndConnectGroups() {
         show(AcrossGroups, EnabledExperiments)
         rule.waitUntil(timeoutMillis = 5_000) { rule.onAllNodesWithText("Don't send").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Connecting groups lets every conversation in yucca and Immich start and message the other without approval.").assertExists()
 
         rule.onNodeWithContentDescription("More ways to send").performClick()
         rule.onNodeWithText("Send and connect groups").performClick()

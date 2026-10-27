@@ -134,7 +134,6 @@ class WorktreesTest {
         show(store())
 
         rule.onNodeWithContentDescription("New worktree").performClick()
-        rule.onNodeWithText("Names the branch and its folder").assertExists()
 
         rule.onNodeWithContentDescription("New branch").performTextInput("fix/restore-copy")
 

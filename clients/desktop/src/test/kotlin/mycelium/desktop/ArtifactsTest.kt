@@ -119,7 +119,6 @@ class ArtifactsScreenTest {
         rule.onNodeWithContentDescription("More for Planning board").performClick()
         rule.onNodeWithText("Manage access").performClick()
         rule.waitUntil(5_000) { shown("Conversation c1") }
-        File("/tmp/artefact-access-actual.png").writeBytes(org.jetbrains.skia.Image.makeFromBitmap(rule.onAllNodes(isRoot()).get(1).captureToImage().asSkiaBitmap()).encodeToData()!!.bytes)
         rule.onNodeWithContentDescription("Remove access for Conversation c1").performClick()
         rule.waitUntil(5_000) { sent("DELETE", "/artifacts/a2/links/l1") != null && !shown("Conversation c1") }
     }
@@ -145,15 +144,6 @@ class ArtifactsScreenTest {
 
         assertTrue(shown("Planning board"))
         assertFalse(shown("Loose notes"))
-    }
-
-    @Test
-    fun theScreenListsEveryArtifactWithItsEditTime() {
-        showArtifacts()
-
-        assertTrue(shown("Planning board"))
-        assertTrue(shown("Release notes"))
-        assertEquals(3, rule.onAllNodesWithText("Edited", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test

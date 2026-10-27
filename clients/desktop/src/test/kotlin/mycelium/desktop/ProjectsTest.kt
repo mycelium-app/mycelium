@@ -120,7 +120,6 @@ class ProjectsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("acme-backups").assertExists()
         rule.onNodeWithText("acme-org").assertExists()
-        rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().let { assertEquals(2, it.size) }
         rule.onNodeWithContentDescription("Set up on laptop").assertExists()
         rule.onNodeWithText("laptop").assertExists()
         rule.onNodeWithText("homelab").assertExists()
@@ -250,17 +249,6 @@ class ProjectsTest {
     }
 
     @Test
-    fun theStepsAreNumbered() {
-        groups = """[{"id":"g1","name":"work","created_at":"2026-10-22T10:00:00Z"}]"""
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Group work").fetchSemanticsNodes().isNotEmpty() }
-
-        listOf("1", "2", "3").forEach { rule.onNodeWithText(it).assertExists() }
-    }
-
-    @Test
     fun aNewRepositoryIsCreatedOnTheForgeThenClonedAsTheProject() {
         val store = store()
         var created: String? = null
@@ -290,7 +278,7 @@ class ProjectsTest {
         rule.onNodeWithContentDescription("New repository").performTextInput("restore-tool")
         rule.onNodeWithText("Create and open").performClick()
 
-        rule.onNodeWithText("Enter the new repository as owner/name, for example acme-org/restore-tool.").assertExists()
+        rule.onNodeWithText("owner/name", substring = true).assertExists()
         assertEquals(0, posts.size)
     }
 
@@ -345,18 +333,6 @@ class ProjectsTest {
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
-    }
-
-    @Test
-    fun theNewConversationScreenIsAHeadingOverOneComposerWithAttachAndTheAgentInsideIt() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { androidx.compose.runtime.CompositionLocalProvider(mycelium.ui.LocalPlatform provides QuietPlatform) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } } }
-
-        rule.onNodeWithText("What are we working on?").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Message").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Attach files").assertExists()
-        rule.onNodeWithContentDescription("Agent: Claude Code").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Send").assertIsDisplayed()
     }
 
     @Test

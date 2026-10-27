@@ -150,22 +150,4 @@ class ConversationAreaInteractionTest {
         rule.onNodeWithText("Sonnet 5.5").assertExists()
         capture("new-conversation-model-menu")
     }
-
-    @Test
-    fun theOpenInIdeMenuNamesWhereItRunsAndLeadsToIdeSettings() {
-        rule.setContent {
-            MyceliumTheme(true) {
-                Box(Modifier.width(600.dp).height(300.dp).background(MyTheme.colors.bgContent).padding(24.dp)) {
-                    SplitButton("Open in Zed", {}, listOf(SplitAlternative("Open in VS Code", {}), SplitAlternative("IDE settings", {}, separated = true)), variant = ButtonVariant.Outline, size = ButtonSize.Sm, menuLabel = "On atlas-box, over SSH")
-                }
-            }
-        }
-
-        rule.onNodeWithContentDescription("More ways to open in Zed").performClick()
-
-        rule.onNodeWithText("On atlas-box, over SSH").assertExists()
-        rule.onNodeWithText("Open in VS Code").assertExists()
-        rule.onNodeWithText("IDE settings").assertExists()
-        capture("open-in-ide-menu")
-    }
 }

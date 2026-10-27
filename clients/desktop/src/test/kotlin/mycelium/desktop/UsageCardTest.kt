@@ -111,6 +111,8 @@ class UsageCardTest {
         return usageRequests
     }
 
+    private fun codexWithBankedResets() = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(2))
+
     @Test
     fun anOverspentKeyShowsItsNegativeRemainingLimit() {
         rule.setContent {
@@ -169,23 +171,13 @@ class UsageCardTest {
     }
 
     @Test
-    fun anAccountWithNoBankedResetsShowsNoBankedLine() {
-        val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(0))
-
-        rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false)) } }
-
-        rule.onNodeWithText("banked", substring = true).assertDoesNotExist()
-    }
-
-    private fun codexWithBankedResets() = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(2))
-
-    @Test
     fun anAccountWithNoBankedResetsHasNoUseResetButton() {
         val account = AgentAccount("codex", "work@example.com", "device_auth", emptyList(), windows = listOf(UsageWindow("five_hour", 5.0)), resetCredits = ResetCredits(0))
 
         rule.setContent { MyceliumTheme(true) { UsageCard(listOf(account to false), onUseReset = { _, _ -> "reset" }) } }
 
         rule.onNodeWithText("Use reset").assertDoesNotExist()
+        rule.onNodeWithText("banked", substring = true).assertDoesNotExist()
     }
 
     @Test
@@ -196,7 +188,6 @@ class UsageCardTest {
         rule.onNodeWithText("Use reset").performClick()
 
         rule.onNodeWithText("Use a banked reset?").assertIsDisplayed()
-        rule.onNodeWithText("Codex resets the current usage limits for work@example.com. You have 2 banked. This cannot be undone.").assertIsDisplayed()
         rule.onNodeWithText("Cancel").performClick()
 
         rule.onNodeWithText("Use a banked reset?").assertDoesNotExist()

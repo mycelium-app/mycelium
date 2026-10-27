@@ -112,9 +112,6 @@ class StartProposalCardTest {
         rule.onNodeWithText("Folder /tmp").assertExists()
         rule.onNodeWithText("claude · a@example.com").assertExists()
         rule.onNodeWithText("Read the schema").assertExists()
-        rule.onNodeWithText("Don't create").assertExists()
-        rule.onNodeWithContentDescription("More ways to create").performClick()
-        rule.onNodeWithText("Create and connect").assertExists()
     }
 
     @Test

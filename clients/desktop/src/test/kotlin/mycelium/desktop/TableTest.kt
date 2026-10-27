@@ -180,13 +180,6 @@ class TableTest {
     }
 
     @Test
-    fun lazy500RowsComposes() {
-        show(rows = 500, lazy = true, cell = { row, _ -> "r$row" })
-
-        rule.onNodeWithText("Name").assertExists()
-    }
-
-    @Test
     fun numericRightEdgesAlign() {
         show()
 

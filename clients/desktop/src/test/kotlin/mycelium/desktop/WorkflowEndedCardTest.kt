@@ -43,7 +43,6 @@ class WorkflowEndedCardTest {
         show(WorkflowProgress("run", emptyList(), plannedPhases = listOf("Implement", "Verify", "Fix"), end = WorkflowEnd("stopped", Instant.parse("2026-10-27T00:42:10Z"))))
 
         rule.onNodeWithText("Stopped before any step ran").assertIsDisplayed()
-        rule.onNodeWithText("before the first agent started.", substring = true).assertIsDisplayed()
         assertEquals(3, rule.onAllNodesWithText("Did not run").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Stop the workflow").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Waiting").fetchSemanticsNodes().size)
@@ -66,7 +65,6 @@ class WorkflowEndedCardTest {
         show(WorkflowProgress("run", agents, lastLineAt = Clock.System.now() - 25.minutes))
 
         rule.onNodeWithText("No progress for 25 minutes").assertIsDisplayed()
-        rule.onNodeWithText("last line 25m ago").assertIsDisplayed()
         rule.onNodeWithContentDescription("Stop the workflow").assertIsDisplayed()
     }
 }

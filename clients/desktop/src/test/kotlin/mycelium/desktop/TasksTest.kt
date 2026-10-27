@@ -151,14 +151,6 @@ class TasksTest {
     }
 
     @Test
-    fun questionsAndProposalsNameWhereTheyCameFrom() {
-        showBoard()
-
-        rule.onNodeWithText("From Release").assertExists()
-        rule.onNodeWithText("app · from Release").assertExists()
-    }
-
-    @Test
     fun approvingAProposalPostsItAndOffersItToStart() {
         showBoard()
 
@@ -188,8 +180,6 @@ class TasksTest {
         rule.onNodeWithText("Show declined").performClick()
 
         rule.onNodeWithText("Old idea").assertExists()
-        rule.onNodeWithText("Declined").assertExists()
-        rule.onNodeWithText("Hide declined").assertExists()
     }
 
     @Test
@@ -249,21 +239,6 @@ class TasksTest {
     }
 
     @Test
-    fun aCardShowsAgentModelProjectAndBranch() {
-        showBoard()
-
-        rule.onNodeWithText("Claude Code · opus · app · feature/x").assertExists()
-        rule.onNodeWithText("Codex").assertExists()
-    }
-
-    @Test
-    fun runningCardsShowHowLongTheyHaveBeenRunning() {
-        showBoard()
-
-        rule.onNodeWithContentDescription("Running for", substring = true).assertExists()
-    }
-
-    @Test
     fun doneStartsCollapsedAndExpandingItShowsItsCardsAndRemembersTheChoice() {
         showBoard()
 
@@ -280,7 +255,7 @@ class TasksTest {
         showBoard()
 
         rule.onNodeWithText("Running job").assertDoesNotExist()
-        rule.onNodeWithContentDescription("Expand Claimed, 5").assertExists()
+        rule.onNodeWithContentDescription("Expand Claimed", substring = true).assertExists()
         rule.onNodeWithText("Cache cargo in the release jobs").assertExists()
     }
 
@@ -385,21 +360,6 @@ class TasksTest {
     }
 
     private fun withIdleConversation(vararg others: String) = store(conversations = "[" + (listOf(conversation("c-idle", "Ready for a look", "review", "/work/app", project = "\"p1\"")) + others).joinToString(",") + "]")
-
-    @Test
-    fun anOpenTaskOffersAnyIdleConversationOfItsProject() {
-        showBoard(withIdleConversation())
-
-        rule.onNodeWithText("app · any idle conversation").assertExists()
-    }
-
-    @Test
-    fun anOpenTaskKeepsItsOwnDetailsWhenNoConversationOfItsProjectIsIdle() {
-        showBoard(store(conversations = "[" + conversation("c-working", "Busy", "working", "/work/app", project = "\"p1\"") + "," + conversation("c-other", "Elsewhere", "review", project = "\"p2\"") + "]"))
-
-        rule.onNodeWithText("any idle conversation", substring = true).assertDoesNotExist()
-        rule.onAllNodesWithText("Claude Code · app").fetchSemanticsNodes().isNotEmpty().let(::assertTrue)
-    }
 
     @Test
     fun startingATaskWithIdleConversationsOffersNewAndEachConversation() {

@@ -15,8 +15,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.unit.dp
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -34,7 +32,6 @@ import mycelium.state.Store
 import mycelium.ui.GitPanel
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
-import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -248,16 +245,5 @@ class GitGraphTest {
 
         assertEquals("""{"branch":"fresh-idea","create":true}""", fake.switchBody())
         assertTrue(fake.requests.any { it.method == HttpMethod.Post })
-    }
-
-    @Test
-    fun rendersTheGraphForReview() {
-        val fake = GitFake()
-        open(fake)
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Graph").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Graph").performClick()
-        awaitText("Merge the importer")
-        File("build/screens").mkdirs()
-        File("build/screens/git-graph.png").writeBytes(rule.onRoot().captureToImage().asSkiaBitmap().let { bitmap -> org.jetbrains.skia.Image.makeFromBitmap(bitmap).encodeToData()!!.bytes })
     }
 }

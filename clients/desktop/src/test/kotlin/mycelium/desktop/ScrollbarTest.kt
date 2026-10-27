@@ -18,13 +18,11 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.moveTo
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.dp
 import mycelium.ui.Label
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.ScrollbarShown
-import mycelium.ui.UpdateBadge
 import mycelium.ui.scrollbar
 import mycelium.ui.verticalScrollWithBar
 import org.junit.Rule
@@ -122,13 +120,6 @@ class ScrollbarTest {
         rule.waitForIdle()
 
         assertTrue(state.scroll.value > 0)
-    }
-
-    @Test
-    fun theUpdateBadgeSaysWhichVersionIsAvailable() {
-        rule.setContent { MyceliumTheme(true) { UpdateBadge("v0.3.6") } }
-
-        rule.onNodeWithText("v0.3.6 available").assertExists()
     }
 }
 

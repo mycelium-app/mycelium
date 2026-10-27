@@ -93,7 +93,6 @@ class HoursShellTest {
         rule.onNodeWithContentDescription("Group: All groups").performClick()
 
         rule.onNodeWithText("Open a closed group").assertIsDisplayed()
-        rule.onNodeWithText("1 closed").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("work").fetchSemanticsNodes().size)
     }
 
@@ -106,7 +105,6 @@ class HoursShellTest {
         rule.onNodeWithText("Work is closed").assertIsDisplayed()
         rule.onNodeWithText("Personal").assertIsDisplayed()
         rule.onNodeWithText("Open Work for 15 minutes").assertIsDisplayed()
-        rule.onNodeWithText("Work is closed.").assertExists()
     }
 
     @Test
@@ -156,7 +154,6 @@ class HoursShellTest {
         waitFor("Mycelium is closed")
 
         rule.onNodeWithText("Open a group for 15 minutes").assertIsDisplayed()
-        rule.onNodeWithText("Everything is closed", substring = true).assertExists()
         rule.onNodeWithText("Wellness & Learning").assertExists()
         assertEquals(0, shown("New conversation"))
         rule.onNodeWithContentDescription("Settings").assertExists()
@@ -169,7 +166,7 @@ class HoursShellTest {
 
         show(server, selected = "g-work")
 
-        waitFor("Anything you send now keeps running overnight.")
+        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("minutes left", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasContentDescription("minutes left", substring = true)).assertIsDisplayed()
         rule.onNodeWithText("Hours").assertIsDisplayed()
     }

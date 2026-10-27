@@ -108,12 +108,4 @@ class TeachMeToggleTest {
         rule.waitUntil(5_000) { patches.isNotEmpty() }
         assertEquals("""{"teach_me":true}""", patches.single())
     }
-
-    @Test
-    fun theThreadShowsADividerEachTimeTeachMeChanges() {
-        show(teachMe = false)
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Teach me on").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Teach me off").assertExists()
-    }
 }

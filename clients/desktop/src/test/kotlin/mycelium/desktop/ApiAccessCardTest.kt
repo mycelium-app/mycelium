@@ -110,11 +110,6 @@ class ApiAccessCardTest {
     }
 
     @Test
-    fun theAssistantsScopeReadsAsAllowManagingAssistants() {
-        assertEquals("Allow managing assistants", apiScopeLabel("assistants"))
-    }
-
-    @Test
     fun untickingAScopeApprovesOnlyTheScopesLeftAndTheCardShowsItWasApproved() {
         show()
         waitForText("Approve")

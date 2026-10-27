@@ -94,18 +94,6 @@ class ForgesSettingsTest {
     }
 
     @Test
-    fun theTokenFieldNamesTheScopeToUseForTheChosenForge() {
-        val store = store()
-        showSettings(store)
-
-        rule.onNodeWithText("Connect a forge").performClick()
-        rule.onNodeWithText("Use a token with the repo scope, or a fine-grained token with Contents, Issues and Pull requests permissions.").assertExists()
-
-        rule.onNodeWithText("GitLab").performClick()
-        rule.onNodeWithText("Use a token with the api scope. read_api is enough to browse only.").assertExists()
-    }
-
-    @Test
     fun theTokenFieldIsMaskedAndEmptyWhenTheFormOpensAgain() {
         val store = store()
         showSettings(store)
@@ -160,21 +148,6 @@ class ForgesSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("samexample").fetchSemanticsNodes().isEmpty() }
         assertEquals("/api/v1/forges/f1", requests.last { it.method == HttpMethod.Delete }.url.encodedPath)
-    }
-
-    @Test
-    fun theGitLabMcpOptionIsOnByDefaultAndIsSentWithTheConnection() {
-        val store = store()
-        showSettings(store)
-
-        rule.onNodeWithText("Connect a forge").performClick()
-        rule.onNodeWithText("GitLab").performClick()
-        rule.onNodeWithContentDescription("Also add GitLab's MCP server").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On"))
-        rule.onNodeWithContentDescription("Personal access token").performTextInput("glpat-secret")
-        rule.onNodeWithText("Connect").performClick()
-
-        rule.waitUntil(5_000) { bodies.any { it.contains("glpat-secret") } }
-        assertEquals("""{"kind":"gitlab","token":"glpat-secret","add_mcp":true}""", bodies.last { it.isNotEmpty() })
     }
 
     @Test

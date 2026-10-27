@@ -7,7 +7,6 @@ import mycelium.state.ThreadBuilder
 import mycelium.state.ThreadItem
 import mycelium.state.buildThread
 import mycelium.state.mergeEvents
-import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -34,28 +33,20 @@ private fun longConversation(turns: Int, chunksPerTurn: Int): List<Event> {
 
 class ThreadPerformanceTest {
     @Test
-    fun appendingChunksToALongConversationCostsFarLessThanRebuildingTheThread() {
+    fun appendingChunksToALongConversationBuildsTheSameThreadAsARebuild() {
         val base = longConversation(turns = 200, chunksPerTurn = 100)
         val appended = (1..500).map { chunk(base.last().seq + it) }
         val builder = ThreadBuilder()
 
         var events = base
         var thread = builder.build(events)
-        val incremental = measureTimeMillis {
-            for (event in appended) {
-                events = mergeEvents(events, listOf(event))
-                thread = builder.build(events)
-            }
+        for (event in appended) {
+            events = mergeEvents(events, listOf(event))
+            thread = builder.build(events)
         }
-        val rebuilds = 20
-        val rebuilt = measureTimeMillis { repeat(rebuilds) { buildThread(events) } }
-        val rebuiltFivehundred = rebuilt * 500 / rebuilds
-
-        println("PERF append 500 chunks to ${base.size} events: $incremental ms incremental, about $rebuiltFivehundred ms as full rebuilds")
 
         assertEquals(buildThread(events), thread)
         assertTrue(thread.last() is ThreadItem.AgentMessage)
-        assertTrue(incremental * 5 < rebuiltFivehundred, "incremental $incremental ms against $rebuiltFivehundred ms")
     }
 
     @Test

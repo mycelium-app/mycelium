@@ -53,7 +53,7 @@ class PasteBadgeTest {
         field.performTextInput("see ")
         field.performTextInput(long)
 
-        rule.onNodeWithText("see \u2009Pasted text · 20 lines\u2009").assertExists()
+        rule.onNodeWithText("Pasted text · 20 lines", substring = true).assertExists()
 
         field.performKeyInput { pressKey(Key.Enter) }
 

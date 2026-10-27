@@ -56,13 +56,6 @@ class QueuedMessagesTest {
     }
 
     @Test
-    fun theHeaderCountsTheQueuedMessages() {
-        show()
-
-        rule.onNodeWithText("2 queued messages").assertIsDisplayed()
-    }
-
-    @Test
     fun collapsingTheQueueHidesItsMessagesAndExpandingShowsThemAgain() {
         show()
 

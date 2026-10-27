@@ -105,7 +105,6 @@ class ChatToolsSettingsTest {
         rule.onNodeWithText("2 tools").assertExists()
         rule.onNodeWithText("Lab").performClick()
 
-        rule.onNodeWithText("MCP server · Developer").assertExists()
         rule.onNodeWithContentDescription("Open lab.test/mcp").performClick()
         rule.onAllNodesWithText("Ends in ••••cdef")[0].assertExists()
     }

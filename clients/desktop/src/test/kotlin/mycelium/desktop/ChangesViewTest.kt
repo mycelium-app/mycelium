@@ -175,7 +175,6 @@ class ChangesViewTest {
 
         assertEquals(tops.sorted(), tops)
         rule.onNodeWithText("val bLine2 = 2").assertIsDisplayed()
-        rule.onNodeWithText("Unstaged", substring = true)
     }
 
     @Test
@@ -304,12 +303,10 @@ class ChangesViewTest {
     fun twoHundredFilesAndTwentyThousandLinesOpenWithOneLayoutCallOneRowRequestAndOnlyTheVisibleRowsComposed() {
         val files = (0 until 200).map { FileSpec("f${it.toString().padStart(3, '0')}.kt", 100) }
         val fake = ChangesFake(files)
-        val started = System.nanoTime()
         open(fake)
 
         awaitText("val f000Line2")
 
-        val opened = (System.nanoTime() - started) / 1_000_000
         val layoutCalls = fake.posts("/git/changes-layout").size
         val rowCalls = fake.rowRequests.get()
         val composedOpening = composedRows.get()
@@ -318,8 +315,6 @@ class ChangesViewTest {
         awaitText("val f0")
         rule.waitForIdle()
 
-        val scrolled = (System.nanoTime() - started) / 1_000_000 - opened
-        println("200 files, 20000 lines: opened in $opened ms with $layoutCalls layout call, $rowCalls row request, $composedOpening rows composed; scrolled to row 10000 in $scrolled ms, $composedRows rows composed in total, ${fake.rowRequests.get()} row requests")
 
         assertEquals(1, layoutCalls)
         assertTrue(rowCalls <= 2, "row requests $rowCalls")

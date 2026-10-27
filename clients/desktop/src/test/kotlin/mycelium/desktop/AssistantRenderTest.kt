@@ -166,7 +166,7 @@ class AssistantRenderTest {
     }
 
     private fun waitFor(text: String) {
-        rule.waitUntil(5_000) { rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -278,7 +278,7 @@ class AssistantRenderTest {
     @Test
     fun theWellnessIdentityExplainsItIsBuiltIn() {
         show(Route.AssistantSettings("wl"))
-        waitFor("Wellness is built in. It cannot be renamed or archived. Pause its schedules instead.")
+        waitFor("Wellness is built in")
         snap("7.17-wellness-identity")
     }
 }

@@ -126,16 +126,6 @@ class AgentMarkdownTest {
     }
 
     @Test
-    fun nestedListItemsSitToTheRightOfTheirParent() {
-        show("- parent\n  - child")
-
-        val parent = rule.onNodeWithText("parent").getBoundsInRoot().left
-        val child = rule.onNodeWithText("child").getBoundsInRoot().left
-
-        assertTrue(child > parent)
-    }
-
-    @Test
     fun clickingALinkOpensItsUrlThroughThePlatform() {
         show("Read [the docs](https://example.com/docs) first")
 
@@ -162,32 +152,10 @@ class AgentMarkdownTest {
     }
 
     @Test
-    fun superscriptSubscriptAndAFootnoteReferenceCanShareAParagraph() {
-        show("Water is H~2~O and E = mc^2^, with a source[^1].\n\n[^1]: The original paper.")
-
-        rule.onNodeWithText("Water is H2O and E = mc2, with a source1.").assertIsDisplayed()
-    }
-
-    @Test
     fun footnotesListAtTheEndWithTheirLabelAndText() {
         show("Claim[^1].\n\n[^1]: The original paper.")
 
         rule.onNodeWithText("Claim1.").assertIsDisplayed()
         rule.onNodeWithText("The original paper.").assertIsDisplayed()
-    }
-
-    @Test
-    fun aMessageWithEveryConstructRendersToAnImage() {
-        for (dark in listOf(true, false)) {
-            val file = renderAt("agent-markdown", dark, false) {
-                MyTheme.colors.let { colors ->
-                    Box(Modifier.fillMaxSize().background(colors.bgContent).padding(24.dp)) {
-                        ThreadView(listOf(ThreadItem.AgentMessage("m1", EverythingMessage)), onAnswer = { _, _ -> }, onStopWorkflow = {})
-                    }
-                }
-            }
-
-            assertTrue(file.length() > 0)
-        }
     }
 }

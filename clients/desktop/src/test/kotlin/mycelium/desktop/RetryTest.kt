@@ -87,5 +87,3 @@ class RetryTest {
         assertEquals(listOf("/api/v1/conversations/c1/retry"), retried)
     }
 }
-
-private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertExists() = assertExists()

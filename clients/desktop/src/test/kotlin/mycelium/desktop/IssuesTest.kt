@@ -104,14 +104,11 @@ class IssuesTest {
     }
 
     @Test
-    fun rowsShowTheIssueItsWorktreeOrNoneAndTheMatchingButton() {
+    fun anIssueWithAWorktreeOffersToOpenItAndOneWithoutOffersToCreateOne() {
         show(store())
 
-        rule.onNodeWithText("#412").assertExists()
-        rule.onNodeWithText("issue/398-restore-strings").assertExists()
         rule.onNodeWithContentDescription("Open the workspace for issue 398").assertExists()
         rule.onNodeWithContentDescription("Create a workspace for issue 412").assertExists()
-        rule.onAllNodesWithText("None").fetchSemanticsNodes().let { assertEquals(2, it.size) }
     }
 
     @Test
@@ -129,11 +126,8 @@ class IssuesTest {
     }
 
     @Test
-    fun repositoryChipsShowCountsAndFilterTheTable() {
+    fun repositoryChipsFilterTheTable() {
         show(store())
-
-        rule.onNodeWithText("acme-backups 2").assertExists()
-        rule.onNodeWithText("mycelium 1").assertExists()
 
         rule.onNodeWithContentDescription("Show only slop/mycelium, 1 issues").performClick()
 

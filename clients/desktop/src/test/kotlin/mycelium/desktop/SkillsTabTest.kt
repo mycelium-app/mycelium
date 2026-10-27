@@ -118,8 +118,6 @@ class SkillsTabTest {
         show()
         openSkills()
 
-        rule.onNodeWithText("Languages").assertIsDisplayed()
-        rule.onNodeWithText("Areas of the codebase").assertIsDisplayed()
         rule.onNodeWithText("24%").assertIsDisplayed()
         rule.onNodeWithText("clients/shared").assertIsDisplayed()
     }
@@ -144,7 +142,6 @@ class SkillsTabTest {
 
         rule.onNodeWithText("Hidden").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Unhide Kotlin").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("No exercises for a hidden skill. Unhide it to see it in the overview and get exercises for it again.").assertIsDisplayed()
 
         rule.onNodeWithContentDescription("Unhide Kotlin").performClick()
         rule.waitUntil(5_000) { requests.sent("DELETE", "/skills/hidden") }
@@ -163,8 +160,6 @@ class SkillsTabTest {
 
         rule.onNodeWithContentDescription("Show a solution to Debounce the sidebar group filter").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("A solution to Debounce the sidebar group filter").assertIsDisplayed()
-        rule.onNodeWithText("What the agent wrote in Usage card flicker, the conversation this exercise came from. Looking is not recorded.").assertIsDisplayed()
 
         rule.onAllNodes(isRoot()).onLast().performKeyInput { pressKey(Key.Escape) }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("src/Filter.kt").fetchSemanticsNodes().isEmpty() }

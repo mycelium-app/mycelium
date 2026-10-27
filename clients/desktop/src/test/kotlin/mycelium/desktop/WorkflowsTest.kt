@@ -9,10 +9,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.graphics.asSkiaBitmap
-import java.io.File
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -57,7 +53,6 @@ class WorkflowsTest {
         rule.waitUntil(5000) { rule.onAllNodesWithText("Review · running · Round 1").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Review · running · Round 1").performClick()
         rule.onNodeWithContentDescription("Decision for design").performTextInput("Use option B")
-        File("/tmp/workflows-actual.png").writeBytes(org.jetbrains.skia.Image.makeFromBitmap(rule.onRoot().captureToImage().asSkiaBitmap()).encodeToData()!!.bytes)
         rule.onNodeWithText("Approve and continue").performScrollTo().performClick()
         rule.waitUntil(5000) { calls.isNotEmpty() }
         val decision = Json.parseToJsonElement(calls.single()).jsonObject

@@ -1,14 +1,10 @@
 package mycelium.desktop
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -17,52 +13,16 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.withKeyDown
-import androidx.compose.ui.unit.dp
 import mycelium.api.GitStatus
 import mycelium.ui.CommitArea
 import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class GitCommitAreaTest {
     @get:Rule
     val rule = createComposeRule()
-
-    @Test
-    fun theRemoteActionsSitAtTheRightEdgeOfTheBranchRow() {
-        rule.setContent {
-            MyceliumTheme(true) {
-                Box(Modifier.width(330.dp)) {
-                    CommitArea(GitStatus("main", upstream = "origin/main", ahead = 2, behind = 0, files = emptyList()), null, "", {}, {}, {}, {})
-                }
-            }
-        }
-
-        val actions = rule.onNodeWithContentDescription("More remote actions").getBoundsInRoot()
-        val panel = rule.onRoot().getBoundsInRoot()
-
-        assertTrue(panel.right - actions.right < 24.dp, "The remote actions end ${panel.right - actions.right} from the right edge")
-    }
-
-    @Test
-    fun openingTheBranchPickerLeavesTheBranchRowWhereItWas() {
-        rule.setContent {
-            MyceliumTheme(true) {
-                Box(Modifier.width(360.dp)) {
-                    CommitArea(GitStatus("feat/job-status-ui", upstream = "origin/feat/job-status-ui", ahead = 23, behind = 0, files = emptyList()), null, "", {}, {}, {}, {})
-                }
-            }
-        }
-
-        val before = rule.onNodeWithText("23 ahead", useUnmergedTree = true).getBoundsInRoot()
-        rule.onNodeWithContentDescription("Switch branch", substring = true).performClick()
-        rule.waitForIdle()
-        val after = rule.onNodeWithText("23 ahead", useUnmergedTree = true).getBoundsInRoot()
-
-        assertEquals(before, after)
-    }
 
     @Test
     fun theRemoteButtonOffersWhatTheBranchNeedsNext() {

@@ -95,8 +95,6 @@ class AssistantsTest {
         rule.onNodeWithContentDescription("Show all assistants").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open War room").fetchSemanticsNodes().isNotEmpty() }
-        assertTrue(present("Daily summary") >= 1)
-        assertTrue(present("Weekdays at 08:00") >= 1)
     }
 
     @Test

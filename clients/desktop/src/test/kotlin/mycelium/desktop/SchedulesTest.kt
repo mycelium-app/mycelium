@@ -98,7 +98,7 @@ class SchedulesTest {
         showSchedules()
 
         rule.onAllNodesWithText("Check backups").assertCountEquals(2)
-        rule.onAllNodesWithText("midden").fetchSemanticsNodes().let { assertEquals(3, it.size) }
+        rule.onAllNodesWithText("midden").assertCountEquals(3)
         rule.onNodeWithText("Mon 06:00").assertExists()
         rule.onNodeWithText("Daily 07:30").assertExists()
         rule.onNodeWithText("Fri 17:00").assertExists()

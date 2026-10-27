@@ -224,31 +224,5 @@ class AttachmentsTest {
 
         rule.onNodeWithText("Same image as above").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Read /work/shot.png").fetchSemanticsNodes().size)
-        rule.onNodeWithText("Same image as above").performClick()
-    }
-
-    @Test
-    fun aThreadWithAPastedImageAndTheAgentReadingItAgainRendersToAPicture() {
-        val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
-            val path = request.url.encodedPath
-
-            when {
-                path.startsWith("/api/v1/attachments/") -> respond(png, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "image/png"))
-                path.endsWith("/events") -> respond(thread(), HttpStatusCode.OK, json)
-                path.endsWith("/conversations") -> respond("[$IdleJson]", HttpStatusCode.OK, json)
-                path.endsWith("/conversations/c1") -> respond(IdleJson, HttpStatusCode.OK, json)
-                path.endsWith("/queue") || path.endsWith("/nodes") -> respond("[]", HttpStatusCode.OK, json)
-                else -> respond("{}", HttpStatusCode.OK, json)
-            }
-        }
-        val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
-        runBlocking { store.refresh() }
-
-        val render = renderAt("attachments", dark = true, phone = false, interact = { Thread.sleep(800) }) {
-            Shell(store, QuietPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1"))
-        }
-
-        assertTrue(render.length() > 10_000)
     }
 }

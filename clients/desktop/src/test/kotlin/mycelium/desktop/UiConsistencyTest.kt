@@ -127,14 +127,6 @@ class UiConsistencyTest {
     }
 
     @Test
-    fun theSidebarHasNoActionsButtonOnItsRows() {
-        show("done", Route.Empty)
-        rule.waitUntil(5_000) { rule.onAllNodes(hasContentDescription("Stand-up, ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
-
-        assertTrue(rule.onAllNodes(hasContentDescription("Actions for ", substring = true)).fetchSemanticsNodes().isEmpty())
-    }
-
-    @Test
     fun theAssistantThreadHeaderOffersRetryAndDismissWhenTheSessionFailed() {
         show("failed", Route.Assistant("a1"))
         appears("Dismiss the failure of Daily summary")

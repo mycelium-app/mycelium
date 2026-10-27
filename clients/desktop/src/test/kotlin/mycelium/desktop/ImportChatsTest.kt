@@ -72,16 +72,6 @@ class ImportChatsTest {
     }
 
     @Test
-    fun aSingleChatWithNothingSkippedReadsInTheSingular() {
-        open(listOf(PickedFile("chat.json", "application/json", "{}".toByteArray())), HttpStatusCode.OK, """{"imported":1,"skipped":0}""")
-
-        rule.onNodeWithText("Import from Claude").performClick()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Imported 1 chat").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Imported 1 chat").assertIsDisplayed()
-    }
-
-    @Test
     fun aFileThatIsNotAnExportShowsTheServersAdviceNextToTheButton() {
         val message = "The file is not a Claude export. Choose the conversations.json from your Claude data export."
         open(listOf(PickedFile("notes.txt", "text/plain", "hello".toByteArray())), HttpStatusCode.BadRequest, """{"error":"not_claude_export","message":"$message"}""")

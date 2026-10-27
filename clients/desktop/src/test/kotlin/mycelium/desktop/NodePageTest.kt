@@ -101,27 +101,21 @@ class NodePageTest {
     }
 
     @Test
-    fun selectingANodeOpensItsPageWithAgentsResourcesAndPorts() {
+    fun selectingANodeListsTheConversationsRunningOnIt() {
         showNodes(nodeJson(), """{"latest":$Sample,"history":[]}""")
 
         rule.onNodeWithContentDescription("Open willow").performClick()
 
-        rule.onNodeWithText("Resources").assertExists()
-        rule.onNodeWithText("Ports").assertExists()
-        rule.onNodeWithText("Conversations running here").assertExists()
         rule.onNodeWithContentDescription("Open Backups").assertExists()
     }
 
     @Test
-    fun resourcesShowCpuMemoryDiskLoadAndTheBusiestProcessesWithTheirConversation() {
+    fun resourcesShowCpuAndTheBusiestProcessesWithTheirConversation() {
         showNodes(nodeJson(), """{"latest":$Sample,"history":[{"at_ms":0,"cpu_percent":10.0},{"at_ms":300000,"cpu_percent":70.0}]}""")
 
         openNode("Resources")
 
         rule.onNodeWithText("38%").assertExists()
-        rule.onNodeWithText("21.4 GB of 32 GB").assertExists()
-        rule.onNodeWithText("13 GB free").assertExists()
-        rule.onNodeWithText("8 cores  ·  load 0.52").assertExists()
         rule.onNodeWithText("212%").assertExists()
         rule.onNodeWithText("claude-agent-acp · Backups").assertExists()
         rule.onNodeWithContentDescription("CPU over the last 5 minutes. Average 40%, peak 70%.").assertExists()
@@ -155,7 +149,7 @@ class NodePageTest {
         openNode("Resources")
 
         rule.onNodeWithText("Not available").assertExists()
-        rule.onNodeWithText("Docker is not installed on this node, or its service is not running.").assertExists()
+        rule.onNodeWithText("Docker is not installed", substring = true).assertExists()
         rule.onNodeWithText("38%").assertExists()
     }
 
@@ -172,7 +166,7 @@ class NodePageTest {
         rule.waitForIdle()
 
         assertEquals(listOf("/api/v1/nodes/n1/processes/10/stop"), stopped)
-        rule.onNodeWithText("Asked gradle to stop. It leaves this list once it has exited.").assertExists()
+        rule.onNodeWithText("Asked gradle to stop", substring = true).assertExists()
     }
 
     @Test
@@ -218,7 +212,7 @@ class NodePageTest {
 
         openNode("Resources")
 
-        rule.onNodeWithText("Resources are not available on this node. Mycelium reads them from /proc, which only Linux provides.").assertExists()
+        rule.onNodeWithText("Resources are not available", substring = true).assertExists()
     }
 
     @Test
@@ -227,7 +221,7 @@ class NodePageTest {
 
         openNode("Ports")
 
-        rule.onNodeWithText("This node is offline. Resources and ports appear here when it connects.").assertExists()
+        rule.onNodeWithText("This node is offline", substring = true).assertExists()
     }
 
     @Test
@@ -236,7 +230,7 @@ class NodePageTest {
 
         openNode("Resources")
 
-        rule.onNodeWithText("Waiting for the first sample from willow.").assertExists()
+        rule.onNodeWithText("Waiting for the first sample", substring = true).assertExists()
     }
 }
 

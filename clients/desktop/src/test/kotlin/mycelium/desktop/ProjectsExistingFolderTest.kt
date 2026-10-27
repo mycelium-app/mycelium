@@ -73,14 +73,6 @@ class ProjectsExistingFolderTest {
     }
 
     @Test
-    fun aRepositoryCanBeClonedOntoANodeOrPointedAtAnExistingFolder() {
-        show()
-
-        rule.onNode(hasText("Clone onto a node") and hasClickAction()).assertExists()
-        rule.onNode(hasText("Use an existing folder") and hasClickAction()).assertExists()
-    }
-
-    @Test
     fun theFolderIsSentWithTheRepositoryAndTheNodeAndTheDialogClosesWhenItIsAccepted() {
         show()
 

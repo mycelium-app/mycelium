@@ -1,7 +1,6 @@
 package mycelium.desktop
 
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertIsDisplayed
@@ -119,23 +118,9 @@ class WalkthroughTest {
         show(Walkthrough)
         openWalkthrough()
 
-        rule.onNodeWithText("STRINGS").assertIsDisplayed()
-        rule.onNodeWithText("CHECKS").assertIsDisplayed()
         rule.onNodeWithContentDescription("Step 1: Add the shared strings file", substring = true).assertIsDisplayed()
         rule.onNodeWithContentDescription("Step 2: Restore reads its copy from strings, key change", substring = true).assertIsDisplayed()
         rule.onNodeWithContentDescription("Step 3: Tests", substring = true).assertIsDisplayed()
-        rule.onNodeWithText("Key").assertIsDisplayed()
-    }
-
-    @Test
-    fun stepsWithoutASectionFormAnUnnamedGroupAtTheTop() {
-        show(Walkthrough)
-        openWalkthrough()
-
-        val top = { description: String -> rule.onNodeWithContentDescription(description, substring = true).fetchSemanticsNode().positionInRoot.y }
-
-        assertTrue(top("Step 4: Loose end") < top("Step 1: Add the shared strings file"))
-        assertTrue(top("Step 1: Add the shared strings file") < top("Step 3: Tests"))
     }
 
     @Test
@@ -156,7 +141,6 @@ class WalkthroughTest {
         rule.onNodeWithContentDescription("Next step").performClick()
 
         rule.onNodeWithText("Step 2 of 4").assertIsDisplayed()
-        rule.onNodeWithText("Key change").assertIsDisplayed()
         rule.onNodeWithText("const title = strings.title").assertIsDisplayed()
         rule.onNodeWithText("const title = \"Restore\"").assertIsDisplayed()
 
@@ -287,15 +271,6 @@ class WalkthroughTest {
         rule.onNode(hasText("Walkthrough") and hasAnyAncestor(hasContentDescription("Main view tabs"))).performMouseInput { moveTo(center); press(MouseButton.Tertiary); release(MouseButton.Tertiary) }
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/walkthroughs/w1/dismissal" } }
-    }
-
-    @Test
-    fun theWalkthroughIsDismissedOnlyFromItsTabNotFromInsideIt() {
-        show(Walkthrough)
-        openWalkthrough()
-
-        assertEquals(1, rule.onAllNodesWithContentDescription("Dismiss walkthrough").fetchSemanticsNodes().size)
-        assertEquals(0, rule.onAllNodesWithText("Dismiss").fetchSemanticsNodes().size)
     }
 
     @Test

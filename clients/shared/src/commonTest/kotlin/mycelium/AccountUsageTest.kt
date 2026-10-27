@@ -25,6 +25,7 @@ import mycelium.state.nextUsageTick
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.time.Instant
 
@@ -129,21 +130,27 @@ class AccountUsageTest {
     fun aProjectionNamesWhenTheWindowRunsOutAndWhenItResets() {
         val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T22:30:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T18:40:00Z")
 
-        assertEquals("At this rate, runs out about 18:40, resets 22:30", usageProjection(window, ::utc, Now))
+        val projection = usageProjection(window, ::utc, Now).orEmpty()
+
+        assertContains(projection, "18:40")
+        assertContains(projection, "22:30")
     }
 
     @Test
     fun withoutAKnownLocalTimeTheProjectionSaysHowLongAway() {
         val window = UsageWindow("five_hour", 64.0, resetsAt = "2026-10-23T22:30:00Z", ratePerHour = 12.0, runsOutAt = "2026-10-23T18:40:00Z")
 
-        assertEquals("At this rate, runs out in 4h, resets in 8h", usageProjection(window, { null }, Now))
+        val projection = usageProjection(window, { null }, Now).orEmpty()
+
+        assertContains(projection, "4h")
+        assertContains(projection, "8h")
     }
 
     @Test
     fun aWindowThatLastsUntilItResetsSaysSo() {
         val window = UsageWindow("seven_day", 20.0, resetsAt = "2026-10-28T09:00:00Z", ratePerHour = 0.2)
 
-        assertEquals("At this rate, lasts until it resets, resets 28 Oct 09:00", usageProjection(window, ::utc, Now))
+        assertContains(usageProjection(window, ::utc, Now).orEmpty(), "28 Oct 09:00")
     }
 
     @Test

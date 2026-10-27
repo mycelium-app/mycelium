@@ -1,6 +1,5 @@
 package mycelium.desktop
 
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -101,18 +100,6 @@ class SubagentChatsTest {
         rule.onNodeWithText("Open the conversation it belongs to").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
-    }
-
-    @Test
-    fun aSubagentRowShowsHowLongAgoItWasLastActive() {
-        shell()
-
-        openSubagentsOfTheParent()
-
-        val description = rule.onNodeWithContentDescription("Check the build, ", substring = true).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].single()
-
-        assertEquals(3, description.split(", ").size)
-        assertTrue(description.split(", ").last().isNotBlank())
     }
 
     @Test

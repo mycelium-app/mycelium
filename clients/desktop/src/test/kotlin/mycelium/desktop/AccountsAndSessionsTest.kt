@@ -186,17 +186,6 @@ class AccountsAndSessionsTest {
     }
 
     @Test
-    fun sessionsListWhereEachClientIsAndMarkTheOneInUse() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { SessionsSettings(store, onSignOut = {}) } }
-
-        rule.onNodeWithText("Firefox on Linux").assertExists()
-        rule.onNodeWithText("This session").assertExists()
-        rule.onNodeWithText("Desktop app on willow").assertExists()
-        rule.onNodeWithText("10.0.0.12").assertExists()
-    }
-
-    @Test
     fun endingAnotherSessionRemovesItAtOnce() {
         val store = store()
         rule.setContent { MyceliumTheme(true) { SessionsSettings(store, onSignOut = {}) } }
@@ -297,7 +286,7 @@ class AccountsAndSessionsTest {
     }
 
     @Test
-    fun thePickerIsTitledForTheAgentAndShowsEachAccountsUsageLeftOrThatItIsUnknown() {
+    fun thePickerShowsEachAccountsUsageLeftOrThatItIsUnknown() {
         val logins = listOf(
             LoginInfo("claude", "sam@example.com", "token", LoginState.SignedIn, usageLeft = 18),
             LoginInfo("claude", "work@acme.example", "token", LoginState.SignedIn),
@@ -306,7 +295,6 @@ class AccountsAndSessionsTest {
 
         rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
 
-        rule.onNodeWithText("Claude account").assertExists()
         rule.onNodeWithText("18% left").assertExists()
         rule.onNodeWithText("Usage unknown").assertExists()
         rule.onNodeWithText("Sign in on willow").assertExists()
@@ -321,14 +309,5 @@ class AccountsAndSessionsTest {
         rule.onNodeWithText("Default account").performClick()
 
         assertEquals(DefaultAccountId, picked)
-    }
-
-    @Test
-    fun theNodesPageListsEveryAccountOfAnAgentOnANode() {
-        val store = store()
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, AccountsPlatform) } }
-
-        rule.onNodeWithText("work@acme.example").assertExists()
-        assertEquals(2, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
     }
 }

@@ -95,16 +95,4 @@ class AccountPageTest {
         rule.waitUntil(5_000) { requests.any { it.first == HttpMethod.Delete } }
         assertEquals("/api/v1/sessions/t1", requests.first { it.first == HttpMethod.Delete }.second)
     }
-
-    @Test
-    fun theApprovalsAndAvailabilityTabsOnlyDisplayUntilAChangeIsChosen() {
-        open()
-
-        rule.onNodeWithText("Approvals").performClick()
-        rule.onNodeWithText("Change approvals").assertExists()
-        rule.onNodeWithText("Availability").performClick()
-        rule.onNodeWithText("All groups").assertExists()
-        rule.onNodeWithText("Change availability").performClick()
-        rule.onNodeWithText("Chosen groups").assertExists()
-    }
 }

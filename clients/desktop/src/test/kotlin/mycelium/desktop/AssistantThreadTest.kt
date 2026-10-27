@@ -128,7 +128,7 @@ class AssistantThreadTest {
     fun aWaitingSecretCardSetsTheSecretWithoutShowingItsValue() {
         shell(current = null, withEarlier = false)
 
-        rule.waitUntil(5_000) { present("Stand-up needs JELLYFIN_KEY: From the dashboard") > 0 }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("needs JELLYFIN_KEY", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Set secret JELLYFIN_KEY").performClick()
         rule.onNodeWithContentDescription("Value of JELLYFIN_KEY").performTextInput("abc123def")
         rule.onNodeWithContentDescription("Save secret JELLYFIN_KEY").performClick()

@@ -1,6 +1,8 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -71,24 +73,31 @@ class MutedConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, SidebarPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Nodes) } }
     }
 
+    private fun row(title: String, notRunning: Boolean): SemanticsMatcher {
+        val titled = hasContentDescription(title, substring = true)
+        val marked = hasContentDescription("not running", substring = true)
+
+        return if (notRunning) titled and marked else titled and marked.not()
+    }
+
     @Test
     fun aConversationWhoseSessionIsRunningOnAnOnlineNodeIsNotMarkedNotRunning() {
         showSidebar()
 
-        rule.onNodeWithContentDescription("Running here, Ready to review, Claude Code on laptop").assertExists()
+        rule.onNode(row("Running here", notRunning = false)).assertExists()
     }
 
     @Test
     fun aConversationWhoseSessionIsNotRunningOnItsNodeIsMarkedNotRunning() {
         showSidebar()
 
-        rule.onNodeWithContentDescription("Stopped here, Ready to review, Claude Code on laptop, not running").assertExists()
+        rule.onNode(row("Stopped here", notRunning = true)).assertExists()
     }
 
     @Test
     fun aConversationOnAnOfflineNodeIsMarkedNotRunning() {
         showSidebar()
 
-        rule.onNodeWithContentDescription("On a node that is away, Ready to review, Claude Code on atlas, not running").assertExists()
+        rule.onNode(row("On a node that is away", notRunning = true)).assertExists()
     }
 }

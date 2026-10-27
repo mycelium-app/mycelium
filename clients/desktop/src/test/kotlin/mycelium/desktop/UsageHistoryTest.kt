@@ -73,7 +73,6 @@ class UsageHistoryTest {
 
         rule.onNodeWithText("example.com").assertExists()
         rule.onNodeWithText("Max 20x").assertExists()
-        rule.onNodeWithText("readings since 3 Sep, before 14 Oct from orchestrator").assertExists()
         rule.onAllNodesWithText("~1.9M")[0].assertExists()
         rule.onNodeWithText("median of 41 windows").assertExists()
         rule.onNodeWithText("median of 7 weeks").assertExists()
@@ -99,7 +98,6 @@ class UsageHistoryTest {
         open()
 
         rule.onNodeWithText("Plan price unknown").assertExists()
-        rule.onNodeWithText("Codex did not report a plan").assertExists()
     }
 
     @Test

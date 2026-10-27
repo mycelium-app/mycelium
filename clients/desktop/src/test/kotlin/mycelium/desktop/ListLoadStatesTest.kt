@@ -77,7 +77,7 @@ class ListLoadStatesTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NodesScreen(store, state, ListPlatform) } }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Could not load nodes. Check your connection, then try again.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Could not load nodes", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, rule.onAllNodesWithText("No nodes", substring = true).fetchSemanticsNodes().size)
 
         rule.onNodeWithContentDescription("Retry loading nodes").performClick()

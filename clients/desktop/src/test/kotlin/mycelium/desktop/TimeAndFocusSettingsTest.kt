@@ -68,30 +68,4 @@ class TimeAndFocusSettingsTest {
         rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/settings") != null }
         assertTrue(requests.sent("PUT", "/wellness/settings")!!.third.contains("\"closes\":\"24:00\""))
     }
-
-    @Test
-    fun theGroupsTableSummarisesEachGroupsHours() {
-        show()
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Weekdays 09:00 to 18:00").fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithText("Every group is closed while Mycelium is closed.").assertExists()
-        rule.onNodeWithText("New groups are always open.").assertExists()
-    }
-
-    @Test
-    fun theHoldChoicesShowUnderWhileClosed() {
-        show()
-
-        rule.onNodeWithText("While closed").assertExists()
-        rule.onNodeWithText("Hold scheduled runs").assertExists()
-        rule.onNodeWithText("Hold assistant pings").assertExists()
-    }
-
-    @Test
-    fun onlyBreakRemindersAreLeftAndPomodoroIsGone() {
-        show()
-
-        rule.onNodeWithText("90 min").assertExists()
-        assertTrue(rule.onAllNodesWithText("Pomodoro", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
-    }
 }

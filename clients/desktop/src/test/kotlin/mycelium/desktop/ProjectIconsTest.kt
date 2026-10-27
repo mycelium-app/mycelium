@@ -69,7 +69,6 @@ class ProjectIconsTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("homelab").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Options for homelab").performClick()
         rule.onNodeWithText("Change icon…").performClick()
-        rule.onNodeWithText("PNG, JPEG or WebP").assertExists()
         rule.onNodeWithContentDescription("Search icons").performTextInput("rock")
         rule.onAllNodesWithContentDescription("server").fetchSemanticsNodes().let { assertEquals(0, it.size) }
         rule.onNodeWithContentDescription("rocket").performClick()

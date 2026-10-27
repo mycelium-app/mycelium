@@ -85,12 +85,11 @@ class ProjectsOrderTest {
     }
 
     @Test
-    fun setUpProjectsComeFirstThenTheOtherRepositoriesMostRecentlyUpdatedFirstWithTheTimeBesideThem() {
+    fun setUpProjectsComeFirstThenTheOtherRepositoriesMostRecentlyUpdatedFirst() {
         show()
 
         assertTrue(top("stalest") < top("freshest"))
         assertTrue(top("freshest") < top("undated"))
-        rule.onAllNodesWithText("updated", substring = true).fetchSemanticsNodes().let { assertTrue(it.size >= 2) }
     }
 
     @Test

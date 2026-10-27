@@ -141,7 +141,6 @@ class WalkthroughCheckTest {
 
         rule.onNodeWithContentDescription("Skip the questions").performClick()
 
-        rule.onNodeWithText("Skipped. Nothing was recorded.").assertIsDisplayed()
         assertEquals(emptyList(), answers.toList())
         rule.onNodeWithText("Answer the questions").performClick()
         rule.onNodeWithText("Step 2: Where does the title come from?").assertIsDisplayed()

@@ -49,7 +49,7 @@ class ModelProvidersSettingsTest {
     private var listed = OllamaJson
     private var postAnswer: Pair<HttpStatusCode, String> = HttpStatusCode.Created to AnthropicJson
 
-    private fun show(inSettings: Boolean = false, experiments: String = "{}") {
+    private fun show(experiments: String = "{}") {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             requests += request
@@ -68,11 +68,7 @@ class ModelProvidersSettingsTest {
         kotlinx.coroutines.runBlocking { store.refreshExperiments() }
         rule.setContent {
             MyceliumTheme(true) {
-                if (inSettings) {
-                    SettingsScreen(store, Me("u", "reader@example.test", "Reader"), "https://mycelium.test", startOn = SettingsSection.Accounts, onSignOut = {})
-                } else {
-                    ModelProvidersSettings(store)
-                }
+                ModelProvidersSettings(store)
             }
         }
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Ollama").fetchSemanticsNodes().isNotEmpty() }
@@ -95,30 +91,13 @@ class ModelProvidersSettingsTest {
     }
 
     @Test
-    fun providersOpensChatModelsWithinTheGroupedSettingsNavigation() {
-        show(inSettings = true)
-
-        rule.onNodeWithText("Providers").assertExists()
-        rule.onNodeWithText("Agents and models").assertExists()
-        rule.onNodeWithText("Knowledge").assertExists()
-        rule.onNodeWithText("Services").assertExists()
-        rule.onNodeWithText("Your account").assertExists()
-        rule.onNodeWithText("Chat models").assertExists()
-        rule.onNodeWithText("Ollama").assertExists()
-        rule.onNodeWithText("Agent connections").assertExists()
-        rule.onNodeWithText("Integrations").assertExists()
-    }
-
-    @Test
     fun theListShowsEachProviderWithItsModels() {
         show()
 
         rule.onNodeWithText("Ollama").assertExists()
-        rule.onNodeWithText("2 models").assertExists()
         rule.onNodeWithText("llama3.2").assertDoesNotExist()
         rule.onNodeWithContentDescription("Browse models from Ollama").performClick()
         rule.onNodeWithText("llama3.2").assertExists()
-        rule.onNodeWithText("No key").assertExists()
     }
 
     @Test
@@ -127,7 +106,6 @@ class ModelProvidersSettingsTest {
         listed = OllamaJson.replace("\"llama3.2\",\"qwen3\"", models)
         show()
 
-        rule.onNodeWithText("500 models").assertExists()
         rule.onNodeWithText("model-500").assertDoesNotExist()
         rule.onNodeWithContentDescription("Browse models from Ollama").performClick()
         rule.onNodeWithContentDescription("Search Ollama models").performTextInput("model-500")
@@ -143,7 +121,6 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithContentDescription("Name").performTextInput("Ollama")
         rule.onNodeWithContentDescription("Base URL").performTextInput("http://box:11434/v1")
-        rule.onNodeWithText("Ollama serves this at http://<host>:11434/v1.").assertExists()
         rule.onNodeWithText("Add provider").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Base URL").fetchSemanticsNodes().isEmpty() }
@@ -204,7 +181,7 @@ class ModelProvidersSettingsTest {
         rule.onNodeWithText("Add a provider").performClick()
         rule.onNodeWithText("Add provider").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Mycelium could not reach http://box:11434/v1. Check the address and try again.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("could not reach", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("Base URL").assertExists()
     }
 

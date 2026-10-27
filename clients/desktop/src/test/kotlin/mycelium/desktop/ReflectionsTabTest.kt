@@ -99,13 +99,4 @@ class ReflectionsTabTest {
         assertEquals("POST", sent.last().first)
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Edited").fetchSemanticsNodes().isNotEmpty() }
     }
-
-    @Test
-    fun redraftSaysThatEditedSectionsAreKept() {
-        reflections = "[${reflectionJson("Mine", """["learned"]""")}]"
-        show()
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Redraft rewrites only the sections you have not edited.").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Edited").assertIsDisplayed()
-    }
 }

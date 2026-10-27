@@ -881,9 +881,7 @@ async fn measure_a_fifty_megabyte_transcript_and_a_hundred_small_ones() {
         mirror(&server, link.id, &format!(".claude/projects/-work-app/{session}.jsonl"), &claude_transcript(&session, "Hi", "Hello.")).await;
     }
 
-    let started = std::time::Instant::now();
     let job = import(&server, link.id, "claude").await;
 
-    println!("imported {} of {} in {:?}", job["imported"], job["total"], started.elapsed());
     assert_eq!(job["imported"], 101);
 }

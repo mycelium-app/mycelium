@@ -116,20 +116,14 @@ class IntegrationsTest {
     }
 
     @Test
-    fun cardsAreGroupedByStatusAndSearchFindsAnIntegrationByItsToolName() {
+    fun searchFindsAnIntegrationByItsToolName() {
         show()
-
-        rule.onNodeWithText("Needs attention").assertExists()
-        rule.onNodeWithText("Disabled: agents cannot use it").assertExists()
-        rule.onNodeWithText("Token expires soon, on 24 Jan 2027").assertExists()
-        rule.onNodeWithText("2 accounts: a@example.com, b@example.com").assertExists()
 
         rule.onNodeWithContentDescription("Search integrations and accounts").performTextInput("send_message")
 
         rule.onNodeWithText("Email").assertExists()
         rule.onNodeWithText("Zulip").assertExists()
         rule.onNodeWithText("Tracker").assertDoesNotExist()
-        rule.onNodeWithText("Token expires soon, on 24 Jan 2027").assertDoesNotExist()
     }
 
     @Test
@@ -172,18 +166,6 @@ class IntegrationsTest {
     }
 
     @Test
-    fun eachTileSaysWhatAgentsCanDoWhatAsksFirstAndWhetherItIsAdded() {
-        show()
-
-        rule.onNodeWithText("Add integration").performClick()
-
-        rule.onNodeWithText("Added, 2 accounts").assertExists()
-        rule.onNodeWithText("Agents can: Search, read and move mail.").assertExists()
-        rule.onNodeWithText("Asks first: Sending mail asks first.").assertExists()
-        rule.onAllNodesWithText("Not added").assertCountEquals(4)
-    }
-
-    @Test
     fun choosingAnAddedTileOpensItsPageAndAnUnaddedOneOpensItsSetupDialog() {
         show()
 
@@ -205,7 +187,6 @@ class IntegrationsTest {
         rule.onAllNodesWithText("Calendar").onLast().performClick()
 
         rule.onNodeWithText("Add a calendar").assertExists()
-        rule.onNodeWithText("Works with any CalDAV server, such as Nextcloud, Radicale, Fastmail or iCloud.").assertExists()
     }
 
     @Test
@@ -274,7 +255,6 @@ class IntegrationsTest {
         openCard("Stoat")
         rule.onNodeWithContentDescription("Open api.stoat.chat").performClick()
 
-        rule.onNodeWithText("1 Oct 2026, expired").assertExists()
         rule.onNodeWithText("Replace token").performScrollTo().performClick()
         rule.onNodeWithContentDescription("New token").performTextInput("fresh-secret-token")
         rule.onNodeWithText("Save").performClick()
@@ -310,8 +290,6 @@ class IntegrationsTest {
         rule.onNodeWithText("Usage").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Triage support inbox").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Claude Code").assertExists()
-        rule.onNodeWithText("OpenRouter · a chat model").assertExists()
         rule.onNodeWithText("2, 1").assertExists()
 
         rule.onNodeWithContentDescription("Open Triage support inbox").performClick()

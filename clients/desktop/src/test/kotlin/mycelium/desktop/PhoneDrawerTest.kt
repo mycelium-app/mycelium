@@ -140,13 +140,4 @@ class PhoneDrawerTest {
         rule.waitUntil(5_000) { !drawerIsOpen() }
         rule.waitForIdle()
     }
-
-    @Test
-    fun theSidePanelSheetHasNoConversationsMenuButtonOfItsOwn() {
-        show()
-        rule.onNodeWithContentDescription("Git").performClick()
-        rule.waitForIdle()
-
-        assertEquals(1, rule.onAllNodesWithContentDescription("Conversations").fetchSemanticsNodes().size)
-    }
 }

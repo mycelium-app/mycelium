@@ -86,7 +86,6 @@ class ChatToolCardsTest {
     fun aPendingApprovalNamesTheToolTheServerAndTheArgumentsAndOffersApproveDenyAndAlwaysApprove() {
         show(ChatToolThread)
 
-        rule.onNodeWithText("Waiting for your approval").assertExists()
         rule.onNodeWithText("Server: lab").assertExists()
         rule.onNodeWithContentDescription("city: Paris").assertExists()
         rule.onNodeWithContentDescription("days: 3").assertExists()

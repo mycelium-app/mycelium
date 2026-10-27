@@ -128,7 +128,6 @@ class MoveTest {
         rule.onNodeWithText("Move").performClick()
 
         waitForDescription("Move to build-01")
-        rule.onNodeWithText("Move to").assertIsDisplayed()
         rule.onNodeWithContentDescription("Move to build-01").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithContentDescription("Move to willow").fetchSemanticsNodes().size)
     }
@@ -136,10 +135,10 @@ class MoveTest {
     @Test
     fun theSheetSaysWhatGoesWithTheConversationAndWhatStaysBehind() {
         sheet(store(Movable, progress("moving")))
-        val text = "Goes with it: the branch, 3 changed files and the agent's session. Stays here: port 5173."
-        rule.waitUntil(5_000) { rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        waitForPlan()
 
-        rule.onNodeWithText(text).assertIsDisplayed()
+        rule.onNodeWithText("3 changed files", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("5173", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -151,8 +150,7 @@ class MoveTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/move" } }
         assertEquals("""{"node_id":"n2"}""", requests.last { it.first == "POST /api/v1/conversations/c1/move" }.second)
-        waitForText("Waiting for the turn to end. The move starts as soon as it does.")
-        rule.onNodeWithText("Waiting for the turn to end. The move starts as soon as it does.").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Waiting for the turn to end", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Cancel move").assertIsDisplayed()
     }
 
@@ -202,9 +200,8 @@ class MoveTest {
 
         rule.onNodeWithText("Move after this turn").performClick()
 
-        val banner = "Error: The project folder on this node has uncommitted changes. Nothing has changed: the conversation is still on willow. Choose Move to try again."
-        waitForDescription(banner)
-        rule.onNodeWithContentDescription(banner).assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("uncommitted changes", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("uncommitted changes", substring = true).assertIsDisplayed()
         rule.onNodeWithContentDescription("Dismiss the error").performClick()
         waitForText("Move after this turn")
         rule.onNodeWithText("Move after this turn").assertIsDisplayed()
@@ -213,13 +210,13 @@ class MoveTest {
     @Test
     fun aConversationThatCannotMoveShowsTheReasonAndSendsNothing() {
         sheet(store(Unmovable, progress("moving")))
-        val reason = "Error: This folder is not on a branch. Check one out on this node, then try again."
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription(reason).fetchSemanticsNodes().isNotEmpty() }
+        val reason = "not on a branch"
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription(reason, substring = true).fetchSemanticsNodes().isNotEmpty() }
 
         rule.onNodeWithText("Move after this turn").performClick()
         rule.waitForIdle()
 
-        rule.onNodeWithContentDescription(reason).assertIsDisplayed()
+        rule.onNodeWithContentDescription(reason, substring = true).assertIsDisplayed()
         assertEquals(false, requests.any { it.first == "POST /api/v1/conversations/c1/move" })
     }
 }

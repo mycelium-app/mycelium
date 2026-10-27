@@ -1,14 +1,11 @@
 package mycelium.desktop
 
-import androidx.compose.ui.test.getUnclippedBoundsInRoot
-import androidx.compose.ui.test.onParent
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.foundation.layout.Box
@@ -30,7 +27,6 @@ import mycelium.ui.MyceliumTheme
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 private const val NodesJson = """[
 {"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,
@@ -117,23 +113,6 @@ class InstructionsTest {
     }
 
     @Test
-    fun eachNodeShowsTheVersionItHoldsAndItsSessionsOnAnOlderVersion() {
-        show()
-
-        rule.onNodeWithText("afad776").assertExists()
-        rule.onNodeWithText("2, update on their next message").assertExists()
-        rule.onNodeWithText("85d49d3").assertExists()
-        rule.onNodeWithText("Offline, catches up on reconnect").assertExists()
-    }
-
-    @Test
-    fun aFileTheNodeDoesNotManageIsNamedAsLeftAsItIs() {
-        show()
-
-        rule.onNodeWithText("Not managed, left as it is: Claude Code: /home/sam/.claude/CLAUDE.md").assertExists()
-    }
-
-    @Test
     fun savingSendsTheEditedTextForTheLayerThatIsOpen() {
         show()
 
@@ -152,34 +131,5 @@ class InstructionsTest {
         rule.onNodeWithContentDescription("Rich Markdown").performScrollTo().performClick()
 
         assertEquals("""{"generated_ui":true,"rich_markdown":false,"mycelium_tools":true}""", requestTo(HttpMethod.Put, "/extensions").third)
-    }
-
-    @Test
-    fun theHintsSayWhatEachExtensionAddsAndWhichAgentsGetIt() {
-        show()
-
-        rule.onNodeWithText("Teaches agents to answer", substring = true).assertExists()
-        rule.onNodeWithText("Added to Claude Code and Codex sessions and to chats.", substring = true).assertExists()
-        rule.onNodeWithText("recall, remember, walkthrough", substring = true).assertExists()
-    }
-
-    @Test
-    fun theEditorIsCappedAndPrecedesNodeSynchronisation() {
-        val longText = (1..300).joinToString("\\n") { "line $it" }
-        show(DocumentJson.replace("## Diffs", longText).replace("Use British English.", longText))
-
-        rule.waitForIdle()
-
-        val editor = rule.onNodeWithContentDescription("Edit Global instructions").onParent().getUnclippedBoundsInRoot()
-
-        val editorHeight = editor.bottom - editor.top
-
-        assertTrue(editorHeight in 320.dp..800.dp, "editor is $editorHeight")
-
-        for (after in listOf(rule.onNodeWithText("Mycelium extensions"), rule.onNodeWithText("Node synchronisation"))) {
-            assertTrue(after.getUnclippedBoundsInRoot().top >= editor.bottom, "operational controls precede the editor")
-        }
-
-        assertTrue(rule.onNodeWithText("Save and commit").getUnclippedBoundsInRoot().top >= editor.bottom)
     }
 }

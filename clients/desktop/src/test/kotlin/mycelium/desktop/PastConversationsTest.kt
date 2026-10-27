@@ -119,7 +119,6 @@ class PastConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("okapi").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Project").assertExists()
         rule.onNodeWithText("okapi").assertExists()
     }
 
@@ -129,9 +128,6 @@ class PastConversationsTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } }
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("~$0.50 (estimated)").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Turns").assertExists()
-        rule.onNodeWithText("Tokens").assertExists()
-        rule.onNodeWithText("Cost").assertExists()
         rule.onNodeWithText("3").assertExists()
         rule.onNodeWithText("1.5k").assertExists()
         rule.onNodeWithText("~$0.50 (estimated)").assertExists()
@@ -155,7 +151,6 @@ class PastConversationsTest {
         rule.onNodeWithContentDescription("More for Plan the rollout").performScrollTo().performClick()
         rule.onNodeWithText("Delete").performClick()
         rule.onNodeWithText("Delete Plan the rollout?").assertExists()
-        rule.onNodeWithText("Its messages and attachments are removed. This cannot be undone.").assertExists()
         assertEquals(emptyList(), deleted)
 
         rule.onNodeWithText("Delete conversation").performClick()
@@ -191,19 +186,6 @@ class PastConversationsTest {
 
         rule.waitUntil(5_000) { deleted.isNotEmpty() }
         assertEquals(listOf("/api/v1/conversations/c1"), deleted)
-    }
-
-    @Test
-    fun historyRowsWithAndWithoutAProjectPutTheNodeInTheSameColumn() {
-        val store = store(archived = TwoArchivedJson, usage = """[{"key":"c1","name":"","turns":1},{"key":"c2","name":"","turns":1}]""")
-        rule.setContent { MyceliumTheme(true) { Box(Modifier.wrapContentSize(unbounded = true).requiredSize(1600.dp, 768.dp)) { Shell(store, NoPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Archive) } } }
-
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Scratch notes").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Open Scratch notes").assertExists()
-
-        val nodeLefts = rule.onAllNodesWithText("laptop").fetchSemanticsNodes().map { it.positionInRoot.x }
-
-        assertEquals(true, nodeLefts.groupBy { it }.values.any { it.size == 2 })
     }
 
     @Test

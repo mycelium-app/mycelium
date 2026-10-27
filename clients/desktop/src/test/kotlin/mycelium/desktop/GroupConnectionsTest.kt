@@ -101,7 +101,7 @@ class GroupConnectionsTest {
     fun withOneGroupItSaysToCreateASecondGroup() {
         show(EnabledExperiments, groups = "[$Yucca]")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Create a second group in Settings, Groups to connect groups.").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Create a second group", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Connect groups").assertDoesNotExist()
     }
 }

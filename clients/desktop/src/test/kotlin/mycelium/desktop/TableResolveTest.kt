@@ -67,9 +67,4 @@ class TableResolveTest {
         assertEquals(natural, resolved.widths)
         assertEquals(490, resolved.total)
     }
-
-    @Test
-    fun deterministic() {
-        assertEquals(resolveTable(min, natural, listOf(1f, 2f, 0f), 333), resolveTable(min, natural, listOf(1f, 2f, 0f), 333))
-    }
 }

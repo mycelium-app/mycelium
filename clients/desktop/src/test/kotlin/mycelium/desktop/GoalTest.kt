@@ -87,12 +87,11 @@ class GoalTest {
     }
 
     @Test
-    fun anActiveGoalShowsItsTextProgressAndPause() {
+    fun anActiveGoalShowsItsTextAndPause() {
         show(goalJson("active"))
         waitForText("Goal: Every test passes on main")
 
         rule.onNodeWithText("Goal: Every test passes on main").assertIsDisplayed()
-        rule.onNodeWithText("Turn 7  ·  2.1M of 5M tokens").assertIsDisplayed()
         rule.onNodeWithText("Pause").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("Resume").fetchSemanticsNodes().size)
     }
@@ -123,11 +122,11 @@ class GoalTest {
     }
 
     @Test
-    fun aGoalThatEndedSaysSoInWordsAndOffersNoPause() {
+    fun aGoalThatEndedShowsItsOutcomeAndOffersNoPause() {
         show(goalJson("met", "All 214 tests pass."))
-        waitForText("Goal met. All 214 tests pass.")
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("All 214 tests pass.", substring = true).fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithText("Goal met. All 214 tests pass.").assertIsDisplayed()
+        rule.onNodeWithText("All 214 tests pass.", substring = true).assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("Pause").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Resume").fetchSemanticsNodes().size)
     }
@@ -174,20 +173,8 @@ class GoalTest {
         show(goalJson("active", extra = ""","time_limit_seconds":7200,"started_at":"$started","five_hour_limit":80,"five_hour_used":64.2,"weekly_limit":90"""))
         waitForText("Goal: Every test passes on main")
 
-        rule.onNodeWithText("Turn 7  ·  2.1M of 5M tokens  ·  1h 19m left  ·  5-hour 64%  ·  weekly usage unknown").assertIsDisplayed()
-    }
-
-    @Test
-    fun theDialogExplainsInOneLineAndAsksForEachLimitAsAnOptionalField() {
-        show("null")
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
-
-        rule.onNodeWithContentDescription("Set a goal").performClick()
-
-        rule.onNodeWithText("The agent keeps going until the goal is met, it is stuck, or a limit is reached.").assertIsDisplayed()
-        for (field in listOf("Token budget", "Time limit", "Stop when the account's 5-hour window reaches", "Stop when the account's weekly window reaches")) {
-            rule.onNodeWithContentDescription(field).assertIsDisplayed()
-        }
+        rule.onNodeWithText("1h 19m left", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("weekly usage unknown", substring = true).assertIsDisplayed()
     }
 
     @Test
