@@ -553,7 +553,7 @@ pub enum ModelProviderKind {
     Anthropic,
 }
 
-pub const DECISION_USES: [&str; 3] = ["decide", "voice_routing", "turn_needs_you"];
+pub const DECISION_USES: [&str; 1] = ["decide"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecisionProvider {
