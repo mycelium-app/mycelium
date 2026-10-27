@@ -46,7 +46,10 @@
 - An agent can show an Outline document beside the conversation with open_outline. The desktop app opens it in a side panel with Outline's own page; the phone and web open the system browser.
 - Open in IDE: a split button in the conversation header, and a button on file cards, the Changes view and exercises, opens the folder in Zed, VS Code or JetBrains. Settings, IDEs chooses which are offered and their commands. A folder on another node opens through the IDE's SSH remote by way of Mycelium.
 - A session that is idle when the instructions change closes and resumes under the same session id before its next message, so it follows the new instructions.
-
+- Usage history, opened from the arrow on the Usage card, charts the 5-hour and weekly windows over time with tokens per percentage point, the API-equivalent value and the subscription price, and is backfilled from orchestrator readings and imported conversations.
+- Activity has an All time period that groups the chart by day.
+- A conversation stopped by a usage limit shows a card on the first limit reply saying it is paused until the reset and resumes automatically by default; a second limit reply updates the same card.
+- A workflow whose agents hit a usage limit says it is paused until the reset and resumes with its conversation.
 
 ## v0.11.0
 
