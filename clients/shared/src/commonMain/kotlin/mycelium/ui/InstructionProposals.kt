@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import mycelium.api.InstructionProposal
@@ -35,7 +36,7 @@ import mycelium.state.decidedProposals
 import mycelium.state.proposalDiff
 import mycelium.state.waitingProposals
 
-val LocalReviewInstructions = staticCompositionLocalOf<(() -> Unit)?> { null }
+val LocalReviewInstructions = staticCompositionLocalOf<((String?) -> Unit)?> { null }
 
 val LocalOpenConversation = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
@@ -57,14 +58,15 @@ fun CountBadge(count: Int, description: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun InstructionProposals(store: Store, onOpenGroup: ((String) -> Unit)? = null) {
+fun InstructionProposals(store: Store, onOpenGroup: ((String) -> Unit)? = null, layer: String? = null) {
     val state by store.state.collectAsState()
-    val waiting = waitingProposals(state.instructionProposals.values)
-    val decided = decidedProposals(state.instructionProposals.values)
+    val inLayer = state.instructionProposals.values.filter { layer == null || it.layer == layer }
+    val waiting = waitingProposals(inLayer)
+    val decided = decidedProposals(inLayer)
     var showingDecided by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        store.act { store.refreshInstructionProposals() }
+        store.load { store.refreshInstructionProposals() }
     }
 
     if (waiting.isEmpty() && decided.isEmpty()) {
@@ -72,7 +74,7 @@ fun InstructionProposals(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-        Label("Proposed edits", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+        Label(if (layer == null) "Proposed edits" else "Proposed edit", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
         for (proposal in waiting) {
             ProposalCard(store, proposal, onOpenGroup)
@@ -165,7 +167,14 @@ private fun ProposalCard(store: Store, proposal: InstructionProposal, onOpenGrou
                         MyButton({ store.act { store.approveInstructionProposal(proposal) } }, text = "Approve", icon = MyIcon.Check, variant = ButtonVariant.Primary, description = "Approve the proposed edit to the ${proposal.layerName} instructions")
                     }
 
-                    MyButton({ declining = true }, text = "Decline", variant = ButtonVariant.Outline, description = "Decline the proposed edit to the ${proposal.layerName} instructions")
+                    SplitButton(
+                        text = "Decline",
+                        onClick = { declining = true },
+                        alternatives = listOf(SplitAlternative("Decline without telling the agent", { store.act { store.declineInstructionProposal(proposal, null, redo = false, notify = false) } })),
+                        variant = ButtonVariant.Outline,
+                        description = "Decline the proposed edit to the ${proposal.layerName} instructions",
+                        menuWidth = 280.dp,
+                    )
                 }
             }
         }

@@ -82,6 +82,9 @@ import mycelium.state.parsePasted
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseUiBlock
 import mycelium.state.pinnedCards
+import mycelium.state.clockTime
+import mycelium.state.quietFor
+import mycelium.state.stalled
 import mycelium.state.workflowPinKey
 import mycelium.state.parsedMarkdown
 import mycelium.state.DiffLine
@@ -268,8 +271,8 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
             }
         }
         is ThreadItem.Plan -> PlanCard(item)
-        is ThreadItem.Permission -> PermissionCard(item, onAnswer)
-        is ThreadItem.Review -> ReviewCard(item)
+        is ThreadItem.Permission -> ToolApprovalCard(item, onAnswer)
+        is ThreadItem.ResponseEdit -> ResponseEditorCard(item)
         is ThreadItem.TurnEnd -> Unit
         is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
@@ -988,45 +991,6 @@ private fun PlanCard(plan: ThreadItem.Plan) {
 }
 
 @Composable
-private fun PermissionCard(permission: ThreadItem.Permission, onAnswer: (String, String) -> Unit) {
-    Card {
-        CardHead {
-            StatusMark(if (permission.resolved) "Answered" else if (permission.server != null) "Waiting for your approval" else "Needs your answer", if (permission.resolved) Tone.Muted else Tone.Attention, if (permission.resolved) MyIcon.Check else MyIcon.Alert)
-        }
-
-        Column(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-            Label(permission.title, style = Tokens.Type.Code)
-
-            if (permission.server != null) {
-                Label("Server: ${permission.server}", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
-            }
-
-            ArgumentLines(permission.input)
-        }
-
-        if (!permission.resolved) {
-            Hairline()
-
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1_5),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End),
-            ) {
-                for (option in permission.options) {
-                    val allows = option.kind.startsWith("allow")
-
-                    MyButton(
-                        onClick = { onAnswer(permission.requestId, option.id) },
-                        text = option.name,
-                        variant = if (allows) ButtonVariant.Primary else ButtonVariant.Outline,
-                        size = ButtonSize.Md,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun TurnEnd(item: ThreadItem.TurnEnd, suggestions: List<String>, onSuggest: (String) -> Unit, onCopy: (() -> Unit)?, onScrollToMessage: (() -> Unit)?, onScrollToTop: (() -> Unit)?) {
     val stopped = when (item.stopReason) {
         "end_turn" -> null
@@ -1068,27 +1032,59 @@ internal fun GeneratedUiPanel(node: UiNode) {
     }
 }
 
+private const val WorkflowTickMillis = 30_000L
+
 @Composable
 internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: PinControls? = null) {
     val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    val now = rememberNow(WorkflowTickMillis, ticking = !progress.over)
     val totals = workflowTokens(progress).takeIf { progress.agents.size > 1 }
+    val stalled = progress.stalled(now)
+    val quietMinutes = progress.quietFor(now)?.inWholeMinutes ?: 0
+    val beforeAnyStep = progress.stopped && progress.agents.isEmpty()
+    val outcome = when {
+        beforeAnyStep -> "Stopped before any step ran"
+        progress.stopped -> "Stopped"
+        progress.failed -> "Failed"
+        stalled -> "No progress for $quietMinutes minutes"
+        else -> null
+    }
+    val endedAt = progress.end?.endedAt?.let { clockTime(it.toString()) { millis -> platform?.localDateTime(millis) } }
+    val explanation = when {
+        beforeAnyStep -> if (endedAt != null) "Stopped at $endedAt, before the first agent started." else "Stopped before the first agent started."
+        progress.stopped -> if (endedAt != null) "Stopped at $endedAt." else "Stopped."
+        progress.failed -> progress.end?.reason
+        else -> null
+    }
 
-    Card {
+    Card(Modifier.semantics { if (outcome != null) contentDescription = "Workflow ${outcome.replaceFirstChar { it.lowercase() }}" }) {
         CardHead {
             if (progress.complete) {
                 Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
+            } else if (progress.stopped) {
+                Icon(MyIcon.Stop, colors.textMuted, Tokens.Size.IconSm)
+            } else if (progress.failed) {
+                Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
+            } else if (stalled) {
+                Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
             } else {
                 Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
             }
 
             Label("Workflow", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            Label("${progress.finishedCount} of ${progress.agents.size}", if (totals == null) Modifier.weight(1f) else Modifier, Tokens.Type.Meta, colors.textMuted, maxLines = 1)
 
-            if (totals != null) {
+            if (progress.agents.isNotEmpty()) {
+                Label("${progress.finishedCount} of ${progress.agents.size}", if (totals == null && outcome == null) Modifier.weight(1f) else Modifier, Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            }
+
+            if (outcome != null) {
+                Label(outcome, Modifier.weight(1f), Tokens.Type.Meta, if (progress.failed) colors.statusFailed else colors.textMuted, maxLines = 1)
+            } else if (totals != null) {
                 Label(totals, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
             }
 
-            if (!progress.complete) {
+            if (!progress.over) {
                 MyButton(onStop, text = "Stop", icon = MyIcon.Stop, description = "Stop the workflow", size = ButtonSize.Sm, muted = true)
             }
 
@@ -1101,21 +1097,30 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             return@Card
         }
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3)
-                .semantics { contentDescription = "${progress.finishedCount} of ${progress.agents.size} agents finished" },
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
-        ) {
-            for (agent in progress.agents) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(Tokens.Size.ProgressBar)
-                        .background(if (agent.finished) colors.statusDone else colors.statusWorking, RoundedCornerShape(Tokens.Radius.Full)),
-                )
+        if (progress.agents.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3)
+                    .semantics { contentDescription = "${progress.finishedCount} of ${progress.agents.size} agents finished" },
+                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5),
+            ) {
+                for (agent in progress.agents) {
+                    val segment = when {
+                        agent.failed -> colors.statusFailed
+                        agent.finished -> colors.statusDone
+                        stalled -> colors.statusAttention
+                        progress.ended -> colors.border
+                        else -> colors.statusWorking
+                    }
+
+                    Box(Modifier.weight(1f).height(Tokens.Size.ProgressBar).background(segment, RoundedCornerShape(Tokens.Radius.Full)))
+                }
             }
+        }
+
+        if (explanation != null) {
+            Label(explanation, Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
         }
 
         for (phase in progress.phases) {
@@ -1124,7 +1129,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             Column(Modifier.padding(top = Tokens.Space.S1_5, bottom = Tokens.Space.S0_5)) {
                 Row(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     Label(phase, Modifier.semantics { heading() }, Tokens.Type.MetaStrong)
-                    Label(if (inPhase.isEmpty()) "Waiting" else "${inPhase.count { it.finished }} of ${inPhase.size}", style = Tokens.Type.Meta, color = colors.textMuted)
+                    Label(if (inPhase.isEmpty()) (if (progress.ended) "Did not run" else "Waiting") else "${inPhase.count { it.finished }} of ${inPhase.size}", style = Tokens.Type.Meta, color = colors.textMuted)
                 }
 
                 for (agent in inPhase) {
@@ -1135,7 +1140,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                             .fillMaxWidth()
                             .then(if (open != null) Modifier.pressable(open, shape = BlockShape, description = "Open ${agent.label}") else Modifier)
                             .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S0_5)
-                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.failed) "Stopped" else if (agent.finished) "Done" else "Running"}: ${agent.label}" },
+                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.failed) "Stopped" else if (agent.finished) "Done" else if (progress.ended) "Stopped" else if (stalled) "Stalled" else "Running"}: ${agent.label}" },
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1143,13 +1148,19 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                             Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
                         } else if (agent.finished) {
                             Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
+                        } else if (progress.ended) {
+                            Icon(MyIcon.Stop, colors.textMuted, Tokens.Size.IconSm)
+                        } else if (stalled) {
+                            Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
                         } else {
                             Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
                         }
 
                         Label(agent.label, Modifier.weight(1f), maxLines = 1)
 
-                        workflowStats(agent)?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1) }
+                        val stats = if (stalled && !agent.finished) "last line ${quietMinutes}m ago" else workflowStats(agent)
+
+                        stats?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1) }
                     }
                 }
             }
