@@ -35,7 +35,7 @@ fun sideChatOf(message: String): Pair<String, String>? {
     return found.groupValues[1] to found.groupValues[2].trim()
 }
 
-fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<JsonObject> = emptyList()): SessionOptions {
+fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<JsonObject> = emptyList(), reportedModels: List<Choice> = emptyList()): SessionOptions {
     val stored = conversation.options
     val modes = stored?.get("modes") as? JsonObject
     val models = stored?.get("models") as? JsonObject
@@ -47,7 +47,7 @@ fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<J
     return SessionOptions(
         modes = choicesFrom(modes?.get("availableModes"), "id"),
         currentMode = currentMode,
-        models = choicesFrom(models?.get("availableModels"), "modelId"),
+        models = choicesFrom(models?.get("availableModels"), "modelId").ifEmpty { reportedModels },
         currentModel = conversation.model ?: models?.string("currentModelId"),
         settings = settings,
     )

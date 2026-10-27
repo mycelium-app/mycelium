@@ -66,28 +66,29 @@ fun IdesSettings(platform: Platform) {
         Label("Saved on this computer. A folder on another node opens through the IDE's SSH remote, by way of Mycelium, so the node needs no open port. Leave a command empty to use the one shown.", style = Tokens.Type.Meta, color = colors.textMuted)
 
         Table(
-            listOf(Col("Offer", 64.dp, rigid = true), Col("IDE", 110.dp, rigid = true), Col("Command or path", 200.dp, weight = 1f)),
+            listOf(Col("Offer", 64.dp, preferred = 64.dp, rigid = true), Col("IDE", 110.dp, rigid = true), Col("Command or path", 200.dp, weight = 1f)),
             Ide.entries.size,
             { row, column ->
                 val ide = Ide.entries[row]
                 val choice = draft.choiceFor(ide)
 
                 when (column) {
-                    0 -> TableCell.Slot { Checkbox(choice.offered, "Offer ${ide.label}", { change(ide) { it.copy(offered = !it.offered) } }, checkedState = "On", uncheckedState = "Off") }
+                    0 -> TableCell.Slot("Offer") { Checkbox(choice.offered, "Offer ${ide.label}", { change(ide) { it.copy(offered = !it.offered) } }, checkedState = "On", uncheckedState = "Off") }
                     1 -> TableCell.Text(ide.label)
-                    else -> TableCell.Slot { TextInput(choice.command, { value -> change(ide) { it.copy(command = value) } }, label = "Command or path for ${ide.label}", placeholder = ide.defaultCommand, mono = true, showLabel = false) }
+                    else -> TableCell.Slot("/opt/jetbrains/idea/bin/idea.sh", Tokens.Space.S4) { TextInput(choice.command, { value -> change(ide) { it.copy(command = value) } }, label = "Command or path for ${ide.label}", placeholder = ide.defaultCommand, mono = true, showLabel = false) }
                 }
             },
+            headerCell = { if (it == 0) TableCell.Text("") else TableCell.Text(listOf("", "IDE", "Command or path")[it], Tokens.Type.MetaStrong) },
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.widthIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Default IDE")
             OptionMenu("Default IDE", Ide.entries.map { Choice(it.id, it.label) }, draft.default, { draft = draft.copy(default = it) })
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-            MyButton({ saved = draft; platform.savePreference(IdePreference, draft.stored()) }, text = "Save")
-            MyButton({ draft = saved }, text = "Cancel", variant = ButtonVariant.Outline)
+            MyButton({ saved = draft; platform.savePreference(IdePreference, draft.stored()) }, text = "Save", variant = ButtonVariant.Outline)
+            MyButton({ draft = saved }, text = "Cancel")
         }
     }
 }

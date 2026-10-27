@@ -353,7 +353,7 @@ private fun MyceliumBody(parsed: MyceliumCall) {
 
         is MyceliumCall.OpenOutline -> {
             val opener = LocalOutlineOpener.current
-            val page = parsed.page
+            val page = LocalOutlinePage.current
 
             Label(page?.title ?: parsed.document, style = Tokens.Type.Ui, maxLines = 1)
 

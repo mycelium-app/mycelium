@@ -100,7 +100,7 @@ sealed interface MyceliumCall {
         override val tool = MyceliumTool.ReadArtifact
     }
 
-    data class OpenOutline(val document: String, val page: OutlinePage?) : MyceliumCall {
+    data class OpenOutline(val document: String) : MyceliumCall {
         override val tool = MyceliumTool.OpenOutline
     }
 }
@@ -203,7 +203,7 @@ fun myceliumCall(call: ThreadItem.ToolCall): MyceliumCall? {
         MyceliumTool.OpenOutline -> {
             val document = fields.requiredString("document", input) ?: return null
 
-            MyceliumCall.OpenOutline(document, outlinePageFromOutput(output))
+            MyceliumCall.OpenOutline(document)
         }
 
         MyceliumTool.SetProjectIcon -> {

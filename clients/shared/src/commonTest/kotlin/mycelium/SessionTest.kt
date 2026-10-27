@@ -41,6 +41,14 @@ class SessionTest {
     """.trimIndent()
 
     @Test
+    fun aConversationWithoutOfferedModelsUsesTheListTheNodeReported() {
+        val reported = listOf(Choice("opus", "Opus 5.5"))
+
+        assertEquals(reported, sessionOptions(conversation(null), emptyList(), reportedModels = reported).models)
+        assertEquals(listOf(Choice("opus", "Opus 5.5"), Choice("sonnet", "Sonnet 5.5", "Fast")), sessionOptions(conversation(offered), emptyList(), reportedModels = listOf(Choice("haiku", "Haiku"))).models)
+    }
+
+    @Test
     fun theOfferedModesModelsAndSettingsAreReadFromTheConversation() {
         val options = sessionOptions(conversation(offered), emptyList())
 

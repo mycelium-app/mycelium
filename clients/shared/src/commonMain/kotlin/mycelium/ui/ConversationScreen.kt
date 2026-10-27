@@ -71,6 +71,7 @@ import mycelium.state.isLaptop
 import mycelium.state.isChat
 import mycelium.state.isSubagent
 import mycelium.state.ThreadBuilder
+import mycelium.state.reportedModelChoices
 import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import mycelium.state.turnIsOpen
@@ -95,15 +96,14 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val conversation = state.conversations[id] ?: fetched
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
     val threadAssistant = conversation?.assistantId?.let { state.assistants[it] }
-    var runningAction by remember(id) { mutableStateOf<mycelium.api.AssistantAction?>(null) }
 
     LaunchedEffect(threadAssistant?.id) {
         store.act { threadAssistant?.let { store.refreshAssistantActions(it.id); store.refreshActionProposals(it.id) } }
         store.act { store.refreshAssistantChanges() }
     }
 
-    fun runAction(action: mycelium.api.AssistantAction, inputs: Map<String, String>) {
-        store.act { store.api.runAssistantAction(action.assistantId, action.id, inputs) }
+    val assistantActions = threadAssistant?.let { held ->
+        rememberAssistantActionControls(held, state.assistantActions[held.id].orEmpty(), onManageActions) { action, inputs -> store.act { store.api.runAssistantAction(action.assistantId, action.id, inputs) } }
     }
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
@@ -273,7 +273,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalOutlineOpener provides showOutline, LocalIdeTarget provides ideTarget) {
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -408,10 +408,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 state.actionProposals.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { ProposedActionCard(store, state, it) }
                 state.assistantChanges.values.filter { it.conversationId == id }.sortedBy { it.createdAt }.forEach { AssistantChangeCard(store, state, it, onOpenSettings = onManageActions) }
 
-                runningAction?.let { action ->
-                    RunActionDialog(action, onDismiss = { runningAction = null }, onRun = { inputs -> runningAction = null; runAction(action, inputs) })
-                }
-
                 val parentId = conversation.parentId
 
                 if (conversation.isSubagent && parentId != null) {
@@ -431,9 +427,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         annotations = annotations,
                         onRemoveAnnotation = { removed -> annotations = annotations - removed },
                         attachments = attached.controls(),
-                        assistantActions = threadAssistant?.let { held ->
-                            AssistantActionControls(held, state.assistantActions[held.id].orEmpty(), { action -> if (action.inputs.isEmpty()) runAction(action, emptyMap()) else runningAction = action }, onManageActions)
-                        },
+                        assistantActions = assistantActions,
                         dictation = dictation,
                         initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
                         onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
@@ -449,7 +443,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onSendAllQueuedNow = { store.act { api.sendAllQueuedNow(id) } },
                         onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
                         onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
-                        options = remember(conversation, state.events[id], state.sessionUpdates[id]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
+                        options = remember(conversation, state.events[id], state.sessionUpdates[id], state.nodes[conversation.nodeId]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(state.nodes[conversation.nodeId], conversation.agent, conversation.account)) },
                         commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
                         onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
                         onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
@@ -498,7 +492,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
                             SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                             SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
-                            SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, "Outline's own page, signed in as you", onClose = { openPanel(null) }) } }
+                            SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
                             null -> Unit
                         }
                     }

@@ -11,8 +11,3 @@ fun outlinePageFrom(event: Event): OutlinePage? {
 
     return if (event.kind == EventKinds.OpenOutline) OutlinePage(payload.string("title").orEmpty(), payload.string("url") ?: return null) else null
 }
-
-private val openedOutline = Regex("^Opened (.*) beside the conversation: (\\S+)$")
-
-fun outlinePageFromOutput(output: String): OutlinePage? =
-    openedOutline.matchEntire(output.trim())?.let { OutlinePage(it.groupValues[1], it.groupValues[2]) }
