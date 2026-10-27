@@ -92,6 +92,25 @@ pub struct NodeSummary {
     pub instructions_unmanaged: Vec<String>,
     #[serde(default)]
     pub sessions_on_older_instructions: u32,
+    #[serde(default)]
+    pub harness_models: Vec<HarnessModels>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HarnessModel {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HarnessModels {
+    pub agent: AgentId,
+    #[serde(default)]
+    pub account: Option<String>,
+    pub models: Vec<HarnessModel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    pub reported_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -526,6 +545,74 @@ pub enum ModelProviderKind {
     Anthropic,
 }
 
+pub const DECISION_USES: [&str; 3] = ["decide", "voice_routing", "turn_needs_you"];
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DecisionProvider {
+    pub id: Uuid,
+    pub name: String,
+    pub base_url: String,
+    pub key_hint: Option<String>,
+    pub model: String,
+    pub uses: Vec<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateDecisionProviderRequest {
+    pub name: String,
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    pub model: String,
+    #[serde(default)]
+    pub uses: Vec<String>,
+}
+
+impl std::fmt::Debug for CreateDecisionProviderRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("CreateDecisionProviderRequest").field("name", &self.name).field("base_url", &self.base_url).field("api_key", &"<hidden>").finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PatchDecisionProviderRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uses: Option<Vec<String>>,
+}
+
+impl std::fmt::Debug for PatchDecisionProviderRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("PatchDecisionProviderRequest").field("name", &self.name).field("base_url", &self.base_url).field("api_key", &"<hidden>").finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct TestDecisionProviderRequest {
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+impl std::fmt::Debug for TestDecisionProviderRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("TestDecisionProviderRequest").field("base_url", &self.base_url).field("key", &"<hidden>").finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DecisionProviderModels {
+    pub models: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelProvider {
     pub id: Uuid,
@@ -582,6 +669,12 @@ pub struct ChatToolInfo {
     pub kind: ToolKind,
     #[serde(default)]
     pub asks: bool,
+    #[serde(default)]
+    pub edits: bool,
+    #[serde(default)]
+    pub ask_source: String,
+    #[serde(default)]
+    pub edit_source: String,
 }
 
 fn write_kind() -> ToolKind {
@@ -598,8 +691,6 @@ pub enum ToolKind {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PolicyLevel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub all: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub write: Option<bool>,
@@ -607,12 +698,58 @@ pub struct PolicyLevel {
     pub tools: std::collections::BTreeMap<String, bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalPreset {
+    #[default]
+    AskWrites,
+    AskAll,
+    AskAllEdit,
+    DontAsk,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct IntegrationPolicy {
     #[serde(default)]
+    pub preset: ApprovalPreset,
+    #[serde(default)]
     pub ask: PolicyLevel,
     #[serde(default)]
-    pub review: PolicyLevel,
+    pub edit: PolicyLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResponseToEdit {
+    pub tool: String,
+    pub server: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_error: Option<String>,
+    pub value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_paths: Option<Vec<Vec<Value>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResponseFilterRequest {
+    pub filter: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ResponseFilterResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_paths: Option<Vec<Vec<Value>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SendResponseRequest {
+    #[serde(default)]
+    pub send: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -661,7 +798,6 @@ pub struct ChatToolServer {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub oauth: bool,
     pub enabled: bool,
-    pub always_allow: bool,
     pub tools: Vec<ChatToolInfo>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default = "connected")]
@@ -674,8 +810,6 @@ pub struct ChatToolServer {
     pub last_error: Option<String>,
     #[serde(default)]
     pub policy: IntegrationPolicy,
-    #[serde(default)]
-    pub locked: bool,
     #[serde(default)]
     pub groups: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -742,8 +876,6 @@ impl std::fmt::Debug for CreateChatToolServerRequest {
 pub struct PatchChatToolServerRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub always_allow: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -956,6 +1088,12 @@ pub struct DeclineInstructionProposalRequest {
     pub note: Option<String>,
     #[serde(default)]
     pub redo: bool,
+    #[serde(default = "tell_the_agent")]
+    pub notify: bool,
+}
+
+fn tell_the_agent() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1099,6 +1237,20 @@ pub struct ApiAccessRequest {
     pub state: ApiAccessState,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integration: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IntegrationApiGrant {
+    pub token_id: Uuid,
+    pub conversation_id: Option<Uuid>,
+    pub conversation_title: Option<String>,
+    pub scopes: Vec<String>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub calls: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -1283,8 +1435,10 @@ pub enum RunOutcome {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Schedule {
     pub id: Uuid,
-    pub node_id: Uuid,
-    pub agent: AgentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentId>,
     pub cwd: String,
     pub project_id: Option<Uuid>,
     pub prompt: String,
@@ -1299,15 +1453,27 @@ pub struct Schedule {
     pub last_conversation_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assistant_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub action_inputs: std::collections::BTreeMap<String, String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateScheduleRequest {
-    pub node_id: Uuid,
-    pub agent: AgentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentId>,
     #[serde(default)]
     pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub action_inputs: std::collections::BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<Uuid>,
     pub prompt: String,
@@ -1594,25 +1760,6 @@ pub struct PatchReflectionRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ReflectionScheduleRequest {
-    pub node_id: Uuid,
-    pub agent: AgentId,
-    #[serde(default)]
-    pub cwd: String,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ReflectionSchedule {
-    pub schedule_id: Uuid,
-    pub node_id: Uuid,
-    pub agent: AgentId,
-    pub cwd: String,
-    pub enabled: bool,
-    pub cron: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RedraftReflection {
     pub conversation_id: Uuid,
 }
@@ -1670,6 +1817,18 @@ pub struct ArtifactVersion {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactOrigin {
+    pub conversation_id: Uuid,
+    pub conversation_title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_icon: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifact {
     pub id: Uuid,
     pub owner: Uuid,
@@ -1679,6 +1838,8 @@ pub struct Artifact {
     pub project_ids: Vec<Uuid>,
     #[serde(default)]
     pub conversation_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ArtifactOrigin>,
     pub kind: ArtifactKind,
     pub title: String,
     pub slug: String,
@@ -1905,6 +2066,8 @@ pub struct Assistant {
     pub backup: Option<AssistantBackup>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wakes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin_key: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -1939,6 +2102,106 @@ pub struct PatchAssistantRequest {
     pub archived: Option<bool>,
     #[serde(default)]
     pub preferences: Option<AssistantPreferences>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionInputKind {
+    Text,
+    Date,
+    Choice,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionInput {
+    pub name: String,
+    pub kind: ActionInputKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantAction {
+    pub id: Uuid,
+    pub assistant_id: Uuid,
+    pub name: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub inputs: Vec<ActionInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<Uuid>,
+    pub pinned: bool,
+    pub position: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin_key: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveActionRequest {
+    pub name: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub inputs: Vec<ActionInput>,
+    #[serde(default)]
+    pub model: Option<ModelChoice>,
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct RunActionRequest {
+    #[serde(default)]
+    pub inputs: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionProposal {
+    pub id: Uuid,
+    pub assistant_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    pub name: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub inputs: Vec<ActionInput>,
+    pub reason: String,
+    pub state: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssistantChange {
+    pub id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<Uuid>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<AssistantPreferences>,
+    pub state: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1987,7 +2250,6 @@ pub struct WellnessSettings {
     pub break_after_minutes: i32,
     pub snooze_minutes: i32,
     pub break_minutes: i32,
-    pub pomodoro: bool,
     pub quiet_hours: bool,
     pub quiet_hold_notifications: bool,
     pub quiet_hold_schedules: bool,
@@ -2021,7 +2283,6 @@ pub struct WellnessDay {
     pub viewing_minutes: i64,
     pub agent_minutes: i64,
     pub breaks: i64,
-    pub puzzles: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2031,6 +2292,74 @@ pub struct WellnessOverview {
     pub current_break: Option<Break>,
     pub quiet_now: bool,
     pub held: i64,
+    pub held_week: HeldWeek,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HeldWeek {
+    pub notifications: i64,
+    pub schedules: i64,
+    pub pings: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LearnedItem {
+    pub id: Uuid,
+    pub text: String,
+    pub source_kind: String,
+    pub conversation_id: Uuid,
+    pub conversation_title: String,
+    pub message_id: Option<i64>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HoldRequest {
+    pub kind: String,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleResult {
+    #[serde(default)]
+    pub solved: Option<bool>,
+    #[serde(default)]
+    pub guesses: Option<i32>,
+    #[serde(default)]
+    pub mistakes: Option<i32>,
+    #[serde(default)]
+    pub score: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleDay {
+    pub day: String,
+    pub result: PuzzleResult,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleBucket {
+    pub value: i32,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleStats {
+    pub played: i64,
+    pub solved: i64,
+    pub average: Option<f64>,
+    pub distribution: Vec<PuzzleBucket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleSummary {
+    pub puzzle: String,
+    pub today: Option<PuzzleResult>,
+    pub history: Vec<PuzzleDay>,
+    pub stats: PuzzleStats,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2042,6 +2371,8 @@ pub struct Skill {
     pub own_share: Option<f64>,
     pub weekly_own_lines: Vec<i64>,
     pub last_practised: Option<String>,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2085,6 +2416,10 @@ pub struct Exercise {
     pub review: Option<ExerciseReview>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub source_conversation_id: Option<Uuid>,
+    #[serde(default)]
+    pub source_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -358,6 +358,34 @@ async fn a_session_started_replayed_on_reconnect_keeps_the_mode_and_model_the_pe
 }
 
 #[tokio::test]
+async fn a_started_session_reports_its_models_to_the_node_for_conversations_not_yet_open() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, None).await;
+
+    link.send(NodeToControl::SessionStarted {
+        conversation_id: id,
+        acp_session_id: "acp-1".into(),
+        modes: None,
+        models: Some(json!({"currentModelId": "opus", "availableModels": [{"modelId": "opus", "name": "Opus 5.5"}, {"modelId": "sonnet", "name": "Sonnet 5.5"}]})),
+        config_options: None,
+    })
+    .await;
+
+    let user = server.user.clone();
+    let reported = common::eventually("the node to carry its models", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes[0]["harness_models"].as_array().filter(|models| !models.is_empty()).map(|models| models[0].clone())
+    })
+    .await;
+
+    assert_eq!(reported["agent"], "claude");
+    assert_eq!(reported["default_model"], "opus");
+    assert_eq!(reported["models"], json!([{"id": "opus", "name": "Opus 5.5"}, {"id": "sonnet", "name": "Sonnet 5.5"}]));
+}
+
+#[tokio::test]
 async fn a_send_now_whose_cancel_never_landed_does_not_release_the_queue_after_a_later_stop() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;

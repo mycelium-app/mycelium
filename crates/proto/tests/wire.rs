@@ -380,6 +380,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         instructions_revision: None,
         instructions_unmanaged: vec![],
         sessions_on_older_instructions: 0,
+        harness_models: vec![],
     });
 
     assert_eq!(json["online"], true);

@@ -16,6 +16,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
+use mycelium_proto::api::HarnessModel;
 use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use mycelium_proto::stream::StreamMessage;
@@ -178,10 +179,6 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::PermissionRequest { conversation_id, seq, request_id, request } => {
-            if crate::exercises::refuse_edit(state, node_id, conversation_id, &request_id, &request).await? {
-                return Ok(());
-            }
-
             let mut payload = request.clone();
 
             match payload.as_object_mut() {
@@ -210,71 +207,20 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             }
 
             let limit = crate::usage_limits::inspect(state, node_id, conversation_id, &message).await?;
-            let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
-            let switch_to = limit.as_ref().and_then(|limit| limit.switch_to.clone());
-            let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
 
-            if resume_at.is_none()
-                && switch_to.is_none()
-                && let Err(error) = crate::goals::session_failed(state, conversation_id).await
-            {
-                tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
-            }
-
-            let hit_limit = limit.is_some();
-            let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
-            let recorded = record(state, node_id, conversation_id, Some(seq), EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
-
-            let mut switched = false;
-
-            if let Some(owner) = owner.filter(|_| recorded && hit_limit) {
-                let until = resume_at.unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
-
-                if crate::assistants::fall_back(state, owner, conversation_id, "usage_limit", Some(until)).await {
-                    let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
-
-                    match crate::assistants::carry_on_after_limit(state, owner, conversation_id, &text).await {
-                        Ok(()) => switched = true,
-                        Err(error) => tracing::warn!("carrying on {conversation_id} after its fallback failed: {}", error.message()),
-                    }
-                }
-            }
-
-            if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded && !switched) {
-                let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-                let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
-                let moved = crate::continuation::continue_on(state, owner, conversation_id, target, Some("usage_limit")).await;
-
-                match moved {
-                    Ok(_) => {
-                        let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
-
-                        crate::prompts::retry_failed(state, owner, conversation_id).await?;
-                        crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
-                        switched = true;
-                    }
-                    Err(error) => {
-                        tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message());
-
-                        if resume_at.is_none()
-                            && let Err(error) = crate::goals::session_failed(state, conversation_id).await
-                        {
-                            tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
-                        }
-                    }
-                }
-            }
-
-            if let Some(at) = resume_at.filter(|_| recorded && !switched) {
-                crate::usage_limits::schedule(state, conversation_id, at).await?;
-            }
-
-            Ok(())
+            stop_for_failure(state, node_id, conversation_id, owner, Some(seq), &message, limit).await
         }
         NodeToControl::Workflow { conversation_id, run_id, line } => {
-            record(state, node_id, conversation_id, None, EventKind::Workflow, json!({"run_id": run_id, "line": line, "at": chrono::Utc::now()}), None).await?;
+            let limit = crate::usage_limits::inspect_workflow_line(state, node_id, conversation_id, &line).await?;
+            let mut payload = json!({"run_id": run_id, "line": line, "at": chrono::Utc::now()});
 
-            if !matches!(line["type"].as_str(), Some("result" | "failed")) {
+            if let Some(limit) = limit {
+                payload["usage_limit"] = limit;
+            }
+
+            record(state, node_id, conversation_id, None, EventKind::Workflow, payload, None).await?;
+
+            if !matches!(line["type"].as_str(), Some("result" | "failed" | "ended")) {
                 return Ok(());
             }
 
@@ -379,6 +325,69 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
     }
 }
 
+async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid, owner: Option<Uuid>, seq: Option<i64>, message: &str, limit: Option<crate::usage_limits::Detected>) -> ApiResult<()> {
+    let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
+    let switch_to = limit.as_ref().and_then(|limit| limit.switch_to.clone());
+    let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
+
+    if resume_at.is_none()
+        && switch_to.is_none()
+        && let Err(error) = crate::goals::session_failed(state, conversation_id).await
+    {
+        tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
+    }
+
+    let hit_limit = limit.is_some();
+    let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
+    let recorded = record(state, node_id, conversation_id, seq, EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
+
+    let mut switched = false;
+
+    if let Some(owner) = owner.filter(|_| recorded && hit_limit) {
+        let until = resume_at.unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::hours(1));
+
+        if crate::assistants::fall_back(state, owner, conversation_id, "usage_limit", Some(until)).await {
+            let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
+
+            match crate::assistants::carry_on_after_limit(state, owner, conversation_id, &text).await {
+                Ok(()) => switched = true,
+                Err(error) => tracing::warn!("carrying on {conversation_id} after its fallback failed: {}", error.message()),
+            }
+        }
+    }
+
+    if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded && !switched) {
+        let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+        let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
+        let moved = crate::continuation::continue_on(state, owner, conversation_id, target, Some("usage_limit")).await;
+
+        match moved {
+            Ok(_) => {
+                let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
+
+                crate::prompts::retry_failed(state, owner, conversation_id).await?;
+                crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
+                switched = true;
+            }
+            Err(error) => {
+                tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message());
+
+                if resume_at.is_none()
+                    && let Err(error) = crate::goals::session_failed(state, conversation_id).await
+                {
+                    tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
+                }
+            }
+        }
+    }
+
+    if let Some(at) = resume_at.filter(|_| recorded && !switched) {
+        crate::usage_limits::schedule(state, conversation_id, at).await?;
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: String, os: String, arch: String, agents: Vec<AgentInfo>, sessions: Vec<SessionPosition>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
@@ -469,6 +478,19 @@ async fn fail_conversations_without_a_session(state: &AppState, node_id: Uuid, l
     Ok(())
 }
 
+fn reported_models(models: Option<&Value>, config_options: Option<&Value>) -> Vec<HarnessModel> {
+    let advertised = models.and_then(|models| models["availableModels"].as_array()).into_iter().flatten().filter_map(|model| Some(HarnessModel { id: model["modelId"].as_str()?.to_string(), name: model["name"].as_str().unwrap_or_else(|| model["modelId"].as_str().unwrap_or_default()).to_string() }));
+    let mut found: Vec<HarnessModel> = advertised.collect();
+
+    if found.is_empty() {
+        let option = config_options.and_then(Value::as_array).into_iter().flatten().find(|option| option["id"] == "model" || option["category"] == "model");
+        let choices = option.and_then(|option| option["options"].as_array()).into_iter().flatten();
+        found = choices.filter_map(|choice| Some(HarnessModel { id: choice["value"].as_str()?.to_string(), name: choice["name"].as_str().unwrap_or_else(|| choice["value"].as_str().unwrap_or_default()).to_string() })).collect();
+    }
+
+    found
+}
+
 async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid, acp_session_id: String, modes: Option<Value>, models: Option<Value>, config_options: Option<Value>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
     let Some(before) = lock_on_node(&mut tx, conversation_id, node_id).await? else {
@@ -477,6 +499,8 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
     let mode = modes.as_ref().and_then(|modes| modes["currentModeId"].as_str()).map(str::to_string);
     let model = models.as_ref().and_then(|models| models["currentModelId"].as_str()).map(str::to_string);
+    let models_value = models.clone();
+    let config_value = config_options.clone();
     let options = json!({"modes": modes, "models": models, "config_options": config_options});
     let updated = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set
@@ -492,7 +516,27 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     .bind(options)
     .fetch_one(&mut *tx)
     .await?;
+    let reported = reported_models(models_value.as_ref(), config_value.as_ref());
+
+    if !reported.is_empty() {
+        sqlx::query(
+            "insert into harness_models (node_id, agent, account, models, default_model, reported_at) values ($1, $2, $3, $4, $5, now())
+             on conflict (node_id, agent, account) do update set models = excluded.models, default_model = excluded.default_model, reported_at = now()",
+        )
+        .bind(node_id)
+        .bind(&updated.agent)
+        .bind(updated.account.clone().unwrap_or_default())
+        .bind(sqlx::types::Json(&reported))
+        .bind(models_value.as_ref().and_then(|models| models["currentModelId"].as_str()))
+        .execute(&mut *tx)
+        .await?;
+    }
+
     tx.commit().await?;
+
+    if !reported.is_empty() {
+        publish_node(state, node_id).await?;
+    }
 
     state.add_session(node_id, conversation_id).await?;
     state.publish(Some(updated.owner), StreamMessage::Conversation(updated.to_proto()?));
@@ -787,6 +831,16 @@ async fn turn_end(state: &AppState, node_id: Uuid, conversation_id: Uuid, seq: i
     }
 
     crate::conversations::spawn_branch_refresh(state, conversation_id);
+
+    if stop_reason != "cancelled"
+        && let Some((message, limit)) = crate::usage_limits::inspect_reply(state, node_id, conversation_id).await?
+    {
+        let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+        state.hub.forget_prompts_of(conversation_id);
+
+        return stop_for_failure(state, node_id, conversation_id, owner, None, &message, Some(limit)).await;
+    }
 
     if let Err(error) = sqlx::query("update conversations set limit_resumes = 0 where id = $1 and limit_resumes > 0").bind(conversation_id).execute(&state.pool).await {
         tracing::warn!("could not reset the limit resumes of {conversation_id}: {error}");

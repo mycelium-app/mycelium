@@ -1,7 +1,7 @@
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::versions::newer;
-use mycelium_proto::api::NodeSummary;
+use mycelium_proto::api::{HarnessModel, HarnessModels, NodeSummary};
 use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt, ResetCredits, UsageWindow};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
@@ -396,6 +396,12 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
     .fetch_all(&state.pool)
     .await?;
     let usage_history = crate::account_usage::project_windows(state, &ids).await?;
+    let reported_models = sqlx::query_as::<_, (Uuid, String, String, sqlx::types::Json<Vec<HarnessModel>>, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        "select node_id, agent, account, models, default_model, reported_at from harness_models where node_id = any($1) order by agent, account",
+    )
+    .bind(&ids)
+    .fetch_all(&state.pool)
+    .await?;
 
     let current_revision = crate::instructions::current_revision(state).await?;
     let mut summaries = Vec::new();
@@ -423,6 +429,12 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             node_logins.push(LoginInfo { agent: parse_enum(agent)?, account: account.clone(), method: method.clone(), state: parse_enum(login_state)?, usage_left: usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: *usage_read_at, reset_credits: reset_credits.as_ref().map(|credits| credits.0.clone()) });
         }
 
+        let mut harness_models = Vec::new();
+
+        for (_, agent, account, models, default_model, reported_at) in reported_models.iter().filter(|row| row.0 == node.id) {
+            harness_models.push(HarnessModels { agent: parse_enum(agent)?, account: Some(account.clone()).filter(|account| !account.is_empty()), models: models.0.clone(), default_model: default_model.clone(), reported_at: *reported_at });
+        }
+
         summaries.push(NodeSummary {
             id: node.id,
             name: node.name,
@@ -444,6 +456,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             instructions_revision: node.instructions_revision,
             instructions_unmanaged: node.instructions_unmanaged,
             sessions_on_older_instructions: older as u32,
+            harness_models,
         });
     }
 
