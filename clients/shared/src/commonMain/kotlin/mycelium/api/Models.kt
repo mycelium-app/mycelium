@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -70,6 +71,7 @@ object EventKinds {
     const val ModelChanged = "model_changed"
     const val Continued = "continued"
     const val TeachMode = "teach_mode"
+    const val OpenOutline = "open_outline"
 }
 
 @Serializable
@@ -192,7 +194,23 @@ data class NodeSummary(
     @SerialName("instructions_revision") val instructionsRevision: String? = null,
     @SerialName("instructions_unmanaged") val instructionsUnmanaged: List<String> = emptyList(),
     @SerialName("sessions_on_older_instructions") val sessionsOnOlderInstructions: Int = 0,
+    @SerialName("harness_models") val harnessModels: List<HarnessModels> = emptyList(),
 )
+
+@Serializable
+data class HarnessModel(val id: String, val name: String)
+
+@Serializable
+data class HarnessModels(
+    val agent: String,
+    val account: String? = null,
+    val models: List<HarnessModel> = emptyList(),
+    @SerialName("default_model") val defaultModel: String? = null,
+    @SerialName("reported_at") val reportedAt: String,
+)
+
+@Serializable
+data class SshToken(val token: String, @SerialName("expires_at") val expiresAt: String)
 
 @Serializable
 data class DrainRequest(val draining: Boolean)
@@ -376,7 +394,7 @@ data class InstructionProposal(
 }
 
 @Serializable
-data class DeclineInstructionProposalRequest(val note: String? = null, val redo: Boolean = false)
+data class DeclineInstructionProposalRequest(val note: String? = null, val redo: Boolean = false, val notify: Boolean = true)
 
 @Serializable
 data class ConversationConnection(
@@ -582,18 +600,30 @@ data class UpdateModelProviderRequest(val name: String? = null, @SerialName("mod
 data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
 
 @Serializable
-data class ChatToolInfo(val name: String, val description: String = "", val kind: String = "write", val asks: Boolean = false)
+data class ChatToolInfo(
+    val name: String,
+    val description: String = "",
+    val kind: String = "write",
+    val asks: Boolean = false,
+    val edits: Boolean = false,
+    @SerialName("ask_source") val askSource: String = "preset",
+    @SerialName("edit_source") val editSource: String = "preset",
+)
 
 @Serializable
 data class PolicyLevel(
-    val all: Boolean? = null,
     val read: Boolean? = null,
     val write: Boolean? = null,
     val tools: Map<String, Boolean> = emptyMap(),
 )
 
 @Serializable
-data class IntegrationPolicy(val ask: PolicyLevel = PolicyLevel(), val review: PolicyLevel = PolicyLevel())
+data class IntegrationPolicy(val preset: String = PresetAskWrites, val ask: PolicyLevel = PolicyLevel(), val edit: PolicyLevel = PolicyLevel())
+
+const val PresetAskWrites = "ask_writes"
+const val PresetAskAll = "ask_all"
+const val PresetAskAllEdit = "ask_all_edit"
+const val PresetDontAsk = "dont_ask"
 
 @Serializable
 data class IntegrationCall(
@@ -625,7 +655,6 @@ data class ChatToolServer(
     @SerialName("token_hint") val tokenHint: String? = null,
     val oauth: Boolean = false,
     val enabled: Boolean = true,
-    @SerialName("always_allow") val alwaysAllow: Boolean = false,
     val tools: List<ChatToolInfo> = emptyList(),
     @SerialName("created_at") val createdAt: String,
     @SerialName("signed_in") val signedIn: Boolean = false,
@@ -635,12 +664,11 @@ data class ChatToolServer(
     @SerialName("last_used_at") val lastUsedAt: String? = null,
     @SerialName("last_error") val lastError: String? = null,
     val policy: IntegrationPolicy = IntegrationPolicy(),
-    val locked: Boolean = false,
     val groups: List<String> = emptyList(),
 )
 
 @Serializable
-data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null)
+data class CreateChatToolServerRequest(val name: String, val url: String, @SerialName("bearer_token") val bearerToken: String? = null, val kind: String? = null, val account: String? = null, val settings: JsonObject? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null)
 
 @Serializable
 data class StartChatToolServerOAuthRequest(val name: String, val url: String, val kind: String? = null, @SerialName("forge_id") val forgeId: String? = null)
@@ -649,7 +677,7 @@ data class StartChatToolServerOAuthRequest(val name: String, val url: String, va
 data class OAuthStart(@SerialName("authorize_url") val authorizeUrl: String)
 
 @Serializable
-data class PatchChatToolServerRequest(val enabled: Boolean? = null, @SerialName("always_allow") val alwaysAllow: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null, @SerialName("bearer_token") val bearerToken: String? = null)
+data class PatchChatToolServerRequest(val enabled: Boolean? = null, val name: String? = null, @SerialName("token_expires_at") val tokenExpiresAt: String? = null, @SerialName("clear_token_expiry") val clearTokenExpiry: Boolean? = null, val policy: IntegrationPolicy? = null, @SerialName("bearer_token") val bearerToken: String? = null)
 
 @Serializable
 data class CreateChatRequest(
@@ -687,7 +715,17 @@ data class PatchProjectRequest(
 )
 
 @Serializable
-data class Group(val id: String, val name: String, val folders: List<GroupFolder> = emptyList(), @SerialName("created_at") val createdAt: String)
+data class Group(
+    val id: String,
+    val name: String,
+    val folders: List<GroupFolder> = emptyList(),
+    @SerialName("created_at") val createdAt: String,
+    val hours: Hours = Hours(),
+    @SerialName("open_now") val openNow: Boolean = true,
+    @SerialName("closes_at") val closesAt: String? = null,
+    @SerialName("opens_at") val opensAt: String? = null,
+    @SerialName("opened_until") val openedUntil: String? = null,
+)
 
 @Serializable
 data class ModelChoice(
@@ -723,6 +761,71 @@ data class Assistant(
     val secrets: List<AssistantSecret> = emptyList(),
     val backup: AssistantBackup? = null,
     val wakes: String? = null,
+    @SerialName("builtin_key") val builtinKey: String? = null,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class ActionInput(
+    val name: String,
+    val kind: String = "text",
+    val options: List<String> = emptyList(),
+    val required: Boolean = false,
+    val default: String? = null,
+)
+
+@Serializable
+data class AssistantAction(
+    val id: String,
+    @SerialName("assistant_id") val assistantId: String,
+    val name: String,
+    val prompt: String,
+    val inputs: List<ActionInput> = emptyList(),
+    val model: ModelChoice? = null,
+    @SerialName("node_id") val nodeId: String? = null,
+    val pinned: Boolean = false,
+    val position: Int = 0,
+    @SerialName("builtin_key") val builtinKey: String? = null,
+)
+
+@Serializable
+data class SaveActionRequest(
+    val name: String,
+    val prompt: String,
+    val inputs: List<ActionInput> = emptyList(),
+    val model: ModelChoice? = null,
+    @SerialName("node_id") val nodeId: String? = null,
+    val pinned: Boolean = false,
+)
+
+@Serializable
+data class RunActionRequest(val inputs: Map<String, String> = emptyMap())
+
+@Serializable
+data class ActionProposal(
+    val id: String,
+    @SerialName("assistant_id") val assistantId: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val name: String,
+    val prompt: String,
+    val inputs: List<ActionInput> = emptyList(),
+    val reason: String = "",
+    val state: String,
+    @SerialName("created_at") val createdAt: String,
+)
+
+@Serializable
+data class AssistantChange(
+    val id: String,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    val kind: String,
+    @SerialName("assistant_id") val assistantId: String? = null,
+    val name: String,
+    val description: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    val instructions: String? = null,
+    val preferences: AssistantPreferences? = null,
+    val state: String,
     @SerialName("created_at") val createdAt: String,
 )
 
@@ -896,8 +999,8 @@ data class CreateTaskRequest(
 @Serializable
 data class Schedule(
     val id: String,
-    @SerialName("node_id") val nodeId: String,
-    val agent: String,
+    @SerialName("node_id") val nodeId: String? = null,
+    val agent: String? = null,
     val cwd: String,
     @SerialName("project_id") val projectId: String? = null,
     val prompt: String,
@@ -911,19 +1014,24 @@ data class Schedule(
     @SerialName("last_run_at") val lastRunAt: String? = null,
     @SerialName("last_conversation_id") val lastConversationId: String? = null,
     @SerialName("assistant_id") val assistantId: String? = null,
+    @SerialName("action_id") val actionId: String? = null,
+    @SerialName("action_inputs") val actionInputs: Map<String, String> = emptyMap(),
     @SerialName("created_at") val createdAt: String,
 )
 
 @Serializable
 data class CreateScheduleRequest(
-    @SerialName("node_id") val nodeId: String,
-    val agent: String,
+    @SerialName("node_id") val nodeId: String? = null,
+    val agent: String? = null,
     val prompt: String,
     val cron: String,
     @SerialName("each_run") val eachRun: String,
     val cwd: String? = null,
     @SerialName("project_id") val projectId: String? = null,
     @SerialName("time_zone") val timeZone: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
+    @SerialName("action_id") val actionId: String? = null,
+    @SerialName("action_inputs") val actionInputs: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -956,12 +1064,22 @@ data class ScheduleRun(
 )
 
 @Serializable
+data class ArtifactOrigin(
+    @SerialName("conversation_id") val conversationId: String,
+    @SerialName("conversation_title") val conversationTitle: String,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("project_name") val projectName: String? = null,
+    @SerialName("project_icon") val projectIcon: String? = null,
+)
+
+@Serializable
 data class Artifact(
     val id: String,
     val owner: String,
     @SerialName("conversation_id") val conversationId: String? = null,
     @SerialName("project_ids") val projectIds: List<String>? = null,
     @SerialName("conversation_ids") val conversationIds: List<String>? = null,
+    val origin: ArtifactOrigin? = null,
     val kind: String,
     val title: String,
     val slug: String = "",
@@ -1154,6 +1272,7 @@ data class CreateConversationRequest(
     val branch: String? = null,
     val title: String? = null,
     val prompt: String? = null,
+    val model: String? = null,
 )
 
 @Serializable
@@ -1221,14 +1340,27 @@ data class PromptAccepted(val queued: Boolean, val message: String)
 data class PatchQueueRequest(val text: String)
 
 @Serializable
-data class ReviewAnswer(
-    @SerialName("request_id") val requestId: String,
-    val decision: String,
-    val removed: List<Int> = emptyList(),
+data class ResponseToEdit(
+    val tool: String,
+    val server: String,
+    val account: String? = null,
+    val filter: String? = null,
+    @SerialName("filter_error") val filterError: String? = null,
+    val value: JsonElement,
+    @SerialName("selected_paths") val selectedPaths: List<List<JsonElement>>? = null,
 )
 
 @Serializable
-data class ReviewItems(val items: List<JsonElement>)
+data class ResponseFilterRequest(val filter: String)
+
+@Serializable
+data class ResponseFilterResult(
+    @SerialName("selected_paths") val selectedPaths: List<List<JsonElement>>? = null,
+    val value: JsonElement? = null,
+)
+
+@Serializable
+data class SendResponseRequest(val send: JsonElement = JsonNull)
 
 @Serializable
 data class PermissionAnswer(
@@ -1457,6 +1589,12 @@ sealed interface StreamMessage {
 
     data class AssistantChanged(val assistant: Assistant) : StreamMessage
 
+    data class AssistantActionsChanged(val assistantId: String) : StreamMessage
+
+    data class ActionProposalChanged(val proposal: ActionProposal) : StreamMessage
+
+    data class AssistantChangeChanged(val change: AssistantChange) : StreamMessage
+
     data class ScheduleRemoved(val scheduleId: String) : StreamMessage
 
     data class ArtifactChanged(val artifact: Artifact, val deleted: Boolean = false) : StreamMessage
@@ -1533,6 +1671,9 @@ fun parseStreamMessage(text: String): StreamMessage? {
         )
         "workflow" -> StreamMessage.WorkflowChanged(element["workflow"]!!.jsonObject)
         "assistant" -> StreamMessage.AssistantChanged(MyceliumJson.decodeFromJsonElement(Assistant.serializer(), element))
+        "assistant_actions_changed" -> StreamMessage.AssistantActionsChanged(element.requireString("assistant_id"))
+        "action_proposal" -> StreamMessage.ActionProposalChanged(MyceliumJson.decodeFromJsonElement(ActionProposal.serializer(), element))
+        "assistant_change" -> StreamMessage.AssistantChangeChanged(MyceliumJson.decodeFromJsonElement(AssistantChange.serializer(), element))
         "schedule" -> StreamMessage.ScheduleChanged(MyceliumJson.decodeFromJsonElement(Schedule.serializer(), element))
         "schedule_removed" -> StreamMessage.ScheduleRemoved(element.requireString("schedule_id"))
         "artifact" -> StreamMessage.ArtifactChanged(

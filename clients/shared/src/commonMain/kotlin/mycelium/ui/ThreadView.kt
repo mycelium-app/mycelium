@@ -921,6 +921,7 @@ internal fun DiffCard(diff: FileDiff, status: ToolStatus) {
             Icon(MyIcon.File, colors.textMuted, Tokens.Size.IconSm)
             Label(diff.path, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
             DiffStat(diff)
+            OpenInIdeButton(diff.path, diff.lines.firstOrNull { it.kind != DiffLine.Kind.Context }?.let { it.newNumber ?: it.oldNumber })
 
             if (status == ToolStatus.Failed) {
                 StatusMark("Failed", Tone.Failed, MyIcon.Failed)

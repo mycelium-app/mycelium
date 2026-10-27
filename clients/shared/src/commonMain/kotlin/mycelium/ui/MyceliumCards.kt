@@ -158,6 +158,7 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.Walkthrough -> MyIcon.List
         is MyceliumCall.ProposeInstructionsEdit -> MyIcon.File
         is MyceliumCall.SetProjectIcon -> MyIcon.Image
+        is MyceliumCall.OpenOutline -> MyIcon.Globe
         is MyceliumCall.FindConversations -> MyIcon.Search
         is MyceliumCall.SendToConversation -> MyIcon.Send
         is MyceliumCall.StartProposed -> MyIcon.Layers
@@ -228,6 +229,7 @@ private fun runningHeading(parsed: MyceliumCall, verb: String): String = when {
 
 private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>): String = when (parsed) {
     is MyceliumCall.SetProjectIcon -> "Set the project icon"
+    is MyceliumCall.OpenOutline -> "Opened an Outline document"
     is MyceliumCall.Recall -> "Searched memory for “${parsed.query}”"
     is MyceliumCall.Remember -> "Remembered"
     is MyceliumCall.ProposeTask -> "Proposed a task"
@@ -316,7 +318,7 @@ private fun MyceliumBody(parsed: MyceliumCall) {
             Label(parsed.reason, style = Tokens.Type.Ui, maxLines = ExcerptLines)
 
             if (review != null) {
-                MyButton(review, text = "Review", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Review the proposed instructions edit in Settings")
+                MyButton({ review(parsed.layer) }, text = "Review", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Review the proposed instructions edit in Settings")
             }
         }
 
@@ -348,6 +350,17 @@ private fun MyceliumBody(parsed: MyceliumCall) {
         }
 
         is MyceliumCall.SetProjectIcon -> Label(parsed.path, style = Tokens.Type.Code)
+
+        is MyceliumCall.OpenOutline -> {
+            val opener = LocalOutlineOpener.current
+            val page = parsed.page
+
+            Label(page?.title ?: parsed.document, style = Tokens.Type.Ui, maxLines = 1)
+
+            if (opener != null && page != null) {
+                MyButton({ opener(page) }, text = "Show", variant = ButtonVariant.Outline, size = ButtonSize.Sm, description = "Show ${page.title} beside the conversation")
+            }
+        }
 
         is MyceliumCall.RequestApiAccess -> RequestApiAccessBody(parsed)
 
@@ -444,13 +457,15 @@ private fun SendToConversationBody(parsed: MyceliumCall.SendToConversation) {
         }
 
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-            MyButton({ decide(proposals.approve) }, text = "Send", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
-            MyButton({ decide(proposals.connect) }, text = "Send and connect", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-
-            if (betweenGroups) {
-                MyButton({ decide(proposals.connectGroups) }, text = "Send and connect groups", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
-            }
-
+            SplitButton(
+                text = "Send",
+                onClick = { decide(proposals.approve) },
+                alternatives = listOfNotNull(
+                    SplitAlternative("Send and connect", { decide(proposals.connect) }),
+                    if (betweenGroups) SplitAlternative("Send and connect groups", { decide(proposals.connectGroups) }) else null,
+                ),
+                size = ButtonSize.Sm,
+            )
             MyButton({ decide(proposals.decline) }, text = "Don't send", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }
@@ -532,8 +547,12 @@ private fun StartProposedBody(parsed: MyceliumCall.StartProposed) {
         }
 
         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5)) {
-            MyButton({ decide(proposals.approve) }, text = "Create", variant = ButtonVariant.Primary, size = ButtonSize.Sm)
-            MyButton({ decide(proposals.connect) }, text = "Create and connect", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            SplitButton(
+                text = "Create",
+                onClick = { decide(proposals.approve) },
+                alternatives = listOf(SplitAlternative("Create and connect", { decide(proposals.connect) })),
+                size = ButtonSize.Sm,
+            )
             MyButton({ deciding.decide(proposal, proposals.decline) }, text = "Don't create", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
     }

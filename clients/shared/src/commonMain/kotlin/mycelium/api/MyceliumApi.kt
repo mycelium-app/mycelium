@@ -156,11 +156,16 @@ class MyceliumApi(
     suspend fun activity(range: String, nodeId: String? = null): Activity =
         call("/activity") { client.get(it) { authorise(); parameter("range", range); if (nodeId != null) parameter("node_id", nodeId) } }.body()
 
+    suspend fun usageHistory(range: String, account: String? = null): UsageHistory =
+        call("/usage/history") { client.get(it) { authorise(); parameter("range", range); if (account != null) parameter("account", account) } }.body()
+
     suspend fun usageOf(id: String): ConversationUsage = call("/conversations/$id/usage") { client.get(it) { authorise() } }.body()
 
     suspend fun conversationUsage(): List<ActivityRow> = call("/activity/conversations") { client.get(it) { authorise() } }.body()
 
     suspend fun nodes(): List<NodeSummary> = call("/nodes") { client.get(it) { authorise() } }.body()
+
+    suspend fun mintSshToken(nodeId: String): SshToken = call("/nodes/$nodeId/ssh-tokens") { client.post(it) { authorise() } }.body()
 
     suspend fun drainNode(id: String, draining: Boolean) {
         call("/nodes/$id/drain") { client.post(it) { authorise(); json(DrainRequest(draining)) } }
@@ -255,6 +260,21 @@ class MyceliumApi(
 
     suspend fun modelProviders(): List<ModelProvider> = call("/model-providers") { client.get(it) { authorise() } }.body()
 
+    suspend fun decisionProviders(): List<DecisionProvider> = call("/decision-providers") { client.get(it) { authorise() } }.body()
+
+    suspend fun createDecisionProvider(request: CreateDecisionProviderRequest): DecisionProvider =
+        call("/decision-providers") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun updateDecisionProvider(id: String, request: PatchDecisionProviderRequest): DecisionProvider =
+        call("/decision-providers/$id") { client.patch(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteDecisionProvider(id: String) {
+        call("/decision-providers/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun testDecisionProvider(request: TestDecisionProviderRequest): DecisionProviderModels =
+        call("/decision-providers/test") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun modelProviderUsage(): List<ModelProviderUsage> = call("/model-provider-usage") { client.get(it) { authorise() } }.body()
 
     suspend fun createModelProvider(request: CreateModelProviderRequest): ModelProvider =
@@ -299,6 +319,19 @@ class MyceliumApi(
 
     suspend fun integrationCalls(server: String? = null, before: String? = null): List<IntegrationCall> =
         call("/integration-calls") { client.get(it) { authorise(); server?.let { value -> parameter("server", value) }; before?.let { value -> parameter("before", value) } } }.body()
+
+    suspend fun probeChatToolServer(request: ProbeChatToolServerRequest): ChatToolServerProbe =
+        call("/chat-tool-servers/probe") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun testChatToolServer(request: TestChatToolServerRequest): TestedChatToolServer =
+        call("/chat-tool-servers/test") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun testCalendars(request: TestCalendarsRequest): TestedCalendars =
+        call("/chat-tool-servers/caldav-test") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun integrationCalendars(id: String): List<CalendarAccess> = call("/integrations/$id/calendars") { client.get(it) { authorise() } }.body()
+
+    suspend fun integrationApiGrants(id: String): List<IntegrationApiGrant> = call("/chat-tool-servers/$id/api-access") { client.get(it) { authorise() } }.body()
 
     suspend fun deleteChatToolServer(id: String) {
         call("/chat-tool-servers/$id") { client.delete(it) { authorise() } }
@@ -359,6 +392,42 @@ class MyceliumApi(
     suspend fun promptAssistant(id: String, text: String): Conversation =
         call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text)) } }.body()
 
+    suspend fun wellnessAssistant(): Assistant = call("/assistants/builtin/wellness") { client.get(it) { authorise() } }.body()
+
+    suspend fun assistantActions(id: String): List<AssistantAction> = call("/assistants/$id/actions") { client.get(it) { authorise() } }.body()
+
+    suspend fun createAssistantAction(id: String, request: SaveActionRequest): AssistantAction =
+        call("/assistants/$id/actions") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun saveAssistantAction(id: String, actionId: String, request: SaveActionRequest): AssistantAction =
+        call("/assistants/$id/actions/$actionId") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteAssistantAction(id: String, actionId: String) {
+        call("/assistants/$id/actions/$actionId") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun resetAssistantAction(id: String, actionId: String): AssistantAction =
+        call("/assistants/$id/actions/$actionId/reset") { client.post(it) { authorise() } }.body()
+
+    suspend fun runAssistantAction(id: String, actionId: String, inputs: Map<String, String>): Conversation =
+        call("/assistants/$id/actions/$actionId/run") { client.post(it) { authorise(); json(RunActionRequest(inputs)) } }.body()
+
+    suspend fun actionProposals(id: String): List<ActionProposal> = call("/assistants/$id/action-proposals") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveActionProposal(id: String, proposalId: String, edited: SaveActionRequest? = null): AssistantAction =
+        call("/assistants/$id/action-proposals/$proposalId/approve") { client.post(it) { authorise(); edited?.let { body -> json(body) } } }.body()
+
+    suspend fun declineActionProposal(id: String, proposalId: String): ActionProposal =
+        call("/assistants/$id/action-proposals/$proposalId/decline") { client.post(it) { authorise() } }.body()
+
+    suspend fun assistantChanges(): List<AssistantChange> = call("/assistant-changes") { client.get(it) { authorise() } }.body()
+
+    suspend fun approveAssistantChange(id: String): AssistantChange = call("/assistant-changes/$id/approve") { client.post(it) { authorise() } }.body()
+
+    suspend fun declineAssistantChange(id: String): AssistantChange = call("/assistant-changes/$id/decline") { client.post(it) { authorise() } }.body()
+
+    suspend fun undoAssistantChange(id: String): AssistantChange = call("/assistant-changes/$id/undo") { client.post(it) { authorise() } }.body()
+
     suspend fun clearAssistant(id: String): Assistant = call("/assistants/$id/clear") { client.post(it) { authorise() } }.body()
 
     suspend fun groups(): List<Group> = call("/groups") { client.get(it) { authorise() } }.body()
@@ -371,6 +440,16 @@ class MyceliumApi(
 
     suspend fun renameGroup(id: String, name: String): Group =
         call("/groups/$id") { client.patch(it) { authorise(); json(GroupRequest(name)) } }.body()
+
+    suspend fun saveGroupHours(id: String, hours: Hours): Group =
+        call("/groups/$id/hours") { client.put(it) { authorise(); json(hours) } }.body()
+
+    suspend fun openGroup(id: String, reason: String): GroupOpening =
+        call("/groups/$id/open") { client.post(it) { authorise(); json(OpenGroupRequest(reason)) } }.body()
+
+    suspend fun closeGroupOpening(id: String) {
+        call("/groups/$id/open") { client.delete(it) { authorise() } }
+    }
 
     suspend fun saveGroupInstructions(id: String, text: String): InstructionLayer =
         call("/groups/$id/instructions") { client.put(it) { authorise(); json(SaveInstructionsRequest(text)) } }.body()
@@ -438,6 +517,18 @@ class MyceliumApi(
         call("/wellness/puzzles/$puzzle/today") { if (played) client.put(it) { authorise() } else client.delete(it) { authorise() } }
     }
 
+    suspend fun recordPuzzleResult(puzzle: String, result: PuzzleResult) {
+        call("/wellness/puzzles/$puzzle/today") { client.put(it) { authorise(); json(result) } }
+    }
+
+    suspend fun learned(limit: Int = 5): List<LearnedItem> = call("/wellness/learned?limit=$limit") { client.get(it) { authorise() } }.body()
+
+    suspend fun puzzles(days: Int = 30): List<PuzzleSummary> = call("/wellness/puzzles?days=$days") { client.get(it) { authorise() } }.body()
+
+    suspend fun holdQuietly(kind: String, subject: String, groupId: String?) {
+        call("/wellness/holds") { client.post(it) { authorise(); json(HoldRequest(kind, subject, groupId)) } }
+    }
+
     suspend fun reflections(): List<Reflection> = call("/reflections") { client.get(it) { authorise() } }.body()
 
     suspend fun patchReflection(id: String, request: PatchReflectionRequest): Reflection =
@@ -445,15 +536,15 @@ class MyceliumApi(
 
     suspend fun redraftReflection(id: String): RedraftReflection = call("/reflections/$id/redraft") { client.post(it) { authorise() } }.body()
 
-    suspend fun reflectionSchedule(): ReflectionSchedule? = call("/reflections/schedule") { client.get(it) { authorise() } }.body()
 
-    suspend fun saveReflectionSchedule(request: ReflectionScheduleRequest): ReflectionSchedule =
-        call("/reflections/schedule") { client.post(it) { authorise(); json(request) } }.body()
-
-    suspend fun skills(): List<Skill> = call("/skills") { client.get(it) { authorise() } }.body()
+    suspend fun skills(hidden: Boolean = false): List<Skill> = call("/skills?hidden=$hidden") { client.get(it) { authorise() } }.body()
 
     suspend fun hideSkill(skill: Skill) {
         call("/skills/hidden") { client.put(it) { authorise(); json(HiddenSkillRequest(skill.kind, skill.name)) } }
+    }
+
+    suspend fun unhideSkill(skill: Skill) {
+        call("/skills/hidden") { client.delete(it) { authorise(); json(HiddenSkillRequest(skill.kind, skill.name)) } }
     }
 
     suspend fun exercises(): List<Exercise> = call("/exercises") { client.get(it) { authorise() } }.body()
@@ -922,15 +1013,18 @@ class MyceliumApi(
         }
     }
 
-    suspend fun reviewItems(id: String, requestId: String): List<JsonElement>? =
+    suspend fun response(id: String, requestId: String): ResponseToEdit? =
         try {
-            call("/conversations/$id/reviews/$requestId") { client.get(it) { authorise() } }.body<ReviewItems>().items
+            call("/conversations/$id/responses/$requestId") { client.get(it) { authorise() } }.body<ResponseToEdit>()
         } catch (gone: ApiException) {
             if (gone.status == 404) null else throw gone
         }
 
-    suspend fun answerReview(id: String, answer: ReviewAnswer) {
-        call("/conversations/$id/review") { client.post(it) { authorise(); json(answer) } }
+    suspend fun filterResponse(id: String, requestId: String, filter: String): ResponseFilterResult =
+        call("/conversations/$id/responses/$requestId/filter") { client.post(it) { authorise(); json(ResponseFilterRequest(filter)) } }.body()
+
+    suspend fun sendResponse(id: String, requestId: String, send: JsonElement) {
+        call("/conversations/$id/responses/$requestId") { client.post(it) { authorise(); json(SendResponseRequest(send)) } }
     }
 
     suspend fun setConfig(id: String, request: ConfigRequest) {

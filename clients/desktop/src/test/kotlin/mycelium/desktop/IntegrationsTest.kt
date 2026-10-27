@@ -118,7 +118,7 @@ class IntegrationsTest {
         rule.onNodeWithText("Needs attention").assertExists()
         rule.onNodeWithText("Disabled: agents cannot use it").assertExists()
         rule.onNodeWithText("Token expires soon, on 24 Jan 2027").assertExists()
-        rule.onNodeWithText("Asks every call, you review results").assertExists()
+        rule.onNodeWithText("Ask before everything and edit responses").assertExists()
         rule.onNodeWithText("2 accounts: a@example.com, b@example.com").assertExists()
 
         rule.onNodeWithContentDescription("Search integrations and accounts").performTextInput("send_message")
@@ -181,18 +181,28 @@ class IntegrationsTest {
     }
 
     @Test
-    fun choosingAnAddedTileOpensItsPageAndAnUnaddedOneOpensItsSetupForm() {
+    fun choosingAnAddedTileOpensItsPageAndAnUnaddedOneOpensItsSetupDialog() {
         show()
 
         rule.onNodeWithText("Add integration").performClick()
         rule.onNodeWithText("Stoat").performClick()
         rule.onNodeWithContentDescription("Stoat API address").assertExists()
-
-        rule.onNodeWithContentDescription("Back to Add integration").performClick()
+        rule.onNodeWithText("Cancel").performClick()
         rule.onNodeWithText("Email").performClick()
 
         rule.onNodeWithText("Accounts").assertExists()
         rule.onNodeWithText("Add account").assertExists()
+    }
+
+    @Test
+    fun theCalendarTileOpensTheCalendarDialogNotTheGenericServerOne() {
+        show()
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithText("Calendar").performClick()
+
+        rule.onNodeWithText("Add a calendar").assertExists()
+        rule.onNodeWithText("Works with any CalDAV server, such as Nextcloud, Radicale, Fastmail or iCloud.").assertExists()
     }
 
     @Test
@@ -227,17 +237,6 @@ class IntegrationsTest {
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch && it.url.encodedPath.endsWith("/e1") } }
         assertTrue(bodies.last { it.isNotEmpty() }.contains("\"ask\":{\"all\":true"), bodies.last())
-    }
-
-    @Test
-    fun zulipShowsItsAlwaysOnRulesWithTheReasonInsteadOfEditableSwitches() {
-        show()
-        openCard("Zulip")
-
-        rule.onNodeWithText("Ask before every call: on").assertExists()
-        rule.onNodeWithText("Review results before the agent sees them: on").assertExists()
-        rule.onNodeWithText("Always on for Zulip, to keep to its data retention and visibility rules. Messages can be private or in channels the agent should not read, so you see every request and every result first.").assertExists()
-        rule.onAllNodesWithContentDescription("Ask before: all tools").assertCountEquals(0)
     }
 
     @Test

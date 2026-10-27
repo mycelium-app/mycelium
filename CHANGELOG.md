@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+- Every tool call that passes through Mycelium has one approval flow: Approve, Approve and edit response, Always approve and Deny. Edit response opens a table, tree or text editor with a jq filter the agent can set, and Send to agent sends only what you kept. Zulip uses the same flow, with Edit response before the agent sees it as its default.
+- An account's approvals are a preset (Ask before writes, Ask before everything, Ask before everything and edit responses, Don't ask) with a Customise table of Ask first and Edit response per tool.
+- Buttons with alternatives are split buttons: Approve, Send and Decline have a chevron menu, and Decline without telling the agent skips the message to the conversation.
+- Wellness & Learning: the leaf is green whatever accent you pick.
+- Pomodoro is removed. Break reminders are the only break timer.
+- Skills has a Show control with All and Hidden. Hidden lists the skills you hid and brings one back with Unhide skill.
+- Show a solution on an exercise opens what the agent wrote in the conversation it came from.
+- Recently learned on the Overview lists what Teach me, a walkthrough check or an exercise review noted you learned.
+- Assistant notifications and sidebar badges are held during quiet hours when Hold assistant pings is on, and the Overview says how many were held this week.
+- Puzzles is a tab on Wellness & Learning. The desktop app reads Wordle's result from the game page in the built-in browser; the phone and web keep the Played tick.
+- Adding an MCP server, Outline, LiteLLM or Last.fm is one dialog with a numbered step strip: address, credential, test, name. Back keeps what you typed, the test runs by itself, and the token expiry is chosen beside the token.
+- Each integration account has its own page with Overview, Approvals, Availability and Usage tabs. The integration page lists its accounts as links with the token expiry beside each.
+- Changing an account's expiry, token, approvals or availability opens a dialog with Cancel and Save instead of editing in place. So do creating or renaming a group, adding a folder to a group, and editing a memory.
+- Email, Zulip, Stoat and Calendar use the same step dialog as other integrations when you add them.
+- An agent can ask for API access to an integration with request_api_access. After you approve, it calls the integration's API through Mycelium with a token that expires, without ever holding the integration's key, and you can revoke it on the account page.
+- Any string argument of an integration tool can be a file in the conversation folder, written as {"file": "path"}. The node reads it, up to 25 MB, and Mycelium passes the exact text, or base64 for attachment tools, so a long document never passes through the chat.
+- Providers has a Decisions section for an OpenJev or Jev-compatible server, and agents get a decide tool that answers yes or no, choice and score questions with probabilities.
+- Sidebar rows open their menu on right-click, long-press, the context-menu key or Shift+F10. The three-dot button is gone from the sidebar and stays in tables.
+- Buttons never truncate their label, and rows of buttons wrap on a narrow screen.
+- Right-aligned table columns keep 12dp of padding after their header and cells.
+- Artefact cards and the viewer show the project and conversation an artefact came from, and the list filters by project.
+- A failed refresh offers Retry, a list that fails its first load says so with Retry, and every list has a Search box as its first control.
+- A workflow card that was stopped, failed or has made no progress for 15 minutes says how it ended instead of spinning.
+- A proposed instructions edit for a group opens that group's page, where its Instructions tab shows the proposal, and Decline can skip telling the agent.
+- Assistant settings are split into Identity, Instructions, Models and nodes, Storage and secrets, and Schedules and actions, each saving on its own. A new assistant asks only for a name, group and instructions.
+- Assistants have Actions: saved prompts with inputs, run from the Actions button or a pinned chip above the composer, and used by schedules. An assistant can propose a new action for you to approve.
+- Calendar is a new integration for any CalDAV server such as Nextcloud, Radicale, Fastmail or iCloud. Give the server address, username and an app password, and Mycelium finds your calendars. Agents can list calendars, list and search events in a date range, and create, change or delete events, which ask first.
+- Agents can list, create and update assistants over MCP. Creating and changing instructions wait for approval, other changes apply at once and can be undone, and the assistants scope of request_api_access covers the API.
+- Wellness is a built-in assistant that drafts reflections, the end-of-day wrap-up and exercise reviews. It replaces the weekly reflection setup, which no longer has its own node, agent, folder or schedule.
+- Usage history, opened from the arrow on the Usage card, charts the 5-hour and weekly windows over time with tokens per percentage point, the API-equivalent value and the subscription price, and is backfilled from orchestrator readings and imported conversations.
+- Activity has an All time period that groups the chart by day.
+- A conversation stopped by a usage limit shows a card on the first limit reply saying it is paused until the reset and resumes automatically by default; a second limit reply updates the same card.
+- A workflow whose agents hit a usage limit says it is paused until the reset and resumes with its conversation.
+- Quiet hours are now Mycelium hours: Time and focus sets when the app is open, with a day-by-day Opens and Closes table and Closed all day, and 24:00 as a closing time.
+- Every group has hours of its own on a new Hours tab of the group page, and the Groups settings and table show each group's hours. New groups are always open.
+- A group that is closed leaves the sidebar, the group selector and every list, its notifications and assistant pings wait until it opens, and agents, workflows and schedules keep running.
+- The last 15 minutes before a group closes show a countdown above the main bar, and the composer works as usual.
+- Selecting a closed group, or opening the app while everything is closed, shows a calm screen with the time it opens again and the groups that are open now.
+- Open a closed group for 15 minutes asks why, shows a countdown with Close now while it is open, and the Overview lists what was opened out of hours this week.
+- New conversation has a Model menu that lists the models the node's harness last reported, with the default model first, even before any conversation is open. The assistant form and the composer use the same list.
+- The new branch field of New worktree says which folder the worktree is created in and which branch it starts from.
+- An agent can show an Outline document beside the conversation with open_outline. The desktop app opens it in a side panel with Outline's own page; the phone and web open the system browser.
+- Open in IDE: a split button in the conversation header, and a button on file cards, the Changes view and exercises, opens the folder in Zed, VS Code or JetBrains. Settings, IDEs chooses which are offered and their commands. A folder on another node opens through the IDE's SSH remote by way of Mycelium.
+- A session that is idle when the instructions change closes and resumes under the same session id before its next message, so it follows the new instructions.
+
+
 ## v0.11.0
 
 Experiments are now just Voice input: everything else that was an experiment is on for everyone.

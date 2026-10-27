@@ -41,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -286,6 +288,56 @@ fun MyButton(
     }
 }
 
+data class SplitAlternative(val label: String, val onClick: () -> Unit, val hint: String? = null, val separated: Boolean = false)
+
+@Composable
+fun SplitButton(
+    text: String,
+    onClick: () -> Unit,
+    alternatives: List<SplitAlternative>,
+    modifier: Modifier = Modifier,
+    variant: ButtonVariant = ButtonVariant.Primary,
+    size: ButtonSize = ButtonSize.Md,
+    description: String? = null,
+    menuWidth: Dp = Tokens.Size.Menu,
+    menuLabel: String? = null,
+) {
+    var open by remember { mutableStateOf(false) }
+    val verb = text.replaceFirstChar { it.lowercase() }
+
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Tokens.Size.Hairline), verticalAlignment = Alignment.CenterVertically) {
+        MyButton(onClick, text = text, variant = variant, size = size, description = description)
+
+        Box {
+            MyButton(
+                { open = true },
+                icon = MyIcon.ChevronDown,
+                variant = variant,
+                size = size,
+                description = "More ways to $verb",
+                selected = open,
+                stateDescription = if (open) "Expanded" else "Collapsed",
+            )
+
+            if (open) {
+                MenuPopup(onDismiss = { open = false }, width = menuWidth) {
+                    if (menuLabel != null) {
+                        MenuLabel(menuLabel)
+                    }
+
+                    for (alternative in alternatives) {
+                        if (alternative.separated) {
+                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                        }
+
+                        MenuItem(alternative.label, { open = false; alternative.onClick() }, hint = alternative.hint)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun Bar(
     modifier: Modifier = Modifier,
@@ -401,6 +453,7 @@ fun TextInput(
     onSubmit: (() -> Unit)? = null,
     masked: Boolean = false,
     leadingIcon: MyIcon? = null,
+    hint: String? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -451,6 +504,58 @@ fun TextInput(
         )
 
         if (error != null) {
+            Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)
+        } else if (hint != null) {
+            Label(hint, style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+    }
+}
+
+@Composable
+fun TextArea(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    mono: Boolean = false,
+    minLines: Int = 4,
+    error: String? = null,
+    errorAbove: Boolean = false,
+    focus: FocusRequester? = null,
+) {
+    val colors = MyTheme.colors
+    val source = remember { MutableInteractionSource() }
+    val focused = source.collectIsFocusedAsState()
+    val borderColor = if (error != null) colors.statusFailed else colors.borderControl
+    val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+        Label(label, style = Tokens.Type.MetaStrong, color = colors.textMuted)
+
+        if (error != null && errorAbove) {
+            Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)
+        }
+
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            minLines = minLines,
+            textStyle = base.themed().copy(color = colors.text),
+            cursorBrush = SolidColor(colors.text),
+            interactionSource = source,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
+                .focusRing(focused, ControlShape, always = true)
+                .background(colors.bgContent, ControlShape)
+                .border(Tokens.Size.Hairline, borderColor, ControlShape)
+                .padding(Tokens.Space.S2)
+                .semantics {
+                    contentDescription = if (error != null) "$label. Error: $error" else label
+                },
+        )
+
+        if (error != null && !errorAbove) {
             Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)
         }
     }
@@ -787,6 +892,11 @@ fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Mod
     ) {
         Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
         Label(message, Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5), Tokens.Type.Meta, colors.statusFailed)
+
+        if (onRetry != null) {
+            MyButton(onRetry, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        }
+
         MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss the error", size = ButtonSize.Sm, muted = true)
     }
 }
@@ -808,8 +918,3 @@ fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier
         MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy the ${label.lowercase()} command", size = ButtonSize.Sm, muted = true)
     }
 }
-
-        if (onRetry != null) {
-            MyButton(onRetry, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-        }
-

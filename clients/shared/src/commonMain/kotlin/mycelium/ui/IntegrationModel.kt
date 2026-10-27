@@ -9,6 +9,7 @@ import kotlin.time.Instant
 enum class IntegrationCategory(val label: String) {
     Chat("Chat"),
     Mail("Mail"),
+    Calendar("Calendar"),
     Docs("Docs"),
     Media("Media"),
     Developer("Developer"),
@@ -39,11 +40,14 @@ data class CatalogueEntry(
     val asksFirst: String,
     val tools: List<String>,
     val brand: String? = null,
+    val detail: String? = null,
+    val icon: MyIcon = MyIcon.Server,
 )
 
 val BuiltInCatalogue = listOf(
     CatalogueEntry("email", "Email", "email", IntegrationCategory.Mail, "Search, read and move mail.", "Sending mail asks first.", listOf("list_folders", "search_messages", "read_message", "move_message", "send_message")),
-    CatalogueEntry("zulip", "Zulip", "zulip", IntegrationCategory.Chat, "Read and search channels and send messages.", "Every call asks first and you review results.", listOf("list_channels", "get_messages", "search_messages", "send_message"), "zulip"),
+    CatalogueEntry("caldav", "Calendar", "caldav", IntegrationCategory.Calendar, "List calendars, and list and search events in a date range.", "Creating, changing and deleting events ask first.", listOf("list_calendars", "list_events", "search_events", "create_event", "update_event", "delete_event"), detail = "CalDAV", icon = MyIcon.Calendar),
+    CatalogueEntry("zulip", "Zulip", "zulip", IntegrationCategory.Chat, "Read and search channels and send messages.", "Every call asks first and you can edit the response.", listOf("list_channels", "get_messages", "search_messages", "send_message"), "zulip"),
     CatalogueEntry("stoat", "Stoat", "stoat", IntegrationCategory.Chat, "Read and search servers your bot is in.", "Sending messages asks first.", listOf("list_servers", "get_messages", "search_messages", "send_message"), "stoat"),
     CatalogueEntry("outline", "Outline", "outline", IntegrationCategory.Docs, "Search, read and write documents, collections and comments.", "Writing asks first.", listOf("search", "fetch", "create_document", "update_document", "list_collections", "create_comment")),
     CatalogueEntry("lastfm", "Last.fm", "lastfm", IntegrationCategory.Media, "Read your listening history and top artists. Sign in to love tracks and scrobble.", "Loving tracks and scrobbling ask first.", listOf("get_recent_tracks", "get_top_artists", "love_track", "unlove_track", "scrobble", "update_now_playing"), "lastfm"),
@@ -81,7 +85,7 @@ fun accountState(server: ChatToolServer): AccountState = when {
 private fun catalogueKey(server: ChatToolServer): String? = when {
     server.forgeId != null -> null
     server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> "outline"
-    server.kind in setOf("email", "zulip", "stoat", "lastfm", "litellm") -> server.kind
+    server.kind in setOf("email", "caldav", "zulip", "stoat", "lastfm", "litellm") -> server.kind
     else -> null
 }
 
