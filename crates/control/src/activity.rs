@@ -220,12 +220,22 @@ pub async fn per_conversation(State(state): State<AppState>, user: AuthUser) -> 
     Ok(Json(rows.into_iter().map(TotalsRow::to_proto).collect()))
 }
 
+#[derive(sqlx::FromRow)]
+struct ConversationTotals {
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    cost_usd: Option<f64>,
+    cost_estimated: bool,
+}
+
 pub async fn for_conversation(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<ConversationUsage>> {
     let conversation = find_owned(&state.pool, id, user.id).await?;
 
-    let totals = sqlx::query_as::<_, (i64, i64, i64, i64, Option<f64>, bool)>(
-        "select coalesce(sum(input_tokens), 0)::bigint, coalesce(sum(output_tokens), 0)::bigint, coalesce(sum(cache_read_tokens), 0)::bigint, coalesce(sum(cache_write_tokens), 0)::bigint,
-                sum(cost_usd), coalesce(bool_or(cost_estimated), false)
+    let totals = sqlx::query_as::<_, ConversationTotals>(
+        "select coalesce(sum(input_tokens), 0)::bigint as input_tokens, coalesce(sum(output_tokens), 0)::bigint as output_tokens, coalesce(sum(cache_read_tokens), 0)::bigint as cache_read_tokens, coalesce(sum(cache_write_tokens), 0)::bigint as cache_write_tokens,
+                sum(cost_usd) as cost_usd, coalesce(bool_or(cost_estimated), false) as cost_estimated
          from usage_turns where conversation_id = $1",
     )
     .bind(id)
@@ -252,5 +262,5 @@ pub async fn for_conversation(State(state): State<AppState>, user: AuthUser, Pat
         }
     };
 
-    Ok(Json(ConversationUsage { context_used, context_size, input_tokens: totals.0, output_tokens: totals.1, cache_read_tokens: totals.2, cache_write_tokens: totals.3, cost_usd: totals.4, cost_estimated: totals.5 }))
+    Ok(Json(ConversationUsage { context_used, context_size, input_tokens: totals.input_tokens, output_tokens: totals.output_tokens, cache_read_tokens: totals.cache_read_tokens, cache_write_tokens: totals.cache_write_tokens, cost_usd: totals.cost_usd, cost_estimated: totals.cost_estimated }))
 }

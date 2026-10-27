@@ -2,7 +2,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::git::relay;
 use crate::state::AppState;
-use crate::store::find_owned;
+use crate::store;
 use crate::walkthrough_diff::{self, Covered, FileChange};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -204,7 +204,7 @@ pub async fn record(state: &AppState, owner: Uuid, conversation_id: Uuid, argume
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Walkthrough>>> {
-    find_owned(&state.pool, id, user.id).await?;
+    store::find_owned(&state.pool, id, user.id).await?;
 
     let row = sqlx::query_as::<_, WalkthroughRow>("select id, conversation_id, steps, created_at, dismissed_at, scope, note, checks from walkthroughs where conversation_id = $1 order by created_at desc, id desc limit 1").bind(id).fetch_optional(&state.pool).await?;
 
@@ -229,14 +229,14 @@ pub async fn uncovered(State(state): State<AppState>, user: AuthUser, Path(id): 
     Ok(Json(walkthrough_diff::uncovered(&changes, &walkthrough_diff::covered_by(&changes, shown))))
 }
 
-async fn find_owned_walkthrough(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<usize> {
+async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<usize> {
     let steps = sqlx::query_scalar::<_, Value>("select w.steps from walkthroughs w join conversations c on c.id = w.conversation_id where w.id = $1 and c.owner = $2").bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     steps.map(|steps| steps.as_array().map_or(0, Vec::len)).ok_or_else(|| ApiError::not_found("That walkthrough"))
 }
 
 pub async fn reads(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<i32>>> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let steps = sqlx::query_scalar::<_, i32>("select step from walkthrough_reads where walkthrough_id = $1 and user_id = $2 order by step").bind(id).bind(user.id).fetch_all(&state.pool).await?;
 
@@ -244,7 +244,7 @@ pub async fn reads(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 pub async fn mark_read(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>) -> ApiResult<StatusCode> {
-    let count = find_owned_walkthrough(&state, id, user.id).await?;
+    let count = find_owned(&state, id, user.id).await?;
 
     if step < 0 || step as usize >= count {
         return Err(ApiError::bad_request("no_such_step", format!("This walkthrough has {count} steps. Choose a step from 0 to {}.", count.saturating_sub(1))));
@@ -256,7 +256,7 @@ pub async fn mark_read(State(state): State<AppState>, user: AuthUser, Path((id, 
 }
 
 pub async fn answers(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughAnswer>>> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let rows = sqlx::query_as::<_, (i32, i32, bool)>("select step, choice, correct from walkthrough_answers where walkthrough_id = $1 and owner = $2 order by step").bind(id).bind(user.id).fetch_all(&state.pool).await?;
     let checks = sqlx::query_scalar::<_, Option<Value>>("select checks from walkthroughs where id = $1").bind(id).fetch_one(&state.pool).await?.and_then(|checks| checks.as_array().cloned()).unwrap_or_default();
@@ -266,7 +266,7 @@ pub async fn answers(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 }
 
 pub async fn answer(State(state): State<AppState>, user: AuthUser, Path((id, step)): Path<(Uuid, i32)>, Json(request): Json<WalkthroughAnswerRequest>) -> ApiResult<Json<WalkthroughAnswer>> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let checks = sqlx::query_scalar::<_, Option<Value>>("select checks from walkthroughs where id = $1").bind(id).fetch_one(&state.pool).await?;
     let check = checks.and_then(|checks| checks.as_array().cloned()).unwrap_or_default().into_iter().find(|check| check.get("step").and_then(Value::as_i64) == Some(i64::from(step)));
@@ -351,7 +351,7 @@ impl NoteRow {
 }
 
 pub async fn add_note(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<NoteRequest>) -> ApiResult<(StatusCode, Json<WalkthroughNote>)> {
-    let count = find_owned_walkthrough(&state, id, user.id).await?;
+    let count = find_owned(&state, id, user.id).await?;
 
     if request.step < 0 || request.step as usize >= count {
         return Err(ApiError::bad_request("no_such_step", format!("This walkthrough has {count} steps. Choose a step from 0 to {}.", count.saturating_sub(1))));
@@ -395,13 +395,13 @@ async fn publish_notes(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
 }
 
 pub async fn notes(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<WalkthroughNote>>> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     Ok(Json(load_notes(&state, user.id, id).await?))
 }
 
 pub async fn mark_notes_sent(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     sqlx::query("update walkthrough_notes set sent_at = now() where walkthrough_id = $1 and user_id = $2 and sent_at is null").bind(id).bind(user.id).execute(&state.pool).await?;
     publish_notes(&state, user.id, id).await?;
@@ -410,7 +410,7 @@ pub async fn mark_notes_sent(State(state): State<AppState>, user: AuthUser, Path
 }
 
 pub async fn remove_note(State(state): State<AppState>, user: AuthUser, Path((id, note_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
-    find_owned_walkthrough(&state, id, user.id).await?;
+    find_owned(&state, id, user.id).await?;
 
     sqlx::query("delete from walkthrough_notes where id = $1 and walkthrough_id = $2 and user_id = $3").bind(note_id).bind(id).bind(user.id).execute(&state.pool).await?;
     publish_notes(&state, user.id, id).await?;

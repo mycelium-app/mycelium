@@ -145,7 +145,7 @@ pub async fn update_from_agent(state: &AppState, owner: Uuid, conversation_id: O
     let Some(id) = text("id").and_then(|given| given.parse::<Uuid>().ok()) else {
         return Ok(Err("Nothing was changed. Give the id of the assistant, as assistant_list returned it.".to_string()));
     };
-    let Ok(assistant) = assistants::load(state, owner, id).await else {
+    let Ok(assistant) = assistants::find_owned(state, id, owner).await else {
         return Ok(Err("Nothing was changed. The person has no assistant with that id.".to_string()));
     };
     let mut preferences = assistant.preferences.clone();
@@ -240,7 +240,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     }
 
     let request = CreateAssistantRequest { name: found.name.clone(), description: found.description.clone(), group_id: found.group_id, instructions: found.instructions.clone(), preferences: None };
-    let (_, Json(created)) = assistants::create(State(state.clone()), user.clone(), Json(request)).await?;
+    let created = assistants::create_for(&state, user.id, request).await?;
     let row = sqlx::query_as::<_, ChangeRow>(sqlx::AssertSqlSafe(format!("update assistant_changes set state = 'approved', assistant_id = $2, decided_at = now() where id = $1 returning {CHANGE_COLUMNS}"))).bind(id).bind(created.id).fetch_one(&state.pool).await?;
 
     Ok(Json(publish(&state, user.id, row)))
@@ -258,7 +258,11 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     if let Some(conversation_id) = found.conversation_id {
         let text = format!("I declined the assistant you proposed, {}. Do not propose it again unless I ask.", found.name);
 
-        let _ = prompts::continue_unless_queued(&state, user.id, conversation_id, &text).await;
+        let told = prompts::continue_unless_queued(&state, user.id, conversation_id, &text).await;
+
+        if let Err(error) = told {
+            tracing::warn!("could not tell conversation {conversation_id} about a declined assistant: {}", error.message());
+        }
     }
 
     Ok(Json(publish(&state, user.id, row)))

@@ -1,6 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
+use crate::state::{AppState, ProcessAnswer};
 use crate::store::{node_summaries, publish_node};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -107,14 +107,14 @@ pub async fn stop_process(State(state): State<AppState>, _user: AuthUser, Path((
         return Err(ApiError::conflict("process_not_stoppable", format!("{} does not belong to a Mycelium conversation or to the node user, so Mycelium cannot stop it.", process.name)));
     }
 
-    let Some((request_id, answered)) = state.hub.request_stop(id, pid, process.name) else {
+
+    if !state.hub.is_online(id) {
         return Err(node_offline());
-    };
+    }
 
-    let answer = tokio::time::timeout(STOP_TIMEOUT, answered).await.ok().and_then(Result::ok);
-    state.hub.forget_stop_request(request_id);
+    let asked = state.ask_node::<ProcessAnswer>(id, STOP_TIMEOUT, |request_id| ControlToNode::StopProcess { request_id, pid, name: process.name }).await;
 
-    let Some(answer) = answer else {
+    let Some(answer) = asked else {
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "stop_timeout", "The node did not answer in time. Try again in a moment."));
     };
 

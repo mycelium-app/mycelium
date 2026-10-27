@@ -116,7 +116,7 @@ pub async fn find_layer(state: &AppState, user: &AuthUser, key: &str) -> ApiResu
 
     if let Some(assistant_id) = key.strip_prefix(ASSISTANT_PREFIX) {
         let id = assistant_id.parse::<Uuid>().map_err(|_| ApiError::not_found("That instructions layer"))?;
-        let assistant = assistants::load(state, user.id, id).await?;
+        let assistant = assistants::find_owned(state, id, user.id).await?;
 
         return Ok(Layer::of_assistant(id, assistant.name));
     }
@@ -149,13 +149,13 @@ async fn describe(state: &AppState, user: &AuthUser) -> ApiResult<Instructions> 
     })
 }
 
-async fn forge_for(state: &AppState, user: &AuthUser, source: &SourceRow) -> ApiResult<ForgeApi> {
-    let forge = forges::find_owned(state, source.forge_id, user.id).await?;
+async fn forge_for(state: &AppState, owner: Uuid, source: &SourceRow) -> ApiResult<ForgeApi> {
+    let forge = forges::find_owned(state, source.forge_id, owner).await?;
 
     Ok(ForgeApi::from_row(&forge)?.cached(&state.forge_cache))
 }
 
-async fn record(state: &AppState, user: &AuthUser, layer: &Layer, text: &str, forge_commit: Option<String>) -> ApiResult<()> {
+async fn record(state: &AppState, owner: Uuid, layer: &Layer, text: &str, forge_commit: Option<String>) -> ApiResult<()> {
     let previous = latest(state, &layer.key).await?.map(|version| version.id).unwrap_or_default();
     let id = forge_commit.unwrap_or_else(|| {
         let digest = Sha256::digest(format!("{}\0{previous}\0{text}\0{}", layer.key, chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()).as_bytes());
@@ -168,10 +168,10 @@ async fn record(state: &AppState, user: &AuthUser, layer: &Layer, text: &str, fo
         .bind(&layer.key)
         .bind(layer.group_id)
         .bind(text)
-        .bind(user.id)
+        .bind(owner)
         .execute(&state.pool)
         .await?;
-    instruction_proposals::republish_layer(state, user.id, &layer.key).await?;
+    instruction_proposals::republish_layer(state, owner, &layer.key).await?;
 
     Ok(())
 }
@@ -292,9 +292,8 @@ pub async fn record_assistant_version(state: &AppState, assistant_id: Uuid, text
     }
 
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from assistants where id = $1").bind(assistant_id).fetch_one(&state.pool).await?;
-    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
 
-    record(state, &user, &Layer::of_assistant(assistant_id, String::new()), text, None).await
+    record(state, owner, &Layer::of_assistant(assistant_id, String::new()), text, None).await
 }
 
 pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str) -> ApiResult<()> {
@@ -312,7 +311,7 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str)
         let source = source(state).await?;
         let commit = match &source {
             Some(source) => {
-                let api = forge_for(state, user, source).await?;
+                let api = forge_for(state, user.id, source).await?;
                 let path = layer.path(&source.path);
                 let existing = api.file(&state.http, &source.repository, &path).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
                 let message = format!("docs: update {path}");
@@ -322,7 +321,7 @@ pub async fn apply(state: &AppState, user: &AuthUser, layer: &Layer, text: &str)
             None => None,
         };
 
-        record(state, user, layer, text, commit).await?;
+        record(state, user.id, layer, text, commit).await?;
         push_to_every_node(state).await?;
     }
 
@@ -353,7 +352,7 @@ pub async fn pull(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     let Some(source) = source(&state).await? else {
         return Err(ApiError::conflict("no_source", "Connect a repository for the instructions before pulling."));
     };
-    let api = forge_for(&state, &user, &source).await?;
+    let api = forge_for(&state, user.id, &source).await?;
 
     for layer in layers_of(&state, &user).await? {
         let file = api.file(&state.http, &source.repository, &layer.path(&source.path)).await.map_err(|error| error.into_api(api.kind, &api.base_url))?;
@@ -363,7 +362,7 @@ pub async fn pull(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
         let current = latest(&state, &layer.key).await?;
 
         if current.is_none_or(|current| current.text != file.text) {
-            record(&state, &user, &layer, &file.text, Some(file.commit)).await?;
+            record(&state, user.id, &layer, &file.text, Some(file.commit)).await?;
         }
     }
 

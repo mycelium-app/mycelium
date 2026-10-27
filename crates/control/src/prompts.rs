@@ -6,7 +6,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::conversations::derived_title;
 use crate::instructions;
 use crate::nodes::{STEERING_SINCE, node_has, node_offline};
-use crate::state::{AppState, UnacknowledgedPrompt};
+use crate::state::{AppState, SteerAnswer, UnacknowledgedPrompt};
 use crate::store::{CONVERSATION_COLUMNS, ConversationRow, TURN_HAS_ENDED, append_event, enqueue, merge_queue, parse_enum, find_owned, lock_owned, publish_queue, queue_of, set_status};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -23,21 +23,33 @@ use uuid::Uuid;
 const NODE_NOT_CONNECTED: &str = "The node is not connected. Your message is queued and goes as soon as it reconnects.";
 const LATE_STEER_WINDOW: Duration = Duration::from_secs(120);
 
+#[derive(sqlx::FromRow)]
+struct LockedTurn {
+    owner: Uuid,
+    node_id: Uuid,
+    archived: bool,
+    idle: bool,
+    agent: String,
+    cwd: String,
+    acp_session_id: Option<String>,
+    account: Option<String>,
+}
+
 pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) -> ApiResult<()> {
     if state.hub.is_moving(conversation_id) {
         return Ok(());
     }
 
     let mut tx = state.pool.begin().await?;
-    let locked = sqlx::query_as::<_, (Uuid, Uuid, bool, bool, String, String, Option<String>, Option<String>)>(sqlx::AssertSqlSafe(format!(
-        "select owner, node_id, archived_at is not null,
-                (acp_session_id is not null or exists (select 1 from events where conversation_id = conversations.id and kind = 'continued')) and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})), agent, cwd, acp_session_id, account from conversations where id = $1 for update",
+    let locked = sqlx::query_as::<_, LockedTurn>(sqlx::AssertSqlSafe(format!(
+        "select owner, node_id, archived_at is not null as archived,
+                (acp_session_id is not null or exists (select 1 from events where conversation_id = conversations.id and kind = 'continued')) and (status in ('review', 'done') or (status = 'working' and {TURN_HAS_ENDED})) as idle, agent, cwd, acp_session_id, account from conversations where id = $1 for update",
     )))
     .bind(conversation_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some((owner, node_id, archived, idle, agent, cwd, acp_session_id, account)) = locked else {
+    let Some(LockedTurn { owner, node_id, archived, idle, agent, cwd, acp_session_id, account }) = locked else {
         return Ok(());
     };
 
@@ -122,16 +134,28 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     Ok(())
 }
 
+pub enum Sent {
+    Delivered,
+    QueuedForOfflineNode,
+}
+
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Response> {
+    match send(&state, user.id, id, request).await? {
+        Sent::Delivered => Ok(StatusCode::NO_CONTENT.into_response()),
+        Sent::QueuedForOfflineNode => Ok((StatusCode::ACCEPTED, Json(json!({"queued": true, "message": NODE_NOT_CONNECTED}))).into_response()),
+    }
+}
+
+pub async fn send(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest) -> ApiResult<Sent> {
     let text = request.text.trim();
 
     if text.is_empty() && request.attachments.is_empty() {
         return Err(ApiError::bad_request("text_required", "Enter a message to send."));
     }
 
-    let attachments = attachments::confirm(&state, user.id, &request.attachments).await?;
+    let attachments = attachments::confirm(state, owner, &request.attachments).await?;
     let mut tx = state.pool.begin().await?;
-    let mut row = lock_owned(&mut tx, id, user.id).await?;
+    let mut row = lock_owned(&mut tx, id, owner).await?;
 
     if row.side_kind.as_deref() == Some("subagent") {
         return Err(ApiError::bad_request("read_only", "A subagent chat is read-only. Message the conversation it belongs to instead."));
@@ -139,16 +163,16 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     if row.status == "failed" && !chats::is_chat(&row) {
         tx.commit().await?;
-        retry_failed(&state, user.id, id).await?;
+        retry_failed(state, owner, id).await?;
         tx = state.pool.begin().await?;
-        row = lock_owned(&mut tx, id, user.id).await?;
+        row = lock_owned(&mut tx, id, owner).await?;
     }
 
     if chats::is_chat(&row) {
         drop(tx);
-        chats::send(&state, user.id, id, text, attachments).await?;
+        chats::send(state, owner, id, text, attachments).await?;
 
-        return Ok(StatusCode::NO_CONTENT.into_response());
+        return Ok(Sent::Delivered);
     }
 
     if row.archived_at.is_some() {
@@ -156,20 +180,28 @@ pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Pat
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-        state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
+        state.publish(Some(owner), StreamMessage::Conversation(restored.to_proto()?));
     }
 
     enqueue(&mut tx, id, text, &attachments).await?;
     tx.commit().await?;
 
-    pump(&state, id, false).await?;
-    publish_queue(&state, user.id, id).await?;
+    pump(state, id, false).await?;
+    publish_queue(state, owner, id).await?;
 
     if !state.hub.is_online(row.node_id) {
-        return Ok((StatusCode::ACCEPTED, Json(json!({"queued": true, "message": NODE_NOT_CONNECTED}))).into_response());
+        return Ok(Sent::QueuedForOfflineNode);
     }
 
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok(Sent::Delivered)
+}
+
+pub async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, text: String) {
+    let told = send(state, owner, conversation_id, PromptRequest { text, ..Default::default() }).await;
+
+    if let Err(error) = told {
+        tracing::warn!("could not tell conversation {conversation_id}: {}", error.message());
+    }
 }
 
 pub async fn retry(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
@@ -287,8 +319,14 @@ pub async fn remove_queued(State(state): State<AppState>, user: AuthUser, Path((
 }
 
 pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, queue_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
+    send_queued_now(&state, user.id, id, queue_id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn send_queued_now(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let row = lock_owned(&mut tx, id, user.id).await?;
+    let row = lock_owned(&mut tx, id, owner).await?;
     let moved = sqlx::query(
         "update queued_prompts set position = (select coalesce(min(position), 1) - 1 from queued_prompts where conversation_id = $1)
          where id = $2 and conversation_id = $1",
@@ -303,10 +341,10 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
     }
 
     tx.commit().await?;
-    publish_queue(&state, user.id, id).await?;
+    publish_queue(state, owner, id).await?;
 
     if row.is_idle() {
-        return pump(&state, id, false).await.map(|()| StatusCode::NO_CONTENT);
+        return pump(state, id, false).await;
     }
 
     if matches!(row.status.as_str(), "working" | "input") {
@@ -315,12 +353,12 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
         let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("select text, attachments from queued_prompts where id = $1 and conversation_id = $2").bind(queue_id).bind(id).fetch_optional(&state.pool).await?;
 
         if let (true, Some((text, sqlx::types::Json(attachments)))) = (steerable, queued) {
-            let loaded = attachments::for_node(&state, &attachments).await?;
-            let requested = state.hub.request_steer(row.node_id, id, text.clone(), loaded);
+            let loaded = attachments::for_node(state, &attachments).await?;
+            let requested = state.hub.begin_request::<SteerAnswer>(row.node_id, |request_id| ControlToNode::Steer { conversation_id: id, request_id, text: text.clone(), attachments: loaded });
             let answer = match requested {
                 Some((request_id, mut answered)) => match tokio::time::timeout(state.config.steer_timeout, &mut answered).await {
                     Ok(answer) => {
-                        state.hub.forget_steer_request(request_id);
+                        state.hub.forget_request::<SteerAnswer>(request_id);
 
                         answer.ok()
                     }
@@ -328,17 +366,17 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
                         let late_state = state.clone();
                         tokio::spawn(async move {
                             let late = tokio::time::timeout(LATE_STEER_WINDOW, answered).await;
-                            late_state.hub.forget_steer_request(request_id);
+                            late_state.hub.forget_request::<SteerAnswer>(request_id);
 
                             if let Ok(Ok(answer)) = late
                                 && answer.outcome == "injected"
-                                && let Err(error) = record_injected(&late_state, user.id, id, queue_id, &text, &attachments).await
+                                && let Err(error) = record_injected(&late_state, owner, id, queue_id, &text, &attachments).await
                             {
                                 tracing::warn!("could not record a late steered message for {id}: {error:?}");
                             }
                         });
 
-                        return Ok(StatusCode::NO_CONTENT);
+                        return Ok(());
                     }
                 },
                 None => None,
@@ -346,11 +384,11 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
 
             match answer.as_ref().map(|answer| answer.outcome.as_str()) {
                 Some("injected") => {
-                    record_injected(&state, user.id, id, queue_id, &text, &attachments).await?;
+                    record_injected(state, owner, id, queue_id, &text, &attachments).await?;
 
-                    return Ok(StatusCode::NO_CONTENT);
+                    return Ok(());
                 }
-                Some("prompt_required") => return pump(&state, id, false).await.map(|()| StatusCode::NO_CONTENT),
+                Some("prompt_required") => return pump(state, id, false).await,
                 _ => {}
             }
         }
@@ -364,7 +402,7 @@ pub async fn send_now(State(state): State<AppState>, user: AuthUser, Path((id, q
         }
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 async fn record_injected(state: &AppState, owner: Uuid, id: Uuid, queue_id: Uuid, text: &str, attachments: &[Attachment]) -> ApiResult<()> {
@@ -387,23 +425,29 @@ pub async fn send_all_now(State(state): State<AppState>, user: AuthUser, Path(id
     let first = merge_queue(&mut tx, id).await?.ok_or_else(|| ApiError::not_found("A queued message"))?;
     tx.commit().await?;
 
-    send_now(State(state), user, Path((id, first))).await
+    send_queued_now(&state, user.id, id, first).await?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn cancel(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
-    let row = find_owned(&state.pool, id, user.id).await?;
+    stop(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn stop(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
+    let row = find_owned(&state.pool, id, owner).await?;
 
     if chats::is_chat(&row) {
-        chats::stop(&state, user.id, id).await?;
-
-        return Ok(StatusCode::NO_CONTENT);
+        return chats::stop(state, owner, id).await;
     }
 
     if !state.hub.send(row.node_id, ControlToNode::Cancel { conversation_id: id }) {
         return Err(node_offline());
     }
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 pub async fn permission(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(answer): Json<PermissionAnswer>) -> ApiResult<StatusCode> {

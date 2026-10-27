@@ -110,8 +110,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, target: &str, mess
     let proposal = publish(state, owner, find_owned(state, id, owner).await?);
 
     if crate::conversation_connections::active(state, owner, conversation_id, target_id).await? || crate::group_connections::connected(state, owner, conversation_id, target_id).await? {
-        let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
-        let Json(sent) = approve(State(state.clone()), user, Path(id)).await?;
+        let sent = approve_for(state, owner, id).await?;
 
         return Ok(Ok(sent));
     }
@@ -129,7 +128,11 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 }
 
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
-    let found = find_owned(&state, id, user.id).await?;
+    Ok(Json(approve_for(&state, user.id, id).await?))
+}
+
+pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<MessageProposal> {
+    let found = find_owned(state, id, owner).await?;
 
     if found.state != "proposed" {
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
@@ -147,7 +150,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     let source = found.source_title.as_deref().map(|title| label(found.conversation_id.unwrap_or_default(), title)).unwrap_or_else(|| "another conversation".to_string());
     let text = format!("From {source}:\n\n{}", found.message);
-    let queued = prompts::prompt(State(state.clone()), user.clone(), Path(found.target_id), Json(PromptRequest { text, ..Default::default() })).await;
+    let queued = prompts::send(state, owner, found.target_id, PromptRequest { text, ..Default::default() }).await;
 
     if let Err(cause) = queued {
         sqlx::query("update message_proposals set state = 'proposed', decided_at = null where id = $1").bind(id).execute(&state.pool).await?;
@@ -155,7 +158,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(cause);
     }
 
-    Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
+    Ok(publish(state, owner, find_owned(state, id, owner).await?))
 }
 
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<MessageProposal>> {
@@ -169,7 +172,7 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     if let Some(conversation_id) = found.conversation_id {
         let text = format!("I declined sending your message to {}. Do not send it to that conversation another way.", label(found.target_id, &found.target_title));
-        let _ = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+        prompts::tell_agent(&state, user.id, conversation_id, text).await;
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))

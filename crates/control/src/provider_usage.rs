@@ -1,5 +1,5 @@
 use crate::auth::AuthUser;
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::model_providers;
 use crate::state::AppState;
 use axum::Json;
@@ -102,7 +102,7 @@ pub async fn list(
                     fetch(&state.http, "https://openrouter.ai/api/v1/key", key).await
                 {
                     let read_at = Utc::now();
-                    let spend = serde_json::to_value(spend).expect("finite spend");
+                    let spend = serde_json::to_value(spend).map_err(ApiError::internal)?;
                     sqlx::query("insert into model_provider_usage (provider_id, read_at, spend) values ($1, $2, $3) on conflict (provider_id) do update set read_at = excluded.read_at, spend = excluded.spend where model_provider_usage.read_at < excluded.read_at")
                         .bind(provider.id).bind(read_at).bind(&spend).execute(&state.pool).await?;
                     cached = Some((read_at, DbJson(spend)));

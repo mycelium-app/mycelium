@@ -65,18 +65,18 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateConversationRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
-    let conversation = start(&state, &user, request).await?;
+    let conversation = start(&state, user.id, request).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
 
-pub async fn start(state: &AppState, user: &AuthUser, request: CreateConversationRequest) -> ApiResult<Conversation> {
-    start_for(state, user, request, None).await
+pub async fn start(state: &AppState, owner: Uuid, request: CreateConversationRequest) -> ApiResult<Conversation> {
+    start_for(state, owner, request, None).await
 }
 
-pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConversationRequest, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
+pub async fn start_for(state: &AppState, owner: Uuid, request: CreateConversationRequest, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
     let project = match request.project_id {
-        Some(project_id) => Some(projects::find_owned(state, project_id, user.id).await?),
+        Some(project_id) => Some(projects::find_owned(state, project_id, owner).await?),
         None => None,
     };
 
@@ -135,7 +135,7 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
     }
 
     let parent = match request.parent_id {
-        Some(parent_id) => Some(find_owned(&state.pool, parent_id, user.id).await?),
+        Some(parent_id) => Some(find_owned(&state.pool, parent_id, owner).await?),
         None => None,
     };
 
@@ -169,7 +169,7 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
          returning {CONVERSATION_COLUMNS}",
     )),
     )
-    .bind(user.id)
+    .bind(owner)
     .bind(request.node_id)
     .bind(enum_text(&request.agent))
     .bind(&cwd)
@@ -208,8 +208,8 @@ pub async fn start_for(state: &AppState, user: &AuthUser, request: CreateConvers
     }
 
     let conversation = row.to_proto()?;
-    state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
-    publish_queue(state, user.id, row.id).await?;
+    state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
+    publish_queue(state, owner, row.id).await?;
 
     Ok(conversation)
 }
@@ -227,7 +227,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
             return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
         let started = CreateChatRequest { provider_id, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
-        let conversation = chats::start(&state, &user, started, Some(request.kind), None).await?;
+        let conversation = chats::start(&state, user.id, started, Some(request.kind), None).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
     }
@@ -267,7 +267,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         side_kind: Some(request.kind),
         model: None,
     };
-    let conversation = start(&state, &user, started).await?;
+    let conversation = start(&state, user.id, started).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
@@ -481,12 +481,18 @@ async fn refresh_branch(state: &AppState, conversation_id: Uuid) -> ApiResult<()
 }
 
 pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
+    close_for(&state, user.id, id).await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn close_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let row = lock_owned(&mut tx, id, user.id).await?;
+    let row = lock_owned(&mut tx, id, owner).await?;
 
     let active = matches!(row.status.as_str(), "working" | "input");
     if chats::is_chat(&row) || !(active || state.hub.has_session(row.node_id, id)) {
-        return Ok(StatusCode::NO_CONTENT);
+        return Ok(());
     }
 
     if !state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id }) {
@@ -496,13 +502,13 @@ pub async fn close(State(state): State<AppState>, user: AuthUser, Path(id): Path
     state.hub.forget_prompts_of(id);
     if active {
         let updated = set_status(&mut tx, id, ConversationStatus::Done).await?;
-        state.publish(Some(user.id), StreamMessage::Conversation(updated.to_proto()?));
+        state.publish(Some(owner), StreamMessage::Conversation(updated.to_proto()?));
     }
 
     tx.commit().await?;
     state.remove_session(row.node_id, id).await?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<StatusCode> {
@@ -654,12 +660,13 @@ pub struct FilesQuery {
 
 pub async fn files(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Query(query): Query<FilesQuery>) -> ApiResult<Json<Vec<String>>> {
     let row = find_owned(&state.pool, id, user.id).await?;
-    let Some((request_id, answered)) = state.hub.request_files(row.node_id, row.cwd, query.query) else {
-        return Err(node_offline());
-    };
 
-    let paths = tokio::time::timeout(FILES_TIMEOUT, answered).await.ok().and_then(Result::ok).unwrap_or_default();
-    state.hub.forget_file_request(request_id);
+    if !state.hub.is_online(row.node_id) {
+        return Err(node_offline());
+    }
+
+    let asked = state.ask_node::<Vec<String>>(row.node_id, FILES_TIMEOUT, |request_id| ControlToNode::ListFiles { request_id, cwd: row.cwd, query: query.query }).await;
+    let paths = asked.unwrap_or_default();
 
     Ok(Json(paths))
 }

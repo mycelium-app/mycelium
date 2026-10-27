@@ -2,10 +2,9 @@ use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::prompts;
 use crate::state::AppState;
-use crate::workflows::Plan;
 use axum::Json;
 use axum::extract::{Path, State};
-use mycelium_proto::api::{ApproveStartProposalRequest, PromptRequest, StartProposal, StartProposalNode, StartProposalState, StartProposalStep};
+use mycelium_proto::api::{ApproveStartProposalRequest, StartProposal, StartProposalNode, StartProposalState, StartProposalStep, WorkflowPlan};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -34,7 +33,7 @@ fn node_of(state: &AppState, names: &[(Uuid, String)], id: Uuid) -> StartProposa
 }
 
 async fn to_proto(state: &AppState, row: ProposalRow) -> ApiResult<StartProposal> {
-    let plan: Plan = serde_json::from_value(row.plan.clone()).map_err(|_| ApiError::not_found("That proposal"))?;
+    let plan: WorkflowPlan = serde_json::from_value(row.plan.clone()).map_err(|_| ApiError::not_found("That proposal"))?;
     let mut node_ids: Vec<Uuid> = plan.steps.iter().filter_map(|step| step.node_id).collect();
     let mut project_ids: Vec<Uuid> = plan.steps.iter().filter_map(|step| step.project_id).collect();
     node_ids.extend(row.choices.as_object().into_iter().flat_map(|choices| choices.values()).flat_map(|choice| choice["node"].as_array().cloned().unwrap_or_default()).filter_map(|node| node["id"].as_str().and_then(|id| id.parse::<Uuid>().ok())));
@@ -153,7 +152,7 @@ pub async fn propose(state: &AppState, owner: Uuid, conversation_id: Uuid, kind:
         }
     }
 
-    let parsed = match serde_json::from_value::<Plan>(plan.clone()) {
+    let parsed = match serde_json::from_value::<WorkflowPlan>(plan.clone()) {
         Ok(parsed) => parsed,
         Err(error) => return Ok(Err(format!("Nothing was proposed. Enter a workflow plan: {error}"))),
     };
@@ -193,7 +192,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    let mut plan: Plan = serde_json::from_value(found.plan.clone()).map_err(|_| ApiError::not_found("That proposal"))?;
+    let mut plan: WorkflowPlan = serde_json::from_value(found.plan.clone()).map_err(|_| ApiError::not_found("That proposal"))?;
 
     for step in &mut plan.steps {
         let choice = request.choices.get(&step.key);
@@ -272,7 +271,7 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     if let Some(conversation_id) = found.conversation_id {
         let title = found.plan["title"].as_str().unwrap_or("it");
         let text = format!("I declined starting {title}. Do not start it another way.");
-        let _ = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+        prompts::tell_agent(&state, user.id, conversation_id, text).await;
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?).await?))

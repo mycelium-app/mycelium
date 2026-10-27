@@ -81,7 +81,7 @@ pub async fn redraft(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     let (assistant_id, action_id) = assistant_actions::action_of_key(&state, user.id, assistant_actions::WEEKLY_REFLECTION).await?;
     let zone = wellness::zone_of(&state, user.id, None).await?;
     let inputs = BTreeMap::from([("week".to_string(), week.to_string())]);
-    let conversation = assistant_actions::run(&state, &user, assistant_id, action_id, &inputs, zone).await?;
+    let conversation = assistant_actions::run(&state, user.id, assistant_id, action_id, &inputs, zone).await?;
 
     sqlx::query("update reflections set conversation_id = $2, assistant_id = $3 where id = $1").bind(id).bind(conversation.id).bind(assistant_id).execute(&state.pool).await?;
 

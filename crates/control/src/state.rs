@@ -5,14 +5,14 @@ use crate::rate_limit::RateLimiter;
 use crate::store::publish_node;
 use crate::versions::LatestVersions;
 use mycelium_proto::api::{CpuPoint, MoveProgress, MoveState, NodeResources};
-use mycelium_proto::conversation::AgentId;
-use mycelium_proto::link::{ControlToNode, FolderFile, GitCommand, PromptAttachment, ResourceSample};
+use mycelium_proto::link::{ControlToNode, FolderFile, ResourceSample};
 use serde_json::Value;
 use mycelium_proto::stream::StreamMessage;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
@@ -148,6 +148,31 @@ impl<A> PendingRequests<A> {
             waiting.remove(&request_id);
         }
     }
+}
+
+pub trait NodeAnswer: Sized {
+    fn pending(hub: &Hub) -> &PendingRequests<Self>;
+}
+
+macro_rules! node_answers {
+    ($($answer:ty => $field:ident),* $(,)?) => {
+        $(
+            impl NodeAnswer for $answer {
+                fn pending(hub: &Hub) -> &PendingRequests<Self> {
+                    &hub.$field
+                }
+            }
+        )*
+    };
+}
+
+node_answers! {
+    Vec<String> => file_requests,
+    GitAnswer => git_requests,
+    SteerAnswer => steer_requests,
+    ProcessAnswer => stop_requests,
+    FolderAnswer => folder_requests,
+    ResetAnswer => reset_requests,
 }
 
 #[derive(Default)]
@@ -301,7 +326,8 @@ impl Hub {
         self.forget_resources_of(node_id);
     }
 
-    fn request<A>(&self, pending: &PendingRequests<A>, node_id: Uuid, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<(Uuid, oneshot::Receiver<A>)> {
+    pub fn begin_request<A: NodeAnswer>(&self, node_id: Uuid, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<(Uuid, oneshot::Receiver<A>)> {
+        let pending = A::pending(self);
         let (request_id, answered) = pending.register(node_id);
 
         if self.send(node_id, message(request_id)) {
@@ -312,64 +338,12 @@ impl Hub {
         }
     }
 
-    pub fn request_files(&self, node_id: Uuid, cwd: String, query: String) -> Option<(Uuid, oneshot::Receiver<Vec<String>>)> {
-        self.request(&self.file_requests, node_id, |request_id| ControlToNode::ListFiles { request_id, cwd, query })
+    pub fn forget_request<A: NodeAnswer>(&self, request_id: Uuid) {
+        A::pending(self).forget(request_id);
     }
 
-    pub fn answer_files(&self, node_id: Uuid, request_id: Uuid, paths: Vec<String>) {
-        self.file_requests.answer(node_id, request_id, paths);
-    }
-
-    pub fn forget_file_request(&self, request_id: Uuid) {
-        self.file_requests.forget(request_id);
-    }
-
-    pub fn request_git(&self, node_id: Uuid, cwd: String, command: GitCommand) -> Option<(Uuid, oneshot::Receiver<GitAnswer>)> {
-        self.request(&self.git_requests, node_id, |request_id| ControlToNode::Git { request_id, cwd, command })
-    }
-
-    pub fn answer_git(&self, node_id: Uuid, request_id: Uuid, answer: GitAnswer) {
-        self.git_requests.answer(node_id, request_id, answer);
-    }
-
-    pub fn forget_git_request(&self, request_id: Uuid) {
-        self.git_requests.forget(request_id);
-    }
-
-    pub fn request_steer(&self, node_id: Uuid, conversation_id: Uuid, text: String, attachments: Vec<PromptAttachment>) -> Option<(Uuid, oneshot::Receiver<SteerAnswer>)> {
-        self.request(&self.steer_requests, node_id, |request_id| ControlToNode::Steer { conversation_id, request_id, text, attachments })
-    }
-
-    pub fn answer_steer(&self, node_id: Uuid, request_id: Uuid, answer: SteerAnswer) {
-        self.steer_requests.answer(node_id, request_id, answer);
-    }
-
-    pub fn forget_steer_request(&self, request_id: Uuid) {
-        self.steer_requests.forget(request_id);
-    }
-
-    pub fn request_stop(&self, node_id: Uuid, pid: u32, name: String) -> Option<(Uuid, oneshot::Receiver<ProcessAnswer>)> {
-        self.request(&self.stop_requests, node_id, |request_id| ControlToNode::StopProcess { request_id, pid, name })
-    }
-
-    pub fn answer_stop(&self, node_id: Uuid, request_id: Uuid, answer: ProcessAnswer) {
-        self.stop_requests.answer(node_id, request_id, answer);
-    }
-
-    pub fn forget_stop_request(&self, request_id: Uuid) {
-        self.stop_requests.forget(request_id);
-    }
-
-    pub fn request_folder(&self, node_id: Uuid, root: String) -> Option<(Uuid, oneshot::Receiver<FolderAnswer>)> {
-        self.request(&self.folder_requests, node_id, |request_id| ControlToNode::ReadFolder { request_id, root })
-    }
-
-    pub fn answer_folder(&self, node_id: Uuid, request_id: Uuid, answer: FolderAnswer) {
-        self.folder_requests.answer(node_id, request_id, answer);
-    }
-
-    pub fn forget_folder_request(&self, request_id: Uuid) {
-        self.folder_requests.forget(request_id);
+    pub fn answer<A: NodeAnswer>(&self, node_id: Uuid, request_id: Uuid, answer: A) {
+        A::pending(self).answer(node_id, request_id, answer);
     }
 
     pub fn begin_backup(&self, assistant_id: Uuid) -> bool {
@@ -390,18 +364,6 @@ impl Hub {
 
     pub fn take_workspace_ask(&self, conversation_id: Uuid) -> bool {
         self.workspace_asks.lock().is_ok_and(|mut asks| asks.remove(&conversation_id))
-    }
-
-    pub fn request_reset(&self, node_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) -> Option<(Uuid, oneshot::Receiver<ResetAnswer>)> {
-        self.request(&self.reset_requests, node_id, |request_id| ControlToNode::UseReset { request_id, agent, account, idempotency_key })
-    }
-
-    pub fn answer_reset(&self, node_id: Uuid, request_id: Uuid, answer: ResetAnswer) {
-        self.reset_requests.answer(node_id, request_id, answer);
-    }
-
-    pub fn forget_reset_request(&self, request_id: Uuid) {
-        self.reset_requests.forget(request_id);
     }
 
     pub fn record_resources(&self, node_id: Uuid, sample: ResourceSample) {
@@ -672,6 +634,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub async fn ask_node<A: NodeAnswer>(&self, node_id: Uuid, timeout: Duration, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<A> {
+        let (request_id, answered) = self.hub.begin_request::<A>(node_id, message)?;
+        let answer = tokio::time::timeout(timeout, answered).await.ok().and_then(Result::ok);
+        self.hub.forget_request::<A>(request_id);
+
+        answer
+    }
+
     pub fn publish(&self, owner: Option<Uuid>, message: StreamMessage) {
         let _ = self.stream.send(Streamed { owner, message });
     }

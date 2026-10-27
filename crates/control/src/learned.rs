@@ -53,15 +53,26 @@ pub async fn note_from_agent(state: &AppState, conversation_id: Uuid, arguments:
     Ok(Ok(()))
 }
 
+#[derive(sqlx::FromRow)]
+struct LearnedRow {
+    id: Uuid,
+    text: String,
+    source_kind: String,
+    conversation_id: Uuid,
+    conversation_title: String,
+    message_id: Option<i64>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
 pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<LearnedQuery>) -> ApiResult<Json<Vec<LearnedItem>>> {
     let limit = query.limit.unwrap_or(5).clamp(1, MOST_LEARNED);
-    let rows = sqlx::query_as::<_, (Uuid, String, String, Uuid, String, Option<i64>, chrono::DateTime<chrono::Utc>)>(
-        "select l.id, l.text, l.source_kind, l.conversation_id, c.title, l.message_id, l.created_at from learned_items l join conversations c on c.id = l.conversation_id where l.owner = $1 order by l.created_at desc limit $2",
+    let rows = sqlx::query_as::<_, LearnedRow>(
+        "select l.id, l.text, l.source_kind, l.conversation_id, c.title as conversation_title, l.message_id, l.created_at from learned_items l join conversations c on c.id = l.conversation_id where l.owner = $1 order by l.created_at desc limit $2",
     )
     .bind(user.id)
     .bind(limit)
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(rows.into_iter().map(|(id, text, source_kind, conversation_id, conversation_title, message_id, created_at)| LearnedItem { id, text, source_kind, conversation_id, conversation_title, message_id, created_at }).collect()))
+    Ok(Json(rows.into_iter().map(|row| LearnedItem { id: row.id, text: row.text, source_kind: row.source_kind, conversation_id: row.conversation_id, conversation_title: row.conversation_title, message_id: row.message_id, created_at: row.created_at }).collect()))
 }

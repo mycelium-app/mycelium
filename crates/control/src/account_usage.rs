@@ -1,6 +1,6 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
-use crate::state::AppState;
+use crate::state::{AppState, ResetAnswer};
 use crate::store::enum_text;
 use axum::Json as AxumJson;
 use axum::extract::State;
@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
 use mycelium_proto::api::{UseResetRequest, UseResetResponse};
 use mycelium_proto::conversation::{AgentId, LoginInfo, ResetCredits, UsageWindow};
+use mycelium_proto::link::ControlToNode;
 use sqlx::types::Json;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -147,15 +148,13 @@ pub async fn use_reset(State(state): State<AppState>, _user: AuthUser, AxumJson(
         return Err(ApiError::conflict("no_reset", "This account has no banked resets."));
     }
 
-    let asked = with_credits.into_iter().filter(|node_id| state.hub.is_online(*node_id)).find_map(|node_id| state.hub.request_reset(node_id, request.agent, account.clone(), request.idempotency_key.clone()));
-    let Some((request_id, answered)) = asked else {
+    let Some(node_id) = with_credits.into_iter().find(|node_id| state.hub.is_online(*node_id)) else {
         return Err(crate::nodes::node_offline());
     };
 
-    let answer = tokio::time::timeout(RESET_TIMEOUT, answered).await.ok().and_then(Result::ok);
-    state.hub.forget_reset_request(request_id);
+    let asked = state.ask_node::<ResetAnswer>(node_id, RESET_TIMEOUT, |request_id| ControlToNode::UseReset { request_id, agent: request.agent, account: account.clone(), idempotency_key: request.idempotency_key.clone() }).await;
 
-    let Some(answer) = answer else {
+    let Some(answer) = asked else {
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "reset_timeout", "Codex did not answer. Check the account's usage before trying again."));
     };
 

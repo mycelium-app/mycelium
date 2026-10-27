@@ -212,7 +212,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let task = move_to(&state, &user, id, TaskStatus::Open, TaskStatus::Claimed).await?;
     let prompt = task.prompt.clone().unwrap_or_else(|| task.title.clone());
     let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt), parent_id: None, side_kind: None, model: None };
-    let started = conversations::start(&state, &user, request).await;
+    let started = conversations::start(&state, user.id, request).await;
 
     match started {
         Ok(conversation) => {
@@ -254,7 +254,7 @@ async fn send(state: &AppState, user: AuthUser, waiting: Task, conversation_id: 
     let delivered = if chat {
         chats::send_or_queue(state, user.id, conversation_id, &text).await
     } else {
-        prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await.map(|_| ())
+        prompts::send(state, user.id, conversation_id, PromptRequest { text, ..Default::default() }).await.map(|_| ())
     };
 
     match delivered {
@@ -294,7 +294,7 @@ pub async fn answer(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         return Err(ApiError::conflict("asker_gone", "The conversation that asked this question no longer exists, so it cannot receive an answer."));
     };
 
-    let delivered = prompts::prompt(State(state.clone()), user, Path(source_id), Json(PromptRequest { text: format!("Answer to your question \"{}\": {text}", asked.title), ..Default::default() })).await;
+    let delivered = prompts::send(&state, user.id, source_id, PromptRequest { text: format!("Answer to your question \"{}\": {text}", asked.title), ..Default::default() }).await;
 
     match delivered {
         Ok(_) => {

@@ -269,7 +269,7 @@ fn changed(state: &AppState, owner: Uuid, assistant_id: Uuid) {
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser, Path(assistant_id): Path<Uuid>) -> ApiResult<Json<Vec<AssistantAction>>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let rows = sqlx::query_as::<_, ActionRow>(sqlx::AssertSqlSafe(format!("select {ACTION_COLUMNS} from assistant_actions where assistant_id = $1 order by position, created_at, id"))).bind(assistant_id).fetch_all(&state.pool).await?;
 
@@ -308,13 +308,13 @@ async fn insert(state: &AppState, owner: Uuid, assistant_id: Uuid, request: Save
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Path(assistant_id): Path<Uuid>, Json(request): Json<SaveActionRequest>) -> ApiResult<(StatusCode, Json<AssistantAction>)> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     Ok((StatusCode::CREATED, Json(insert(&state, user.id, assistant_id, request).await?)))
 }
 
 pub async fn update(State(state): State<AppState>, user: AuthUser, Path((assistant_id, action_id)): Path<(Uuid, Uuid)>, Json(request): Json<SaveActionRequest>) -> ApiResult<Json<AssistantAction>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
     find(&state, assistant_id, action_id).await?;
 
     let name = valid_name(&request.name)?;
@@ -348,7 +348,7 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path((assista
 }
 
 pub async fn delete(State(state): State<AppState>, user: AuthUser, Path((assistant_id, action_id)): Path<(Uuid, Uuid)>) -> ApiResult<StatusCode> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let action = find(&state, assistant_id, action_id).await?;
 
@@ -363,7 +363,7 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path((assista
 }
 
 pub async fn reset(State(state): State<AppState>, user: AuthUser, Path((assistant_id, action_id)): Path<(Uuid, Uuid)>) -> ApiResult<Json<AssistantAction>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let action = find(&state, assistant_id, action_id).await?;
     let Some(builtin) = BUILTINS.iter().find(|builtin| Some(builtin.key) == action.builtin_key.as_deref()) else {
@@ -385,19 +385,19 @@ pub async fn reset(State(state): State<AppState>, user: AuthUser, Path((assistan
     Ok(Json(row.to_proto()))
 }
 
-pub async fn run(state: &AppState, user: &AuthUser, assistant_id: Uuid, action_id: Uuid, values: &BTreeMap<String, String>, zone: Tz) -> ApiResult<Conversation> {
+pub async fn run(state: &AppState, owner: Uuid, assistant_id: Uuid, action_id: Uuid, values: &BTreeMap<String, String>, zone: Tz) -> ApiResult<Conversation> {
     let action = find(state, assistant_id, action_id).await?;
     let text = expand(&action, values, zone, Utc::now())?;
     let overrides = StartOverrides { model: action.model, node_id: action.node_id };
 
-    assistants::send(state, user, assistant_id, PromptRequest { text, ..Default::default() }, &overrides).await
+    assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &overrides).await
 }
 
 pub async fn run_handler(State(state): State<AppState>, user: AuthUser, Path((assistant_id, action_id)): Path<(Uuid, Uuid)>, request: Option<Json<RunActionRequest>>) -> ApiResult<Json<Conversation>> {
     let request = request.map(|Json(request)| request).unwrap_or_default();
     let zone = wellness::zone_of(&state, user.id, None).await?;
 
-    Ok(Json(run(&state, &user, assistant_id, action_id, &request.inputs, zone).await?))
+    Ok(Json(run(&state, user.id, assistant_id, action_id, &request.inputs, zone).await?))
 }
 
 fn publish_proposal(state: &AppState, owner: Uuid, row: ProposalRow) -> ActionProposal {
@@ -415,7 +415,7 @@ async fn find_proposal(state: &AppState, assistant_id: Uuid, id: Uuid) -> ApiRes
 }
 
 pub async fn list_proposals(State(state): State<AppState>, user: AuthUser, Path(assistant_id): Path<Uuid>) -> ApiResult<Json<Vec<ActionProposal>>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let rows = sqlx::query_as::<_, ProposalRow>(sqlx::AssertSqlSafe(format!("select {PROPOSAL_COLUMNS} from assistant_action_proposals where assistant_id = $1 order by (state = 'proposed') desc, created_at desc limit 50"))).bind(assistant_id).fetch_all(&state.pool).await?;
 
@@ -466,7 +466,7 @@ pub async fn propose_from_agent(state: &AppState, conversation_id: Uuid, argumen
 }
 
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path((assistant_id, proposal_id)): Path<(Uuid, Uuid)>, edited: Option<Json<SaveActionRequest>>) -> ApiResult<Json<AssistantAction>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let found = find_proposal(&state, assistant_id, proposal_id).await?;
 
@@ -487,7 +487,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path((assist
 }
 
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path((assistant_id, proposal_id)): Path<(Uuid, Uuid)>) -> ApiResult<Json<ActionProposal>> {
-    assistants::load(&state, user.id, assistant_id).await?;
+    assistants::find_owned(&state, assistant_id, user.id).await?;
 
     let found = find_proposal(&state, assistant_id, proposal_id).await?;
 
@@ -585,7 +585,7 @@ pub async fn ensure_wellness(state: &AppState, owner: Uuid) -> ApiResult<Uuid> {
 pub async fn wellness_assistant(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<mycelium_proto::api::Assistant>> {
     let id = ensure_wellness(&state, user.id).await?;
 
-    Ok(Json(assistants::load(&state, user.id, id).await?))
+    Ok(Json(assistants::find_owned(&state, id, user.id).await?))
 }
 
 pub async fn action_of_key(state: &AppState, owner: Uuid, key: &str) -> ApiResult<(Uuid, Uuid)> {

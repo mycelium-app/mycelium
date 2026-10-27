@@ -1,7 +1,8 @@
-use crate::api_access::tell_agent;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
+use crate::prompts;
 use crate::state::{AppState, hash_token, new_token};
+use crate::token_delivery;
 use axum::Json;
 use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{Path, State};
@@ -95,6 +96,16 @@ fn forward(node_id: Uuid, session_id: Uuid, toward: Toward) {
     }
 }
 
+#[derive(sqlx::FromRow)]
+struct AgentGrant {
+    id: Uuid,
+    owner: Uuid,
+    conversation_id: Uuid,
+    node_id: Uuid,
+    node_name: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+}
+
 async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<RequestRow> {
     let row = sqlx::query_as::<_, RequestRow>(sqlx::AssertSqlSafe(format!("select {REQUEST_COLUMNS} from {REQUEST_SOURCE} where r.id = $1 and r.owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
@@ -164,9 +175,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(body): Json<ApproveSshAccessRequest>) -> ApiResult<Json<SshAccessRequest>> {
     let found = find_owned(&state, id, user.id).await?;
 
-    if found.state != "requested" {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
-    }
+    token_delivery::require_requested(&found.state)?;
 
     let minutes = body.minutes.unwrap_or(found.minutes);
 
@@ -174,10 +183,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::bad_request("minutes_out_of_range", format!("Choose between {MIN_MINUTES} and {} minutes.", found.minutes)));
     }
 
-    let node_id = sqlx::query_scalar::<_, Option<Uuid>>("select node_id from conversations where id = $1").bind(found.conversation_id).fetch_one(&state.pool).await?;
-    let Some(node_id) = node_id else {
-        return Err(ApiError::conflict("no_node", "This conversation does not run on a node, so there is nowhere to save the token. Decline the request."));
-    };
+    let node_id = token_delivery::node_of(&state, found.conversation_id).await?;
 
     let secret = new_token();
     let claimed = sqlx::query("update ssh_access_requests set state = 'approved', decided_at = now(), minutes = $2, expires_at = now() + make_interval(mins => $2::int), token_hash = $3 where id = $1 and state = 'requested'")
@@ -188,15 +194,15 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         .await?;
 
     if claimed.rows_affected() == 0 {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
+        return Err(token_delivery::already_decided());
     }
 
-    let sent = state.hub.send(node_id, ControlToNode::SshToken { request_id: id, conversation_id: found.conversation_id, token: format!("{TOKEN_PREFIX}{secret}") });
+    let sent = token_delivery::send_token(&state, node_id, ControlToNode::SshToken { request_id: id, conversation_id: found.conversation_id, token: format!("{TOKEN_PREFIX}{secret}") });
 
-    if !sent {
+    if let Err(cause) = sent {
         sqlx::query("update ssh_access_requests set state = 'requested', decided_at = null, expires_at = null, token_hash = null, minutes = $2 where id = $1").bind(id).bind(found.minutes).execute(&state.pool).await?;
 
-        return Err(ApiError::conflict("node_offline", "The node this conversation runs on is offline, so the token cannot be delivered. Approve it again once the node is back."));
+        return Err(cause);
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
@@ -205,12 +211,10 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<SshAccessRequest>> {
     let found = find_owned(&state, id, user.id).await?;
 
-    if found.state != "requested" {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
-    }
+    token_delivery::require_requested(&found.state)?;
 
     sqlx::query("update ssh_access_requests set state = 'declined', decided_at = now() where id = $1").bind(id).execute(&state.pool).await?;
-    tell_agent(&state, user.id, found.conversation_id, format!("I declined your request for SSH access to {}. Do not get access to that node another way.", found.node_name)).await;
+    prompts::tell_agent(&state, user.id, found.conversation_id, format!("I declined your request for SSH access to {}. Do not get access to that node another way.", found.node_name)).await;
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
 }
@@ -232,7 +236,7 @@ pub async fn revoke(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         let _ = relay.to_agent.send(Toward::Cut);
     }
 
-    tell_agent(&state, user.id, found.conversation_id, format!("I revoked your SSH access to {}. Its sessions have ended. Do not get access to that node another way.", found.node_name)).await;
+    prompts::tell_agent(&state, user.id, found.conversation_id, format!("I revoked your SSH access to {}. Its sessions have ended. Do not get access to that node another way.", found.node_name)).await;
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
 }
@@ -269,7 +273,7 @@ pub async fn token_saved(state: &AppState, node_id: Uuid, request_id: Uuid, path
         }
     };
 
-    tell_agent(state, owner, conversation_id, text).await;
+    prompts::tell_agent(state, owner, conversation_id, text).await;
 
     Ok(())
 }
@@ -291,8 +295,8 @@ pub fn node_closed(node_id: Uuid, session_id: Uuid) -> ApiResult<()> {
 pub async fn connect(State(state): State<AppState>, Path(node): Path<String>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
     let admitted = async {
         let secret = headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer ")).and_then(|value| value.strip_prefix(TOKEN_PREFIX)).ok_or_else(ApiError::unauthorised)?;
-        let grant = sqlx::query_as::<_, (Uuid, Uuid, Uuid, Uuid, String, chrono::DateTime<chrono::Utc>)>(
-            "select r.id, r.owner, r.conversation_id, r.node_id, n.name, r.expires_at
+        let grant = sqlx::query_as::<_, AgentGrant>(
+            "select r.id, r.owner, r.conversation_id, r.node_id, n.name as node_name, r.expires_at
              from ssh_access_requests r join nodes n on n.id = r.node_id
              where r.token_hash = $1 and r.state = 'approved' and r.revoked_at is null and r.expires_at > now()",
         )
@@ -304,7 +308,7 @@ pub async fn connect(State(state): State<AppState>, Path(node): Path<String>, he
             None => sqlx::query_as::<_, (Uuid, Uuid, String)>("select t.id, t.node_id, n.name from person_ssh_tokens t join nodes n on n.id = t.node_id where t.token_hash = $1 and t.expires_at > now()").bind(hash_token(secret)).fetch_optional(&state.pool).await?,
         };
         let (request_id, agent_grant, target, target_name, expires_at) = match (grant, person) {
-            (Some((request_id, owner, conversation_id, target, target_name, expires_at)), _) => (request_id, Some((owner, conversation_id)), target, target_name, expires_at),
+            (Some(AgentGrant { id: request_id, owner, conversation_id, node_id: target, node_name: target_name, expires_at }), _) => (request_id, Some((owner, conversation_id)), target, target_name, expires_at),
             (None, Some((token_id, target, target_name))) => (token_id, None, target, target_name, chrono::Utc::now() + chrono::Duration::hours(PERSON_SESSION_HOURS)),
             (None, None) => return Err(ApiError::unauthorised()),
         };

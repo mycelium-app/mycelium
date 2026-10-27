@@ -6,8 +6,8 @@ use crate::conversations;
 use crate::error::{ApiError, ApiResult};
 use crate::groups;
 use crate::prompts;
-use crate::state::AppState;
-use crate::store::{ConversationRow, enum_text, find_owned, parse_enum};
+use crate::state::{AppState, FolderAnswer};
+use crate::store::{self, ConversationRow, enum_text, parse_enum};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::body::Bytes;
@@ -106,7 +106,7 @@ pub struct ListQuery {
     archived: bool,
 }
 
-pub async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
+pub async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Assistant> {
     let row = sqlx::query_as::<_, AssistantRow>(sqlx::AssertSqlSafe(format!(
         "select {ASSISTANT_COLUMNS} from assistants a left join conversations c on c.id = a.conversation_id where a.id = $1 and a.owner = $2"
     )))
@@ -124,7 +124,7 @@ pub async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistan
 }
 
 pub async fn publish(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Assistant> {
-    let assistant = load(state, owner, id).await?;
+    let assistant = find_owned(state, id, owner).await?;
 
     state.publish(Some(owner), StreamMessage::Assistant(assistant.clone()));
 
@@ -246,6 +246,12 @@ pub async fn validate_preferences(state: &AppState, owner: Uuid, preferences: &A
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateAssistantRequest>) -> ApiResult<(StatusCode, Json<Assistant>)> {
+    let assistant = create_for(&state, user.id, request).await?;
+
+    Ok((StatusCode::CREATED, Json(assistant)))
+}
+
+pub async fn create_for(state: &AppState, owner: Uuid, request: CreateAssistantRequest) -> ApiResult<Assistant> {
     let name = valid_name(&request.name)?;
     let preferences = request.preferences.unwrap_or_default();
     let instructions = request.instructions.unwrap_or_default();
@@ -253,14 +259,14 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     check_file_size(INSTRUCTIONS_PATH, instructions.as_bytes())?;
 
     if let Some(group_id) = request.group_id {
-        groups::find_owned(&state, group_id, user.id).await?;
+        groups::find_owned(state, group_id, owner).await?;
     }
 
-    validate_preferences(&state, user.id, &preferences).await?;
+    validate_preferences(state, owner, &preferences).await?;
 
     let description = request.description.as_deref().map(str::trim).filter(|text| !text.is_empty());
     let inserted = sqlx::query_scalar::<_, Uuid>("insert into assistants (owner, name, description, group_id, preferences) values ($1, $2, $3, $4, $5) returning id")
-        .bind(user.id)
+        .bind(owner)
         .bind(&name)
         .bind(description)
         .bind(request.group_id)
@@ -273,11 +279,9 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
         Err(cause) => return Err(cause.into()),
     };
 
-    store_file(&state, id, INSTRUCTIONS_PATH, instructions.as_bytes()).await?;
+    store_file(state, id, INSTRUCTIONS_PATH, instructions.as_bytes()).await?;
 
-    let assistant = publish(&state, user.id, id).await?;
-
-    Ok((StatusCode::CREATED, Json(assistant)))
+    publish(state, owner, id).await
 }
 
 pub async fn list_for(state: &AppState, owner: Uuid, archived: bool) -> ApiResult<Vec<Assistant>> {
@@ -305,7 +309,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Q
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
-    let mut assistant = load(&state, user.id, id).await?;
+    let mut assistant = find_owned(&state, id, user.id).await?;
 
     assistant.instructions = Some(instructions_of(&state, id).await?);
     assistant.next_choice = next_choice_label(&state, user.id, &assistant).await?;
@@ -314,7 +318,7 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchAssistantRequest>) -> ApiResult<Json<Assistant>> {
-    let current = load(&state, user.id, id).await?;
+    let current = find_owned(&state, id, user.id).await?;
 
     if current.builtin_key.is_some() {
         if request.name.as_deref().is_some_and(|name| name.trim() != current.name) {
@@ -388,7 +392,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 pub async fn prompt(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PromptRequest>) -> ApiResult<Json<Conversation>> {
-    Ok(Json(send(&state, &user, id, request, &StartOverrides::default()).await?))
+    Ok(Json(wake(&state, user.id, id, request, &StartOverrides::default()).await?))
 }
 
 #[derive(Default)]
@@ -397,10 +401,8 @@ pub struct StartOverrides {
     pub node_id: Option<Uuid>,
 }
 
-pub async fn send(state: &AppState, user: &AuthUser, id: Uuid, request: PromptRequest, overrides: &StartOverrides) -> ApiResult<Conversation> {
-    let state = state.clone();
-    let user = user.clone();
-    let assistant = load(&state, user.id, id).await?;
+pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, overrides: &StartOverrides) -> ApiResult<Conversation> {
+    let assistant = find_owned(state, id, owner).await?;
     let text = request.text.trim();
 
     if assistant.archived_at.is_some() {
@@ -412,24 +414,24 @@ pub async fn send(state: &AppState, user: &AuthUser, id: Uuid, request: PromptRe
     }
 
     let current = match assistant.conversation_id {
-        Some(conversation_id) => Some(find_owned(&state.pool, conversation_id, user.id).await?),
+        Some(conversation_id) => Some(store::find_owned(&state.pool, conversation_id, owner).await?),
         None => None,
     };
     let conversation = match current {
         Some(row) if chats::is_chat(&row) && request.attachments.is_empty() => {
-            chats::send_or_queue(&state, user.id, row.id, text).await?;
+            chats::send_or_queue(state, owner, row.id, text).await?;
 
-            find_owned(&state.pool, row.id, user.id).await?.to_proto()?
+            store::find_owned(&state.pool, row.id, owner).await?.to_proto()?
         }
-        Some(row) if chats::is_chat(&row) => chats::send(&state, user.id, row.id, text, request.attachments).await?,
+        Some(row) if chats::is_chat(&row) => chats::send(state, owner, row.id, text, request.attachments).await?,
         Some(row) => {
-            if let Some(reason) = unavailable_reason(&state, &row).await? {
-                fall_back(&state, user.id, row.id, reason, None).await;
+            if let Some(reason) = unavailable_reason(state, &row).await? {
+                fall_back(state, owner, row.id, reason, None).await;
             }
 
-            prompts::prompt(State(state.clone()), user.clone(), Path(row.id), Json(request.clone())).await?;
+            prompts::send(state, owner, row.id, request.clone()).await?;
 
-            find_owned(&state.pool, row.id, user.id).await?.to_proto()?
+            store::find_owned(&state.pool, row.id, owner).await?.to_proto()?
         }
         None => {
             let mut preferences = assistant.preferences.clone();
@@ -446,46 +448,46 @@ pub async fn send(state: &AppState, user: &AuthUser, id: Uuid, request: PromptRe
                 return Err(ApiError::bad_request("model_required", "Choose a model for this assistant in its settings, then send your message again."));
             }
 
-            let facts = facts_of(&state, user.id, id).await?;
+            let facts = facts_of(state, owner, id).await?;
             let Some(choice) = choose(&preferences, &facts, false) else {
                 return Err(ApiError::conflict("no_choice_available", "None of this assistant's models can run right now. Bring one of its nodes online and signed in, or add another model in its settings."));
             };
 
             match choice {
                 Choice::Chat { provider_id, model, .. } => {
-                    let started = chats::start(&state, &user, CreateChatRequest { provider_id, model, prompt: None, parent_id: None }, None, Some(id)).await?;
+                    let started = chats::start(state, owner, CreateChatRequest { provider_id, model, prompt: None, parent_id: None }, None, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
 
-                    chats::send(&state, user.id, started.id, text, request.attachments).await?
+                    chats::send(state, owner, started.id, text, request.attachments).await?
                 }
                 Choice::Workspace { agent, account, node_id, .. } => {
                     let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None };
-                    let started = conversations::start_for(&state, &user, started, Some(id)).await?;
+                    let started = conversations::start_for(state, owner, started, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
-                    prompts::prompt(State(state.clone()), user.clone(), Path(started.id), Json(request.clone())).await?;
+                    prompts::send(state, owner, started.id, request.clone()).await?;
 
-                    find_owned(&state.pool, started.id, user.id).await?.to_proto()?
+                    store::find_owned(&state.pool, started.id, owner).await?.to_proto()?
                 }
             }
         }
     };
 
-    publish(&state, user.id, id).await?;
+    publish(state, owner, id).await?;
 
     Ok(conversation)
 }
 
 pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Assistant>> {
-    let assistant = load(&state, user.id, id).await?;
+    let assistant = find_owned(&state, id, user.id).await?;
 
     if let Some(conversation_id) = assistant.conversation_id {
-        let row = find_owned(&state.pool, conversation_id, user.id).await?;
+        let row = store::find_owned(&state.pool, conversation_id, user.id).await?;
 
         if chats::is_chat(&row) {
             chats::stop(&state, user.id, conversation_id).await?;
-        } else if let Err(error) = conversations::close(State(state.clone()), user.clone(), Path(conversation_id)).await {
+        } else if let Err(error) = conversations::close_for(&state, user.id, conversation_id).await {
             tracing::warn!("could not close the working session of assistant {id}: {}", error.message());
         }
     }
@@ -496,13 +498,13 @@ pub async fn clear(State(state): State<AppState>, user: AuthUser, Path(id): Path
 }
 
 pub async fn list_files(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<AssistantFile>>> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     Ok(Json(files_of(&state, id, "").await?))
 }
 
 pub async fn read_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>) -> ApiResult<Response> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let content = sqlx::query_scalar::<_, Vec<u8>>("select content from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).fetch_optional(&state.pool).await?;
     let Some(content) = content else {
@@ -517,7 +519,7 @@ pub async fn read_file(State(state): State<AppState>, user: AuthUser, Path((id, 
 }
 
 pub async fn write_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>, body: Bytes) -> ApiResult<Json<AssistantFile>> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let path = valid_path(&path)?;
 
@@ -531,7 +533,7 @@ pub async fn write_file(State(state): State<AppState>, user: AuthUser, Path((id,
 }
 
 pub async fn delete_file(State(state): State<AppState>, user: AuthUser, Path((id, path)): Path<(Uuid, String)>) -> ApiResult<StatusCode> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let deleted = sqlx::query("delete from assistant_files where assistant_id = $1 and path = $2").bind(id).bind(&path).execute(&state.pool).await?;
 
@@ -546,13 +548,13 @@ pub async fn delete_file(State(state): State<AppState>, user: AuthUser, Path((id
 }
 
 pub async fn list_secrets(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Vec<AssistantSecret>>> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     Ok(Json(secrets_of(&state, id).await?))
 }
 
 pub async fn put_secret(State(state): State<AppState>, user: AuthUser, Path((id, name)): Path<(Uuid, String)>, Json(request): Json<PutAssistantSecretRequest>) -> ApiResult<Json<AssistantSecret>> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let name = valid_secret_name(&name)?;
     let value = request.value.filter(|value| !value.is_empty());
@@ -590,7 +592,7 @@ pub async fn put_secret(State(state): State<AppState>, user: AuthUser, Path((id,
 }
 
 pub async fn delete_secret(State(state): State<AppState>, user: AuthUser, Path((id, name)): Path<(Uuid, String)>) -> ApiResult<StatusCode> {
-    load(&state, user.id, id).await?;
+    find_owned(&state, id, user.id).await?;
 
     let deleted = sqlx::query("delete from assistant_secrets where assistant_id = $1 and name = $2").bind(id).bind(&name).execute(&state.pool).await?;
 
@@ -794,14 +796,13 @@ pub async fn copy_down(state: &AppState, node_id: Uuid, assistant_id: Uuid) -> A
 }
 
 pub async fn copy_up(state: &AppState, owner: Uuid, node_id: Uuid, assistant_id: Uuid) -> ApiResult<()> {
-    let Some((request_id, answered)) = state.hub.request_folder(node_id, folder_of(assistant_id)) else {
+    if !state.hub.is_online(node_id) {
         return Ok(());
-    };
-    let answer = tokio::time::timeout(FOLDER_TIMEOUT, answered).await.ok().and_then(Result::ok);
+    }
 
-    state.hub.forget_folder_request(request_id);
+    let asked = state.ask_node::<FolderAnswer>(node_id, FOLDER_TIMEOUT, |request_id| ControlToNode::ReadFolder { request_id, root: folder_of(assistant_id) }).await;
 
-    let Some(answer) = answer else {
+    let Some(answer) = asked else {
         tracing::warn!("node {node_id} did not return the folder of assistant {assistant_id} in time");
 
         return Ok(());
@@ -874,7 +875,7 @@ async fn move_to_workspace(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult
     let Some(assistant_id) = assistant_id else {
         return Ok(());
     };
-    let assistant = load(state, owner, assistant_id).await?;
+    let assistant = find_owned(state, assistant_id, owner).await?;
     let facts = facts_of(state, owner, assistant_id).await?;
     let Some(Choice::Workspace { agent, account, node_id, .. }) = choose(&assistant.preferences, &facts, true) else {
         return Err(ApiError::conflict("no_choice_available", "No node can run this assistant right now."));
@@ -1026,7 +1027,7 @@ pub async fn use_workspace_tool(state: &AppState, conversation_id: Option<Uuid>)
         return Ok(("You already have a working folder.".to_string(), true));
     }
 
-    let assistant = load(state, owner, assistant_id).await?;
+    let assistant = find_owned(state, assistant_id, owner).await?;
     let facts = facts_of(state, owner, assistant_id).await?;
 
     let Some(Choice::Workspace { node_id, .. }) = choose(&assistant.preferences, &facts, true) else {
@@ -1045,7 +1046,7 @@ pub async fn session_started(state: &AppState, owner: Uuid, conversation_id: Uui
     let Ok(Some((Some(assistant_id), agent, account))) = found else {
         return;
     };
-    let Ok(assistant) = load(state, owner, assistant_id).await else {
+    let Ok(assistant) = find_owned(state, assistant_id, owner).await else {
         return;
     };
     let Ok(facts) = facts_of(state, owner, assistant_id).await else {
@@ -1118,11 +1119,11 @@ pub async fn fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, rea
 }
 
 async fn try_fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, until: Option<chrono::DateTime<chrono::Utc>>) -> ApiResult<bool> {
-    let row = find_owned(&state.pool, conversation_id, owner).await?;
+    let row = store::find_owned(&state.pool, conversation_id, owner).await?;
     let Some(assistant_id) = row.assistant_id else {
         return Ok(false);
     };
-    let assistant = load(state, owner, assistant_id).await?;
+    let assistant = find_owned(state, assistant_id, owner).await?;
 
     if !assistant.preferences.fall_back_on.iter().any(|condition| condition == reason) {
         return Ok(false);
@@ -1156,7 +1157,7 @@ pub async fn fall_back_after_chat_error(state: &AppState, owner: Uuid, id: Uuid)
         return;
     }
 
-    let resumed = match find_owned(&state.pool, id, owner).await {
+    let resumed = match store::find_owned(&state.pool, id, owner).await {
         Ok(row) if chats::is_chat(&row) => chats::resume_turn(state, owner, id).await,
         Ok(_) => prompts::retry_failed(state, owner, id).await,
         Err(error) => Err(error),
@@ -1168,7 +1169,7 @@ pub async fn fall_back_after_chat_error(state: &AppState, owner: Uuid, id: Uuid)
 }
 
 pub async fn carry_on_after_limit(state: &AppState, owner: Uuid, id: Uuid, text: &str) -> ApiResult<()> {
-    let row = find_owned(&state.pool, id, owner).await?;
+    let row = store::find_owned(&state.pool, id, owner).await?;
 
     if chats::is_chat(&row) {
         chats::send(state, owner, id, text, Vec::new()).await?;

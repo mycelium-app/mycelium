@@ -1,5 +1,5 @@
 use crate::assistant_actions;
-use crate::assistants;
+use crate::assistants::{self, StartOverrides};
 use crate::auth::AuthUser;
 use crate::boot::run_while_ready;
 use crate::conversations;
@@ -233,7 +233,7 @@ pub async fn insert(state: &AppState, owner: Uuid, request: CreateScheduleReques
     let next_run_at = next_run_after(request.cron.trim(), zone, chrono::Utc::now())?;
 
     if let Some(assistant_id) = request.assistant_id {
-        assistants::load(state, owner, assistant_id).await?;
+        assistants::find_owned(state, assistant_id, owner).await?;
 
         if let Some(action_id) = request.action_id {
             let action = assistant_actions::find(state, assistant_id, action_id).await?;
@@ -359,7 +359,7 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 
     if let Some(conversation_id) = found.conversation_id {
         let text = format!("I declined the schedule you proposed to run \"{}\". Do not set it up another way.", found.prompt);
-        let _ = prompts::prompt(State(state.clone()), user, Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+        prompts::tell_agent(&state, user.id, conversation_id, text).await;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -373,6 +373,16 @@ pub async fn set_time_zone(State(state): State<AppState>, user: AuthUser, Json(r
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(sqlx::FromRow)]
+struct ProposingConversation {
+    owner: Uuid,
+    node_id: Uuid,
+    agent: String,
+    cwd: String,
+    project_id: Option<Uuid>,
+    assistant_id: Option<Uuid>,
+}
+
 pub struct ProposedSchedule<'a> {
     pub cron: String,
     pub prompt: &'a str,
@@ -381,8 +391,8 @@ pub struct ProposedSchedule<'a> {
 }
 
 pub async fn propose(state: &AppState, conversation_id: Uuid, proposal: ProposedSchedule<'_>) -> ApiResult<Result<Schedule, String>> {
-    let (owner, node_id, agent, cwd, project_id, assistant_id) =
-        sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<Uuid>, Option<Uuid>)>("select owner, node_id, agent, cwd, project_id, assistant_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let ProposingConversation { owner, node_id, agent, cwd, project_id, assistant_id } =
+        sqlx::query_as::<_, ProposingConversation>("select owner, node_id, agent, cwd, project_id, assistant_id from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let agent = if assistant_id.is_some() { "claude".to_string() } else { agent };
     let zone = match proposal.time_zone {
         Some(name) => match name.trim().parse::<Tz>() {
@@ -513,9 +523,7 @@ async fn record_held(connection: &mut PgConnection, schedule_id: Uuid) -> ApiRes
 }
 
 async fn fire(state: &AppState, connection: &mut PgConnection, row: &ScheduleRow) -> ApiResult<ScheduleRun> {
-    let user = sqlx::query_as::<_, (Uuid, String, String)>("select id, email, name from users where id = $1").bind(row.owner).fetch_one(&mut *connection).await?;
-    let user = AuthUser { id: user.0, email: user.1, name: user.2, session: None, scopes: None, expires_at: None };
-    let started = start_run(state, &user, row).await;
+    let started = start_run(state, row).await;
     let (outcome, reason, conversation_id) = match started {
         Ok(conversation_id) => (RunOutcome::Started, None, Some(conversation_id)),
         Err(cause) => (RunOutcome::Skipped, Some(cause.message().to_string()), None),
@@ -534,18 +542,18 @@ async fn fire(state: &AppState, connection: &mut PgConnection, row: &ScheduleRow
     run.to_proto()
 }
 
-async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiResult<Uuid> {
+async fn start_run(state: &AppState, row: &ScheduleRow) -> ApiResult<Uuid> {
     if let Some(assistant_id) = row.assistant_id {
         if let Some(action_id) = row.action_id {
             let zone = parse_zone(&row.time_zone)?;
-            let woken = assistant_actions::run(state, user, assistant_id, action_id, &row.action_inputs.0, zone).await?;
+            let woken = assistant_actions::run(state, row.owner, assistant_id, action_id, &row.action_inputs.0, zone).await?;
 
             return Ok(woken.id);
         }
 
-        let woken = assistants::prompt(State(state.clone()), user.clone(), Path(assistant_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await?;
+        let woken = assistants::wake(state, row.owner, assistant_id, PromptRequest { text: row.prompt.clone(), ..Default::default() }, &StartOverrides::default()).await?;
 
-        return Ok(woken.0.id);
+        return Ok(woken.id);
     }
 
     let (Some(node_id), Some(agent)) = (row.node_id, row.agent.as_deref()) else {
@@ -568,15 +576,16 @@ async fn start_run(state: &AppState, user: &AuthUser, row: &ScheduleRow) -> ApiR
     };
 
     if let Some(conversation_id) = reusable {
-        let queued = prompts::prompt(State(state.clone()), AuthUser { id: user.id, email: user.email.clone(), name: user.name.clone(), session: None, scopes: None, expires_at: None }, Path(conversation_id), Json(PromptRequest { text: row.prompt.clone(), ..Default::default() })).await;
+        let queued = prompts::send(state, row.owner, conversation_id, PromptRequest { text: row.prompt.clone(), ..Default::default() }).await;
 
-        if queued.is_ok() {
-            return Ok(conversation_id);
+        match queued {
+            Ok(_) => return Ok(conversation_id),
+            Err(error) => tracing::warn!("could not reuse conversation {conversation_id} for schedule {}: {}", row.id, error.message()),
         }
     }
 
     let request = CreateConversationRequest { account: None, node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: None };
-    let conversation = conversations::start(state, user, request).await?;
+    let conversation = conversations::start(state, row.owner, request).await?;
 
     Ok(conversation.id)
 }

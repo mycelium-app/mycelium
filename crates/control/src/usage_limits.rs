@@ -134,16 +134,26 @@ pub struct Detected {
     pub account: Option<String>,
 }
 
+#[derive(sqlx::FromRow)]
+struct LimitedConversation {
+    agent: String,
+    account: Option<String>,
+    limit_resumes: i32,
+    side_chat: bool,
+    time_zone: Option<String>,
+    on_usage_limit: String,
+}
+
 pub async fn inspect(state: &AppState, node_id: Uuid, conversation_id: Uuid, message: &str) -> ApiResult<Option<Detected>> {
-    let row = sqlx::query_as::<_, (String, Option<String>, i32, bool, Option<String>, String)>(
-        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null, u.time_zone, coalesce(s.on_usage_limit, 'resume')
+    let row = sqlx::query_as::<_, LimitedConversation>(
+        "select c.agent, c.account, c.limit_resumes, c.parent_id is not null as side_chat, u.time_zone, coalesce(s.on_usage_limit, 'resume') as on_usage_limit
          from conversations c join users u on u.id = c.owner left join user_settings s on s.owner = c.owner where c.id = $1",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some((agent, account, resumes, side_chat, time_zone, on_usage_limit)) = row else {
+    let Some(LimitedConversation { agent, account, limit_resumes: resumes, side_chat, time_zone, on_usage_limit }) = row else {
         return Ok(None);
     };
     let now = Utc::now();

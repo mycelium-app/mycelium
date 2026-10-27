@@ -3,12 +3,13 @@ use crate::error::{ApiError, ApiResult};
 use crate::integration_proxy;
 use crate::prompts;
 use crate::state::{AppState, hash_token, new_token};
+use crate::token_delivery;
 use axum::Json;
 use axum::extract::{MatchedPath, Path, Request, State};
 use axum::http::{Method, StatusCode, header::AUTHORIZATION};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use mycelium_proto::api::{ApiAccessRequest, ApiAccessState, ApproveApiAccessRequest, PromptRequest};
+use mycelium_proto::api::{ApiAccessRequest, ApiAccessState, ApproveApiAccessRequest};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -168,11 +169,6 @@ fn publish(state: &AppState, owner: Uuid, row: RequestRow) -> ApiAccessRequest {
     request
 }
 
-pub(crate) async fn tell_agent(state: &AppState, owner: Uuid, conversation_id: Uuid, text: String) {
-    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
-    let _ = prompts::prompt(State(state.clone()), user, Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
-}
-
 pub async fn request(state: &AppState, conversation_id: Uuid, scopes: &[String], hours: Option<i64>, reason: &str, integration: Option<&str>) -> ApiResult<Result<ApiAccessRequest, String>> {
     let hours = hours.unwrap_or(DEFAULT_HOURS);
     let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
@@ -232,9 +228,7 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
 pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(body): Json<ApproveApiAccessRequest>) -> ApiResult<Json<ApiAccessRequest>> {
     let found = find_owned(&state, id, user.id).await?;
 
-    if found.state != "requested" {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
-    }
+    token_delivery::require_requested(&found.state)?;
 
     let scopes = match &body.scopes {
         None => found.scopes.clone(),
@@ -245,10 +239,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
         return Err(ApiError::bad_request("scopes_required", "Choose at least one kind of access to approve, or decline the request."));
     }
 
-    let node_id = sqlx::query_scalar::<_, Option<Uuid>>("select node_id from conversations where id = $1").bind(found.conversation_id).fetch_one(&state.pool).await?;
-    let Some(node_id) = node_id else {
-        return Err(ApiError::conflict("no_node", "This conversation does not run on a node, so there is nowhere to save the token. Decline the request."));
-    };
+    let node_id = token_delivery::node_of(&state, found.conversation_id).await?;
 
     let granted: Vec<String> = match found.server_id {
         Some(server_id) => scopes.iter().map(|scope| integration_proxy::token_scope(server_id, scope)).collect(),
@@ -259,7 +250,7 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     let claimed = sqlx::query("update api_access_requests set state = 'approved', decided_at = now(), scopes = $2 where id = $1 and state = 'requested'").bind(id).bind(&scopes).execute(&mut *tx).await?;
 
     if claimed.rows_affected() == 0 {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
+        return Err(token_delivery::already_decided());
     }
 
     let token_id = sqlx::query_scalar::<_, Uuid>(
@@ -276,13 +267,13 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     sqlx::query("update api_access_requests set token_id = $2 where id = $1").bind(id).bind(token_id).execute(&mut *tx).await?;
     tx.commit().await?;
 
-    let sent = state.hub.send(node_id, ControlToNode::ApiToken { conversation_id: found.conversation_id, token: format!("myc_client_{secret}") });
+    let sent = token_delivery::send_token(&state, node_id, ControlToNode::ApiToken { conversation_id: found.conversation_id, token: format!("myc_client_{secret}") });
 
-    if !sent {
+    if let Err(cause) = sent {
         sqlx::query("update client_tokens set revoked_at = now() where id = $1").bind(token_id).execute(&state.pool).await?;
         sqlx::query("update api_access_requests set state = 'requested', decided_at = null, token_id = null where id = $1").bind(id).execute(&state.pool).await?;
 
-        return Err(ApiError::conflict("node_offline", "The node this conversation runs on is offline, so the token cannot be delivered. Approve it again once the node is back."));
+        return Err(cause);
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
@@ -291,12 +282,10 @@ pub async fn approve(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<ApiAccessRequest>> {
     let found = find_owned(&state, id, user.id).await?;
 
-    if found.state != "requested" {
-        return Err(ApiError::conflict("request_not_requested", "This request has already been decided."));
-    }
+    token_delivery::require_requested(&found.state)?;
 
     sqlx::query("update api_access_requests set state = 'declined', decided_at = now() where id = $1").bind(id).execute(&state.pool).await?;
-    tell_agent(&state, user.id, found.conversation_id, "I declined your request for API access. Do not get access to the API another way.".to_string()).await;
+    prompts::tell_agent(&state, user.id, found.conversation_id, "I declined your request for API access. Do not get access to the API another way.".to_string()).await;
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))
 }
@@ -321,7 +310,7 @@ pub async fn token_saved(state: &AppState, node_id: Uuid, conversation_id: Uuid,
             let base = state.config.public_url.trim_end_matches('/');
 
             if let Some(server_id) = server_id {
-                tell_agent(state, owner, conversation_id, integration_proxy::granted_text(base, server_id, &path, &scopes, expires_at)).await;
+                prompts::tell_agent(state, owner, conversation_id, integration_proxy::granted_text(base, server_id, &path, &scopes, expires_at)).await;
 
                 return Ok(());
             }
@@ -339,7 +328,7 @@ pub async fn token_saved(state: &AppState, node_id: Uuid, conversation_id: Uuid,
         }
     };
 
-    tell_agent(state, owner, conversation_id, text).await;
+    prompts::tell_agent(state, owner, conversation_id, text).await;
 
     Ok(())
 }

@@ -279,17 +279,17 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::Files { request_id, paths } => {
-            state.hub.answer_files(node_id, request_id, paths);
+            state.hub.answer(node_id, request_id, paths);
 
             Ok(())
         }
         NodeToControl::FolderFiles { request_id, files, truncated, error } => {
-            state.hub.answer_folder(node_id, request_id, FolderAnswer { files, truncated, error });
+            state.hub.answer(node_id, request_id, FolderAnswer { files, truncated, error });
 
             Ok(())
         }
         NodeToControl::GitResult { request_id, ok, output, error } => {
-            state.hub.answer_git(node_id, request_id, GitAnswer { ok, output, error });
+            state.hub.answer(node_id, request_id, GitAnswer { ok, output, error });
 
             Ok(())
         }
@@ -298,18 +298,18 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 tracing::warn!("node {node_id} could not steer the turn: {error}");
             }
 
-            state.hub.answer_steer(node_id, request_id, SteerAnswer { outcome });
+            state.hub.answer(node_id, request_id, SteerAnswer { outcome });
 
             Ok(())
         }
         NodeToControl::UpdateResult { message, .. } => crate::node_updates::record_result(state, node_id, message).await,
         NodeToControl::ProcessStopped { request_id, ok, error } => {
-            state.hub.answer_stop(node_id, request_id, ProcessAnswer { ok, error });
+            state.hub.answer(node_id, request_id, ProcessAnswer { ok, error });
 
             Ok(())
         }
         NodeToControl::ResetUsed { request_id, outcome, error } => {
-            state.hub.answer_reset(node_id, request_id, ResetAnswer { outcome, error });
+            state.hub.answer(node_id, request_id, ResetAnswer { outcome, error });
 
             Ok(())
         }

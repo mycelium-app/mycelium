@@ -7,7 +7,7 @@ use crate::state::AppState;
 use crate::store::CONVERSATION_GROUP_SQL;
 use axum::Json;
 use axum::extract::{Path, State};
-use mycelium_proto::api::{DeclineInstructionProposalRequest, InstructionProposal, InstructionProposalState, PromptRequest};
+use mycelium_proto::api::{DeclineInstructionProposalRequest, InstructionProposal, InstructionProposalState};
 use mycelium_proto::stream::StreamMessage;
 use uuid::Uuid;
 
@@ -176,7 +176,7 @@ pub async fn propose(state: &AppState, conversation_id: Uuid, requested: Option<
 }
 
 pub async fn propose_for_assistant(state: &AppState, owner: Uuid, assistant_id: Uuid, conversation_id: Option<Uuid>, text: &str, reason: &str) -> ApiResult<Result<InstructionProposal, String>> {
-    let assistant = assistants::load(state, owner, assistant_id).await?;
+    let assistant = assistants::find_owned(state, assistant_id, owner).await?;
     let current = assistants::instructions_of(state, assistant_id).await?;
 
     if text == current {
@@ -261,7 +261,7 @@ pub async fn decline(State(state): State<AppState>, user: AuthUser, Path(id): Pa
             text.push_str(&format!(" My note: {note}"));
         }
 
-        let _ = prompts::prompt(State(state.clone()), user.clone(), Path(conversation_id), Json(PromptRequest { text, ..Default::default() })).await;
+        prompts::tell_agent(&state, user.id, conversation_id, text).await;
     }
 
     Ok(Json(publish(&state, user.id, find_owned(&state, id, user.id).await?)))

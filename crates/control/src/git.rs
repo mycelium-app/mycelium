@@ -3,12 +3,12 @@ use crate::error::{ApiError, ApiResult};
 use crate::forges::{self, ForgeApi};
 use crate::nodes::node_offline;
 use crate::projects;
-use crate::state::AppState;
+use crate::state::{AppState, GitAnswer};
 use crate::store::find_owned;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use mycelium_proto::link::{CommitOptions, GitCommand, RowRange};
+use mycelium_proto::link::{CommitOptions, ControlToNode, GitCommand, RowRange};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -110,14 +110,14 @@ pub async fn relay(state: &AppState, node_id: Uuid, cwd: String, command: GitCom
         GitCommand::Clone { .. } => CLONE_TIMEOUT,
         _ => GIT_TIMEOUT,
     };
-    let Some((request_id, answered)) = state.hub.request_git(node_id, cwd, command) else {
+
+    if !state.hub.is_online(node_id) {
         return Err(node_offline());
-    };
+    }
 
-    let answer = tokio::time::timeout(timeout, answered).await.ok().and_then(Result::ok);
-    state.hub.forget_git_request(request_id);
+    let asked = state.ask_node::<GitAnswer>(node_id, timeout, |request_id| ControlToNode::Git { request_id, cwd, command }).await;
 
-    let Some(answer) = answer else {
+    let Some(answer) = asked else {
         return Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "git_timeout", "The node did not answer in time. Try again in a moment."));
     };
 

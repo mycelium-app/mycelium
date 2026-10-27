@@ -39,7 +39,7 @@ const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from 
 const COMMENT_COLUMNS: &str = "id, artifact_id, author_name, body, anchor, resolved, created_at";
 
 #[derive(sqlx::FromRow)]
-struct ArtifactRow {
+pub(crate) struct ArtifactRow {
     id: Uuid,
     owner: Uuid,
     conversation_id: Option<Uuid>,
@@ -216,7 +216,7 @@ pub(crate) async fn republish(state: &AppState, id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
+pub(crate) async fn find_owned(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where id = $1 and owner = $2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That artefact"))

@@ -83,20 +83,20 @@ pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
     let side_kind = request.parent_id.map(|_| SideKind::Side);
-    let conversation = start(&state, &user, request, side_kind, None).await?;
+    let conversation = start(&state, user.id, request, side_kind, None).await?;
 
     Ok((StatusCode::CREATED, Json(conversation)))
 }
 
-pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest, side_kind: Option<SideKind>, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
-    let provider = model_providers::find_owned(state, request.provider_id, user.id).await?;
+pub async fn start(state: &AppState, owner: Uuid, request: CreateChatRequest, side_kind: Option<SideKind>, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
+    let provider = model_providers::find_owned(state, request.provider_id, owner).await?;
     let model = request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()).map(str::to_string).or_else(|| provider.default_model.clone());
     let Some(model) = model else {
         return Err(ApiError::bad_request("model_required", "Choose a model for this chat."));
     };
 
     if let Some(parent_id) = request.parent_id {
-        let parent = find_owned(&state.pool, parent_id, user.id).await?;
+        let parent = find_owned(&state.pool, parent_id, owner).await?;
 
         if parent.agent != CHAT_AGENT {
             return Err(ApiError::bad_request("parent_invalid", "A side chat belongs to another chat."));
@@ -104,12 +104,12 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
     }
 
     let prompt = request.prompt.as_deref().map(str::trim).filter(|text| !text.is_empty());
-    let node_id = chat_node(state, user.id).await?;
+    let node_id = chat_node(state, owner).await?;
     let row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
         "insert into conversations (owner, node_id, agent, cwd, title, status, model, provider_id, parent_id, side_kind, assistant_id) values ($1, $2, $3, '', 'New chat', 'done', $4, $5, $6, $7, $8)
          returning {CONVERSATION_COLUMNS}"
     )))
-    .bind(user.id)
+    .bind(owner)
     .bind(node_id)
     .bind(CHAT_AGENT)
     .bind(&model)
@@ -123,10 +123,10 @@ pub async fn start(state: &AppState, user: &AuthUser, request: CreateChatRequest
     index_title(state, row.id, &row.title).await?;
 
     let conversation = row.to_proto()?;
-    state.publish(Some(user.id), StreamMessage::Conversation(conversation.clone()));
+    state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
 
     match prompt {
-        Some(text) => send(state, user.id, row.id, text, Vec::new()).await,
+        Some(text) => send(state, owner, row.id, text, Vec::new()).await,
         None => Ok(conversation),
     }
 }

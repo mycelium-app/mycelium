@@ -56,6 +56,16 @@ fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     header.split(';').filter_map(|pair| pair.trim().split_once('=')).find(|(key, _)| *key == name).map(|(_, value)| value)
 }
 
+#[derive(sqlx::FromRow)]
+struct ClientTokenRow {
+    user_id: Uuid,
+    email: String,
+    name: String,
+    session: Uuid,
+    scopes: Option<Vec<String>>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiError;
 
@@ -63,25 +73,25 @@ impl FromRequestParts<AppState> for AuthUser {
         let address = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|ConnectInfo(peer)| client_address(state, &parts.headers, *peer).to_string()).unwrap_or_default();
 
         if let Some(token) = bearer(&parts.headers).or_else(|| cookie(&parts.headers, CLIENT_COOKIE)).and_then(|value| value.strip_prefix("myc_client_")) {
-            let row = sqlx::query_as::<_, (Uuid, String, String, Uuid, Option<Vec<String>>, Option<chrono::DateTime<chrono::Utc>>)>(
-                "select users.id, users.email, users.name, client_tokens.id, client_tokens.scopes, client_tokens.expires_at from client_tokens join users on users.id = client_tokens.user_id
+            let row = sqlx::query_as::<_, ClientTokenRow>(
+                "select users.id as user_id, users.email, users.name, client_tokens.id as session, client_tokens.scopes, client_tokens.expires_at from client_tokens join users on users.id = client_tokens.user_id
                  where client_tokens.token_hash = $1 and client_tokens.revoked_at is null and (client_tokens.expires_at is null or client_tokens.expires_at > now())",
             )
             .bind(hash_token(token))
             .fetch_optional(&state.pool)
             .await?;
-            let (id, email, name, session, scopes, expires_at) = row.ok_or_else(ApiError::unauthorised)?;
+            let token = row.ok_or_else(ApiError::unauthorised)?;
 
             sqlx::query(
                 "update client_tokens set last_used_at = now(), address = $2
                  where id = $1 and (last_used_at is null or last_used_at < now() - interval '1 minute' or address is distinct from $2)",
             )
-            .bind(session)
+            .bind(token.session)
             .bind(&address)
             .execute(&state.pool)
             .await?;
 
-            return Ok(AuthUser { id, email, name, session: Some(session), scopes, expires_at });
+            return Ok(AuthUser { id: token.user_id, email: token.email, name: token.name, session: Some(token.session), scopes: token.scopes, expires_at: token.expires_at });
         }
 
         let token = cookie(&parts.headers, SESSION_COOKIE).ok_or_else(ApiError::unauthorised)?;

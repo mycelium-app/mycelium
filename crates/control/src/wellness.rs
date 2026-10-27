@@ -566,6 +566,16 @@ fn union_minutes_per_day(spans: Vec<(DateTime<Utc>, DateTime<Utc>)>, zone: Tz) -
     seconds.into_iter().map(|(day, seconds)| (day, seconds / 60)).collect()
 }
 
+#[derive(sqlx::FromRow)]
+struct OutOfHoursRow {
+    group_id: Uuid,
+    group_name: String,
+    reason: String,
+    opened_at: DateTime<Utc>,
+    until: DateTime<Utc>,
+    closed_at: Option<DateTime<Utc>>,
+}
+
 pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query): Query<OverviewQuery>) -> ApiResult<Json<WellnessOverview>> {
     let count = query.days.unwrap_or(7).clamp(1, OVERVIEW_DAYS_LIMIT);
     let settings = load_settings(&state, user.id).await?;
@@ -614,14 +624,14 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
     let schedules = sqlx::query_scalar::<_, i64>("select count(*) from schedule_runs where outcome = 'held' and ran_at > now() - interval '7 days' and schedule_id in (select id from schedules where owner = $1)").bind(user.id).fetch_one(&state.pool).await?;
     let held_week = HeldWeek { notifications: held_kind("notification").await?, schedules, pings: held_kind("ping").await? };
 
-    let opened_out_of_hours = sqlx::query_as::<_, (Uuid, String, String, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>(
-        "select o.group_id, g.name, o.reason, o.opened_at, o.until, o.closed_at from out_of_hours_opens o join groups g on g.id = o.group_id where o.owner = $1 and o.opened_at > now() - interval '7 days' order by o.opened_at desc",
+    let opened_out_of_hours = sqlx::query_as::<_, OutOfHoursRow>(
+        "select o.group_id, g.name as group_name, o.reason, o.opened_at, o.until, o.closed_at from out_of_hours_opens o join groups g on g.id = o.group_id where o.owner = $1 and o.opened_at > now() - interval '7 days' order by o.opened_at desc",
     )
     .bind(user.id)
     .fetch_all(&state.pool)
     .await?
     .into_iter()
-    .map(|(group_id, group_name, reason, opened_at, until, closed_at)| OutOfHoursOpen { group_id, group_name, reason, opened_at, until, closed_at })
+    .map(|row| OutOfHoursOpen { group_id: row.group_id, group_name: row.group_name, reason: row.reason, opened_at: row.opened_at, until: row.until, closed_at: row.closed_at })
     .collect();
 
     Ok(Json(WellnessOverview { days, last_break_at, current_break, quiet_now: quiet, held, held_week, opened_out_of_hours }))

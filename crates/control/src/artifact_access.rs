@@ -63,21 +63,6 @@ impl From<RequestRow> for ArtifactAccessRequest {
     }
 }
 
-async fn owned(state: &AppState, owner: Uuid, artifact: Uuid) -> ApiResult<()> {
-    let exists: bool =
-        sqlx::query_scalar("select exists(select 1 from artifacts where id = $1 and owner = $2)")
-            .bind(artifact)
-            .bind(owner)
-            .fetch_one(&state.pool)
-            .await?;
-
-    if !exists {
-        return Err(ApiError::not_found("That artefact"));
-    }
-
-    Ok(())
-}
-
 fn permission(value: &str) -> ApiResult<()> {
     if !matches!(value, "view" | "edit") {
         return Err(ApiError::bad_request(
@@ -133,7 +118,7 @@ pub async fn request(
     reason: &str,
 ) -> ApiResult<String> {
     permission(access)?;
-    owned(state, owner, artifact).await?;
+    crate::artifacts::find_owned(state, artifact, owner).await?;
     find_owned(&state.pool, conversation, owner).await?;
 
     if reason.trim().is_empty() || reason.len() > 4000 {
@@ -169,7 +154,7 @@ pub async fn links(
     user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<ArtifactLink>>> {
-    owned(&state, user.id, id).await?;
+    crate::artifacts::find_owned(&state, id, user.id).await?;
     let rows = sqlx::query_as::<_, LinkRow>("select id, artifact_id, project_id, conversation_id, permission from artifact_links where artifact_id = $1 order by id").bind(id).fetch_all(&state.pool).await?;
 
     Ok(Json(rows.into_iter().map(Into::into).collect()))
@@ -181,7 +166,7 @@ pub async fn link(
     Path(id): Path<Uuid>,
     Json(request): Json<LinkArtifactRequest>,
 ) -> ApiResult<Json<ArtifactLink>> {
-    owned(&state, user.id, id).await?;
+    crate::artifacts::find_owned(&state, id, user.id).await?;
     permission(&request.permission)?;
 
     if request.project_id.is_some() == request.conversation_id.is_some() {
@@ -226,7 +211,7 @@ pub async fn unlink(
     user: AuthUser,
     Path((id, link_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    owned(&state, user.id, id).await?;
+    crate::artifacts::find_owned(&state, id, user.id).await?;
     let deleted = sqlx::query("delete from artifact_links where id = $1 and artifact_id = $2")
         .bind(link_id)
         .bind(id)
@@ -297,7 +282,7 @@ pub async fn approve(
         StreamMessage::ArtifactAccessRequest(request.clone()),
     );
     crate::artifacts::republish(&state, request.artifact_id).await?;
-    crate::api_access::tell_agent(
+    crate::prompts::tell_agent(
         &state,
         user.id,
         request.conversation_id,
@@ -322,7 +307,7 @@ pub async fn decline(
         Some(user.id),
         StreamMessage::ArtifactAccessRequest(request.clone()),
     );
-    crate::api_access::tell_agent(
+    crate::prompts::tell_agent(
         &state,
         user.id,
         request.conversation_id,
