@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.12.1
+
+v0.12.0 was tagged but never published: its Android and web builds failed. v0.12.1 is that release with both building.
+
 ## v0.12.0
 
 The canonical UI design now lives in the design artefact "Mycelium UI (canonical)", and every screen in this release was designed there first. The code had a refactor for cohesion before the features landed; what still has more than one way is listed in docs/COHERENCE.md.
