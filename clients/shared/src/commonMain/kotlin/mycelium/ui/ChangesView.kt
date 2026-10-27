@@ -244,7 +244,13 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
         }
 
         when {
-            layout == null && loadFailed -> Label("Could not load the changes. Close the tab and open it again.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+            layout == null && loadFailed -> LoadFailedState("the changes", onRetry = {
+                scope.launch {
+                    val problem = attempt { layout = store.api.gitChangesLayout(id) }
+
+                    loadFailed = problem != null
+                }
+            }, modifier = Modifier.padding(Tokens.Space.S3))
             layout == null -> Label("Loading the changes", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             sections.isEmpty() -> Label("There are no changes in this folder.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             else -> DiffStack(
@@ -282,8 +288,9 @@ fun CommitTabView(store: Store, conversation: Conversation, tab: DiffTab, modifi
     val colors = MyTheme.colors
     var shown by remember(tab.key) { mutableStateOf<Pair<List<FileDiff>, Boolean>?>(null) }
     var failed by remember(tab.key) { mutableStateOf(false) }
+    var attempts by remember(tab.key) { mutableStateOf(0) }
 
-    LaunchedEffect(tab.key, conversation.id) {
+    LaunchedEffect(tab.key, conversation.id, attempts) {
         failed = false
 
         val problem = attempt {
@@ -301,7 +308,7 @@ fun CommitTabView(store: Store, conversation: Conversation, tab: DiffTab, modifi
 
     Column(modifier.fillMaxWidth()) {
         when {
-            failed -> Label("Could not load this diff. Close the tab and open it again.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
+            failed -> LoadFailedState("this diff", onRetry = { attempts += 1 }, modifier = Modifier.padding(Tokens.Space.S3))
             loaded == null -> Label("Loading the diff", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             sections.isEmpty() -> Label("There are no text changes to show.", Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
             else -> DiffStack(sections, rowAt = { path, row -> lines[path]?.getOrNull(row) }, onWindow = {}, modifier = Modifier.weight(1f), onRowComposed = onRowComposed)

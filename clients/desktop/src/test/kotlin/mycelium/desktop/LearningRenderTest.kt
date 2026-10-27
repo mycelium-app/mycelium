@@ -19,7 +19,6 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 private val Reflection = """{"id":"r1","week":"2026-10-19","done":"Shipped the importer.\n\n- Fixed the retry loop","learned":"Lifetimes finally make sense.","waiting":"Review from Sam","next_week":"Plan the release","edited":["learned"],"drafted_at":"2026-10-23T16:00:00Z"}"""
-private const val Schedule = """{"schedule_id":"s1","node_id":"n1","agent":"claude","cwd":"/home/sam/notes","enabled":true,"cron":"0 16 * * 5"}"""
 private const val Checked = """{"id":"w1","conversation_id":"c1","created_at":"2026-10-23T10:00:00Z","steps":[{"title":"One","explanation":"","files":[]},{"title":"Two","explanation":"","files":[]}],"checks":[{"step":2,"question":"Where does the title come from?","choices":["A literal","The strings file","The server"]}]}"""
 
 class LearningRenderTest {
@@ -31,7 +30,6 @@ class LearningRenderTest {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             val reply = when {
-                path.endsWith("/reflections/schedule") -> Schedule
                 path.endsWith("/reflections") -> "[$Reflection]"
                 path.endsWith("/answers") -> """[{"step":2,"choice":0,"correct":false,"explanation":"Step 2 reads it from strings."}]"""
                 else -> "{}"
@@ -54,7 +52,7 @@ class LearningRenderTest {
             for (phone in listOf(false, true)) {
                 val store = store()
 
-                assertTrue(renderAt("reflections", dark, phone) { Box(Modifier.fillMaxSize()) { ReflectionsTab(store) } }.length() > 2_000)
+                assertTrue(renderAt("reflections", dark, phone) { Box(Modifier.fillMaxSize()) { ReflectionsTab(store) {} } }.length() > 2_000)
                 assertTrue(renderAt("walkthrough-check", dark, phone) { Box(Modifier.fillMaxSize()) { WalkthroughCheckStep(store, walkthrough) {} } }.length() > 2_000)
             }
         }

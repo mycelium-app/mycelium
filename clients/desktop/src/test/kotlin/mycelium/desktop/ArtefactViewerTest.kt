@@ -45,7 +45,7 @@ private class ViewerPlatform : Platform {
     override fun copyToClipboard(text: String) = Unit
 
     @Composable
-    override fun WebContent(url: String, token: String?, modifier: Modifier) {
+    override fun WebContent(url: String, token: String?, modifier: Modifier, reading: mycelium.PageReading?) {
         LaunchedEffect(url) { loaded += url }
     }
 }

@@ -25,6 +25,7 @@
 - Artefact cards and the viewer show the project and conversation an artefact came from, and the list filters by project.
 - A failed refresh offers Retry, a list that fails its first load says so with Retry, and every list has a Search box as its first control.
 - A workflow card that was stopped, failed or has made no progress for 15 minutes says how it ended instead of spinning.
+- Artefact cards and the viewer show the project and conversation they came from, and the list filters by project.
 - A proposed instructions edit for a group opens that group's page, where its Instructions tab shows the proposal, and Decline can skip telling the agent.
 - Assistant settings are split into Identity, Instructions, Models and nodes, Storage and secrets, and Schedules and actions, each saving on its own. A new assistant asks only for a name, group and instructions.
 - Assistants have Actions: saved prompts with inputs, run from the Actions button or a pinned chip above the composer, and used by schedules. An assistant can propose a new action for you to approve.
@@ -46,10 +47,7 @@
 - An agent can show an Outline document beside the conversation with open_outline. The desktop app opens it in a side panel with Outline's own page; the phone and web open the system browser.
 - Open in IDE: a split button in the conversation header, and a button on file cards, the Changes view and exercises, opens the folder in Zed, VS Code or JetBrains. Settings, IDEs chooses which are offered and their commands. A folder on another node opens through the IDE's SSH remote by way of Mycelium.
 - A session that is idle when the instructions change closes and resumes under the same session id before its next message, so it follows the new instructions.
-- Usage history, opened from the arrow on the Usage card, charts the 5-hour and weekly windows over time with tokens per percentage point, the API-equivalent value and the subscription price, and is backfilled from orchestrator readings and imported conversations.
-- Activity has an All time period that groups the chart by day.
-- A conversation stopped by a usage limit shows a card on the first limit reply saying it is paused until the reset and resumes automatically by default; a second limit reply updates the same card.
-- A workflow whose agents hit a usage limit says it is paused until the reset and resumes with its conversation.
+
 
 ## v0.11.0
 
