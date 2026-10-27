@@ -4,6 +4,8 @@ rust = "1.96.0"
 java = "jetbrains-jcef-21.0.11-b1163.116"
 gradle = "9.8.2"
 node = "22"
+uv = "0.13.5"
+"pipx:radicale" = "3.9.0"
 
 [tasks.test-rust]
 description = "Rust tests in parallel; needs the throwaway Postgres on 55499"
