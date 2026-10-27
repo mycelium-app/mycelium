@@ -24,11 +24,6 @@ const REVOKED: i64 = 9;
 const SIGN_IN_FIRST: &str = "Sign in to Last.fm in Settings, Integrations to love tracks and scrobble.";
 const WRITES: [&str; 4] = ["love_track", "unlove_track", "scrobble", "update_now_playing"];
 
-pub struct Outcome {
-    pub output: CallOutput,
-    pub revoked: bool,
-}
-
 pub fn normalise_settings(settings: &Value) -> Result<Value, String> {
     match settings["api_key"].as_str().map(str::trim).filter(|key| !key.is_empty()) {
         Some(key) => Ok(json!({"api_key": key})),
@@ -190,11 +185,19 @@ async fn run(http: &reqwest::Client, credentials: &Credentials, tool: &str, argu
     }
 }
 
-pub async fn call(http: &reqwest::Client, credentials: &Credentials, tool: &str, arguments: &Value) -> Outcome {
-    match run(http, credentials, tool, arguments).await {
-        Ok(value) => Outcome { output: CallOutput { text: value.to_string(), is_error: false }, revoked: false },
-        Err((_, REVOKED)) => Outcome { output: CallOutput { text: SIGN_IN_FIRST.to_string(), is_error: true }, revoked: true },
-        Err((reason, _)) => Outcome { output: CallOutput { text: reason, is_error: true }, revoked: false },
+pub async fn call(state: &AppState, owner: Uuid, server: &ServerRow, credentials: &Credentials, tool: &str, arguments: &Value) -> CallOutput {
+    match run(&state.http, credentials, tool, arguments).await {
+        Ok(value) => CallOutput { text: value.to_string(), is_error: false },
+        Err((_, REVOKED)) => {
+            if credentials.session.is_some() {
+                let _ = sqlx::query("update chat_tool_servers set session_key = null where id = $1").bind(server.id).execute(&state.pool).await;
+                state.hub.tools_changed(owner);
+                state.publish(Some(owner), StreamMessage::IntegrationsChanged);
+            }
+
+            CallOutput { text: SIGN_IN_FIRST.to_string(), is_error: true }
+        }
+        Err((reason, _)) => CallOutput { text: reason, is_error: true },
     }
 }
 

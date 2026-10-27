@@ -163,9 +163,19 @@ pub async fn proxy(State(state): State<AppState>, user: AuthUser, Path((server_i
     Ok(answer)
 }
 
+#[derive(sqlx::FromRow)]
+struct GrantRow {
+    token_id: Uuid,
+    conversation_id: Option<Uuid>,
+    conversation_title: Option<String>,
+    scopes: Vec<String>,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    calls: i64,
+}
+
 pub async fn grants(State(state): State<AppState>, user: AuthUser, Path(server_id): Path<Uuid>) -> ApiResult<Json<Vec<IntegrationApiGrant>>> {
-    let rows = sqlx::query_as::<_, (Uuid, Option<Uuid>, Option<String>, Vec<String>, chrono::DateTime<chrono::Utc>, i64)>(
-        "select t.id, t.conversation_id, c.title, r.scopes, t.expires_at, (select count(*) from api_token_calls k where k.token_id = t.id)
+    let rows = sqlx::query_as::<_, GrantRow>(
+        "select t.id as token_id, t.conversation_id, c.title as conversation_title, r.scopes, t.expires_at, (select count(*) from api_token_calls k where k.token_id = t.id) as calls
          from api_access_requests r join client_tokens t on t.id = r.token_id left join conversations c on c.id = t.conversation_id
          where r.owner = $1 and r.server_id = $2 and r.state = 'approved' and t.revoked_at is null and t.expires_at > now()
          order by t.expires_at",
@@ -174,7 +184,7 @@ pub async fn grants(State(state): State<AppState>, user: AuthUser, Path(server_i
     .bind(server_id)
     .fetch_all(&state.pool)
     .await?;
-    let grants = rows.into_iter().map(|(token_id, conversation_id, conversation_title, scopes, expires_at, calls)| IntegrationApiGrant { token_id, conversation_id, conversation_title, scopes, expires_at, calls }).collect();
+    let grants = rows.into_iter().map(|row| IntegrationApiGrant { token_id: row.token_id, conversation_id: row.conversation_id, conversation_title: row.conversation_title, scopes: row.scopes, expires_at: row.expires_at, calls: row.calls }).collect();
 
     Ok(Json(grants))
 }

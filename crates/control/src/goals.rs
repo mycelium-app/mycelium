@@ -60,9 +60,22 @@ async fn latest_agent_text(state: &AppState, conversation_id: Uuid) -> ApiResult
     Ok(text)
 }
 
-type GoalRow = (String, Option<i64>, Option<i64>, Option<i16>, Option<i16>, String, Option<String>, DateTime<Utc>, Uuid, String, Option<String>);
+#[derive(sqlx::FromRow)]
+struct GoalRow {
+    text: String,
+    token_budget: Option<i64>,
+    time_limit_seconds: Option<i64>,
+    five_hour_limit: Option<i16>,
+    weekly_limit: Option<i16>,
+    state: String,
+    reason: Option<String>,
+    started_at: DateTime<Utc>,
+    node_id: Uuid,
+    agent: String,
+    account: Option<String>,
+}
 
-async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>> {
+async fn read(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>> {
     let row = sqlx::query_as::<_, GoalRow>(
         "select g.text, g.token_budget, g.time_limit_seconds, g.five_hour_limit, g.weekly_limit, g.state, g.reason, g.started_at, c.node_id, c.agent, c.account
          from goals g join conversations c on c.id = g.conversation_id where g.conversation_id = $1",
@@ -71,7 +84,7 @@ async fn load(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some((text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, goal_state, reason, started_at, node_id, agent, account)) = row else {
+    let Some(GoalRow { text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, state: goal_state, reason, started_at, node_id, agent, account }) = row else {
         return Ok(None);
     };
 
@@ -160,7 +173,7 @@ fn duration_text(seconds: i64) -> String {
 }
 
 async fn announce(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
-    match load(state, conversation_id).await? {
+    match read(state, conversation_id).await? {
         Some(goal) => state.publish(Some(owner), StreamMessage::Goal(goal)),
         None => state.publish(Some(owner), StreamMessage::GoalCleared { conversation_id }),
     }
@@ -186,7 +199,6 @@ async fn start_check(state: &AppState, owner: Uuid, conversation_id: Uuid) -> Ap
     let text = sqlx::query_scalar::<_, String>("select text from goals where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let last: String = latest_agent_text(state, conversation_id).await?.chars().take(LAST_MESSAGE_LIMIT).collect();
     let prompt = format!("{CHECK_INSTRUCTIONS}\n\nGoal: {text}\n\nThe agent's latest message:\n{last}");
-    let user = AuthUser { id: owner, email: String::new(), name: String::new(), session: None, scopes: None, expires_at: None };
     let request = mycelium_proto::api::CreateConversationRequest {
         node_id: row.node_id,
         agent: parse_enum(&row.agent)?,
@@ -201,7 +213,7 @@ async fn start_check(state: &AppState, owner: Uuid, conversation_id: Uuid) -> Ap
     model: None,
     };
 
-    match conversations::start(state, &user, request).await {
+    match conversations::start(state, owner, request).await {
         Ok(check) => {
             sqlx::query("update goals set check_id = $2 where conversation_id = $1").bind(conversation_id).bind(check.id).execute(&state.pool).await?;
 
@@ -236,7 +248,7 @@ async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid,
             announce(state, owner, goal_conversation_id).await
         }
         Some((Verdict::Continue, reason)) => {
-            let goal = load(state, goal_conversation_id).await?;
+            let goal = read(state, goal_conversation_id).await?;
 
             let Some(goal) = goal else {
                 return Ok(());
@@ -257,7 +269,7 @@ pub async fn refresh(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
     let owner = sqlx::query_scalar("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
     let row = find_owned(&state.pool, conversation_id, owner).await?;
     let target = if row.side_kind.as_deref() == Some("check") { row.parent_id.unwrap_or(conversation_id) } else { conversation_id };
-    if load(state, target).await?.is_some() {
+    if read(state, target).await?.is_some() {
         announce(state, row.owner, target).await?;
     }
 
@@ -271,7 +283,7 @@ pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &s
         return finish_check(state, owner, parent_id, conversation_id).await;
     }
 
-    let Some(goal) = load(state, conversation_id).await? else {
+    let Some(goal) = read(state, conversation_id).await? else {
         return Ok(());
     };
 
@@ -321,10 +333,14 @@ pub async fn session_failed(state: &AppState, conversation_id: Uuid) -> ApiResul
     Ok(())
 }
 
-pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Goal>>> {
-    find_owned(&state.pool, id, user.id).await?;
+pub async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Option<Goal>> {
+    find_owned(&state.pool, id, owner).await?;
 
-    Ok(Json(load(&state, id).await?))
+    read(state, id).await
+}
+
+pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Option<Goal>>> {
+    Ok(Json(load(&state, user.id, id).await?))
 }
 
 pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<SetGoalRequest>) -> ApiResult<Json<Goal>> {
@@ -374,14 +390,14 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
         enqueue(&state, user.id, id, &format!("Work towards this goal: {text}")).await?;
     }
 
-    let goal = load(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
 
     Ok(Json(goal))
 }
 
 pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<PatchGoalRequest>) -> ApiResult<Json<Goal>> {
     let row = find_owned(&state.pool, id, user.id).await?;
-    let goal = load(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
 
     if !matches!(goal.state, GoalState::Active | GoalState::Paused) {
         return Err(ApiError::conflict("goal_ended", "This goal has ended. Clear it and set a new one."));
@@ -401,7 +417,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     }
 
     announce(&state, user.id, id).await?;
-    let goal = load(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
 
     Ok(Json(goal))
 }

@@ -252,12 +252,10 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     Ok(Json(row.to_proto()))
 }
 
-pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, headers: HeaderMap, body: Bytes) -> ApiResult<Json<Project>> {
-    find_owned(&state, id, user.id).await?;
+pub async fn set_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &str, body: &[u8]) -> ApiResult<Project> {
+    find_owned(state, id, owner).await?;
 
-    let media_type = attachments::media_type_of(&headers);
-
-    if !AVATAR_MEDIA_TYPES.contains(&media_type.as_str()) {
+    if !AVATAR_MEDIA_TYPES.contains(&media_type) {
         return Err(ApiError::bad_request("avatar_not_image", "The logo must be a PNG, JPEG or WebP image. Choose another file."));
     }
 
@@ -269,11 +267,17 @@ pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(i
         return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "avatar_too_large", "The logo is larger than 256 KB. Choose a smaller image."));
     }
 
-    let row = store_avatar(&state, user.id, id, &media_type, &body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
+    let row = store_avatar(state, owner, id, media_type, body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
 
-    publish_conversations(&state, user.id, id).await?;
+    publish_conversations(state, owner, id).await?;
 
-    Ok(Json(row.to_proto()))
+    Ok(row.to_proto())
+}
+
+pub async fn upload_avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, headers: HeaderMap, body: Bytes) -> ApiResult<Json<Project>> {
+    let media_type = attachments::media_type_of(&headers);
+
+    Ok(Json(set_avatar(&state, user.id, id, &media_type, &body).await?))
 }
 
 async fn store_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &str, body: &[u8], automatic: bool) -> ApiResult<Option<ProjectRow>> {

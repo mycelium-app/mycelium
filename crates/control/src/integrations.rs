@@ -135,17 +135,7 @@ impl Integration {
             Integration::Email => email::call(state, owner, server, &credentials, tool, arguments).await,
             Integration::Stoat => stoat::call(&state.http, &credentials, tool, arguments).await,
             Integration::CalDav => caldav::call(&state.http, &credentials, tool, arguments).await,
-            Integration::LastFm => {
-                let outcome = lastfm::call(&state.http, &credentials, tool, arguments).await;
-
-                if outcome.revoked && credentials.session.is_some() {
-                    let _ = sqlx::query("update chat_tool_servers set session_key = null where id = $1").bind(server.id).execute(&state.pool).await;
-                    state.hub.tools_changed(owner);
-                    state.publish(Some(owner), mycelium_proto::stream::StreamMessage::IntegrationsChanged);
-                }
-
-                outcome.output
-            }
+            Integration::LastFm => lastfm::call(state, owner, server, &credentials, tool, arguments).await,
         }
     }
 }
