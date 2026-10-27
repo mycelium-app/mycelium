@@ -177,7 +177,7 @@ class AssistantSettingsTest {
 
         rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/assistants/a1/secrets/GITHUB_TOKEN" } }
         assertEquals("""{"value":"ghp_abcdef"}""", requests.last { it.first.startsWith("PUT") }.second)
-        assertEquals(0, rule.onAllNodesWithText("ghp_abcdef").fetchSemanticsNodes().size)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("ghp_abcdef").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test

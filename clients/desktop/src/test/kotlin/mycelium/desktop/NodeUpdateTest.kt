@@ -84,8 +84,8 @@ class NodeUpdateTest {
         openNode(nodeJson("v0.3.1"))
 
         rule.onNodeWithText("Update to v0.3.6").performClick()
-        rule.waitForIdle()
 
+        rule.waitUntil(5_000) { updates.isNotEmpty() }
         assertEquals(listOf("/api/v1/nodes/n1/update"), updates)
     }
 
