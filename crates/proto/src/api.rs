@@ -1235,6 +1235,81 @@ pub struct ApproveStartProposalRequest {
     pub choices: std::collections::HashMap<String, StartProposalChoice>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowPlan {
+    pub title: String,
+    pub steps: Vec<WorkflowStep>,
+    #[serde(default = "default_workflow_rounds")]
+    pub max_rounds: u32,
+    #[serde(default)]
+    pub stop_when: Option<String>,
+}
+
+fn default_workflow_rounds() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub gate: bool,
+    #[serde(default)]
+    pub workflow: Option<Box<WorkflowPlan>>,
+    #[serde(default)]
+    pub node_id: Option<Uuid>,
+    #[serde(default)]
+    pub agent: Option<AgentId>,
+    #[serde(default)]
+    pub provider_id: Option<Uuid>,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub difficulty: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowRunStep {
+    pub key: String,
+    pub status: String,
+    pub conversation_id: Option<Uuid>,
+    pub workflow_id: Option<Uuid>,
+    pub output: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Workflow {
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub conversation_id: Option<Uuid>,
+    pub title: String,
+    pub status: String,
+    pub plan: WorkflowPlan,
+    pub steps: Vec<WorkflowRunStep>,
+    pub round: i32,
+    pub output: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowControlRequest {
+    pub action: String,
+    pub step: Option<String>,
+    pub output: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiAccessState {

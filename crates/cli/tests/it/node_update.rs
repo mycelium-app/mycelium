@@ -42,7 +42,7 @@ async fn a_verified_download_replaces_the_binary_and_leaves_it_executable() {
 
     let installed = install(&reqwest::Client::new(), &url, "v9.9.9", ASSET, &target).await;
 
-    assert_eq!(installed, Ok(()));
+    assert!(installed.is_ok());
     assert_eq!(std::fs::read(&target).unwrap(), b"new build");
     assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o755);
     assert!(!directory.path().join("mycelium.new").exists());
@@ -56,7 +56,7 @@ async fn a_download_that_does_not_match_its_checksum_is_refused_and_the_binary_i
 
     let installed = install(&reqwest::Client::new(), &url, "v9.9.9", ASSET, &target).await;
 
-    assert!(installed.unwrap_err().contains("checksum"));
+    assert!(installed.unwrap_err().to_string().contains("checksum"));
     assert_eq!(std::fs::read(&target).unwrap(), b"old build");
     assert!(!directory.path().join("mycelium.new").exists());
 }
@@ -69,7 +69,7 @@ async fn a_release_that_is_not_published_is_reported_and_the_binary_is_kept() {
 
     let installed = install(&reqwest::Client::new(), &url, "v1.0.0", ASSET, &target).await;
 
-    assert!(installed.unwrap_err().contains("404"));
+    assert!(installed.unwrap_err().to_string().contains("404"));
     assert_eq!(std::fs::read(&target).unwrap(), b"old build");
 }
 
@@ -83,5 +83,5 @@ async fn a_directory_that_cannot_be_written_is_reported_as_a_nix_install() {
     let installed = install(&reqwest::Client::new(), &url, "v9.9.9", ASSET, &target).await;
 
     std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(installed, Err("This node was installed by Nix; update it through the flake".into()));
+    assert_eq!(installed.unwrap_err().to_string(), "This node was installed by Nix; update it through the flake");
 }

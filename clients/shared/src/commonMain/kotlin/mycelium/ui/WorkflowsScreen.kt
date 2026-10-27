@@ -21,7 +21,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,18 +28,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.put
 import mycelium.api.ModelProvider
+import mycelium.api.WorkflowControlRequest
+import mycelium.api.WorkflowPlan
+import mycelium.api.WorkflowStep
 import mycelium.state.AppState
 import mycelium.state.workflowInGroup
 import mycelium.state.Store
@@ -61,7 +52,7 @@ private data class WorkflowDraft(
     val difficulty: String = "",
     val dependsOn: Set<Int> = emptySet(),
     val gate: Boolean = false,
-    val nested: JsonObject? = null,
+    val nested: WorkflowPlan? = null,
 )
 
 private const val WorkflowsList = "workflows"
@@ -69,7 +60,6 @@ private const val WorkflowsList = "workflows"
 @Composable
 fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
-    val scope = rememberCoroutineScope()
     val group = LocalGroupFilter.current
     val workflows = state.workflows.values.filter { workflowInGroup(it, state, group) }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -79,6 +69,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var creating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val attempt = rememberAttempt { error = it }
     var title by remember { mutableStateOf("") }
     var drafts by remember { mutableStateOf(listOf(WorkflowDraft(node = state.nodes.keys.firstOrNull().orEmpty()))) }
     var rounds by remember { mutableStateOf("1") }
@@ -99,17 +90,13 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     }
 
     val control: (String, String) -> Unit = { workflowId, action ->
-        scope.launch {
-            try {
-                store.api.controlWorkflow(workflowId, buildJsonObject { put("action", action) })
-                store.refreshWorkflows()
-            } catch (failure: Exception) {
-                error = failure.message
-            }
+        attempt {
+            store.api.controlWorkflow(workflowId, WorkflowControlRequest(action))
+            store.refreshWorkflows()
         }
     }
 
-    val selectedWorkflow = workflows.firstOrNull { it["id"]?.jsonPrimitive?.content == selected }
+    val selectedWorkflow = workflows.firstOrNull { it.id == selected }
 
     Column(Modifier.fillMaxSize().background(colors.bgContent)) {
         Bar {
@@ -117,7 +104,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                 BackButton("workflows", { selected = null })
             }
 
-            BarTitle(selectedWorkflow?.get("title")?.jsonPrimitive?.content ?: "Workflows")
+            BarTitle(selectedWorkflow?.title ?: "Workflows")
             Box(Modifier.weight(1f))
             MyButton({ creating = !creating }, text = "New workflow", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
         }
@@ -206,13 +193,13 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                         }
 
                         if (draft.nested != null) {
-                            Label("Nested workflow: ${draft.nested["title"]?.jsonPrimitive?.content.orEmpty()}")
+                            Label("Nested workflow: ${draft.nested.title}")
                         }
 
                         if (workflows.isNotEmpty()) {
                             Label("Or run an existing workflow", color = colors.textMuted)
-                            for (existing in workflows.filter { it["parent_id"] == JsonNull }) {
-                                MyButton({ drafts = drafts.toMutableList().also { it[index] = draft.copy(gate = false, nested = existing["plan"]!!.jsonObject) } }, text = existing["title"]!!.jsonPrimitive.content)
+                            for (existing in workflows.filter { it.parentId == null }) {
+                                MyButton({ drafts = drafts.toMutableList().also { it[index] = draft.copy(gate = false, nested = existing.plan) } }, text = existing.title)
                             }
                         }
 
@@ -230,64 +217,50 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
 
                 MyButton({ drafts = drafts + WorkflowDraft(node = state.nodes.keys.firstOrNull().orEmpty()) }, text = "Add step", icon = MyIcon.Plus)
                 MyButton({
-                    scope.launch {
-                        try {
-                            val plan = buildJsonObject {
-                                put("title", title)
-                                put("max_rounds", rounds.toIntOrNull() ?: 0)
-                                if (stopWhen.isNotBlank()) { put("stop_when", stopWhen) }
-                                put("steps", JsonArray(drafts.mapIndexed { index, draft ->
-                                    buildJsonObject {
-                                        put("key", "step${index + 1}")
-                                        put("title", draft.title)
-                                        put("prompt", draft.prompt)
-                                        put("gate", draft.gate)
-                                        put("depends_on", JsonArray(draft.dependsOn.sorted().map { JsonPrimitive("step${it + 1}") }))
-                                        if (draft.nested != null) {
-                                            put("workflow", draft.nested)
-                                        } else if (!draft.gate) {
-                                            if (draft.chat) {
-                                                put("provider_id", draft.providerId)
-                                            } else {
-                                                put("node_id", draft.node)
-                                                put("agent", draft.agent)
-                                                put("cwd", draft.cwd)
+                    attempt {
+                        val plan = WorkflowPlan(
+                            title = title,
+                            maxRounds = rounds.toIntOrNull() ?: 0,
+                            stopWhen = stopWhen.takeIf { it.isNotBlank() },
+                            steps = drafts.mapIndexed { index, draft ->
+                                val runsAgent = draft.nested == null && !draft.gate
+                                val inWorkspace = runsAgent && !draft.chat
 
-                                                if (draft.projectId.isNotBlank()) {
-                                                    put("project_id", draft.projectId)
-                                                }
-
-                                                if (draft.branch.isNotBlank()) {
-                                                    put("branch", draft.branch)
-                                                }
-                                            }
-                                            if (draft.model.isNotBlank()) { put("model", draft.model) }
-                                            if (draft.difficulty.isNotBlank()) { put("difficulty", draft.difficulty) }
-                                        }
-                                    }
-                                }))
-                            }
-                            val workflow = store.api.createWorkflow(plan)
-                            store.refreshWorkflows()
-                            selected = workflow["id"]?.jsonPrimitive?.content
-                            creating = false
-                            error = null
-                        } catch (failure: Exception) {
-                            error = failure.message
-                        }
+                                WorkflowStep(
+                                    key = "step${index + 1}",
+                                    title = draft.title,
+                                    prompt = draft.prompt,
+                                    gate = draft.gate,
+                                    dependsOn = draft.dependsOn.sorted().map { "step${it + 1}" },
+                                    workflow = draft.nested,
+                                    providerId = draft.providerId.takeIf { runsAgent && draft.chat },
+                                    nodeId = draft.node.takeIf { inWorkspace },
+                                    agent = draft.agent.takeIf { inWorkspace },
+                                    cwd = draft.cwd.takeIf { inWorkspace },
+                                    projectId = draft.projectId.takeIf { inWorkspace && it.isNotBlank() },
+                                    branch = draft.branch.takeIf { inWorkspace && it.isNotBlank() },
+                                    model = draft.model.takeIf { runsAgent && it.isNotBlank() },
+                                    difficulty = draft.difficulty.takeIf { runsAgent && it.isNotBlank() },
+                                )
+                            },
+                        )
+                        val workflow = store.api.createWorkflow(plan)
+                        store.refreshWorkflows()
+                        selected = workflow.id
+                        creating = false
                     }
                 }, text = "Start workflow", variant = ButtonVariant.Outline)
             }
 
-            for (workflow in workflows.filter { if (selected == null) it["title"]?.jsonPrimitive?.content.orEmpty().contains(query.trim(), ignoreCase = true) else it["id"]?.jsonPrimitive?.content == selected }) {
-                val id = workflow["id"]!!.jsonPrimitive.content
-                val status = workflow["status"]!!.jsonPrimitive.content
-                val name = workflow["title"]!!.jsonPrimitive.content
+            for (workflow in workflows.filter { if (selected == null) it.title.contains(query.trim(), ignoreCase = true) else it.id == selected }) {
+                val id = workflow.id
+                val status = workflow.status
+                val name = workflow.title
                 if (selected != id) {
                     val menu = rememberRowMenuState()
 
                     Row(Modifier.rowContextMenu(menu), verticalAlignment = Alignment.CenterVertically) {
-                        MyButton({ selected = id }, text = "$name · $status · Round ${workflow["round"]}")
+                        MyButton({ selected = id }, text = "$name · $status · Round ${workflow.round}")
 
                         RowMenu(name, menu) { close ->
                             MenuItem("Open", onClick = { close(); selected = id }, leading = MyIcon.Layers)
@@ -302,10 +275,10 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                     continue
                 }
 
-                Label("$status · Round ${workflow["round"]}", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("$status · Round ${workflow.round}", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 if (status == "failed") {
-                    Label(workflow["output"]?.jsonPrimitive?.content.orEmpty())
+                    Label(workflow.output)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((action, label) in listOf(if (status == "paused") "resume" to "Resume workflow" else "pause" to "Pause workflow", "stop" to "Stop workflow")) {
@@ -313,59 +286,54 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                     }
                 }
 
-                val specs = workflow["plan"]!!.jsonObject["steps"]!!.jsonArray
-                val steps = workflow["steps"]!!.jsonArray.map { it.jsonObject }
+                val specs = workflow.plan.steps
+                val steps = workflow.steps
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 for ((heading, states) in listOf("Finished" to setOf("done"), "Needs you" to setOf("gate"), "Running" to setOf("running", "starting"), "Waiting" to setOf("waiting"), "Failed" to setOf("failed"))) {
-                    val matches = steps.filter { it["status"]!!.jsonPrimitive.content in states }
+                    val matches = steps.filter { it.status in states }
                     if (matches.isEmpty()) { continue }
                     Column(Modifier.widthIn(max = 310.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     Label(heading, style = Tokens.Type.MetaStrong)
                     for (step in matches) {
-                        val key = step["key"]!!.jsonPrimitive.content
-                        val spec = specs.first { it.jsonObject["key"]!!.jsonPrimitive.content == key }.jsonObject
+                        val key = step.key
+                        val spec = specs.first { it.key == key }
                         Column(Modifier.fillMaxWidth().background(colors.bgPanel, BlockShape).border(Tokens.Size.Hairline, colors.border, BlockShape).padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Label(spec["title"]!!.jsonPrimitive.content, style = Tokens.Type.MetaStrong)
-                            val metadata = listOfNotNull(spec["agent"]?.jsonPrimitive?.content?.let(::agentName), spec["model"]?.jsonPrimitive?.content, spec["difficulty"]?.jsonPrimitive?.content, spec["node_id"]?.jsonPrimitive?.content?.let { state.nodes[it]?.name })
+                            Label(spec.title, style = Tokens.Type.MetaStrong)
+                            val metadata = listOfNotNull(spec.agent?.let(::agentName), spec.model, spec.difficulty, spec.nodeId?.let { state.nodes[it]?.name })
 
                             if (metadata.isNotEmpty()) {
                                 Label(metadata.joinToString(" · "), style = Tokens.Type.Meta, color = colors.textMuted)
                             }
 
-                            if (step["status"]?.jsonPrimitive?.content == "gate") {
-                                spec["prompt"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { Label(it) }
+                            if (step.status == "gate") {
+                                spec.prompt.takeIf { it.isNotBlank() }?.let { Label(it) }
                             }
 
-                            spec["depends_on"]?.jsonArray?.takeIf { it.isNotEmpty() }?.let { dependencies ->
-                                val names = dependencies.map { dependency -> specs.first { it.jsonObject["key"] == dependency }.jsonObject["title"]!!.jsonPrimitive.content }
+                            spec.dependsOn.takeIf { it.isNotEmpty() }?.let { dependencies ->
+                                val names = dependencies.map { dependency -> specs.first { it.key == dependency }.title }
                                 Label("Uses ${names.joinToString()}", style = Tokens.Type.Meta, color = colors.textMuted)
                             }
-                            step["conversation_id"]?.jsonPrimitive?.content?.takeUnless { it == "null" }?.let { conversation ->
+                            step.conversationId?.let { conversation ->
                                 MyButton({ onOpenConversation(conversation) }, text = "Open conversation")
 
-                                if (step["status"]?.jsonPrimitive?.content in setOf("running", "starting")) {
-                                    MyButton({ store.act { store.api.closeSession(conversation) } }, text = "Stop", icon = MyIcon.Stop, description = "Stop ${spec["title"]!!.jsonPrimitive.content}", size = ButtonSize.Sm, muted = true)
+                                if (step.status in setOf("running", "starting")) {
+                                    MyButton({ store.act { store.api.closeSession(conversation) } }, text = "Stop", icon = MyIcon.Stop, description = "Stop ${spec.title}", size = ButtonSize.Sm, muted = true)
                                 }
                             }
-                            step["workflow_id"]?.jsonPrimitive?.content?.takeUnless { it == "null" }?.let { child -> MyButton({ selected = child }, text = "Open nested workflow") }
-                            if (step["status"]!!.jsonPrimitive.content == "gate") {
+                            step.workflowId?.let { child -> MyButton({ selected = child }, text = "Open nested workflow") }
+                            if (step.status == "gate") {
                                 WorkflowField("Decision for $key", gateDecisions["$id/$key"].orEmpty(), { value -> gateDecisions = gateDecisions + ("$id/$key" to value) }, multiline = true)
                                 MyButton({
-                                    scope.launch {
-                                        try {
-                                            store.api.controlWorkflow(id, buildJsonObject { put("action", "approve"); put("step", key); put("output", gateDecisions["$id/$key"].orEmpty()) })
-                                            store.refreshWorkflows()
-                                            gateDecisions = gateDecisions - "$id/$key"
-                                        } catch (failure: Exception) {
-                                            error = failure.message
-                                        }
+                                    attempt {
+                                        store.api.controlWorkflow(id, WorkflowControlRequest("approve", key, gateDecisions["$id/$key"].orEmpty()))
+                                        store.refreshWorkflows()
+                                        gateDecisions = gateDecisions - "$id/$key"
                                     }
                                 }, text = "Approve and continue", variant = ButtonVariant.Outline)
                             }
 
-                            val output = step["output"]?.jsonPrimitive?.content.orEmpty()
-                            if (output.isNotBlank()) {
-                                Label(output)
+                            if (step.output.isNotBlank()) {
+                                Label(step.output)
                             }
                         }
                     }

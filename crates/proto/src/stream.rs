@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::api::{ActionProposal, AssistantChange, ApiAccessRequest, Assistant, ArtifactAccessRequest, Artifact, ArtifactComment, Goal, ImportJob, InstructionProposal, Memory, MemoryBank, MessageProposal, MoveProgress, StartProposal, NodeSummary, Schedule, SshAccessRequest, Walkthrough, WalkthroughNote};
+use crate::api::{ActionProposal, AssistantChange, ApiAccessRequest, Assistant, ArtifactAccessRequest, Artifact, ArtifactComment, Goal, ImportJob, InstructionProposal, Memory, MemoryBank, MessageProposal, MoveProgress, StartProposal, NodeSummary, Schedule, SshAccessRequest, Walkthrough, WalkthroughNote, Workflow};
 use crate::link::ResourceSample;
 use crate::conversation::{Conversation, DeviceKind, DeviceState, Event, QueuedPrompt};
 
@@ -29,7 +29,7 @@ pub enum StreamMessage {
         walkthrough_id: Uuid,
         notes: Vec<WalkthroughNote>,
     },
-    Workflow { workflow: serde_json::Value },
+    Workflow { workflow: Workflow },
     Schedule(Schedule),
     Assistant(Assistant),
     AssistantActionsChanged {

@@ -432,3 +432,15 @@ fn a_fork_start_session_names_the_session_to_fork_and_a_plain_one_omits_the_flag
     assert_eq!((forked["fork"].clone(), forked["resume"].clone()), (serde_json::json!(true), serde_json::json!("s")));
     assert!(plain.get("fork").is_none());
 }
+
+#[test]
+fn a_workflow_is_sent_with_every_step_field_and_a_plan_without_rounds_runs_once() {
+    let plan: WorkflowPlan = serde_json::from_value(json!({"title": "Review", "steps": [{"key": "a", "title": "A", "gate": true}]})).unwrap();
+    let workflow = Workflow { id: id(), parent_id: None, conversation_id: None, title: "Review".into(), status: "running".into(), plan, steps: vec![WorkflowRunStep { key: "a".into(), status: "gate".into(), conversation_id: None, workflow_id: None, output: String::new() }], round: 1, output: String::new() };
+    let wire = round_trip(&workflow);
+
+    assert_eq!(wire["plan"]["max_rounds"], 1);
+    assert_eq!(wire["plan"]["steps"][0], json!({"key": "a", "title": "A", "depends_on": [], "prompt": "", "gate": true, "workflow": null, "node_id": null, "agent": null, "provider_id": null, "cwd": "", "project_id": null, "branch": null, "account": null, "model": null, "difficulty": null}));
+    assert_eq!(wire["parent_id"], Value::Null);
+    assert_eq!(round_trip(&StreamMessage::Workflow { workflow })["workflow"]["status"], "running");
+}

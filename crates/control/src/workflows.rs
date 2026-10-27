@@ -7,67 +7,12 @@ use axum::{
     extract::{Path, State},
 };
 use mycelium_proto::api::{
-    CreateChatRequest, CreateConversationRequest, PromptRequest,
+    CreateChatRequest, CreateConversationRequest, PromptRequest, Workflow, WorkflowControlRequest, WorkflowPlan, WorkflowRunStep,
 };
-use mycelium_proto::conversation::AgentId;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Plan {
-    pub title: String,
-    pub steps: Vec<Step>,
-    #[serde(default = "one")]
-    pub max_rounds: u32,
-    #[serde(default)]
-    pub stop_when: Option<String>,
-}
-
-fn one() -> u32 {
-    1
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Step {
-    pub key: String,
-    pub title: String,
-    #[serde(default)]
-    pub depends_on: Vec<String>,
-    #[serde(default)]
-    pub prompt: String,
-    #[serde(default)]
-    pub gate: bool,
-    #[serde(default)]
-    pub workflow: Option<Box<Plan>>,
-    #[serde(default)]
-    pub node_id: Option<Uuid>,
-    #[serde(default)]
-    pub agent: Option<AgentId>,
-    #[serde(default)]
-    pub provider_id: Option<Uuid>,
-    #[serde(default)]
-    pub cwd: String,
-    #[serde(default)]
-    pub project_id: Option<Uuid>,
-    #[serde(default)]
-    pub branch: Option<String>,
-    #[serde(default)]
-    pub account: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub difficulty: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RunStep {
-    pub key: String,
-    pub status: String,
-    pub conversation_id: Option<Uuid>,
-    pub workflow_id: Option<Uuid>,
-    pub output: String,
-}
+const COLUMNS: &str = "id,owner,parent_id,conversation_id,title,status,plan,steps,round,output";
 
 #[derive(sqlx::FromRow)]
 struct Row {
@@ -84,15 +29,28 @@ struct Row {
 }
 
 impl Row {
-    fn json(&self) -> Value {
-        json!({"id":self.id,"parent_id":self.parent_id,"conversation_id":self.conversation_id,"title":self.title,"status":self.status,"plan":self.plan,"steps":self.steps,"round":self.round,"output":self.output})
+    fn workflow(&self) -> ApiResult<Workflow> {
+        let plan = serde_json::from_value(self.plan.clone()).map_err(|_| ApiError::not_found("That workflow"))?;
+        let steps = serde_json::from_value(self.steps.clone()).map_err(|_| ApiError::not_found("That workflow"))?;
+
+        Ok(Workflow {
+            id: self.id,
+            parent_id: self.parent_id,
+            conversation_id: self.conversation_id,
+            title: self.title.clone(),
+            status: self.status.clone(),
+            plan,
+            steps,
+            round: self.round,
+            output: self.output.clone(),
+        })
     }
 }
 
-fn waiting(plan: &Plan) -> Vec<RunStep> {
+fn waiting(plan: &WorkflowPlan) -> Vec<WorkflowRunStep> {
     plan.steps
         .iter()
-        .map(|step| RunStep {
+        .map(|step| WorkflowRunStep {
             key: step.key.clone(),
             status: "waiting".into(),
             conversation_id: None,
@@ -102,7 +60,7 @@ fn waiting(plan: &Plan) -> Vec<RunStep> {
         .collect()
 }
 
-pub fn validate(plan: &Plan, depth: usize) -> ApiResult<()> {
+pub fn validate(plan: &WorkflowPlan, depth: usize) -> ApiResult<()> {
     if depth > 8
         || plan.title.trim().is_empty()
         || plan.steps.is_empty()
@@ -169,11 +127,13 @@ pub fn validate(plan: &Plan, depth: usize) -> ApiResult<()> {
 pub async fn create(
     State(state): State<AppState>,
     user: AuthUser,
-    Json(plan): Json<Plan>,
-) -> ApiResult<Json<Value>> {
+    Json(plan): Json<WorkflowPlan>,
+) -> ApiResult<Json<Workflow>> {
     user.require_full_access()?;
     let id = create_owned(&state, user.id, None, None, plan).await?;
-    get(State(state), user, Path(id)).await
+    let workflow = load(&state, user.id, id).await?;
+
+    Ok(Json(workflow))
 }
 
 pub async fn create_owned(
@@ -181,7 +141,7 @@ pub async fn create_owned(
     owner: Uuid,
     parent: Option<Uuid>,
     conversation: Option<Uuid>,
-    plan: Plan,
+    plan: WorkflowPlan,
 ) -> ApiResult<Uuid> {
     validate(&plan, 0)?;
     let id = Uuid::new_v4();
@@ -192,47 +152,47 @@ pub async fn create_owned(
 }
 
 async fn publish(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
-    let row = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where id=$1 and owner=$2").bind(id).bind(owner).fetch_one(&state.pool).await?;
+    let workflow = load(state, owner, id).await?;
     state.publish(
         Some(owner),
-        mycelium_proto::stream::StreamMessage::Workflow {
-            workflow: row.json(),
-        },
+        mycelium_proto::stream::StreamMessage::Workflow { workflow },
     );
     Ok(())
 }
 
-pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Value>> {
-    let rows = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where owner=$1 order by created_at desc").bind(user.id).fetch_all(&state.pool).await?;
-    Ok(Json(json!(rows.iter().map(Row::json).collect::<Vec<_>>())))
+pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Workflow>>> {
+    let rows = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from workflows where owner=$1 order by created_at desc"))).bind(user.id).fetch_all(&state.pool).await?;
+    let workflows = rows.iter().map(Row::workflow).collect::<ApiResult<Vec<_>>>()?;
+
+    Ok(Json(workflows))
+}
+
+pub async fn load(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<Workflow> {
+    let row = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from workflows where id=$1 and owner=$2"))).bind(id).bind(owner).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That workflow"))?;
+
+    row.workflow()
 }
 
 pub async fn get(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
-    let row = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where id=$1 and owner=$2").bind(id).bind(user.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That workflow"))?;
-    Ok(Json(row.json()))
-}
+) -> ApiResult<Json<Workflow>> {
+    let workflow = load(&state, user.id, id).await?;
 
-#[derive(Deserialize)]
-pub struct Control {
-    pub action: String,
-    pub step: Option<String>,
-    pub output: Option<String>,
+    Ok(Json(workflow))
 }
 
 pub async fn control(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<Uuid>,
-    Json(request): Json<Control>,
-) -> ApiResult<Json<Value>> {
+    Json(request): Json<WorkflowControlRequest>,
+) -> ApiResult<Json<Workflow>> {
     user.require_full_access()?;
     let mut tx = state.pool.begin().await?;
-    let row = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where id=$1 and owner=$2 for update").bind(id).bind(user.id).fetch_optional(&mut *tx).await?.ok_or_else(|| ApiError::not_found("That workflow"))?;
-    let mut steps: Vec<RunStep> = serde_json::from_value(row.steps.clone())
+    let row = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from workflows where id=$1 and owner=$2 for update"))).bind(id).bind(user.id).fetch_optional(&mut *tx).await?.ok_or_else(|| ApiError::not_found("That workflow"))?;
+    let mut steps: Vec<WorkflowRunStep> = serde_json::from_value(row.steps.clone())
         .map_err(|_| ApiError::not_found("That workflow"))?;
     let status = match request.action.as_str() {
         "pause" if row.status == "running" => "paused",
@@ -276,16 +236,18 @@ pub async fn control(
         tracing::warn!(%id, error = error.message(), "workflow result notification failed");
     }
 
-    get(State(state), user, Path(id)).await
+    let workflow = load(&state, user.id, id).await?;
+
+    Ok(Json(workflow))
 }
 
 async fn notify_parent(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
-    let row = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where id=$1 and owner=$2").bind(id).bind(owner).fetch_one(&state.pool).await?;
-    let Some(parent) = row.conversation_id.filter(|_| row.parent_id.is_none()) else {
+    let workflow = load(state, owner, id).await?;
+    let Some(parent) = workflow.conversation_id.filter(|_| workflow.parent_id.is_none()) else {
         return Ok(());
     };
 
-    if !matches!(row.status.as_str(), "done" | "failed" | "stopped") {
+    if !matches!(workflow.status.as_str(), "done" | "failed" | "stopped") {
         return Ok(());
     }
 
@@ -295,7 +257,7 @@ async fn notify_parent(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
         return Ok(());
     }
 
-    let claimed = sqlx::query("insert into workflow_dispatches (workflow_id, round, step_key, operation) values ($1,$2,'result','notify') on conflict do nothing").bind(id).bind(row.round).execute(&state.pool).await?;
+    let claimed = sqlx::query("insert into workflow_dispatches (workflow_id, round, step_key, operation) values ($1,$2,'result','notify') on conflict do nothing").bind(id).bind(workflow.round).execute(&state.pool).await?;
 
     if claimed.rows_affected() == 0 {
         return Ok(());
@@ -303,53 +265,41 @@ async fn notify_parent(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
 
     let text = format!(
         "Workflow {} ({id}) {}.\n\n{}",
-        row.title, row.status, row.output
+        workflow.title, workflow.status, workflow.output
     );
 
     if conversation.agent == crate::chats::CHAT_AGENT {
         chats::send_or_queue(state, owner, parent, &text).await?;
     } else {
-        let user = AuthUser {
-            id: owner,
-            email: String::new(),
-            name: String::new(),
-            session: None,
-            scopes: None,
-            expires_at: None,
-        };
-        prompts::prompt(
-            State(state.clone()),
-            user,
-            Path(parent),
-            Json(PromptRequest {
+        prompts::send(
+            state,
+            owner,
+            parent,
+            PromptRequest {
                 text,
                 ..Default::default()
-            }),
+            },
         )
         .await?;
     }
 
-    dispatched(state, id, row.round, "result", "notify", parent).await
+    dispatched(state, id, workflow.round, "result", "notify", parent).await
 }
 
 async fn stop_children(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
     let rows: Vec<(Uuid, Value)> = sqlx::query_as("with recursive children as (select id from workflows where id=$1 and owner=$2 union all select w.id from workflows w join children c on w.parent_id=c.id) update workflows set status='stopped',updated_at=now() where id in (select id from children) returning id,steps").bind(id).bind(owner).fetch_all(&state.pool).await?;
     for (workflow, value) in rows {
-        let steps: Vec<RunStep> = serde_json::from_value(value).unwrap_or_default();
+        let steps: Vec<WorkflowRunStep> = serde_json::from_value(value).unwrap_or_default();
         for step in steps
             .iter()
             .filter(|step| step.status == "running" || step.status == "starting")
         {
             if let Some(conversation) = step.conversation_id {
-                let user = AuthUser {
-                    id: owner,
-                    email: String::new(),
-                    name: String::new(),
-                    session: None,
-                    scopes: None,
-                    expires_at: None,
-                };
-                let _ = prompts::cancel(State(state.clone()), user, Path(conversation)).await;
+                let stopped = prompts::stop(state, owner, conversation).await;
+
+                if let Err(error) = stopped {
+                    tracing::warn!(%workflow, %conversation, error = error.message(), "stopping a workflow step failed");
+                }
             }
         }
         publish(state, owner, workflow).await?;
@@ -358,7 +308,7 @@ async fn stop_children(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
     Ok(())
 }
 
-fn render(prompt: &str, steps: &[RunStep], previous: &str) -> String {
+fn render(prompt: &str, steps: &[WorkflowRunStep], previous: &str) -> String {
     let mut rendered = prompt.replace("{{previous}}", previous);
     for step in steps {
         rendered = rendered.replace(&format!("{{{{{}.output}}}}", step.key), &step.output);
@@ -465,23 +415,18 @@ async fn tick(state: &AppState) -> ApiResult<()> {
 
 async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    let row = sqlx::query_as::<_, Row>("select id,owner,parent_id,conversation_id,title,status,plan,steps,round,output from workflows where id=$1 and status='running' for no key update skip locked").bind(id).fetch_optional(&mut *tx).await?;
+    let row = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from workflows where id=$1 and status='running' for no key update skip locked"))).bind(id).fetch_optional(&mut *tx).await?;
     let Some(mut row) = row else {
         return Ok(());
     };
-    let previous = row.json();
-    let plan: Plan = serde_json::from_value(row.plan.clone())
+    let previous_status = row.status.clone();
+    let previous_steps = row.steps.clone();
+    let previous_round = row.round;
+    let previous_output = row.output.clone();
+    let plan: WorkflowPlan = serde_json::from_value(row.plan.clone())
         .map_err(|_| ApiError::not_found("That workflow plan"))?;
-    let mut steps: Vec<RunStep> = serde_json::from_value(row.steps.clone())
+    let mut steps: Vec<WorkflowRunStep> = serde_json::from_value(row.steps.clone())
         .map_err(|_| ApiError::not_found("Those workflow steps"))?;
-    let user = AuthUser {
-        id: row.owner,
-        email: String::new(),
-        name: String::new(),
-        session: None,
-        scopes: None,
-        expires_at: None,
-    };
     for index in 0..steps.len() {
         if row.status != "running" {
             break;
@@ -505,21 +450,21 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
             if !ready {
                 continue;
             }
-            prompts::apply_model(state, user.id, conversation, spec.model.as_deref(), spec.difficulty.as_deref()).await?;
+            prompts::apply_model(state, row.owner, conversation, spec.model.as_deref(), spec.difficulty.as_deref()).await?;
 
             let text = render(&spec.prompt, &steps, &row.output);
             if claim(state, id, row.round, &spec.key, "prompt")
                 .await?
                 .is_none()
             {
-                prompts::prompt(
-                    State(state.clone()),
-                    user.clone(),
-                    Path(conversation),
-                    Json(PromptRequest {
+                prompts::send(
+                    state,
+                    row.owner,
+                    conversation,
+                    PromptRequest {
                         text,
                         ..Default::default()
-                    }),
+                    },
                 )
                 .await?;
                 dispatched(state, id, row.round, &spec.key, "prompt", conversation).await?;
@@ -593,7 +538,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                 None => {
                     let conversation = chats::start(
                         state,
-                        &user,
+                        row.owner,
                         CreateChatRequest {
                             provider_id: provider,
                             model: spec.model.clone(),
@@ -623,7 +568,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                 None => {
                     let conversation = conversations::start(
                         state,
-                        &user,
+                        row.owner,
                         CreateConversationRequest {
                             node_id,
                             agent,
@@ -667,10 +612,10 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
         }
     }
 
-    if previous["status"] == json!(row.status)
-        && previous["steps"] == json!(steps)
-        && previous["round"] == json!(row.round)
-        && previous["output"] == json!(row.output)
+    if previous_status == row.status
+        && previous_steps == json!(steps)
+        && previous_round == row.round
+        && previous_output == row.output
     {
         tx.commit().await?;
         return Ok(());
@@ -703,7 +648,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn plan(steps: Value) -> Plan {
+    fn plan(steps: Value) -> WorkflowPlan {
         serde_json::from_value(json!({"title":"Review","steps":steps})).unwrap()
     }
     #[test]
@@ -720,7 +665,7 @@ mod tests {
     }
     #[test]
     fn outputs_and_previous_round_are_passed_to_prompts() {
-        let step = RunStep {
+        let step = WorkflowRunStep {
             key: "build".into(),
             status: "done".into(),
             conversation_id: None,

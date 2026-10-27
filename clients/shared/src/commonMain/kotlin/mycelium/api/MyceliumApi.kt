@@ -102,11 +102,11 @@ class MyceliumApi(
     private suspend fun call(path: String, block: suspend (String) -> HttpResponse): HttpResponse =
         block("$root/api/v1$path").ensureSuccess()
 
-    suspend fun workflows(): List<JsonObject> = call("/workflows") { client.get(it) { authorise() } }.body()
+    suspend fun workflows(): List<Workflow> = call("/workflows") { client.get(it) { authorise() } }.body()
 
-    suspend fun createWorkflow(plan: JsonObject): JsonObject = call("/workflows") { client.post(it) { authorise(); json(plan) } }.body()
+    suspend fun createWorkflow(plan: WorkflowPlan): Workflow = call("/workflows") { client.post(it) { authorise(); json(plan) } }.body()
 
-    suspend fun controlWorkflow(id: String, action: JsonObject): JsonObject = call("/workflows/$id/control") { client.post(it) { authorise(); json(action) } }.body()
+    suspend fun controlWorkflow(id: String, request: WorkflowControlRequest): Workflow = call("/workflows/$id/control") { client.post(it) { authorise(); json(request) } }.body()
 
     suspend fun me(): Me = call("/me") { client.get(it) { authorise() } }.body()
 
