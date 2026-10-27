@@ -232,9 +232,12 @@ impl NodeLink {
     }
 
     pub async fn expect_start_session(&mut self) -> Uuid {
-        match self.next().await {
-            ControlToNode::StartSession { conversation_id, .. } => conversation_id,
-            other => panic!("expected start_session, got {other:?}"),
+        loop {
+            match self.next().await {
+                ControlToNode::StartSession { conversation_id, .. } => return conversation_id,
+                ControlToNode::Instructions { .. } => {}
+                other => panic!("expected start_session, got {other:?}"),
+            }
         }
     }
 
@@ -318,6 +321,8 @@ impl Server {
             device_code_lifetime: mycelium_control::DEVICE_CODE_LIFETIME,
             release_url: "http://127.0.0.1:1/latest".into(),
             npm_registry_url: "http://127.0.0.1:1".into(),
+            nyt_games_url: "http://127.0.0.1:1".into(),
+            exchange_rates_url: "http://127.0.0.1:1".into(),
             releases_url: "http://127.0.0.1:1".into(),
             version_check_interval: mycelium_control::VERSION_CHECK_INTERVAL,
             scheduler_tick: mycelium_control::SCHEDULER_TICK,
