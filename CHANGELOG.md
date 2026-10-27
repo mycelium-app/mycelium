@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.13.0
+
+Every screen in this release was designed in the canonical design artefact first. The code had a whole-codebase refactor for cohesion before the features landed, and the tests now check what the app does rather than its wording or layout.
+
+- On a narrow window the left sidebar hides behind a menu button and opens over the chat; narrower still, an open side panel takes over the chat with Back to conversation. Your saved widths never change.
+- Starting a break covers the app with a break screen and the time left. Running work carries on, notifications wait, and ending a break early asks first.
+- When Mycelium itself is closed the sidebar shows no conversations or chats at all, and Close now takes a group out of every list at once.
+- Workflow card actions sit at the right end of the header, and subagents are listed newest first.
+- Settings has an Agents section: the default permission mode for Claude Code and Codex and for each account, the usage-limit choice, and your Any model list.
+- Account menus offer Claude Code, any account; Codex, any account; and Any model. Mycelium starts on the one with the most usage left and moves the conversation when it hits a limit, with a line in the thread saying why.
+- Each account can carry the price you actually pay, and Usage history uses it.
+- A goal set on a conversation always reaches the agent, now or when its turn ends, and the goal bar says when it was sent. A goal stopped by a usage limit is held, not ended, and carries on when the limit resets without counting the held time.
+- Wordle and Connections can be played in Mycelium itself. enclose.horse joins the puzzles, and every puzzle records its result and score with a streak and a calendar of past days.
+- New integrations: Discord, FreeAgent, Actual Budget and Paperless-ngx.
+- Local builds are lighter: one test binary per crate, the mold linker, pruning after test runs and Gradle's configuration cache.
+
 ## v0.12.1
 
 v0.12.0 was tagged but never published: its Android and web builds failed. v0.12.1 is that release with both building.
