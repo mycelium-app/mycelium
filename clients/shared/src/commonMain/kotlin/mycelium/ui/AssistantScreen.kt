@@ -129,8 +129,7 @@ private fun AssistantNotices(store: Store, state: AppState, assistant: Assistant
 @Composable
 private fun WaitingSecret(store: Store, assistant: Assistant, name: String, description: String?) {
     var setting by remember(name) { mutableStateOf(false) }
-    var failure by remember(name) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(name)
 
     Column(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S4, vertical = Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
@@ -141,10 +140,10 @@ private fun WaitingSecret(store: Store, assistant: Assistant, name: String, desc
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (setting) {
-            SecretValueForm(name, onSave = { value -> attempt { store.api.putAssistantSecret(assistant.id, name, PutAssistantSecretRequest(value = value)); setting = false } }, onCancel = { setting = false })
+            SecretValueForm(name, onSave = { value -> runner { store.api.putAssistantSecret(assistant.id, name, PutAssistantSecretRequest(value = value)); setting = false } }, onCancel = { setting = false })
         }
     }
 

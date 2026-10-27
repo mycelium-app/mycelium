@@ -54,15 +54,14 @@ enum class AssistantSection(val label: String, val icon: MyIcon) {
 
 @Composable
 fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, startOn: AssistantSection = AssistantSection.Identity, onDone: () -> Unit, onBack: () -> Unit) {
-    var failure by remember { mutableStateOf<String?>(null) }
     var loaded by remember(assistantId) { mutableStateOf<Assistant?>(null) }
     var section by remember(assistantId) { mutableStateOf(startOn) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistantId)
     val touch = LocalTouch.current
 
     LaunchedEffect(assistantId) {
         store.load { store.refreshGroups() }
-        attempt { loaded = store.api.assistant(assistantId) }
+        runner { loaded = store.api.assistant(assistantId) }
     }
 
     val current = loaded
@@ -78,7 +77,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, modifier = Modifier.padding(Tokens.Space.S3)) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }, modifier = Modifier.padding(Tokens.Space.S3)) }
 
         if (touch) {
             TabRow(AssistantSection.entries.map { it.label }, section.label, { picked -> section = AssistantSection.entries.first { it.label == picked } }, "Assistant settings sections", Modifier.padding(horizontal = Tokens.Space.S3))
@@ -145,9 +144,8 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     var description by remember(assistant.id) { mutableStateOf(assistant.description.orEmpty()) }
     var group by remember(assistant.id) { mutableStateOf(assistant.groupId ?: NoGroup) }
     var nameError by remember(assistant.id) { mutableStateOf<String?>(null) }
-    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
     var confirmingArchive by remember(assistant.id) { mutableStateOf(false) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistant.id)
     val builtIn = assistant.builtinKey != null
     val groupName = state.groups[group]?.name
     val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
@@ -160,7 +158,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (builtIn) {
             Label("${assistant.name} is built in. It cannot be renamed or archived. Pause its schedules instead.", color = colors.textMuted)
@@ -187,7 +185,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
                     return@SectionActions
                 }
 
-                attempt {
+                runner {
                     val chosen = group.takeUnless { it == NoGroup }
 
                     onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null)))
@@ -213,7 +211,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     if (confirmingArchive) {
         ConfirmDialog("Archive ${assistant.name}?", "It keeps its thread, files and secrets, and stops waking for schedules. You can restore it from Assistants.", "Archive assistant", onDismiss = { confirmingArchive = false }, onConfirm = {
             confirmingArchive = false
-            attempt {
+            runner {
                 store.patchAssistant(assistant, PatchAssistantRequest(archived = true))
                 onArchived()
             }
@@ -224,9 +222,8 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 @Composable
 private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (Assistant) -> Unit) {
     val colors = MyTheme.colors
-    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
     var editorKey by remember(assistant.id) { mutableStateOf(0) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistant.id)
 
     LaunchedEffect(assistant.id) {
         store.load { store.refreshInstructionProposals() }
@@ -235,14 +232,14 @@ private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
         Label("Kept in the assistant's storage as AGENTS.md and added after the global and group instructions.", style = Tokens.Type.Meta, color = colors.textMuted)
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         key(editorKey, assistant.instructions) {
             InstructionsEditor(
                 layer = InstructionLayer("assistant:${assistant.id}", assistant.name, text = assistant.instructions.orEmpty()),
                 file = "AGENTS.md",
                 saveLabel = "Save",
-                onSave = { text -> attempt { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(instructions = text))) } },
+                onSave = { text -> runner { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(instructions = text))) } },
                 actions = { MyButton({ editorKey += 1 }, text = "Cancel", muted = true) },
             )
         }
@@ -260,15 +257,14 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
     var chatFirst by remember(assistant.id) { mutableStateOf(assistant.preferences.chatFirst) }
     var fallBackOn by remember(assistant.id) { mutableStateOf(assistant.preferences.fallBackOn) }
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
-    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistant.id)
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Models, in order of preference", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
@@ -333,7 +329,7 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
         }
 
         SectionActions(
-            onSave = { attempt { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(preferences = assistant.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))) } },
+            onSave = { runner { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(preferences = assistant.preferences.copy(models = models, nodes = nodes, chatFirst = chatFirst, fallBackOn = fallBackOn)))) } },
             onCancel = {
                 models = assistant.preferences.models
                 nodes = assistant.preferences.nodes
@@ -400,23 +396,22 @@ private const val InstructionsFile = "AGENTS.md"
 private fun StorageSection(store: Store, assistantId: String) {
     val colors = MyTheme.colors
     var files by remember(assistantId) { mutableStateOf(emptyList<AssistantFile>()) }
-    var failure by remember(assistantId) { mutableStateOf<String?>(null) }
     var editing by remember(assistantId) { mutableStateOf<Pair<String, String>?>(null) }
     var newPath by remember(assistantId) { mutableStateOf("") }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistantId)
 
     suspend fun reload() {
         files = store.api.assistantFiles(assistantId).filter { it.path != InstructionsFile }
     }
 
     LaunchedEffect(assistantId) {
-        attempt { reload() }
+        runner { reload() }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Label("Storage", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
         Label("Files this assistant keeps between sessions. It reads and writes them itself.", style = Tokens.Type.Meta, color = colors.textMuted)
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (files.isNotEmpty()) {
             val updated = files.map { ago(it.updatedAt) }
@@ -440,8 +435,8 @@ private fun StorageSection(store: Store, assistantId: String) {
                         3 -> TableCell.Text(if (file.backedUp) "Yes" else "No", color = colors.textMuted)
                         else -> TableCell.Slot {
                             RowMenu(file.path) { close ->
-                                MenuItem("Edit", onClick = { close(); attempt { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
-                                MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantFile(assistantId, file.path); reload() } }, leading = MyIcon.Close)
+                                MenuItem("Edit", onClick = { close(); runner { editing = file.path to store.api.assistantFile(assistantId, file.path) } }, leading = MyIcon.Pencil)
+                                MenuItem("Delete", onClick = { close(); runner { store.api.deleteAssistantFile(assistantId, file.path); reload() } }, leading = MyIcon.Close)
                             }
                         }
                     }
@@ -454,7 +449,7 @@ private fun StorageSection(store: Store, assistantId: String) {
                 layer = InstructionLayer(path, path, text = text),
                 file = path,
                 saveLabel = "Save file",
-                onSave = { updated -> attempt { store.api.saveAssistantFile(assistantId, path, updated); editing = null; reload() } },
+                onSave = { updated -> runner { store.api.saveAssistantFile(assistantId, path, updated); editing = null; reload() } },
                 actions = { MyButton({ editing = null }, text = "Cancel", muted = true) },
                 editLabel = "Edit $path",
             )
@@ -465,9 +460,9 @@ private fun StorageSection(store: Store, assistantId: String) {
             MyButton(
                 {
                     if (newPath.isBlank()) {
-                        failure = "Enter the path of the new file, for example notes/today.md."
+                        runner.failure = "Enter the path of the new file, for example notes/today.md."
                     } else {
-                        failure = null
+                        runner.failure = null
                         editing = newPath.trim() to ""
                         newPath = ""
                     }
@@ -484,24 +479,23 @@ private fun StorageSection(store: Store, assistantId: String) {
 private fun SecretsSection(store: Store, assistantId: String) {
     val colors = MyTheme.colors
     var secrets by remember(assistantId) { mutableStateOf(emptyList<AssistantSecret>()) }
-    var failure by remember(assistantId) { mutableStateOf<String?>(null) }
     var setting by remember(assistantId) { mutableStateOf<String?>(null) }
     var newName by remember(assistantId) { mutableStateOf("") }
     var newDescription by remember(assistantId) { mutableStateOf("") }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistantId)
 
     suspend fun reload() {
         secrets = store.api.assistantSecrets(assistantId)
     }
 
     LaunchedEffect(assistantId) {
-        attempt { reload() }
+        runner { reload() }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Label("Secrets", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
         Label("Reach working folder sessions as environment variables when they start. Values are never shown again.", style = Tokens.Type.Meta, color = colors.textMuted)
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (secrets.isNotEmpty()) {
             Table(
@@ -524,7 +518,7 @@ private fun SecretsSection(store: Store, assistantId: String) {
                         else -> TableCell.Slot {
                             RowMenu(secret.name) { close ->
                                 MenuItem("Set value", onClick = { close(); setting = secret.name }, leading = MyIcon.Pencil)
-                                MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
+                                MenuItem("Delete", onClick = { close(); runner { store.api.deleteAssistantSecret(assistantId, secret.name); reload() } }, leading = MyIcon.Close)
                             }
                         }
                     }
@@ -533,7 +527,7 @@ private fun SecretsSection(store: Store, assistantId: String) {
         }
 
         setting?.let { name ->
-            SecretValueForm(name, onSave = { value -> attempt { store.api.putAssistantSecret(assistantId, name, PutAssistantSecretRequest(value = value)); setting = null; reload() } }, onCancel = { setting = null })
+            SecretValueForm(name, onSave = { value -> runner { store.api.putAssistantSecret(assistantId, name, PutAssistantSecretRequest(value = value)); setting = null; reload() } }, onCancel = { setting = null })
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Bottom) {
@@ -541,7 +535,7 @@ private fun SecretsSection(store: Store, assistantId: String) {
             TextInput(newDescription, { newDescription = it }, label = "What it is for", placeholder = "Pushes to the repository", modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
             MyButton(
                 {
-                    attempt {
+                    runner {
                         store.api.putAssistantSecret(assistantId, newName.trim(), PutAssistantSecretRequest(description = newDescription.ifBlank { null }))
                         setting = newName.trim()
                         newName = ""
@@ -563,27 +557,26 @@ private fun BackupSection(store: Store, state: AppState, assistant: Assistant) {
     val backup = state.assistants[assistant.id]?.backup ?: assistant.backup
     var forge by remember(assistant.id) { mutableStateOf<String?>(null) }
     var repository by remember(assistant.id) { mutableStateOf("") }
-    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistant.id)
 
     var forges by remember(assistant.id) { mutableStateOf(emptyList<mycelium.api.Forge>()) }
 
     LaunchedEffect(assistant.id) {
-        attempt { forges = store.api.forges() }
+        runner { forges = store.api.forges() }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Label("Backup", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
         Label("Commits changes to a repository after each turn. Files matched by the .gitignore in storage stay out.", style = Tokens.Type.Meta, color = colors.textMuted)
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (backup != null) {
             Label(backup.repository, style = Tokens.Type.Code)
             Label(backup.error ?: backup.lastAt?.let { "Last backed up ${ago(it)}" } ?: "Not backed up yet", color = if (backup.error != null) colors.statusFailed else colors.textMuted)
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton({ attempt { store.api.pullAssistantBackup(assistant.id) } }, text = "Pull from repository", variant = ButtonVariant.Outline)
-                MyButton({ attempt { store.api.clearAssistantBackup(assistant.id) } }, text = "Stop backing up", variant = ButtonVariant.Outline)
+                MyButton({ runner { store.api.pullAssistantBackup(assistant.id) } }, text = "Pull from repository", variant = ButtonVariant.Outline)
+                MyButton({ runner { store.api.clearAssistantBackup(assistant.id) } }, text = "Stop backing up", variant = ButtonVariant.Outline)
             }
         } else {
             if (forges.isEmpty()) {
@@ -596,7 +589,7 @@ private fun BackupSection(store: Store, state: AppState, assistant: Assistant) {
                         {
                             val chosen = forge ?: forges.first().id
 
-                            attempt { store.api.setAssistantBackup(assistant.id, SetAssistantBackupRequest(chosen, repository.trim())) }
+                            runner { store.api.setAssistantBackup(assistant.id, SetAssistantBackupRequest(chosen, repository.trim())) }
                         },
                         text = "Back up to this repository",
                         variant = ButtonVariant.Outline,

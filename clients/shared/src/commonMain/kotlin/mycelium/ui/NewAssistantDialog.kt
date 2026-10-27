@@ -37,8 +37,7 @@ fun NewAssistantDialog(store: Store, state: AppState, onDismiss: () -> Unit, onC
     var group by remember { mutableStateOf(NoGroup) }
     var instructions by remember { mutableStateOf("") }
     var nameError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
     val source = remember { MutableInteractionSource() }
     val focused = source.collectIsFocusedAsState()
     val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
@@ -54,7 +53,7 @@ fun NewAssistantDialog(store: Store, state: AppState, onDismiss: () -> Unit, onC
             return
         }
 
-        attempt {
+        runner {
             val created = store.createAssistant(CreateAssistantRequest(name.trim(), null, group.takeUnless { it == NoGroup }, instructions.ifBlank { null }))
 
             onCreated(created)
@@ -95,7 +94,7 @@ fun NewAssistantDialog(store: Store, state: AppState, onDismiss: () -> Unit, onC
 
         Label("It starts on your default model, on any node that is online. Set models, nodes, storage, secrets, actions and schedules in its settings afterwards.", style = Tokens.Type.Meta, color = colors.textMuted)
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

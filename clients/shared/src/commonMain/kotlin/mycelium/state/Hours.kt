@@ -88,7 +88,7 @@ fun hoursViewOf(settings: WellnessSettings, groups: Collection<Group>, now: Inst
     val appOpen = isOpen(app, local)
     val appChange = minutesUntilChange(listOf(app), local)?.minutes?.let { now + it }
     val statuses = groups.associate { group ->
-        val openedUntil = group.openedUntil?.let(Instant::parse)?.takeIf { it > now }
+        val openedUntil = group.openedUntil?.let(::instantOrNull)?.takeIf { it > now }
         val together = listOf(app, group.hours)
         val byHours = isOpen(app, local) && isOpen(group.hours, local)
         val open = openedUntil != null || byHours

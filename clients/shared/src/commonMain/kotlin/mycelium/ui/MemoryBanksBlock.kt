@@ -44,8 +44,7 @@ fun MemoryBanksBlock(store: Store) {
     val groups = live.groups.values.sortedBy { it.name.lowercase() }
     var drafting by remember { mutableStateOf<BankDraft?>(null) }
     var deleting by remember { mutableStateOf<MemoryBank?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     LaunchedEffect(Unit) {
         store.act {
@@ -57,7 +56,7 @@ fun MemoryBanksBlock(store: Store) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Label("Banks", Modifier.weight(1f).semantics { heading() }, Tokens.Type.UiStrong)
-            MyButton({ failure = null; drafting = BankDraft(null) }, text = "New bank", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+            MyButton({ runner.failure = null; drafting = BankDraft(null) }, text = "New bank", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
         if (banks.isNotEmpty()) {
@@ -78,8 +77,8 @@ fun MemoryBanksBlock(store: Store) {
                         2 -> TableCell.Text(if (bank.groupIds.isEmpty()) "Every group" else bank.groupIds.mapNotNull { live.groups[it]?.name }.joinToString(", "), color = colors.textMuted)
                         else -> TableCell.Slot {
                             RowMenu("${bank.name} bank") { close ->
-                                MenuItem("Edit", onClick = { close(); failure = null; drafting = BankDraft(bank) })
-                                MenuItem("Delete", onClick = { close(); failure = null; deleting = bank })
+                                MenuItem("Edit", onClick = { close(); runner.failure = null; drafting = BankDraft(bank) })
+                                MenuItem("Delete", onClick = { close(); runner.failure = null; deleting = bank })
                             }
                         }
                     }
@@ -93,7 +92,7 @@ fun MemoryBanksBlock(store: Store) {
             fun save() {
                 val request = SaveMemoryBankRequest(draft.name.trim(), draft.modelClass, draft.groupIds.toList())
 
-                attempt {
+                runner {
                     val saved = draft.editing?.let { store.api.updateMemoryBank(it.id, request) } ?: store.api.createMemoryBank(request)
                     store.receive(mycelium.api.StreamMessage.MemoryBankChanged(saved))
                     drafting = null
@@ -101,7 +100,7 @@ fun MemoryBanksBlock(store: Store) {
             }
 
             Label(if (draft.editing == null) "New bank" else "Edit bank", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+            runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
             TextInput(draft.name, { draft.name = it }, label = "Name", onSubmit = ::save)
             OptionMenu("Models", MemoryModelClasses, draft.modelClass, { draft.modelClass = it })
 
@@ -130,10 +129,10 @@ fun MemoryBanksBlock(store: Store) {
     deleting?.let { bank ->
         Dialog(onDismiss = { deleting = null }) {
             Label("Delete the ${bank.name} bank?", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+            runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({
-                    attempt {
+                    runner {
                         store.api.deleteMemoryBank(bank.id)
                         store.receive(mycelium.api.StreamMessage.MemoryBankRemoved(bank.id))
                         deleting = null

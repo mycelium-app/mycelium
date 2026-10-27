@@ -125,23 +125,22 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
     var model by remember { mutableStateOf(draft.model) }
     var uses by remember { mutableStateOf(draft.uses) }
     var tested by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     fun test() {
         tested = null
 
-        attempt {
+        runner {
             val found = store.api.testDecisionProvider(TestDecisionProviderRequest(address.trim(), key.trim().ifEmpty { null })).models
             models = found
             model = model.takeIf { it in found } ?: found.firstOrNull().orEmpty()
             tested = "Connected. The server offers ${found.size} ${if (found.size == 1) "model" else "models"}."
-            failure = null
+            runner.failure = null
         }
     }
 
     fun save() {
-        attempt {
+        runner {
             val saved = if (draft.id == null) {
                 store.api.createDecisionProvider(CreateDecisionProviderRequest(name.trim(), address.trim(), key.trim().ifEmpty { null }, model, DecisionUses.map { it.id }.filter { it in uses }))
             } else {
@@ -180,7 +179,7 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

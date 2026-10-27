@@ -53,8 +53,7 @@ fun ModelProvidersSettings(store: Store) {
     var name by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     LaunchedEffect(Unit) {
         load()
@@ -62,12 +61,12 @@ fun ModelProvidersSettings(store: Store) {
 
     fun add() {
         if (kind == "openrouter" && apiKey.isBlank()) {
-            failure = "Enter your OpenRouter API key."
+            runner.failure = "Enter your OpenRouter API key."
 
             return
         }
 
-        attempt {
+        runner {
             val request = when (kind) {
                 "openrouter" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "OpenRouter" }, OpenRouterUrl, apiKey.trim())
                 "litellm" -> CreateModelProviderRequest("openai_compatible", name.trim().ifEmpty { "LiteLLM" }, baseUrl.trim(), apiKey.trim().ifEmpty { null })
@@ -226,7 +225,7 @@ fun ModelProvidersSettings(store: Store) {
                     else -> "API key"
                 }, mono = true, masked = true, onSubmit = ::add)
 
-                failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+                runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton(::add, text = "Add provider", variant = ButtonVariant.Outline)
@@ -236,7 +235,7 @@ fun ModelProvidersSettings(store: Store) {
                             name = ""
                             baseUrl = ""
                             apiKey = ""
-                            failure = null
+                            runner.failure = null
                         },
                         text = "Cancel",
                         muted = true,

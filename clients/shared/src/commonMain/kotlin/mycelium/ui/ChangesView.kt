@@ -201,6 +201,10 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
     }
 
     fun stage(path: String, staging: Boolean) {
+        if (runner.running) {
+            return
+        }
+
         runner {
             if (staging) store.api.gitStage(id, listOf(path)) else store.api.gitUnstage(id, listOf(path))
 
@@ -254,17 +258,21 @@ fun ChangesTabView(store: Store, conversation: Conversation, tab: DiffTab, modif
                 onStage = { stage(it, true) },
                 onUnstage = { stage(it, false) },
                 onEdit = { path ->
-                    runner {
-                        val loaded = store.api.gitFile(id, path)
-                        original = loaded.content
-                        draft = loaded.content
-                        editing = path
+                    if (!runner.running) {
+                        runner {
+                            val loaded = store.api.gitFile(id, path)
+                            original = loaded.content
+                            draft = loaded.content
+                            editing = path
+                        }
                     }
                 },
                 onHunk = { section, row, action ->
-                    runner {
-                        store.api.gitHunk(id, section.path, row, section.fingerprint, action)
-                        layout = store.api.gitChangesLayout(id)
+                    if (!runner.running) {
+                        runner {
+                            store.api.gitHunk(id, section.path, row, section.fingerprint, action)
+                            layout = store.api.gitChangesLayout(id)
+                        }
                     }
                 },
                 reveal = tab.reveal,

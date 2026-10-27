@@ -133,10 +133,9 @@ fun SetupFlow(
     var failedStep by remember { mutableStateOf(0) }
     var tested by remember { mutableStateOf(false) }
     var created by remember { mutableStateOf<ChatToolServer?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
     var confirmingClose by remember { mutableStateOf(false) }
     var attempts by remember { mutableStateOf(0) }
-    val attempting = rememberAttempt { failure = it }
+    val runner = rememberAction()
     val typed = address.isNotBlank() && knownAddress == null || token.isNotBlank() || name.isNotBlank() || username.isNotBlank() || apiKey.isNotBlank() || secret.isNotBlank() || imapHost.isNotBlank() || smtpHost.isNotBlank()
     val title = steps[step]
 
@@ -220,7 +219,7 @@ fun SetupFlow(
                 }
 
                 if (problem != null) {
-                    failure = problem
+                    runner.failure = problem
 
                     return
                 }
@@ -237,7 +236,7 @@ fun SetupFlow(
                 }
 
                 if (problem != null) {
-                    failure = problem
+                    runner.failure = problem
 
                     return
                 }
@@ -252,7 +251,7 @@ fun SetupFlow(
     }
 
     fun next() {
-        failure = null
+        runner.failure = null
 
         when {
             form -> nextFormStep()
@@ -265,7 +264,7 @@ fun SetupFlow(
 
             caldav && step == 0 -> {
                 if (!address.trim().startsWith("http")) {
-                    failure = "Enter the server's address, starting with http:// or https://, for example https://cal.example.com."
+                    runner.failure = "Enter the server's address, starting with http:// or https://, for example https://cal.example.com."
 
                     return
                 }
@@ -276,9 +275,9 @@ fun SetupFlow(
 
             caldav && step == 1 -> {
                 when {
-                    username.isBlank() -> failure = "Enter your calendar username."
-                    secret.isBlank() -> failure = "Enter an app password for your calendar account."
-                    expiry == CustomExpiry && chosenExpiry() == null -> failure = "Enter the expiry date as year-month-day, for example 2027-01-24."
+                    username.isBlank() -> runner.failure = "Enter your calendar username."
+                    secret.isBlank() -> runner.failure = "Enter an app password for your calendar account."
+                    expiry == CustomExpiry && chosenExpiry() == null -> runner.failure = "Enter the expiry date as year-month-day, for example 2027-01-24."
                     else -> {
                         testState = null
                         step = 2
@@ -288,11 +287,11 @@ fun SetupFlow(
 
             caldav && step == 2 -> step = 3
 
-            mcp && step == 0 -> attempting {
+            mcp && step == 0 -> runner {
                 if (!address.trim().startsWith("http")) {
-                    failure = "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp."
+                    runner.failure = "Enter the server's address, starting with http:// or https://, for example https://example.com/mcp."
 
-                    return@attempting
+                    return@runner
                 }
 
                 oauthOffered = store.api.probeChatToolServer(ProbeChatToolServerRequest(address.trim())).oauth
@@ -301,7 +300,7 @@ fun SetupFlow(
                 step = 1
             }
 
-            mcp && step == 1 && method == OAuth -> attempting {
+            mcp && step == 1 && method == OAuth -> runner {
                 if (nameFailure() != null || name.isBlank()) {
                     name = uniqueName(defaultIntegrationName(address, product))
                 }
@@ -317,7 +316,7 @@ fun SetupFlow(
                 }
 
                 if (expiry == CustomExpiry && chosenExpiry() == null) {
-                    failure = "Enter the expiry date as year-month-day, for example 2027-01-24."
+                    runner.failure = "Enter the expiry date as year-month-day, for example 2027-01-24."
 
                     return
                 }
@@ -331,13 +330,13 @@ fun SetupFlow(
     }
 
     fun back() {
-        failure = null
+        runner.failure = null
         testState = null
         step = (step - 1).coerceAtLeast(if (knownAddress != null) 1 else 0)
     }
 
     fun backTo(target: Int) {
-        failure = null
+        runner.failure = null
         testState = null
         step = target.coerceAtLeast(if (knownAddress != null) 1 else 0)
     }
@@ -346,12 +345,12 @@ fun SetupFlow(
         val problem = nameFailure()
 
         if (problem != null) {
-            failure = problem
+            runner.failure = problem
 
             return
         }
 
-        attempting {
+        runner {
             val credential = if (caldav) secret else token
             val request = if (form) formRequest() else CreateChatToolServerRequest(name.trim(), address.trim(), credential.trim().ifEmpty { null }, kind = kind.takeIf { it != "mcp" }, account = username.trim().takeIf { caldav }, tokenExpiresAt = expiresAt())
             val added = store.api.createChatToolServer(request)
@@ -563,7 +562,7 @@ fun SetupFlow(
             }
 
             "Name" -> {
-                TextInput(name, { name = it }, label = "Name", error = failure, onSubmit = ::connect)
+                TextInput(name, { name = it }, label = "Name", error = runner.failure, onSubmit = ::connect)
                 Label("Agents see its tools as ${integrationSlug(name).ifEmpty { "name" }}__tool_name. The name must be unique.", style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
@@ -578,7 +577,7 @@ fun SetupFlow(
         }
 
         if (title != "Name") {
-            failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+            runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
         }
 
         val running = title == "Test" && testState !is TestState.Passed

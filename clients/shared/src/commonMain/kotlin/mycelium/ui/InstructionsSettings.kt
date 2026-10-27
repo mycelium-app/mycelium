@@ -108,7 +108,6 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
     var document by remember { mutableStateOf<Instructions?>(null) }
     var forges by remember { mutableStateOf<List<Forge>>(emptyList()) }
     var extensions by remember { mutableStateOf<Extensions?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
     var choosingSource by remember { mutableStateOf(false) }
     var sourceForge by remember { mutableStateOf<String?>(null) }
     var sourceRepository by remember { mutableStateOf("") }
@@ -119,7 +118,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
     val layer = layers.firstOrNull { it.layer == GlobalLayer }
     val source = document?.source
 
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     val load = {
         store.load {
@@ -136,7 +135,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         Label("Instructions", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (layer != null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -190,9 +189,9 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                                     val forgeId = sourceForge
 
                                     if (forgeId == null) {
-                                        failure = "Choose the forge the repository is on."
+                                        runner.failure = "Choose the forge the repository is on."
                                     } else {
-                                        attempt {
+                                        runner {
                                             document = store.api.setInstructionSource(SetInstructionSourceRequest(forgeId, sourceRepository, sourcePath.ifBlank { null }))
                                             document = store.api.pullInstructions()
                                             choosingSource = false
@@ -204,7 +203,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                             )
 
                             if (source != null) {
-                                MyButton({ attempt { store.api.clearInstructionSource(); document = store.api.instructions(); choosingSource = false } }, text = "Disconnect", muted = true)
+                                MyButton({ runner { store.api.clearInstructionSource(); document = store.api.instructions(); choosingSource = false } }, text = "Disconnect", muted = true)
                             }
 
                             MyButton({ choosingSource = false }, text = "Cancel", muted = true)
@@ -219,10 +218,10 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                 layer = layer,
                 file = layerFile(layer, source?.repository),
                 saveLabel = if (source != null) "Save and commit" else "Save",
-                onSave = { text -> attempt { store.api.saveInstructions(layer.layer, text); document = store.api.instructions() } },
+                onSave = { text -> runner { store.api.saveInstructions(layer.layer, text); document = store.api.instructions() } },
                 actions = {
                     if (source != null) {
-                        MyButton({ attempt { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
+                        MyButton({ runner { document = store.api.pullInstructions() } }, text = "Pull", muted = true)
                     }
                 },
             )
@@ -236,13 +235,13 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                 Label("Built-in additions to the instructions of conversations. A session picks up a change before its next message.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 ExtensionSwitch("Generated UI", "Teaches agents to answer with tables, charts and buttons you can press. Added to Claude Code and Codex sessions.", held.generatedUi) {
-                    attempt { extensions = store.api.saveExtensions(held.copy(generatedUi = !held.generatedUi)) }
+                    runner { extensions = store.api.saveExtensions(held.copy(generatedUi = !held.generatedUi)) }
                 }
                 ExtensionSwitch("Rich Markdown", "Tells agents which Markdown Mycelium renders: task lists, callouts, footnotes, highlighted code. Added to Claude Code and Codex sessions and to chats.", held.richMarkdown) {
-                    attempt { extensions = store.api.saveExtensions(held.copy(richMarkdown = !held.richMarkdown)) }
+                    runner { extensions = store.api.saveExtensions(held.copy(richMarkdown = !held.richMarkdown)) }
                 }
                 ExtensionSwitch("Mycelium tools", "Tells agents they run inside Mycelium and when to use its recall, remember, walkthrough, propose_task and ask_question tools. Added to Claude Code and Codex sessions.", held.myceliumTools) {
-                    attempt { extensions = store.api.saveExtensions(held.copy(myceliumTools = !held.myceliumTools)) }
+                    runner { extensions = store.api.saveExtensions(held.copy(myceliumTools = !held.myceliumTools)) }
                 }
             }
         }
@@ -274,7 +273,7 @@ fun InstructionsSettings(store: Store, onOpenGroup: ((String) -> Unit)? = null) 
                                 for (file in node.instructionsUnmanaged) {
                                     MenuItem("Manage ${file.substringAfterLast('/')}", onClick = {
                                         close()
-                                        attempt { store.api.takeOverInstructions(node.id) }
+                                        runner { store.api.takeOverInstructions(node.id) }
                                     })
                                 }
                             }

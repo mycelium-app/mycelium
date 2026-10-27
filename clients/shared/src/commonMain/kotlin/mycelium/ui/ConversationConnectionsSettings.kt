@@ -61,8 +61,7 @@ private fun GroupConnectionsBlock(store: Store) {
     var connecting by remember { mutableStateOf(false) }
     var first by remember { mutableStateOf("") }
     var second by remember { mutableStateOf("") }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Label("Groups", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
@@ -82,7 +81,7 @@ private fun GroupConnectionsBlock(store: Store) {
             Label("Create a second group in Settings, Groups to connect groups.", color = MyTheme.colors.textMuted)
         } else if (!connecting) {
             MyButton({
-                failure = null
+                runner.failure = null
                 first = groups[0].id
                 second = groups[1].id
                 connecting = true
@@ -90,15 +89,15 @@ private fun GroupConnectionsBlock(store: Store) {
         } else {
             val choices = groups.map { Choice(it.id, it.name) }
 
-            failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+            runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
             OptionMenu("First group", choices, first, { first = it })
             OptionMenu("Second group", choices, second, { second = it })
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 MyButton({
                     if (first == second) {
-                        failure = "Choose two different groups."
+                        runner.failure = "Choose two different groups."
                     } else {
-                        attempt {
+                        runner {
                             store.connectGroups(CreateGroupConnectionRequest(first, second))
                             connecting = false
                         }

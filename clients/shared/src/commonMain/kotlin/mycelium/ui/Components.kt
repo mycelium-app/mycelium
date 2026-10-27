@@ -647,17 +647,6 @@ suspend fun attempt(unreachable: String = ControlPlaneUnreachable, block: suspen
         unreachable
     }
 
-@Composable
-fun rememberAttempt(onFailure: (String?) -> Unit): (suspend () -> Unit) -> Unit {
-    val scope = rememberCoroutineScope()
-
-    return { block ->
-        scope.launch {
-            onFailure(attempt(block = block))
-        }
-    }
-}
-
 @Stable
 class ActionRunner(private val scope: CoroutineScope, private val unreachable: String) {
     var running by mutableStateOf(false)
@@ -675,10 +664,10 @@ class ActionRunner(private val scope: CoroutineScope, private val unreachable: S
 }
 
 @Composable
-fun rememberAction(unreachable: String = ControlPlaneUnreachable): ActionRunner {
+fun rememberAction(vararg keys: Any?, unreachable: String = ControlPlaneUnreachable): ActionRunner {
     val scope = rememberCoroutineScope()
 
-    return remember(scope, unreachable) { ActionRunner(scope, unreachable) }
+    return remember(scope, unreachable, *keys) { ActionRunner(scope, unreachable) }
 }
 
 @Composable

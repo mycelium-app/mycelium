@@ -99,9 +99,8 @@ fun OpenOutOfHoursDialog(store: Store, platform: Platform?, closed: List<Group>,
     var chosen by remember { mutableStateOf(closed.firstOrNull { it.id == initial } ?: closed.first()) }
     var reason by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
     val focus = remember { FocusRequester() }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
     val closesAt = clockOf(localTimeOf(platform, store.hoursView().now + OpeningMinutes.minutes))
 
     fun open() {
@@ -112,7 +111,7 @@ fun OpenOutOfHoursDialog(store: Store, platform: Platform?, closed: List<Group>,
             return
         }
 
-        attempt {
+        runner {
             store.openGroupOutOfHours(chosen.id, reason.trim())
             onOpened(chosen.id)
             onDismiss()
@@ -130,7 +129,7 @@ fun OpenOutOfHoursDialog(store: Store, platform: Platform?, closed: List<Group>,
 
         TextArea(reason, { reason = it; error = null }, "Why do you need it now?", error = error, errorAbove = true, focus = focus)
 
-        failure?.let { Label(it, style = Tokens.Type.MetaStrong, color = MyTheme.colors.statusFailed) }
+        runner.failure?.let { Label(it, style = Tokens.Type.MetaStrong, color = MyTheme.colors.statusFailed) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)

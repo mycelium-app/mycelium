@@ -45,7 +45,6 @@ private val GroupTabs = listOf(GroupInstructionsTab, "Folders", "Projects", Grou
 fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> Unit, startTab: String? = null, onOpenTimeAndFocus: () -> Unit = {}) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
-    var failure by remember { mutableStateOf<String?>(null) }
     var openingOutOfHours by remember { mutableStateOf(false) }
     val view = rememberHoursView(store)
     val platform = LocalPlatform.current
@@ -58,7 +57,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     var newFolder by remember { mutableStateOf("") }
     var folderNode by remember { mutableStateOf<String?>(null) }
     var addingFolder by remember { mutableStateOf(false) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
     var query by remember { mutableStateOf("") }
     val groups = state.groups.values.filter { it.name.contains(query.trim(), ignoreCase = true) }.sortedBy { it.name.lowercase() }
     val loadFailures by store.loadFailures.collectAsState()
@@ -75,12 +74,12 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
         layer = null
 
         if (open != null) {
-            attempt { layer = store.api.groupInstructions(open.id) }
+            runner { layer = store.api.groupInstructions(open.id) }
         }
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (open == null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -110,7 +109,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                 Label("Delete the ${doomed.name} group? Its projects stay, without a group, and its instructions stop reaching new conversations.", Modifier.weight(1f), color = colors.statusFailed)
                 MyButton(
                     {
-                        attempt {
+                        runner {
                             store.api.deleteGroup(doomed.id)
                             deleting = null
                             onOpenGroup(null)
@@ -191,7 +190,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                             layer = held,
                             file = held.path ?: "Stored in Mycelium",
                             saveLabel = if (held.path != null) "Save and commit" else "Save",
-                            onSave = { text -> attempt { layer = store.api.saveGroupInstructions(open.id, text) } },
+                            onSave = { text -> runner { layer = store.api.saveGroupInstructions(open.id, text) } },
                         )
                     }
                 }
@@ -212,7 +211,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                             RowMenu("folder ${folder.prefix} in ${open.name}") { close ->
                                 MenuItem("Remove folder", onClick = {
                                     close()
-                                    attempt { store.api.removeGroupFolder(open.id, folder.id); store.refreshGroups() }
+                                    runner { store.api.removeGroupFolder(open.id, folder.id); store.refreshGroups() }
                                 })
                             }
                         }
@@ -245,7 +244,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                 val status = view.groups[open.id]
 
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-                    HoursEditor(open.name, open.hours) { hours -> attempt { store.saveGroupHours(open.id, hours) } }
+                    HoursEditor(open.name, open.hours) { hours -> runner { store.saveGroupHours(open.id, hours) } }
                     Label("Outside these hours ${open.name} leaves the sidebar, every list and the group selector, and its notifications wait. Agents keep working. It is never open while Mycelium is closed.", Modifier, Tokens.Type.Meta, colors.textMuted)
 
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -262,7 +261,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
 
     if (naming) {
         fun create() {
-            attempt {
+            runner {
                 val group = store.api.createGroup(newName)
                 store.refreshGroups()
                 onOpenGroup(group.id)
@@ -275,7 +274,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
 
     if (forming != null) {
         fun rename() {
-            attempt {
+            runner {
                 store.api.renameGroup(forming.id, renamed)
                 store.refreshGroups()
                 renaming = null
@@ -287,7 +286,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
 
     if (addingFolder && open != null) {
         fun addFolder() {
-            attempt {
+            runner {
                 store.api.addGroupFolder(open.id, newFolder, folderNode)
                 store.refreshGroups()
                 addingFolder = false

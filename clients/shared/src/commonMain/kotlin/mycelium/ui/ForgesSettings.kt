@@ -53,19 +53,18 @@ fun ForgesSettings(store: Store) {
     var kind by remember { mutableStateOf("github") }
     var baseUrl by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
-    var failure by remember { mutableStateOf<String?>(null) }
     var addMcp by remember { mutableStateOf(true) }
     var refusedMcp by remember { mutableStateOf<Forge?>(null) }
     var disconnecting by remember { mutableStateOf<Forge?>(null) }
     val platform = LocalPlatform.current
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     LaunchedEffect(Unit) {
         load()
     }
 
     fun connect() {
-        attempt {
+        runner {
             val offered = mcpOffered(kind, baseUrl)
             val connected = store.api.connectForge(ConnectForgeRequest(kind, baseUrl.trim().ifEmpty { null }, token.trim(), addMcp = if (offered) addMcp else null))
             forges = forges.filter { it.id != connected.id } + connected
@@ -77,7 +76,7 @@ fun ForgesSettings(store: Store) {
     }
 
     fun signInToMcp(forge: Forge) {
-        attempt {
+        runner {
             val product = forgeName(forge)
             val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(product, mcpAddress(forge), forgeId = forge.id))
             platform?.openUrl(started.authorizeUrl)
@@ -164,7 +163,7 @@ fun ForgesSettings(store: Store) {
                 connecting = false
                 baseUrl = ""
                 token = ""
-                failure = null
+                runner.failure = null
             }) {
                 Segmented(
                     ForgeKinds.keys.toList(),
@@ -189,7 +188,7 @@ fun ForgesSettings(store: Store) {
                     }
                 }
 
-                failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+                runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     MyButton(::connect, text = "Connect", variant = ButtonVariant.Outline)
@@ -198,7 +197,7 @@ fun ForgesSettings(store: Store) {
                             connecting = false
                             baseUrl = ""
                             token = ""
-                            failure = null
+                            runner.failure = null
                         },
                         text = "Cancel",
                         muted = true,

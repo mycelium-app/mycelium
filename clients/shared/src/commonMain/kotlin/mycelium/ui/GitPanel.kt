@@ -88,7 +88,6 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     var message by remember(id) { mutableStateOf("") }
     var signoff by remember(id) { mutableStateOf(false) }
     var skipHooks by remember(id) { mutableStateOf(false) }
-    var failure by remember(id) { mutableStateOf<String?>(null) }
     val files = status?.files.orEmpty()
     val shownPath = if (onOpenDiff != null) store.changesFile.collectAsState().value[id] else null
 
@@ -104,10 +103,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
         }
     }
 
-    val run = rememberAttempt { failure = it }
+    val runner = rememberAction(conversation.id)
 
     LaunchedEffect(id, conversation.status) {
-        run { refresh() }
+        runner { refresh() }
     }
 
     LaunchedEffect(id) {
@@ -127,13 +126,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
 
     LaunchedEffect(id, tab) {
         if (tab == GitTab.Graph && graph.isEmpty()) {
-            run { refresh() }
+            runner { refresh() }
         }
     }
 
     LaunchedEffect(id, tab, status?.branch, status?.ahead, status?.behind) {
         if (tab == GitTab.Stack) {
-            run { stack = store.api.gitStack(id) }
+            runner { stack = store.api.gitStack(id) }
         }
     }
 
@@ -153,7 +152,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, onRetry = { run { refresh() } }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }, onRetry = { runner { refresh() } }) }
 
         val open = viewing
         val shown = diff
@@ -218,13 +217,13 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                         } else {
                             openCommit = commit
                             commitDiff = null
-                            run { commitDiff = store.api.gitShow(id, commit.hash) }
+                            runner { commitDiff = store.api.gitShow(id, commit.hash) }
                         }
                     },
                     hasMore = !graphComplete && !graphLoading,
                     onMore = {
                         graphLoading = true
-                        run {
+                        runner {
                             try {
                                 val page = store.api.gitGraph(id, skip = graph.size)
 
@@ -248,12 +247,12 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                             } else {
                                 viewing = file
                                 diff = null
-                                run { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
+                                runner { diff = store.api.gitDiff(id, file.path, diffIsStaged(file)) }
                             }
                         },
-                        onStageAll = { run { store.api.gitStageAll(id); refresh() } },
+                        onStageAll = { runner { store.api.gitStageAll(id); refresh() } },
                         onToggle = { file ->
-                            run {
+                            runner {
                                 if (fullyStaged(file)) store.api.gitUnstage(id, listOf(file.path)) else store.api.gitStage(id, listOf(file.path))
                                 refresh()
                             }
@@ -266,16 +265,16 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                         } else {
                             openCommit = GraphCommit(commit.hash, emptyList(), commit.author, commit.date, emptyList(), commit.subject)
                             commitDiff = null
-                            run { commitDiff = store.api.gitShow(id, commit.hash) }
+                            runner { commitDiff = store.api.gitShow(id, commit.hash) }
                         }
                     }
                 } else {
                     GitStackTab(
                         stack = stack,
                         working = townWorking,
-                        onSwitch = { branch -> run { store.api.gitSwitch(id, branch); refresh(); stack = store.api.gitStack(id) } },
+                        onSwitch = { branch -> runner { store.api.gitSwitch(id, branch); refresh(); stack = store.api.gitStack(id) } },
                         onSync = {
-                            run {
+                            runner {
                                 townWorking = "Syncing the stack"
 
                                 try {
@@ -289,7 +288,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                             }
                         },
                         onPropose = {
-                            run {
+                            runner {
                                 townWorking = "Proposing the branch"
 
                                 try {
@@ -312,26 +311,26 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 lastCommit = log.firstOrNull(),
                 message = message,
                 onMessage = { message = it },
-                onFetch = { run { store.api.gitFetch(id); refresh() } },
-                onPull = { rebase -> run { store.api.gitPull(id, rebase); refresh() } },
-                onPush = { force -> run { store.api.gitPush(id, force); refresh() } },
+                onFetch = { runner { store.api.gitFetch(id); refresh() } },
+                onPull = { rebase -> runner { store.api.gitPull(id, rebase); refresh() } },
+                onPush = { force -> runner { store.api.gitPush(id, force); refresh() } },
                 onCommit = {
                     val text = message.ifBlank { status?.preparedMessage.orEmpty() }
                     val problem = commitProblem(text, files)
 
                     if (problem != null) {
-                        failure = problem
+                        runner.failure = problem
                     } else {
-                        run { store.api.gitCommit(id, text.trim(), signoff = signoff, noVerify = skipHooks); message = ""; refresh() }
+                        runner { store.api.gitCommit(id, text.trim(), signoff = signoff, noVerify = skipHooks); message = ""; refresh() }
                     }
                 },
-                onAmend = { run { store.api.gitCommit(id, message.trim(), amend = true, signoff = signoff, noVerify = skipHooks); message = ""; refresh() } },
+                onAmend = { runner { store.api.gitCommit(id, message.trim(), amend = true, signoff = signoff, noVerify = skipHooks); message = ""; refresh() } },
                 signoff = signoff,
                 onSignoff = { signoff = !signoff },
                 skipHooks = skipHooks,
                 onSkipHooks = { skipHooks = !skipHooks },
                 onUndo = {
-                    run {
+                    runner {
                         val undone = store.api.gitUndo(id)
 
                         if (message.isBlank()) {
@@ -344,10 +343,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 branches = branches,
                 onOpenBranches = {
                     branches = null
-                    run { branches = store.api.gitBranches(id) }
+                    runner { branches = store.api.gitBranches(id) }
                 },
                 onSwitch = { entry ->
-                    run {
+                    runner {
                         when (entry) {
                             is BranchEntry.Local -> if (!entry.current) store.api.gitSwitch(id, entry.branch.name)
                             is BranchEntry.Remote -> store.api.gitSwitch(id, entry.localName, create = true, track = entry.branch.name)

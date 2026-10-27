@@ -223,8 +223,7 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: App
     var pinned by remember { mutableStateOf(initial?.pinned ?: false) }
     var nameError by remember { mutableStateOf<String?>(null) }
     var promptError by remember { mutableStateOf<String?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction()
 
     fun save() {
         nameError = if (name.isBlank()) "Enter a name for the action." else null
@@ -234,7 +233,7 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: App
             return
         }
 
-        attempt {
+        runner {
             onSave(SaveActionRequest(name.trim(), prompt.trim(), inputs, model, nodeId, pinned))
             onDismiss()
         }
@@ -276,7 +275,7 @@ internal fun ActionDialog(title: String, initial: SaveActionRequest?, state: App
             }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             MyButton(onDismiss, text = "Cancel", muted = true)
@@ -320,9 +319,8 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     var creating by remember(assistant.id) { mutableStateOf(false) }
     var scheduling by remember(assistant.id) { mutableStateOf(false) }
     var editingSchedule by remember(assistant.id) { mutableStateOf<mycelium.api.Schedule?>(null) }
-    var failure by remember(assistant.id) { mutableStateOf<String?>(null) }
     var providers by remember { mutableStateOf(emptyList<ModelProvider>()) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(assistant.id)
 
     LaunchedEffect(assistant.id) {
         store.act { providers = store.api.modelProviders() }
@@ -332,7 +330,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -370,7 +368,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                                 Checkbox(
                                     action.pinned,
                                     "Pinned: ${action.name}",
-                                    { attempt { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, action.model, action.nodeId, !action.pinned)); store.refreshAssistantActions(assistant.id) } },
+                                    { runner { store.api.saveAssistantAction(assistant.id, action.id, SaveActionRequest(action.name, action.prompt, action.inputs, action.model, action.nodeId, !action.pinned)); store.refreshAssistantActions(assistant.id) } },
                                     checkedState = "Pinned",
                                     uncheckedState = "Not pinned",
                                 )
@@ -381,9 +379,9 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
                                     MenuItem("Edit", onClick = { close(); editing = action }, leading = MyIcon.Pencil)
 
                                     if (action.builtinKey != null) {
-                                        MenuItem("Reset to default", onClick = { close(); attempt { store.api.resetAssistantAction(assistant.id, action.id); store.refreshAssistantActions(assistant.id) } }, leading = MyIcon.Refresh)
+                                        MenuItem("Reset to default", onClick = { close(); runner { store.api.resetAssistantAction(assistant.id, action.id); store.refreshAssistantActions(assistant.id) } }, leading = MyIcon.Refresh)
                                     } else {
-                                        MenuItem("Delete", onClick = { close(); attempt { store.api.deleteAssistantAction(assistant.id, action.id); store.refreshAssistantActions(assistant.id) } }, leading = MyIcon.Close)
+                                        MenuItem("Delete", onClick = { close(); runner { store.api.deleteAssistantAction(assistant.id, action.id); store.refreshAssistantActions(assistant.id) } }, leading = MyIcon.Close)
                                     }
                                 }
                             }
@@ -466,8 +464,7 @@ internal fun ActionsSection(store: Store, state: AppState, assistant: Assistant)
 internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionProposal, providers: List<ModelProvider> = emptyList()) {
     val colors = MyTheme.colors
     var editing by remember(proposal.id) { mutableStateOf(false) }
-    var failure by remember(proposal.id) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(proposal.id)
     val waiting = proposal.state == "proposed"
 
     Column(
@@ -496,13 +493,13 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
 
         Label(proposal.prompt, style = Tokens.Type.Code)
         Label("Asks for: ${if (proposal.inputs.isEmpty()) "nothing" else proposal.inputs.joinToString(", ") { "${it.name} (${it.kind})" }}. Pinned: no.", style = Tokens.Type.Meta, color = colors.textMuted)
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (waiting) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton({ attempt { store.api.approveActionProposal(proposal.assistantId, proposal.id); store.refreshAssistantActions(proposal.assistantId) } }, text = "Approve", variant = ButtonVariant.Outline)
+                MyButton({ runner { store.api.approveActionProposal(proposal.assistantId, proposal.id); store.refreshAssistantActions(proposal.assistantId) } }, text = "Approve", variant = ButtonVariant.Outline)
                 MyButton({ editing = true }, text = "Edit", variant = ButtonVariant.Outline)
-                MyButton({ attempt { store.api.declineActionProposal(proposal.assistantId, proposal.id) } }, text = "Decline", muted = true)
+                MyButton({ runner { store.api.declineActionProposal(proposal.assistantId, proposal.id) } }, text = "Decline", muted = true)
             }
         }
     }
@@ -522,8 +519,7 @@ internal fun ProposedActionCard(store: Store, state: AppState, proposal: ActionP
 @Composable
 internal fun AssistantChangeCard(store: Store, state: AppState, change: mycelium.api.AssistantChange, onOpenSettings: () -> Unit = {}) {
     val colors = MyTheme.colors
-    var failure by remember(change.id) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { failure = it }
+    val runner = rememberAction(change.id)
     val creating = change.kind == "create"
     val groupName = change.groupId?.let { state.groups[it]?.name }
 
@@ -558,18 +554,18 @@ internal fun AssistantChangeCard(store: Store, state: AppState, change: mycelium
             groupName?.let { Label("Group: $it", color = colors.textMuted) }
         }
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
         if (creating && change.state == "proposed") {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                MyButton({ attempt { store.api.approveAssistantChange(change.id); store.refreshAssistants() } }, text = "Approve", variant = ButtonVariant.Outline)
-                MyButton({ attempt { store.api.declineAssistantChange(change.id) } }, text = "Decline", muted = true)
+                MyButton({ runner { store.api.approveAssistantChange(change.id); store.refreshAssistants() } }, text = "Approve", variant = ButtonVariant.Outline)
+                MyButton({ runner { store.api.declineAssistantChange(change.id) } }, text = "Decline", muted = true)
             }
         }
 
         if (!creating && change.state == "applied") {
             Row {
-                MyButton({ attempt { store.api.undoAssistantChange(change.id); store.refreshAssistants() } }, text = "Undo", variant = ButtonVariant.Outline)
+                MyButton({ runner { store.api.undoAssistantChange(change.id); store.refreshAssistants() } }, text = "Undo", variant = ButtonVariant.Outline)
             }
         }
     }

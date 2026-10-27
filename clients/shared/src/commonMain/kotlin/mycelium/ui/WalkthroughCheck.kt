@@ -67,8 +67,7 @@ fun WalkthroughCheckStep(store: Store, walkthrough: Walkthrough, onBackToStep: (
 private fun CheckQuestion(check: WalkthroughCheck, answer: WalkthroughAnswer?, onCheck: suspend (Int) -> Unit, onBack: () -> Unit) {
     val colors = MyTheme.colors
     var chosen by remember(check.step) { mutableStateOf(answer?.choice) }
-    var error by remember(check.step) { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { error = it }
+    val runner = rememberAction(check.step)
 
     LaunchedEffect(answer?.choice) {
         if (chosen == null) {
@@ -80,10 +79,10 @@ private fun CheckQuestion(check: WalkthroughCheck, answer: WalkthroughAnswer?, o
         Label("Step ${check.step}: ${check.question}", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
         for ((position, choice) in check.choices.withIndex()) {
-            MenuItem(choice, { chosen = position; error = null }, checked = chosen == position)
+            MenuItem(choice, { chosen = position; runner.failure = null }, checked = chosen == position)
         }
 
-        error?.let { Label(it, style = Tokens.Type.MetaStrong, color = colors.statusFailed) }
+        runner.failure?.let { Label(it, style = Tokens.Type.MetaStrong, color = colors.statusFailed) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
             MyButton(
@@ -91,9 +90,9 @@ private fun CheckQuestion(check: WalkthroughCheck, answer: WalkthroughAnswer?, o
                     val picked = chosen
 
                     if (picked == null) {
-                        error = "Choose an answer to check it."
+                        runner.failure = "Choose an answer to check it."
                     } else {
-                        attempt { onCheck(picked) }
+                        runner { onCheck(picked) }
                     }
                 },
                 text = "Check",

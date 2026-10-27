@@ -68,8 +68,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     val load = { store.load(WorkflowsList) { store.refreshWorkflows() } }
     var providers by remember { mutableStateOf<List<ModelProvider>>(emptyList()) }
     var creating by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val attempt = rememberAttempt { error = it }
+    val runner = rememberAction()
     var title by remember { mutableStateOf("") }
     var drafts by remember { mutableStateOf(listOf(WorkflowDraft(node = state.nodes.keys.firstOrNull().orEmpty()))) }
     var rounds by remember { mutableStateOf("1") }
@@ -90,7 +89,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
     }
 
     val control: (String, String) -> Unit = { workflowId, action ->
-        attempt {
+        runner {
             store.api.controlWorkflow(workflowId, WorkflowControlRequest(action))
             store.refreshWorkflows()
         }
@@ -110,7 +109,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
         }
 
         Column(Modifier.fillMaxWidth().weight(1f).verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
-            error?.let { Label(it, color = colors.textMuted) }
+            runner.failure?.let { Label(it, color = colors.textMuted) }
 
             if (selected == null && !creating) {
                 if (WorkflowsList in loadFailures && state.workflows.isEmpty()) {
@@ -217,7 +216,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
 
                 MyButton({ drafts = drafts + WorkflowDraft(node = state.nodes.keys.firstOrNull().orEmpty()) }, text = "Add step", icon = MyIcon.Plus)
                 MyButton({
-                    attempt {
+                    runner {
                         val plan = WorkflowPlan(
                             title = title,
                             maxRounds = rounds.toIntOrNull() ?: 0,
@@ -324,7 +323,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
                             if (step.status == "gate") {
                                 WorkflowField("Decision for $key", gateDecisions["$id/$key"].orEmpty(), { value -> gateDecisions = gateDecisions + ("$id/$key" to value) }, multiline = true)
                                 MyButton({
-                                    attempt {
+                                    runner {
                                         store.api.controlWorkflow(id, WorkflowControlRequest("approve", key, gateDecisions["$id/$key"].orEmpty()))
                                         store.refreshWorkflows()
                                         gateDecisions = gateDecisions - "$id/$key"
