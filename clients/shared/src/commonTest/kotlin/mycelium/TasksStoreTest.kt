@@ -162,7 +162,7 @@ class TasksStoreTest {
         val store = store(backgroundScope, requests)
 
         store.refreshSchedules()
-        store.createSchedule(CreateScheduleRequest("n1", "claude", "Go", "0 6 * * 1", EachRun.New, cwd = "/work/app"))
+        store.createSchedule(CreateScheduleRequest("n1", "claude", prompt = "Go", cron = "0 6 * * 1", eachRun = EachRun.New, cwd = "/work/app"))
         store.pauseSchedule(store.state.value.schedules.getValue("s1"), true)
 
         assertEquals(listOf("r1"), store.state.value.scheduleRuns.map { it.id })

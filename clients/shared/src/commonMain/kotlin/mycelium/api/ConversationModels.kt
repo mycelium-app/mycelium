@@ -51,6 +51,7 @@ data class CreateConversationRequest(
     val title: String? = null,
     val prompt: String? = null,
     val model: String? = null,
+    val routing: String? = null,
 )
 
 @Serializable
@@ -83,6 +84,7 @@ data class ContinueRequest(
     val model: String? = null,
     @SerialName("node_id") val nodeId: String? = null,
     val cwd: String? = null,
+    val routing: String? = null,
 )
 
 @Serializable
@@ -185,6 +187,7 @@ data class Conversation(
     @SerialName("assistant_id") val assistantId: String? = null,
     @SerialName("agent_active") val agentActive: Boolean = false,
     @SerialName("teach_me") val teachMe: Boolean = false,
+    val routing: String? = null,
 )
 
 @Serializable

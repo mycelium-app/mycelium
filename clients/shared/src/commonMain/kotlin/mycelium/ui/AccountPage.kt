@@ -54,7 +54,7 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
     var removing by remember { mutableStateOf(false) }
     var renamed by remember { mutableStateOf<String?>(null) }
     val title = accountTitle(account)
-    val reauthenticates = account.oauth || account.kind == "lastfm"
+    val reauthenticates = account.oauth || account.kind == "lastfm" || account.kind == "freeagent"
     val calendar = account.kind == "caldav"
     var calendars by remember(account.id) { mutableStateOf<List<CalendarAccess>?>(null) }
     var calendarsFailure by remember(account.id) { mutableStateOf<String?>(null) }
@@ -111,6 +111,10 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
                         Label("Not signed in: needed to love tracks and scrobble", color = colors.textMuted)
                     }
 
+                    if (account.kind == "freeagent" && !account.signedIn) {
+                        Label("Not signed in: needed to read anything in FreeAgent", color = colors.textMuted)
+                    }
+
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                         if (reauthenticates) {
                             MyButton({ actions.onReauthenticate(account) }, text = "Re-authenticate", icon = MyIcon.Refresh, variant = ButtonVariant.Outline)
@@ -126,6 +130,15 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
                                     actions.onReplace(account.copy(signedIn = false))
                                 }
                             }, text = "Sign out of Last.fm", variant = ButtonVariant.Outline)
+                        }
+
+                        if (account.kind == "freeagent" && account.signedIn) {
+                            MyButton({
+                                store.act {
+                                    store.api.signOutOfFreeAgent(account.id)
+                                    actions.onReplace(account.copy(signedIn = false))
+                                }
+                            }, text = "Sign out of FreeAgent", variant = ButtonVariant.Outline)
                         }
                     }
                 }

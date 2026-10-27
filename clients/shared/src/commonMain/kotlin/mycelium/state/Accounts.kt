@@ -5,6 +5,7 @@ import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
+import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
 import mycelium.api.NodeSummary
 import mycelium.api.ResetCredits
@@ -130,11 +131,12 @@ private const val ChatGroup = "Chat"
 private fun lowUsageHint(login: LoginInfo): String? = login.usageLeft?.takeIf { it < LowUsageLeft }?.let { "$it% left" }
 
 fun currentContinueId(conversation: Conversation): String? = when {
+    conversation.routing != null -> "$RoutingPrefix${conversation.routing}"
     conversation.agent == "chat" -> conversation.providerId?.let { provider -> conversation.model?.let { "$ContinueChatPrefix$provider:$it" } }
     else -> "$ContinueAccountPrefix${conversation.account ?: DefaultAccountId}"
 }
 
-fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, providers: List<ModelProvider>): List<Choice> {
+fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, providers: List<ModelProvider>, anyModel: List<ModelChoice> = emptyList()): List<Choice> {
     val reachable = nodes.filter { it.online }.sortedBy { if (it.id == conversation.nodeId) 0 else 1 }
     val accounts = reachable.flatMap { node ->
         node.logins.filter { login -> login.state == LoginState.SignedIn && node.agents.any { it.agent == login.agent && it.available } }.map { node to it }
@@ -155,7 +157,9 @@ fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, 
     }
     val models = providers.mapNotNull { provider -> provider.defaultModel?.let { Choice("$ContinueChatPrefix${provider.id}:$it", "${provider.name} · $it", group = ChatGroup) } }
 
-    return perHarness + models
+    val routing = routingChoices(accounts.map { it.second }, anyModel, "moves to")
+
+    return routing + perHarness + models
 }
 
 fun windowName(name: String): String = when (name) {

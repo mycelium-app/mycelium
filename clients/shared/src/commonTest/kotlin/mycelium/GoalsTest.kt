@@ -9,7 +9,13 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import mycelium.api.Goal
+import mycelium.api.EventKinds
+import mycelium.api.Event
+import mycelium.api.GoalDelivery
 import mycelium.api.GoalState
+import mycelium.state.ThreadItem
+import mycelium.state.buildThread
+import kotlinx.serialization.json.Json
 import mycelium.api.MyceliumApi
 import mycelium.api.SetGoalRequest
 import mycelium.api.StreamMessage
@@ -105,6 +111,37 @@ class GoalsTest {
 
         assertContains(progress, "time limit reached")
         assertContains(progress, "unknown")
+    }
+
+    @Test
+    fun timeHeldAtAUsageLimitDoesNotCountTowardsTheTimeLimit() {
+        val goal = limited(timeLimitSeconds = 3_600)
+
+        assertContains(goalProgress(goal.copy(heldSeconds = 1_800), Now), "10m left")
+        assertContains(goalProgress(goal.copy(heldSeconds = 0, heldSince = "2026-10-23T13:20:00Z"), Now), "20m left")
+    }
+
+    @Test
+    fun aHeldGoalSaysItCarriesOnWhenTheLimitResets() {
+        val held = goal(GoalState.Active).copy(heldSince = "2026-10-23T13:30:00Z")
+
+        assertEquals("The goal carries on when the limit resets. Time on hold does not count towards the time limit.", goalMessage(held))
+    }
+
+    @Test
+    fun aGoalNotYetSentSaysWhenItWillBeAndAFailedOneSaysWhy() {
+        val pending = goal(GoalState.Active).copy(delivery = GoalDelivery.Pending, turnActive = true)
+
+        assertEquals("Sends to Claude Code when its current turn ends.", goalMessage(pending, "claude"))
+        assertEquals("Sending the goal to Codex.", goalMessage(pending.copy(turnActive = false), "codex"))
+        assertEquals("Check that laptop is online.", goalMessage(goal(GoalState.Active).copy(delivery = GoalDelivery.Failed, deliveryReason = "Check that laptop is online.")))
+    }
+
+    @Test
+    fun aGoalMessageFromMyceliumIsMarkedWithWhenItWasSent() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.UserMessage, Json.parseToJsonElement("""{"text":"Work towards this goal: ship","origin":"goal","sent_at":"2026-10-23T14:02:00Z"}"""))))
+
+        assertEquals("2026-10-23T14:02:00Z", (thread.single() as ThreadItem.UserMessage).goalSentAt)
     }
 
     @Test

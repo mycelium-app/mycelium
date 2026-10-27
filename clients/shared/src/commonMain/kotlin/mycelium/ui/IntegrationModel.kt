@@ -13,6 +13,7 @@ enum class IntegrationCategory(val label: String) {
     Calendar("Calendar"),
     Docs("Docs"),
     Media("Media"),
+    Finance("Finance"),
     Developer("Developer"),
     AiGateway("AI gateway"),
 }
@@ -50,8 +51,12 @@ val BuiltInCatalogue = listOf(
     CatalogueEntry("caldav", "Calendar", "caldav", IntegrationCategory.Calendar, "List calendars, and list and search events in a date range.", "Creating, changing and deleting events ask first.", listOf("list_calendars", "list_events", "search_events", "create_event", "update_event", "delete_event"), detail = "CalDAV", icon = MyIcon.Calendar),
     CatalogueEntry("zulip", "Zulip", "zulip", IntegrationCategory.Chat, "Read and search channels and send messages.", "Every call asks first and you can edit the response.", listOf("list_channels", "get_messages", "search_messages", "send_message"), "zulip"),
     CatalogueEntry("stoat", "Stoat", "stoat", IntegrationCategory.Chat, "Read and search servers your bot is in.", "Sending messages asks first.", listOf("list_servers", "get_messages", "search_messages", "send_message"), "stoat"),
+    CatalogueEntry("discord", "Discord", "discord", IntegrationCategory.Chat, "Read and search the servers your bot is in and send messages.", "Sending messages asks first, and each one says the Mycelium agent posted it.", listOf("list_servers", "list_channels", "get_messages", "search_messages", "send_message"), "discord"),
     CatalogueEntry("outline", "Outline", "outline", IntegrationCategory.Docs, "Search, read and write documents, collections and comments.", "Writing asks first.", listOf("search", "fetch", "create_document", "update_document", "list_collections", "create_comment")),
     CatalogueEntry("lastfm", "Last.fm", "lastfm", IntegrationCategory.Media, "Read your listening history and top artists. Sign in to love tracks and scrobble.", "Loving tracks and scrobbling ask first.", listOf("get_recent_tracks", "get_top_artists", "love_track", "unlove_track", "scrobble", "update_now_playing"), "lastfm"),
+    CatalogueEntry("paperless", "Paperless-ngx", "paperless", IntegrationCategory.Docs, "Search documents, read their text and list tags, correspondents and document types.", "Changing a document's tags or correspondent asks first.", listOf("search_documents", "get_document", "list_tags", "list_correspondents", "list_document_types", "update_document"), "paperless"),
+    CatalogueEntry("freeagent", "FreeAgent", "freeagent", IntegrationCategory.Finance, "Read contacts, invoices, bills, bank transactions and expenses.", "Creating a draft invoice or an expense asks first.", listOf("list_contacts", "list_invoices", "list_bills", "list_bank_transactions", "list_expenses", "create_draft_invoice", "create_expense"), icon = MyIcon.Receipt),
+    CatalogueEntry("actual", "Actual Budget", "actual", IntegrationCategory.Finance, "Read accounts, categories, transactions in a range and a month's budget. Needs an Actual HTTP API.", "Adding a transaction asks first.", listOf("list_accounts", "list_categories", "get_transactions", "get_budget_month", "add_transaction"), "actual"),
     CatalogueEntry("litellm", "LiteLLM", "litellm", IntegrationCategory.AiGateway, "Use the MCP tools your gateway publishes, with your gateway key.", "Tools that change things ask first.", listOf("mcp")),
 )
 
@@ -86,7 +91,7 @@ fun accountState(server: ChatToolServer): AccountState = when {
 private fun catalogueKey(server: ChatToolServer): String? = when {
     server.forgeId != null -> null
     server.settings?.get("app")?.jsonPrimitive?.content == "outline" -> "outline"
-    server.kind in setOf("email", "caldav", "zulip", "stoat", "lastfm", "litellm") -> server.kind
+    server.kind in setOf("email", "caldav", "zulip", "stoat", "lastfm", "litellm", "discord", "paperless", "freeagent", "actual") -> server.kind
     else -> null
 }
 

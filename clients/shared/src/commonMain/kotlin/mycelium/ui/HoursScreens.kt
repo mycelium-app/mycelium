@@ -1,8 +1,11 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,13 +23,17 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
 import mycelium.Platform
+import mycelium.api.ConversationStatus
 import mycelium.api.Group
+import mycelium.state.BreakPhase
 import mycelium.state.ClosedNotice
 import mycelium.state.HoursAction
 import mycelium.state.HoursNotice
@@ -33,21 +41,42 @@ import mycelium.state.HoursView
 import mycelium.state.OpeningMinutes
 import mycelium.state.Store
 import mycelium.state.clockOf
+import mycelium.state.countdownText
 import mycelium.state.displayName
 import mycelium.state.localTimeOf
+import mycelium.state.minutesLeftText
+import mycelium.state.stillWorkingOnBreak
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 
 val LocalHoursView = staticCompositionLocalOf<HoursView?> { null }
 
 internal const val MinuteMillis = 60_000L
+internal const val SecondMillis = 1_000L
 
 @Composable
 fun rememberHoursView(store: Store): HoursView {
     val wellness by store.wellness.state.collectAsState()
     val state by store.state.collectAsState()
-    val now = rememberNow(MinuteMillis)
+    var now by remember { mutableStateOf(Clock.System.now()) }
+    val view = remember(wellness.settings, state.groups, now) { store.hoursView(now) }
+    val nextChange = view.groups.values.flatMap { listOfNotNull(it.openedUntil, it.closesAt, it.opensAt) }.filter { it > view.now }.minOrNull()
 
-    return remember(wellness.settings, state.groups, now) { store.hoursView(now) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(MinuteMillis)
+            now = Clock.System.now()
+        }
+    }
+
+    LaunchedEffect(nextChange) {
+        if (nextChange != null) {
+            delay((nextChange - Clock.System.now()).inWholeMilliseconds.coerceAtLeast(0) + 1)
+            now = Clock.System.now()
+        }
+    }
+
+    return view
 }
 
 @Composable
@@ -67,14 +96,20 @@ fun HoursBanner(notice: HoursNotice, onAction: () -> Unit) {
 }
 
 @Composable
-fun ClosedScreen(notice: ClosedNotice, onSelect: (String) -> Unit, onOpenOutOfHours: () -> Unit) {
-    val colors = MyTheme.colors
-
+private fun CalmScreen(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(Tokens.Space.S4),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.CenterVertically),
-    ) {
+        content = content,
+    )
+}
+
+@Composable
+fun ClosedScreen(notice: ClosedNotice, onSelect: (String) -> Unit, onOpenOutOfHours: () -> Unit) {
+    val colors = MyTheme.colors
+
+    CalmScreen {
         Icon(MyIcon.Moon, colors.leaf, Tokens.Size.IconMd * 2)
         Label(notice.title, Modifier.semantics { heading() }, Tokens.Type.Display)
         Label(notice.body, Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
@@ -90,6 +125,55 @@ fun ClosedScreen(notice: ClosedNotice, onSelect: (String) -> Unit, onOpenOutOfHo
         }
 
         MyButton(onOpenOutOfHours, Modifier.padding(top = Tokens.Space.S4), text = notice.openLabel, muted = true)
+    }
+}
+
+@Composable
+fun BreakScreen(store: Store, platform: Platform?) {
+    val wellness by store.wellness.state.collectAsState()
+    val state by store.state.collectAsState()
+    val now = rememberNow(SecondMillis)
+    val colors = MyTheme.colors
+    var confirming by remember { mutableStateOf(false) }
+    val startedAt = wellness.breakStartedAt
+    val endsAt = wellness.breakEndsAt
+
+    LaunchedEffect(now) {
+        store.wellness.finishBreakIfOver(now)
+    }
+
+    if (wellness.clock.phase != BreakPhase.OnBreak || endsAt == null) {
+        return
+    }
+
+    val left = endsAt - now
+    val total = startedAt?.let { endsAt - it }
+    val working = state.conversations.values.count { it.archivedAt == null && it.status == ConversationStatus.Working }
+
+    Box(Modifier.fillMaxSize().background(colors.bgContent).pointerInput(Unit) { detectTapGestures() }.semantics { contentDescription = "Break" }) {
+        CalmScreen {
+            Icon(MyIcon.Cup, colors.leaf, Tokens.Size.IconMd * 2)
+            Label("On a break until ${clockOf(localTimeOf(platform, endsAt))}", Modifier.semantics { heading() }, Tokens.Type.Display)
+            Label(countdownText(left), Modifier.semantics { contentDescription = "${minutesLeftText(left)} left" }, Tokens.Type.Display)
+
+            if (total != null && total.isPositive()) {
+                DeterminateProgress("Break", 1f - (left / total).toFloat(), Modifier.widthIn(max = Tokens.Size.FormColumn))
+            }
+
+            Label("Step away from the screen. Stand up, stretch, and look at something far away.", Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
+            Label(stillWorkingOnBreak(working), Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
+            MyButton({ confirming = true }, Modifier.padding(top = Tokens.Space.S4), text = "End break early", muted = true)
+        }
+    }
+
+    if (confirming) {
+        ConfirmDialog(
+            "End your break early?",
+            "${minutesLeftText(left)} left. Breaks ended early are counted in Wellness & Learning.",
+            "End break early",
+            onDismiss = { confirming = false },
+            onConfirm = { confirming = false; store.wellness.endBreak() },
+        )
     }
 }
 

@@ -301,6 +301,7 @@ class ProjectsTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewProjectDialog(store, state, onDismiss = {}, onCreated = {}) } }
 
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("immich-app/immich").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Clone and open").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Choose the repository to clone.").fetchSemanticsNodes().isNotEmpty() }

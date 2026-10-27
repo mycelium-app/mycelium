@@ -213,6 +213,8 @@ pub struct CreateConversationRequest {
     pub side_kind: Option<SideKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::Routing>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -263,6 +265,8 @@ pub struct ContinueRequest {
     pub node_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::Routing>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -828,6 +832,11 @@ pub struct ChatToolServer {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LastFmSignIn {
+    pub authorize_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FreeAgentSignIn {
     pub authorize_url: String,
 }
 
@@ -1530,6 +1539,10 @@ pub struct Schedule {
     pub node_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::Routing>,
     pub cwd: String,
     pub project_id: Option<Uuid>,
     pub prompt: String,
@@ -1557,6 +1570,10 @@ pub struct CreateScheduleRequest {
     pub node_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<crate::routing::Routing>,
     #[serde(default)]
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1725,6 +1742,15 @@ pub enum GoalState {
     LimitReached,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalDelivery {
+    Pending,
+    #[default]
+    Sent,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     pub conversation_id: Uuid,
@@ -1751,6 +1777,18 @@ pub struct Goal {
     pub state: GoalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default)]
+    pub delivery: GoalDelivery,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_since: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub held_seconds: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumes_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2074,6 +2112,8 @@ pub struct ModelChoice {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub any_model: bool,
 }
 
 fn chat_first_by_default() -> bool {
@@ -2444,11 +2484,9 @@ pub struct PuzzleResult {
     #[serde(default)]
     pub solved: Option<bool>,
     #[serde(default)]
-    pub guesses: Option<i32>,
+    pub score: Option<i32>,
     #[serde(default)]
-    pub mistakes: Option<i32>,
-    #[serde(default)]
-    pub score: Option<String>,
+    pub seconds: Option<i32>,
     #[serde(default)]
     pub source: Option<String>,
 }
@@ -2471,6 +2509,12 @@ pub struct PuzzleStats {
     pub played: i64,
     pub solved: i64,
     pub average: Option<f64>,
+    #[serde(default)]
+    pub average_seconds: Option<f64>,
+    #[serde(default)]
+    pub streak: i64,
+    #[serde(default)]
+    pub best_streak: i64,
     pub distribution: Vec<PuzzleBucket>,
 }
 
@@ -2481,6 +2525,59 @@ pub struct PuzzleSummary {
     pub today: Option<PuzzleResult>,
     pub history: Vec<PuzzleDay>,
     pub stats: PuzzleStats,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WordleGuess {
+    pub word: String,
+    pub marks: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WordleGame {
+    pub day: String,
+    pub status: String,
+    pub guesses: Vec<WordleGuess>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WordleGuessRequest {
+    pub word: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionsGroup {
+    pub title: String,
+    pub words: Vec<String>,
+    pub level: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionsGame {
+    pub day: String,
+    pub status: String,
+    pub words: Vec<String>,
+    pub solved: Vec<ConnectionsGroup>,
+    pub unsolved: Vec<ConnectionsGroup>,
+    pub mistakes: i32,
+    pub mistakes_allowed: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionsGuessRequest {
+    pub words: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionsGuessAnswer {
+    pub outcome: String,
+    pub game: ConnectionsGame,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

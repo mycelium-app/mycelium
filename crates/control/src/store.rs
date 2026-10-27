@@ -19,7 +19,7 @@ macro_rules! conversation_group_sql {
 }
 
 pub const CONVERSATION_GROUP_SQL: &str = conversation_group_sql!();
-pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, branch, pull_request_label, pull_request_url, assistant_id, teach_me");
+pub const CONVERSATION_COLUMNS: &str = concat!("id, owner, node_id, agent, cwd, title, title_user_set, status, agent_active, acp_session_id, mode, model, account, options, parent_id, side_kind, imported_from, provider_id, project_id, ", conversation_group_sql!(), " as group_id, created_at, updated_at, archived_at, pinned_at, resume_at, branch, pull_request_label, pull_request_url, assistant_id, teach_me, routing");
 pub const TURN_HAS_ENDED: &str = "coalesce((select max(seq) from events where conversation_id = $1 and kind = 'turn_end'), 0) >= coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)";
 
 pub const WORKFLOW_AGENT_QUIET_SECONDS: i32 = 15 * 60;
@@ -98,6 +98,7 @@ pub struct ConversationRow {
     pub pull_request_url: Option<String>,
     pub assistant_id: Option<Uuid>,
     pub teach_me: bool,
+    pub routing: Option<String>,
 }
 
 impl ConversationRow {
@@ -133,6 +134,7 @@ impl ConversationRow {
             pull_request_url: self.pull_request_url.clone(),
             assistant_id: self.assistant_id,
             teach_me: self.teach_me,
+            routing: self.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse),
         })
     }
 
@@ -351,7 +353,13 @@ pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> 
         let text = rows.iter().map(|(_, text, _)| text.as_str()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n");
         let attachments: Vec<Attachment> = rows.iter().flat_map(|(_, _, attachments)| attachments.0.clone()).collect();
 
-        sqlx::query("update queued_prompts set text = $2, attachments = $3 where id = $1").bind(first_id).bind(text).bind(sqlx::types::Json(attachments)).execute(&mut *tx).await?;
+        sqlx::query("update queued_prompts set text = $2, attachments = $3, origin = (select origin from queued_prompts where conversation_id = $4 and origin is not null order by position limit 1) where id = $1")
+            .bind(first_id)
+            .bind(text)
+            .bind(sqlx::types::Json(attachments))
+            .bind(conversation_id)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
     }
 

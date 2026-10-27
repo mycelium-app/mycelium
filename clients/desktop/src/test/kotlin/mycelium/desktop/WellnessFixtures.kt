@@ -38,10 +38,16 @@ internal val WellnessOverviewJson = """{"days":[
 "opened_out_of_hours":[{"group_id":"g-work","group_name":"work","reason":"Restart the release workflow that stalled","opened_at":"2026-10-26T21:32:00Z","until":"2026-10-26T21:47:00Z","closed_at":null}]}"""
 
 internal const val WellnessPuzzlesJson = """[
-{"puzzle":"wordle","day":"2026-10-27","today":{"solved":true,"guesses":4,"source":"read"},"history":[{"day":"2026-10-26","result":{"solved":true,"guesses":4,"source":"read"},"recorded_at":"2026-10-26T10:00:00Z"}],"stats":{"played":22,"solved":21,"average":3.9,"distribution":[{"value":3,"count":2},{"value":4,"count":9}]}},
-{"puzzle":"connections","day":"2026-10-27","today":null,"history":[],"stats":{"played":0,"solved":0,"average":null,"distribution":[]}},
-{"puzzle":"daily-orbs","day":"2026-10-27","today":null,"history":[],"stats":{"played":0,"solved":0,"average":null,"distribution":[]}},
-{"puzzle":"catfishing","day":"2026-10-27","today":null,"history":[],"stats":{"played":0,"solved":0,"average":null,"distribution":[]}}]"""
+{"puzzle":"wordle","day":"2026-10-27","today":{"solved":true,"score":4,"seconds":220,"source":"native"},"history":[
+{"day":"2026-10-26","result":{"solved":true,"score":3,"source":"native"},"recorded_at":"2026-10-26T10:00:00Z"},
+{"day":"2026-10-25","result":{"solved":true,"score":4,"source":"manual"},"recorded_at":"2026-10-25T10:00:00Z"},
+{"day":"2026-10-14","result":{"solved":false,"source":"native"},"recorded_at":"2026-10-14T10:00:00Z"},
+{"day":"2026-09-12","result":{"solved":true,"score":5,"source":"native"},"recorded_at":"2026-09-12T10:00:00Z"}],
+"stats":{"played":22,"solved":21,"average":3.9,"average_seconds":220.0,"streak":12,"best_streak":31,"distribution":[{"value":3,"count":2},{"value":4,"count":9}]}},
+{"puzzle":"connections","day":"2026-10-27","today":null,"history":[],"stats":{"played":5,"solved":5,"average":1.0,"streak":5,"best_streak":5,"distribution":[]}},
+{"puzzle":"daily-orbs","day":"2026-10-27","today":null,"history":[],"stats":{"played":0,"solved":0,"average":null,"streak":8,"best_streak":14,"distribution":[]}},
+{"puzzle":"catfishing","day":"2026-10-27","today":{"score":7,"source":"read"},"history":[],"stats":{"played":3,"solved":0,"average":7.0,"streak":3,"best_streak":3,"distribution":[]}},
+{"puzzle":"enclose-horse","day":"2026-10-27","today":{"score":87,"source":"read"},"history":[],"stats":{"played":1,"solved":0,"average":87.0,"streak":1,"best_streak":1,"distribution":[]}}]"""
 
 internal class WellnessRequests {
     val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())

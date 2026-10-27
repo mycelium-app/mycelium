@@ -149,7 +149,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::conflict("exercise_needs_project", "This exercise has no project to branch from. Register the project on its node first."));
     };
     let branch = format!("learn/{}", slug_of(&place.title, id));
-    let request = CreateConversationRequest { account: None, node_id: place.node_id, agent: parse_enum(&place.agent)?, cwd: String::new(), project_id: Some(project_id), branch: Some(branch.clone()), title: Some(place.title.clone()), prompt: None, parent_id: None, side_kind: None, model: None };
+    let request = CreateConversationRequest { account: None, node_id: place.node_id, agent: parse_enum(&place.agent)?, cwd: String::new(), project_id: Some(project_id), branch: Some(branch.clone()), title: Some(place.title.clone()), prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
     let conversation = conversations::start(&state, user.id, request).await?;
 
     sqlx::query("update exercises set state = 'started', branch = $2, cwd = $3, conversation_id = $4, started_at = now() where id = $1").bind(id).bind(&branch).bind(&conversation.cwd).bind(conversation.id).execute(&state.pool).await?;
@@ -248,7 +248,7 @@ pub async fn propose(State(state): State<AppState>, user: AuthUser, Json(request
     user.require_full_access()?;
 
     let prompt = "Propose up to three practice exercises for me, based on code agents wrote recently in my conversations. Use find_conversations and recall to look. For each, call propose_exercise with a short title, a brief that says what to build or fix without giving the answer, the skill it practises (a language, or an area of the codebase) and the minutes it should take, naming the conversation the code came from. Do not change any files.".to_string();
-    let conversation = conversations::start(&state, user.id, CreateConversationRequest { account: None, node_id: request.node_id, agent: request.agent, cwd: request.cwd, project_id: request.project_id, branch: None, title: Some("Propose exercises".to_string()), prompt: Some(prompt), parent_id: None, side_kind: None, model: None }).await?;
+    let conversation = conversations::start(&state, user.id, CreateConversationRequest { account: None, node_id: request.node_id, agent: request.agent, cwd: request.cwd, project_id: request.project_id, branch: None, title: Some("Propose exercises".to_string()), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None }).await?;
 
     Ok((StatusCode::ACCEPTED, Json(json!({"conversation_id": conversation.id}))))
 }

@@ -111,6 +111,9 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
@@ -180,6 +183,7 @@ sealed interface Route {
 fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
         ShellFor(store, platform, me, onSignOut, initialRoute)
+        BreakScreen(store, platform)
     }
 }
 
@@ -220,32 +224,91 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
         platform.savePreference(SidebarWidthPreference, sidebarWidth.value.toString())
     }
 
-    Row(Modifier.fillMaxSize().background(colors.bgContent)) {
-        CompositionLocalProvider(LocalPlatform provides platform) {
-            Sidebar(
-                store = store,
-                platform = platform,
-                state = state,
-                route = route,
-                onRoute = { route = it },
-                groupFilter = groupFilter,
-                hours = hours,
-                onOpenOutOfHours = { openRequest = OpenRequest(it) },
-                modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
-            )
+    val demand = remember { PanelDemand() }
+    var overlayOpen by remember { mutableStateOf(false) }
+    val overlayFocus = remember { FocusRequester() }
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(colors.bgContent)) {
+        val docked = sidebarDocks(maxWidth, sidebarWidth, demand.width)
+
+        LaunchedEffect(docked) {
+            if (docked) {
+                overlayOpen = false
+            }
         }
 
-        ResizeHandle("Resize the sidebar") { moved -> resize(sidebarWidth + moved) }
+        LaunchedEffect(overlayOpen) {
+            if (overlayOpen) {
+                runCatching { overlayFocus.requestFocus() }
+            }
+        }
 
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            if (!state.connected) {
-                ReconnectingBanner()
+        Row(Modifier.fillMaxSize()) {
+            if (docked) {
+                CompositionLocalProvider(LocalPlatform provides platform) {
+                    Sidebar(
+                        store = store,
+                        platform = platform,
+                        state = state,
+                        route = route,
+                        onRoute = { route = it },
+                        groupFilter = groupFilter,
+                        hours = hours,
+                        onOpenOutOfHours = { openRequest = OpenRequest(it) },
+                        modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
+                    )
+                }
+
+                ResizeHandle("Resize the sidebar") { moved -> resize(sidebarWidth + moved) }
             }
 
-            problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                if (!state.connected) {
+                    ReconnectingBanner()
+                }
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
+                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
+
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    CompositionLocalProvider(LocalOpenList provides (if (docked) null else ({ overlayOpen = true })), LocalPanelDemand provides demand) {
+                        RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
+                    }
+                }
+            }
+        }
+
+        if (!docked && overlayOpen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClickLabel = "Hide the sidebar") { overlayOpen = false },
+            )
+
+            CompositionLocalProvider(LocalPlatform provides platform) {
+                Sidebar(
+                    store = store,
+                    platform = platform,
+                    state = state,
+                    route = route,
+                    onRoute = { route = it; overlayOpen = false },
+                    groupFilter = groupFilter,
+                    hours = hours,
+                    onOpenOutOfHours = { openRequest = OpenRequest(it) },
+                    modifier = Modifier
+                        .width(sidebarWidth)
+                        .fillMaxHeight()
+                        .focusRequester(overlayFocus)
+                        .focusable()
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                                overlayOpen = false
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
             }
         }
     }
@@ -488,6 +551,7 @@ private val HoursExemptRoutes = setOf(Route.Settings, Route.Wellness, Route.Acti
 private fun routeGroup(route: Route, state: AppState, selected: String): String = when (route) {
     is Route.Chat -> state.conversations[route.id]?.groupId ?: NoGroup
     is Route.Assistant -> state.assistants[route.id]?.groupId ?: NoGroup
+    Route.NewChat -> NoGroup
     else -> groupChoiceOf(selected)
 }
 
@@ -530,9 +594,11 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     val closedNotice = closedNotice(hours, groupFilter.value, 0, platform)
     val closedLine = sidebarClosedLine(hours, groupFilter.value, platform)
     val everythingClosed = closedNotice != null && closedNotice.groupId == null
-    val pinned = pinnedConversations(state.conversations.values, scope)
-    val sections = sidebarSections(state.conversations.values, scope)
-    val openChats = state.conversations.values.filterNot { hours.closed(it.groupId) }
+    val appClosed = !hours.appOpen
+    val workspaceConversations = if (appClosed) state.conversations.values.filter { it.groupId != null } else state.conversations.values
+    val pinned = pinnedConversations(workspaceConversations, scope)
+    val sections = sidebarSections(workspaceConversations, scope)
+    val openChats = if (appClosed) emptyList() else state.conversations.values.filterNot { hours.closed(it.groupId) }
     val pinnedChatRows = pinnedChats(openChats)
     val chats = chatSections(openChats)
 
@@ -610,7 +676,9 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
 
         Column(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5)) {
             if (mode == ChatsMode) {
-                SidebarLink("New chat", MyIcon.Plus, selected = route == Route.NewChat) { onRoute(Route.NewChat) }
+                if (!appClosed) {
+                    SidebarLink("New chat", MyIcon.Plus, selected = route == Route.NewChat) { onRoute(Route.NewChat) }
+                }
             } else if (everythingClosed) {
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             } else {
@@ -636,6 +704,12 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             }
 
             if (mode == ChatsMode) {
+                if (appClosed && closedLine != null) {
+                    item(key = "closed") {
+                        Label(closedLine, Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
+                    }
+                }
+
                 conversationRows(PinnedName, pinnedChatRows, state, store, route, onRoute, collapsed, { collapsed = it }, withNode = false)
 
                 for (section in chats) {

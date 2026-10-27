@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import mycelium.api.AccountPrice
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
 import mycelium.state.AgentAccount
@@ -31,6 +33,7 @@ import mycelium.state.agentAccounts
 import mycelium.state.agentName
 import mycelium.state.loginMethodName
 import mycelium.state.newAccountName
+import mycelium.state.priceLabel
 import mycelium.state.splitSignedOut
 
 @Composable
@@ -40,11 +43,17 @@ fun AccountsSettings(store: Store) {
     val accounts = agentAccounts(state.nodes.values)
     val agents = (accounts.map { it.agent } + state.nodes.values.flatMap { node -> node.agents.filter { it.available }.map { it.agent } }).distinct()
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
+    var prices by remember { mutableStateOf(emptyList<AccountPrice>()) }
+    var pricing by remember { mutableStateOf<AgentAccount?>(null) }
     val startSignIn: (NodeSummary, String) -> Unit = { node, agent ->
         store.act {
             val started = store.api.startLogin(node.id, agent, loginMethodFor(agent), newAccountName())
             signIn = LoginSession(started.loginId, agent)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        prices = store.accountPrices().orEmpty()
     }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
@@ -77,6 +86,8 @@ fun AccountsSettings(store: Store) {
                             Col("Account", 120.dp, weight = 1f),
                             Col("Signed in on", 140.dp, max = 360.dp, overflow = Overflow.Wrap),
                             Col("Method", 88.dp, priority = 1),
+                            Col("Price", 100.dp, preferred = 200.dp),
+                            ActionColumn,
                         ),
                         accounts.size,
                         { row, column ->
@@ -97,7 +108,28 @@ fun AccountsSettings(store: Store) {
                                     }
                                 }
 
-                                else -> TableCell.Text(loginMethodName(account.method), color = colors.textMuted)
+                                2 -> TableCell.Text(loginMethodName(account.method), color = colors.textMuted)
+
+                                3 -> {
+                                    val price = prices.firstOrNull { it.agent == account.agent && it.account == account.label }
+
+                                    if (price == null) {
+                                        TableCell.Text("Unknown", color = colors.textMuted)
+                                    } else {
+                                        TableCell.Slot(priceLabel(price), extra = 90.dp) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                                Label(priceLabel(price))
+                                                Tag("Your price")
+                                            }
+                                        }
+                                    }
+                                }
+
+                                else -> TableCell.Slot {
+                                    RowMenu(account.label) { close ->
+                                        MenuItem("Set your price", onClick = { close(); pricing = account }, leading = MyIcon.Pencil)
+                                    }
+                                }
                             }
                         },
                         detail = { row -> AccountUsage(accounts[row]) },
@@ -112,6 +144,18 @@ fun AccountsSettings(store: Store) {
     }
 
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
+
+    pricing?.let { account ->
+        PriceDialog(
+            store,
+            account.agent,
+            account.label,
+            prices.firstOrNull { it.agent == account.agent && it.account == account.label },
+            listPrice = null,
+            onSaved = { store.act { prices = store.accountPrices().orEmpty() } },
+            onDismiss = { pricing = null },
+        )
+    }
 }
 
 @Composable

@@ -13,6 +13,7 @@ data class UsageHistoryAccount(
     val plan: String? = null,
     @SerialName("plan_price_usd") val planPriceUsd: Double? = null,
     @SerialName("plan_price_as_of") val planPriceAsOf: String? = null,
+    @SerialName("your_price") val yourPrice: YourPrice? = null,
     @SerialName("readings_since") val readingsSince: String? = null,
     @SerialName("orchestrator_until") val orchestratorUntil: String? = null,
     val readings: List<UsageReading> = emptyList(),

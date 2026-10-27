@@ -10,6 +10,7 @@ import mycelium.api.NodeSummary
 import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
 import mycelium.state.continueChoices
+import mycelium.state.RoutingGroup
 import mycelium.state.currentContinueId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,9 +38,23 @@ class ContinueChoicesTest {
     fun everySignedInAccountIsListedByHarnessThenTheChatModels() {
         val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node), Providers)
 
-        assertEquals(listOf("account:sam@example.com", "account:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
-        assertEquals(listOf("Claude Code", "Claude Code", "Codex", "Chat"), choices.map { it.group })
-        assertEquals("Claude Code · work@example.org", choices[1].name)
+        assertEquals(listOf("routing:claude_any", "routing:codex_any", "routing:any_model", "account:sam@example.com", "account:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
+        assertEquals(listOf(RoutingGroup, RoutingGroup, RoutingGroup, "Claude Code", "Claude Code", "Codex", "Chat"), choices.map { it.group })
+        assertEquals("Claude Code · work@example.org", choices[4].name)
+    }
+
+    @Test
+    fun theRoutingChoicesSayWhereTheyWouldMoveTo() {
+        val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(Node), Providers)
+
+        assertEquals("moves to work@example.org", choices.first { it.id == "routing:claude_any" }.description)
+        assertEquals("moves to codex@example.com", choices.first { it.id == "routing:codex_any" }.description)
+        assertEquals("Add models in Settings, Agents", choices.first { it.id == "routing:any_model" }.description)
+    }
+
+    @Test
+    fun aRoutedConversationHasItsRoutingChoiceChecked() {
+        assertEquals("routing:any_model", currentContinueId(conversation("claude", "sam@example.com").copy(routing = "any_model")))
     }
 
     @Test
@@ -68,7 +83,7 @@ class ContinueChoicesTest {
 
         val choices = continueChoices(conversation("claude", "sam@example.com"), listOf(withoutCodex), emptyList())
 
-        assertEquals(listOf("account:sam@example.com", "account:work@example.org"), choices.map { it.id })
+        assertEquals(listOf("routing:claude_any", "routing:any_model", "account:sam@example.com", "account:work@example.org"), choices.map { it.id })
     }
 
     @Test
@@ -92,7 +107,7 @@ class ContinueChoicesTest {
     fun aChatListsEveryAccountRegardlessOfWhichProviderItUses() {
         val choices = continueChoices(conversation("chat"), listOf(Node), Providers)
 
-        assertEquals(listOf("agent:claude:sam@example.com", "agent:claude:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
+        assertEquals(listOf("routing:claude_any", "routing:codex_any", "routing:any_model", "agent:claude:sam@example.com", "agent:claude:work@example.org", "agent:codex:codex@example.com", "chat:p1:llama3.2"), choices.map { it.id })
     }
 
     @Test

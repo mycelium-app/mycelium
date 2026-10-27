@@ -138,6 +138,16 @@ pub async fn send(state: &AppState, owner: Uuid, id: Uuid, text: &str, attachmen
 
     withdraw_waiting_call(state, owner, id).await?;
 
+    if crate::routing::before_chat_turn(state, owner, id).await? {
+        let mut queue = state.pool.begin().await?;
+
+        enqueue(&mut queue, id, text, &attachments).await?;
+        queue.commit().await?;
+        crate::prompts::pump(state, id, false).await?;
+
+        return Ok(find_owned(&state.pool, id, owner).await?.to_proto()?);
+    }
+
     let mut tx = state.pool.begin().await?;
     let row = lock_owned(&mut tx, id, owner).await?;
 

@@ -31,6 +31,8 @@ import mycelium.Platform
 import mycelium.api.WellnessDay
 import mycelium.state.BreakPhase
 import mycelium.state.Puzzle
+import mycelium.state.Puzzles
+import mycelium.state.puzzlesToday
 import mycelium.state.Store
 import mycelium.state.WellnessState
 import mycelium.state.weekdayOf
@@ -106,17 +108,17 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
     }
 
     Column(Modifier.fillMaxSize()) {
-        Bar {
-            Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconMd)
-            BarTitle("Wellness & Learning")
-        }
-
         val game = playing
 
         if (game != null) {
-            PuzzleBrowser(store, platform, game) { playing = null }
+            PuzzlePlay(store, platform, game) { playing = null }
 
             return@Column
+        }
+
+        Bar {
+            Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconMd)
+            BarTitle("Wellness & Learning")
         }
 
         TabRow(listOf(WellnessTabName, SkillsTabName, ReflectionsTabName, PuzzlesTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
@@ -126,7 +128,10 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
             if (tab == WellnessTabName) {
                 WellnessOverview(wellness)
                 OpenedOutOfHours(wellness)
-                LaunchedEffect(Unit) { store.learning.loadSkills() }
+                LaunchedEffect(Unit) {
+                    store.learning.loadSkills()
+                    store.wellness.loadPuzzles()
+                }
                 SuggestedExerciseCard(store, Modifier.widthIn(max = Tokens.Size.Page))
                 RecentlyLearned(store, { tab = ReflectionsTabName }, Modifier.widthIn(max = Tokens.Size.Page))
                 SkillsOverTime(store, { tab = SkillsTabName }, Modifier.widthIn(max = Tokens.Size.Page))
@@ -153,6 +158,12 @@ private fun WellnessOverview(wellness: WellnessState) {
             Stat("With agents today", durationText(today?.agentMinutes ?: 0))
             Stat("Looking at sessions today", durationText(today?.viewingMinutes ?: 0))
             Stat("Breaks today", if ((today?.breaks ?: 0L) == 0L) "None" else today?.breaks.toString())
+
+            if (wellness.puzzles.isNotEmpty()) {
+                val (played, left) = puzzlesToday(wellness.puzzles)
+
+                Stat("Puzzles today", "$played of ${Puzzles.size}", if (left.isEmpty()) "All played" else "${left.joinToString(", ")} left")
+            }
         }
 
         if (days.isNotEmpty()) {
@@ -200,7 +211,7 @@ private fun OpenedOutOfHours(wellness: WellnessState) {
 }
 
 @Composable
-private fun Stat(name: String, value: String) {
+private fun Stat(name: String, value: String, note: String? = null) {
     val colors = MyTheme.colors
 
     Column(
@@ -209,6 +220,10 @@ private fun Stat(name: String, value: String) {
     ) {
         Label(name, style = Tokens.Type.Meta, color = colors.textMuted)
         Label(value, style = Tokens.Type.Title)
+
+        if (note != null) {
+            Label(note, style = Tokens.Type.Meta, color = colors.textMuted)
+        }
     }
 }
 

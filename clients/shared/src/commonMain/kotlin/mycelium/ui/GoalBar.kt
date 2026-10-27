@@ -21,7 +21,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import kotlin.time.Clock
 import mycelium.api.Goal
+import mycelium.api.GoalDelivery
 import mycelium.api.GoalState
+import mycelium.state.goalIsHeld
 import mycelium.state.GoalLimits
 import mycelium.state.formatTimeLeft
 import mycelium.state.formatTokens
@@ -37,26 +39,33 @@ data class GoalControls(
     val onPause: () -> Unit,
     val onResume: () -> Unit,
     val onClear: () -> Unit,
+    val onSendAgain: () -> Unit,
+    val agent: String = "",
 )
 
 @Composable
-fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -> Unit) {
+fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -> Unit, onSendAgain: () -> Unit, agent: String = "") {
     val colors = MyTheme.colors
+    val held = goalIsHeld(goal)
     val tint = when (goal.state) {
-        GoalState.Active -> colors.statusWorking
+        GoalState.Active -> if (held) colors.statusAttention else if (goal.delivery == GoalDelivery.Failed) colors.statusFailed else colors.statusWorking
         GoalState.Paused -> colors.textMuted
         GoalState.Met -> colors.accent
         GoalState.Stuck, GoalState.OverBudget, GoalState.LimitReached -> colors.statusFailed
     }
     val actions: @Composable () -> Unit = {
         when (goal.state) {
-            GoalState.Active -> MyButton(onPause, text = "Pause", description = "Pause the goal", size = ButtonSize.Sm, muted = true)
+            GoalState.Active -> if (goal.delivery == GoalDelivery.Failed) {
+                MyButton(onSendAgain, text = "Send again", description = "Send the goal to the agent again", size = ButtonSize.Sm, muted = true)
+            } else {
+                MyButton(onPause, text = "Pause", description = "Pause the goal", size = ButtonSize.Sm, muted = true)
+            }
             GoalState.Paused -> MyButton(onResume, text = "Resume", description = "Resume the goal", size = ButtonSize.Sm, muted = true)
             else -> Unit
         }
     }
-    val message = goalMessage(goal)
-    val now = rememberNow(ClockTickMillis, ticking = goal.timeLimitSeconds != null)
+    val message = goalMessage(goal, agent)
+    val now = rememberNow(ClockTickMillis, ticking = goal.timeLimitSeconds != null && !held)
     val progress = goalProgress(goal, now)
 
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "Goal" }) {
@@ -88,7 +97,7 @@ fun GoalBar(goal: Goal, onPause: () -> Unit, onResume: () -> Unit, onClear: () -
         }
 
         if (message != null) {
-            Label(message, Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1).semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
+            Label(message, Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1).semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, if (held || goal.delivery == GoalDelivery.Failed) tint else colors.textMuted)
         }
 
         Hairline()

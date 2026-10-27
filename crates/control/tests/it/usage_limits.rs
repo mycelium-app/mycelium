@@ -452,7 +452,7 @@ async fn retrying_now_cancels_the_pending_resume() {
 }
 
 #[tokio::test]
-async fn a_goal_stays_active_when_its_usage_limit_will_resume_automatically() {
+async fn a_goal_is_held_when_its_usage_limit_will_resume_automatically() {
     let server = Server::start().await;
     choose_automatic_resume(&server).await;
     let mut link = server.online_node("laptop").await;
@@ -460,13 +460,48 @@ async fn a_goal_stays_active_when_its_usage_limit_will_resume_automatically() {
     server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000}))).await;
 
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
 
     let (_, goal) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/goal"))).await;
     assert_eq!(goal["state"], "active");
+    assert!(goal["held_since"].is_string(), "{goal}");
+    assert!(goal["resumes_at"].is_string(), "{goal}");
 }
 
 #[tokio::test]
-async fn a_goal_stops_on_a_usage_limit_when_the_person_chose_to_be_asked() {
+async fn a_held_goal_carries_on_when_the_limit_resets_and_keeps_its_counts() {
+    let server = ticking_server().await;
+    choose_automatic_resume(&server).await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": "Every test passes", "token_budget": 100000, "time_limit_seconds": 7200}))).await;
+    hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the resume to be scheduled", || async { resume_at(&server, id).await }).await;
+    sqlx::query("update goals set held_since = now() - interval '1 hour' where conversation_id = $1").bind(id).execute(&server.pool).await.unwrap();
+    let started: Value = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1;
+
+    make_due(&server, id).await;
+
+    loop {
+        if let ControlToNode::Prompt { text, .. } = link.next().await {
+            if text.contains("towards this goal") || text.starts_with("Continue towards the goal") {
+                assert!(text.ends_with("Every test passes"), "{text}");
+                break;
+            }
+        }
+    }
+    let goal = common::eventually("the hold to be released", || async {
+        let (_, goal) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/goal"))).await;
+
+        goal["held_since"].is_null().then_some(goal)
+    })
+    .await;
+    assert_eq!((goal["state"].as_str(), goal["started_at"].clone(), goal["token_budget"].as_i64()), (Some("active"), started["started_at"].clone(), Some(100000)));
+    assert!(goal["held_seconds"].as_i64().unwrap() >= 3600, "{goal}");
+}
+
+#[tokio::test]
+async fn a_goal_is_held_on_a_usage_limit_when_the_person_chose_to_be_asked() {
     let server = Server::start().await;
     choose_to_be_asked(&server).await;
     let mut link = server.online_node("laptop").await;
@@ -476,7 +511,8 @@ async fn a_goal_stops_on_a_usage_limit_when_the_person_chose_to_be_asked() {
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
 
     let (_, goal) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}/goal"))).await;
-    assert_eq!(goal["state"], "stuck");
+    assert_eq!(goal["state"], "active");
+    assert!(goal["held_since"].is_string(), "{goal}");
 }
 
 #[tokio::test]

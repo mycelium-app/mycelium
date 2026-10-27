@@ -25,11 +25,21 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import mycelium.api.CreateScheduleRequest
 import mycelium.api.EachRun
+import mycelium.api.LoginState
 import mycelium.api.PatchScheduleRequest
 import mycelium.api.Schedule
 import mycelium.api.ScheduleRun
 import mycelium.state.AppState
 import mycelium.state.Choice
+import mycelium.state.DefaultAccountId
+import mycelium.state.RoutingPrefix
+import mycelium.state.accountChoices
+import mycelium.state.accountMenuTitle
+import mycelium.state.accountsOn
+import mycelium.state.groupedByAgent
+import mycelium.state.routingButtonText
+import mycelium.state.routingChoices
+import mycelium.state.scheduleAccountChoice
 import mycelium.state.scheduleInGroup
 import mycelium.state.Store
 import mycelium.state.Cadence
@@ -230,6 +240,8 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
     var chosenAction by remember { mutableStateOf(editing?.actionId) }
     var inputValues by remember { mutableStateOf(editing?.actionInputs.orEmpty()) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var accountPick by remember { mutableStateOf<String?>(null) }
+    val agentSettings = rememberAgentSettings(store)
     val forAssistant = runsIn == RunsInAssistant
     val actions = chosenAssistant?.let { state.assistantActions[it] }.orEmpty()
     val action = actions.firstOrNull { it.id == chosenAction } ?: actions.firstOrNull()
@@ -312,9 +324,13 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
             return
         }
 
+        val account = scheduleAccountChoice(target.node, target.agent, accountPick)
+        val routed = account?.startsWith(RoutingPrefix) == true
         val request = CreateScheduleRequest(
             nodeId = target.node.id,
             agent = target.agent,
+            account = account?.takeIf { !routed && it != DefaultAccountId },
+            routing = account?.removePrefix(RoutingPrefix)?.takeIf { routed },
             prompt = prompt.trim(),
             cron = cron,
             eachRun = eachRun,
@@ -371,6 +387,17 @@ internal fun ScheduleDialog(store: Store, state: AppState, editing: Schedule? = 
                 Unit
             } else if (editing == null) {
                 PlacePicker(store, state, place, withBranch = false, cwdError = cwdError)
+
+                place.target(state)?.let { target ->
+                    val signedIn = accountsOn(target.node, target.agent).filter { it.state == LoginState.SignedIn }
+                    val shown = scheduleAccountChoice(target.node, target.agent, accountPick)
+
+                    if (signedIn.isNotEmpty()) {
+                        val choices = routingChoices(target.node.logins, agentSettings.anyModel, "starts on") + groupedByAgent(accountChoices(signedIn, emptyList(), target.node.name), target.agent)
+
+                        OptionMenu("Account", choices, shown, { accountPick = it }, title = accountMenuTitle(target.agent), icon = MyIcon.Person, buttonText = routingButtonText(shown))
+                    }
+                }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
                     Label("Runs in", style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)

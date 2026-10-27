@@ -40,12 +40,17 @@ private const val CustomExpiry = "custom"
 private val McpSteps = listOf("Address", "Credential", "Test", "Name")
 private val LastFmSteps = listOf("API key", "Test", "Sign in")
 private val FormSteps = listOf("Address", "Credential", "Name")
+private val CredentialSteps = listOf("Credential", "Name")
+private val FreeAgentSteps = listOf("Credential", "Name", "Sign in")
 
 private const val Tls = "TLS"
 private const val StartTls = "STARTTLS"
 private const val UserSession = "User session"
 private const val Bot = "Bot"
 private const val StoatAddress = "https://stoat.chat/api"
+private const val Production = "Production"
+private const val Sandbox = "Sandbox"
+private const val FreeAgentSandboxAddress = "https://api.sandbox.freeagent.com"
 
 private val ExpiryChoices = ExpiryPresets.map { Choice(it.toString(), "$it days") } + listOf(Choice(CustomExpiry, "Custom date"), Choice(NoExpiry, "No expiration"))
 
@@ -92,10 +97,13 @@ fun SetupFlow(
     val platform = LocalPlatform.current
     val lastFm = kind == "lastfm"
     val caldav = kind == "caldav"
-    val form = kind == "zulip" || kind == "email" || kind == "stoat"
+    val freeAgent = kind == "freeagent"
+    val form = kind in setOf("zulip", "email", "stoat", "discord", "freeagent", "actual", "paperless")
     val mcp = !lastFm && !caldav && !form
     val steps = when {
         lastFm -> LastFmSteps
+        freeAgent -> FreeAgentSteps
+        kind == "discord" -> CredentialSteps
         form -> FormSteps
         else -> McpSteps
     }
@@ -107,6 +115,10 @@ fun SetupFlow(
         "zulip" -> "Zulip"
         "email" -> "Email"
         "stoat" -> "Stoat"
+        "discord" -> "Discord"
+        "freeagent" -> "FreeAgent"
+        "actual" -> "Actual Budget"
+        "paperless" -> "Paperless-ngx"
         else -> "MCP server"
     }
     var step by remember { mutableStateOf(if (knownAddress != null) 1 else 0) }
@@ -128,6 +140,9 @@ fun SetupFlow(
     var smtpSecurity by remember { mutableStateOf(Tls) }
     var sender by remember { mutableStateOf("") }
     var tokenType by remember { mutableStateOf(UserSession) }
+    var environment by remember { mutableStateOf(Production) }
+    var budgetSyncId by remember { mutableStateOf("") }
+    var encryptionPassword by remember { mutableStateOf("") }
     var testState by remember { mutableStateOf<TestState?>(null) }
     var calendars by remember { mutableStateOf<List<CalendarAccess>>(emptyList()) }
     var failedStep by remember { mutableStateOf(0) }
@@ -136,7 +151,7 @@ fun SetupFlow(
     var confirmingClose by remember { mutableStateOf(false) }
     var attempts by remember { mutableStateOf(0) }
     val runner = rememberAction()
-    val typed = address.isNotBlank() && knownAddress == null || token.isNotBlank() || name.isNotBlank() || username.isNotBlank() || apiKey.isNotBlank() || secret.isNotBlank() || imapHost.isNotBlank() || smtpHost.isNotBlank()
+    val typed = address.isNotBlank() && knownAddress == null || token.isNotBlank() || name.isNotBlank() || username.isNotBlank() || apiKey.isNotBlank() || secret.isNotBlank() || imapHost.isNotBlank() || smtpHost.isNotBlank() || budgetSyncId.isNotBlank()
     val title = steps[step]
 
     fun chosenExpiry(): String? = when (expiry) {
@@ -204,14 +219,32 @@ fun SetupFlow(
     fun formRequest(): CreateChatToolServerRequest = when (kind) {
         "zulip" -> CreateChatToolServerRequest(name.trim(), address.trim(), token.trim().ifEmpty { null }, kind = "zulip", account = username.trim().ifEmpty { null })
         "email" -> CreateChatToolServerRequest(name.trim(), "", token.trim().ifEmpty { null }, kind = "email", account = username.trim().ifEmpty { null }, settings = emailSettings())
+        "discord" -> CreateChatToolServerRequest(name.trim(), "", token.trim().ifEmpty { null }, kind = "discord", account = username.trim().ifEmpty { null })
+        "freeagent" -> CreateChatToolServerRequest(name.trim(), if (environment == Sandbox) FreeAgentSandboxAddress else "", token.trim().ifEmpty { null }, kind = "freeagent", account = username.trim().ifEmpty { null })
+        "actual" -> CreateChatToolServerRequest(
+            name.trim(),
+            address.trim(),
+            token.trim().ifEmpty { null },
+            kind = "actual",
+            settings = JsonObject(buildMap {
+                put("budget_sync_id", JsonPrimitive(budgetSyncId.trim()))
+
+                if (encryptionPassword.isNotBlank()) {
+                    put("encryption_password", JsonPrimitive(encryptionPassword.trim()))
+                }
+            }),
+        )
+        "paperless" -> CreateChatToolServerRequest(name.trim(), address.trim(), token.trim().ifEmpty { null }, kind = "paperless")
         else -> CreateChatToolServerRequest(name.trim(), address.trim().ifEmpty { StoatAddress }, token.trim().ifEmpty { null }, kind = "stoat", settings = JsonObject(mapOf("token_kind" to JsonPrimitive(if (tokenType == Bot) "bot" else "user"))))
     }
 
     fun nextFormStep() {
-        when (step) {
-            0 -> {
+        when (title) {
+            "Address" -> {
                 val problem = when {
                     kind == "zulip" && !address.trim().startsWith("http") -> "Enter the Zulip server address, starting with https://, for example https://example.zulipchat.com."
+                    kind == "actual" && !address.trim().startsWith("http") -> "Enter the address of your Actual HTTP API, starting with http:// or https://, for example http://localhost:5007."
+                    kind == "paperless" && !address.trim().startsWith("http") -> "Enter the Paperless-ngx address, starting with https://, for example https://paperless.example.com."
                     kind == "email" && (imapHost.isBlank() || smtpHost.isBlank()) -> "Enter the IMAP and SMTP servers, for example imap.example.com and smtp.example.com."
                     kind == "email" && imapPort.isNotBlank() && imapPort.trim().toIntOrNull() == null -> "Enter the IMAP port as a number, for example 993."
                     kind == "email" && smtpPort.isNotBlank() && smtpPort.trim().toIntOrNull() == null -> "Enter the SMTP port as a number, for example 465."
@@ -225,12 +258,19 @@ fun SetupFlow(
                 }
 
                 name = name.ifBlank { product }
-                step = 1
+                step += 1
             }
 
-            1 -> {
+            "Credential" -> {
                 val problem = when {
-                    kind != "stoat" && username.isBlank() -> if (kind == "zulip") "Enter your Zulip email address." else "Enter your email username."
+                    kind == "discord" && username.isBlank() -> "Enter the name people know you by on Discord."
+                    kind == "discord" && token.isBlank() -> "Enter your Discord bot token."
+                    kind == "freeagent" && username.isBlank() -> "Enter your FreeAgent OAuth identifier."
+                    kind == "freeagent" && token.isBlank() -> "Enter your FreeAgent OAuth secret."
+                    kind == "actual" && budgetSyncId.isBlank() -> "Enter your budget's sync id, from Settings, Show advanced settings in Actual Budget."
+                    kind == "actual" && token.isBlank() -> "Enter the API key your Actual HTTP API is set up with."
+                    kind == "paperless" && token.isBlank() -> "Enter your Paperless-ngx API token."
+                    kind in setOf("zulip", "email") && username.isBlank() -> if (kind == "zulip") "Enter your Zulip email address." else "Enter your email username."
                     token.isBlank() -> "Enter the credential for this account."
                     else -> null
                 }
@@ -241,11 +281,13 @@ fun SetupFlow(
                     return
                 }
 
+                name = name.ifBlank { product }
+
                 if (integrationSlug(name) in takenNames) {
                     name = "$product ${username.trim().ifEmpty { defaultIntegrationName(address, product) }}".trim()
                 }
 
-                step = 2
+                step += 1
             }
         }
     }
@@ -355,7 +397,13 @@ fun SetupFlow(
             val request = if (form) formRequest() else CreateChatToolServerRequest(name.trim(), address.trim(), credential.trim().ifEmpty { null }, kind = kind.takeIf { it != "mcp" }, account = username.trim().takeIf { caldav }, tokenExpiresAt = expiresAt())
             val added = store.api.createChatToolServer(request)
             onAdded(added)
-            onFinished(added)
+
+            if (freeAgent) {
+                created = added
+                step = steps.indexOf("Sign in")
+            } else {
+                onFinished(added)
+            }
         }
     }
 
@@ -436,6 +484,12 @@ fun SetupFlow(
                 TextInput(smtpHost, { smtpHost = it }, label = "SMTP server", placeholder = "smtp.example.com", mono = true)
                 TextInput(smtpPort, { smtpPort = it }, label = "SMTP port, if not the usual one", placeholder = if (smtpSecurity == Tls) "465" else "587", mono = true)
                 Segmented(listOf(Tls, StartTls), smtpSecurity, { smtpSecurity = it }, "SMTP security")
+            } else if (kind == "actual") {
+                Label("Actual Budget has no HTTP API of its own. Mycelium talks to the actual-http-api bridge, which you run beside your Actual server. Set it up first, then enter its address.", style = Tokens.Type.Meta, color = colors.textMuted)
+                TextInput(address, { address = it }, label = "Actual HTTP API address", placeholder = "http://localhost:5007", mono = true, onSubmit = ::next)
+            } else if (kind == "paperless") {
+                Label("Chats and agents can search your documents and read their text and, with your approval, change their tags and correspondent.", style = Tokens.Type.Meta, color = colors.textMuted)
+                TextInput(address, { address = it }, label = "Paperless-ngx address", placeholder = "https://paperless.example.com", mono = true, onSubmit = ::next)
             } else if (kind == "stoat") {
                 Label("Chats and agents can read and search Stoat messages and, with your approval, send them.", style = Tokens.Type.Meta, color = colors.textMuted)
                 TextInput(address, { address = it }, label = "Stoat API address", placeholder = StoatAddress, mono = true, onSubmit = ::next)
@@ -458,6 +512,25 @@ fun SetupFlow(
                     TextInput(token, { token = it }, label = "Email password or app password", mono = true, masked = true)
                     TextInput(sender, { sender = it }, label = "Send from address, if it differs from the username", mono = true, onSubmit = ::next)
                     Label("Your provider may need an app password instead of your usual one.", style = Tokens.Type.Meta, color = colors.textMuted)
+                } else if (kind == "discord") {
+                    Label("Chats and agents can read and search the servers your bot is in and, with your approval, send messages. Each one opens with a line saying the Mycelium agent posted it on your behalf.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    TextInput(username, { username = it }, label = "Your name on Discord", mono = true)
+                    TextInput(token, { token = it }, label = "Discord bot token", mono = true, masked = true, onSubmit = ::next)
+                    Label("Create a bot in the Discord Developer Portal, turn on Message Content Intent, and invite it to your server.", style = Tokens.Type.Meta, color = colors.textMuted)
+                } else if (kind == "freeagent") {
+                    Label("Register an app at dev.freeagent.com, and add this control plane's address followed by /integrations/freeagent/callback as an OAuth redirect URI.", style = Tokens.Type.Meta, color = colors.textMuted)
+                    TextInput(username, { username = it }, label = "FreeAgent OAuth identifier", mono = true)
+                    TextInput(token, { token = it }, label = "FreeAgent OAuth secret", mono = true, masked = true, onSubmit = ::next)
+                    Segmented(listOf(Production, Sandbox), environment, { environment = it }, "FreeAgent environment")
+                    Label("Use Sandbox with an app registered for a FreeAgent test account.", style = Tokens.Type.Meta, color = colors.textMuted)
+                } else if (kind == "actual") {
+                    TextInput(budgetSyncId, { budgetSyncId = it }, label = "Budget sync id", mono = true)
+                    TextInput(token, { token = it }, label = "Actual HTTP API key", mono = true, masked = true)
+                    TextInput(encryptionPassword, { encryptionPassword = it }, label = "Budget encryption password, if it has one", mono = true, masked = true, onSubmit = ::next)
+                    Label("Find the sync id in Actual under Settings, Show advanced settings. The API key is the API_KEY the bridge starts with.", style = Tokens.Type.Meta, color = colors.textMuted)
+                } else if (kind == "paperless") {
+                    TextInput(token, { token = it }, label = "Paperless-ngx API token", mono = true, masked = true, onSubmit = ::next)
+                    Label("Copy it from My Profile in Paperless-ngx.", style = Tokens.Type.Meta, color = colors.textMuted)
                 } else {
                     Segmented(listOf(UserSession, Bot), tokenType, { tokenType = it }, "Stoat token type")
                     TextInput(token, { token = it }, label = "Stoat token", mono = true, masked = true, onSubmit = ::next)
@@ -566,7 +639,21 @@ fun SetupFlow(
                 Label("Agents see its tools as ${integrationSlug(name).ifEmpty { "name" }}__tool_name. The name must be unique.", style = Tokens.Type.Meta, color = colors.textMuted)
             }
 
-            "Sign in" -> {
+            "Sign in" -> if (freeAgent) {
+                Label("Mycelium opens FreeAgent in your browser. Approve access there. Agents can read nothing until you do.", color = colors.textMuted)
+                MyButton(
+                    {
+                        created?.let { account ->
+                            store.act {
+                                val start = store.api.startFreeAgentSignIn(account.id)
+                                platform?.openUrl(start.authorizeUrl)
+                            }
+                        }
+                    },
+                    text = "Sign in to FreeAgent",
+                    variant = ButtonVariant.Outline,
+                )
+            } else {
                 Label("Signing in is optional. It lets agents love tracks and scrobble, with your approval each time.", color = colors.textMuted)
                 MyButton(
                     { created?.let { account -> store.act { platform?.openUrl(store.api.startLastFmSignIn(account.id).authorizeUrl) } } },
@@ -586,7 +673,7 @@ fun SetupFlow(
             if (title == "Sign in") {
                 MyButton(onDismiss, text = "Done", variant = ButtonVariant.Outline)
             } else {
-                if (step > (if (knownAddress != null) 1 else 0) && !(lastFm && step == 1)) {
+                if (step > (if (knownAddress != null) 1 else 0) && !(lastFm && step == 1) && !(freeAgent && created != null)) {
                     MyButton(::back, text = "Back", muted = true)
                 } else {
                     MyButton({ if (typed && created == null) confirmingClose = true else onDismiss() }, text = "Cancel", muted = true)

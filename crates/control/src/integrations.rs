@@ -1,7 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::integration_policy::{self, Effective};
 use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
-use crate::{caldav, email, lastfm, stoat, zulip};
+use crate::{actual, caldav, discord, email, freeagent, lastfm, paperless, stoat, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
 use serde_json::Value;
@@ -13,6 +13,10 @@ pub enum Integration {
     Stoat,
     LastFm,
     CalDav,
+    Discord,
+    FreeAgent,
+    Actual,
+    Paperless,
 }
 
 pub struct Credentials {
@@ -52,6 +56,10 @@ impl Integration {
             "stoat" => Some(Integration::Stoat),
             "lastfm" => Some(Integration::LastFm),
             "caldav" => Some(Integration::CalDav),
+            "discord" => Some(Integration::Discord),
+            "freeagent" => Some(Integration::FreeAgent),
+            "actual" => Some(Integration::Actual),
+            "paperless" => Some(Integration::Paperless),
             _ => None,
         }
     }
@@ -63,6 +71,8 @@ impl Integration {
     pub fn default_address(self) -> Option<&'static str> {
         match self {
             Integration::LastFm => Some(lastfm::DEFAULT_ADDRESS),
+            Integration::Discord => Some(discord::DEFAULT_ADDRESS),
+            Integration::FreeAgent => Some(freeagent::PRODUCTION_ADDRESS),
             _ => None,
         }
     }
@@ -74,6 +84,9 @@ impl Integration {
             Integration::Stoat => None,
             Integration::LastFm => Some("Enter your Last.fm username."),
             Integration::CalDav => Some("Enter your calendar username."),
+            Integration::Discord => Some("Enter the name people know you by on Discord."),
+            Integration::FreeAgent => Some("Enter your FreeAgent OAuth identifier."),
+            Integration::Actual | Integration::Paperless => None,
         }
     }
 
@@ -84,6 +97,10 @@ impl Integration {
             Integration::Stoat => "Enter your Stoat token.",
             Integration::LastFm => "Enter your Last.fm shared secret.",
             Integration::CalDav => "Enter an app password for your calendar account.",
+            Integration::Discord => "Enter your Discord bot token.",
+            Integration::FreeAgent => "Enter your FreeAgent OAuth secret.",
+            Integration::Actual => "Enter the API key your Actual HTTP API is set up with.",
+            Integration::Paperless => "Enter your Paperless-ngx API token.",
         }
     }
 
@@ -94,6 +111,8 @@ impl Integration {
             Integration::Stoat => stoat::normalise_settings(settings),
             Integration::LastFm => lastfm::normalise_settings(settings),
             Integration::CalDav => caldav::normalise_settings(settings),
+            Integration::Actual => actual::normalise_settings(settings),
+            Integration::Discord | Integration::FreeAgent | Integration::Paperless => Ok(Value::Null),
         }
     }
 
@@ -104,6 +123,10 @@ impl Integration {
             Integration::Stoat => stoat::tools(),
             Integration::LastFm => lastfm::tools(),
             Integration::CalDav => caldav::tools(),
+            Integration::Discord => discord::tools(),
+            Integration::FreeAgent => freeagent::tools(),
+            Integration::Actual => actual::tools(),
+            Integration::Paperless => paperless::tools(),
         }
     }
 
@@ -114,6 +137,10 @@ impl Integration {
             Integration::Stoat => stoat::always_asks(tool),
             Integration::LastFm => lastfm::always_asks(tool),
             Integration::CalDav => caldav::always_asks(tool),
+            Integration::Discord => discord::always_asks(tool),
+            Integration::FreeAgent => freeagent::always_asks(tool),
+            Integration::Actual => actual::always_asks(tool),
+            Integration::Paperless => paperless::always_asks(tool),
         }
     }
 
@@ -124,6 +151,10 @@ impl Integration {
             Integration::Stoat => stoat::verify(http, credentials).await.map(|_| Value::Null),
             Integration::LastFm => lastfm::verify(http, credentials).await.map(|_| Value::Null),
             Integration::CalDav => caldav::verify(http, credentials).await,
+            Integration::Discord => discord::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::FreeAgent => freeagent::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::Actual => actual::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::Paperless => paperless::verify(http, credentials).await.map(|_| Value::Null),
         }
     }
 
@@ -136,6 +167,10 @@ impl Integration {
             Integration::Stoat => stoat::call(&state.http, &credentials, tool, arguments).await,
             Integration::CalDav => caldav::call(&state.http, &credentials, tool, arguments).await,
             Integration::LastFm => lastfm::call(state, owner, server, &credentials, tool, arguments).await,
+            Integration::Discord => discord::call(&state.http, &credentials, tool, arguments).await,
+            Integration::FreeAgent => freeagent::call(state, owner, server, &credentials, tool, arguments).await,
+            Integration::Actual => actual::call(&state.http, &credentials, tool, arguments).await,
+            Integration::Paperless => paperless::call(&state.http, &credentials, tool, arguments).await,
         }
     }
 }
@@ -172,6 +207,10 @@ impl ServerRow {
 
         if !self.enabled {
             return IntegrationStatus::Disabled;
+        }
+
+        if self.integration() == Some(Integration::FreeAgent) && self.session_key.is_none() {
+            return IntegrationStatus::NeedsSignIn;
         }
 
         match self.token_expires_at {

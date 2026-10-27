@@ -70,11 +70,11 @@ class SideChatsTest {
     }
 
     @Test
-    fun aConversationsSubagentsAreListedOldestFirst() {
+    fun aConversationsSubagentsAreListedNewestFirst() {
         fun subagent(id: String, createdAt: String) = chat(id, "parent").copy(sideKind = "subagent", createdAt = createdAt)
         val all = listOf(chat("parent"), subagent("late", "2026-10-22T10:05:00Z"), chat("side", "parent"), subagent("early", "2026-10-22T10:01:00Z"), subagent("elsewhere", "2026-10-22T10:02:00Z").copy(parentId = "other"))
 
-        assertEquals(listOf("early", "late"), subagentsOf(all, "parent").map { it.id })
+        assertEquals(listOf("late", "early"), subagentsOf(all, "parent").map { it.id })
     }
 
     @Test

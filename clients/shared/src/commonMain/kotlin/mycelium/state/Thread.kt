@@ -116,6 +116,7 @@ sealed interface ThreadItem {
         val text: String,
         val files: List<Attachment> = emptyList(),
         val images: List<ThreadImage> = emptyList(),
+        val goalSentAt: String? = null,
     ) : ThreadItem
 
     data class AgentMessage(override val key: String, val text: String) : ThreadItem
@@ -172,10 +173,12 @@ sealed interface ThreadItem {
 
     data class ModelChanged(override val key: String, val provider: String, val model: String) : ThreadItem
 
-    data class Continued(override val key: String, val text: String) : ThreadItem
+    data class Continued(override val key: String, val text: String, val from: ContinuedFrom? = null, val why: String? = null) : ThreadItem
 
     data class TeachMode(override val key: String, val on: Boolean) : ThreadItem
 }
+
+data class ContinuedFrom(val agent: String, val account: String?, val model: String?, val provider: String?)
 
 data class UsageLimitNote(val window: String, val resetsAt: String?)
 
@@ -274,7 +277,7 @@ class ThreadBuilder {
             EventKinds.Error -> addFailure(key, payload)
             EventKinds.Workflow -> applyWorkflowLine(items, key, payload)
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
-            EventKinds.Continued -> items += ThreadItem.Continued(key, continuedText(payload))
+            EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
         }
     }
@@ -293,7 +296,9 @@ private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMe
     }
     val (pictures, files) = attachments.partition { isImage(it.mediaType) }
 
-    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) })
+    val goalSentAt = payload.string("sent_at").takeIf { payload.string("origin") == "goal" }
+
+    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) }, goalSentAt)
 }
 
 private fun withSameImagesMarked(items: List<ThreadItem>): List<ThreadItem> {
@@ -744,27 +749,39 @@ fun diffLines(oldText: String, newText: String): List<DiffLine> {
     return before + result + after
 }
 
-private fun continuedText(payload: JsonObject): String {
-    val agent = payload.string("agent").orEmpty()
-    val account = payload.string("account")
-    val target = when {
-        agent == "chat" -> listOfNotNull(payload.string("provider_name"), payload.string("model")).joinToString(" · ")
-        account != null -> "${agentName(agent)} as $account"
-        else -> agentName(agent)
-    }
-    val node = payload.string("node_name")
-    val reason = when (payload.string("reason")) {
-        "usage_limit" -> "Usage limit reached"
-        "signed_out" -> "Signed out"
-        "offline" -> "Node offline"
-        "model_error" -> "The model failed"
-        else -> null
+private fun sideLabel(agent: String, account: String?, model: String?, provider: String?): String =
+    when {
+        agent == "chat" -> listOfNotNull(provider, model).joinToString(" · ")
+        else -> listOfNotNull(if (account != null) "${agentName(agent)} as $account" else agentName(agent), model).joinToString(", ")
     }
 
+private fun limitName(window: String?): String = when (window) {
+    "five_hour" -> "5-hour limit"
+    "seven_day" -> "weekly limit"
+    else -> "usage limit"
+}
+
+private fun switchReason(reason: String, payload: JsonObject, from: ContinuedFrom?): String? = when (reason) {
+    "usage_limit" -> if (payload.boolean("every_account") == true && from != null) "${limitName(payload.string("window"))} reached on every ${agentName(from.agent)} account" else "${limitName(payload.string("window"))} reached"
+    "usage_returned" -> "${agentName(payload.string("agent").orEmpty())} has usage again"
+    "signed_out" -> "signed out"
+    "offline" -> "node offline"
+    "model_error" -> "the model failed"
+    else -> null
+}
+
+private fun continuedItem(key: String, payload: JsonObject): ThreadItem.Continued {
+    val agent = payload.string("agent").orEmpty()
+    val target = sideLabel(agent, payload.string("account"), payload.string("model"), payload.string("provider_name"))
+    val from = (payload["from"] as? JsonObject)?.let { ContinuedFrom(it.string("agent").orEmpty(), it.string("account"), it.string("model"), it.string("provider_name")) }
+    val node = payload.string("node_name")
+    val reason = payload.string("reason")?.let { switchReason(it, payload, from) }
+    val source = from?.let { sideLabel(it.agent, it.account, it.model, it.provider) }
+
     return when {
-        reason != null -> "$reason · continued with ${node?.let { "$target on $it" } ?: target}"
-        node != null -> "Moved to $node"
-        else -> "Continued on $target"
+        reason != null -> ThreadItem.Continued(key, "Continued with ${node?.let { "$target on $it" } ?: target}", from, if (source != null) "From $source: $reason" else reason.replaceFirstChar { it.uppercase() })
+        node != null -> ThreadItem.Continued(key, "Moved to $node", from)
+        else -> ThreadItem.Continued(key, "Continued on $target", from)
     }
 }
 

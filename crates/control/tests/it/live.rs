@@ -31,6 +31,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PUT /api/v1/conversations/{id}/goal",
     "PATCH /api/v1/conversations/{id}/goal",
     "DELETE /api/v1/conversations/{id}/goal",
+    "POST /api/v1/conversations/{id}/goal/send",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/schedules/{id}/confirm",
@@ -100,7 +101,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
 ];
 
 const SILENT_ROUTES: &[&str] = &[
-
+    "PUT /api/v1/agent-settings",
+    "PUT /api/v1/agent-settings/account-mode",
+    "PUT /api/v1/account-prices",
     "POST /auth/logout",
     "DELETE /api/v1/sessions/{id}",
     "POST /api/v1/nodes/{id}/logins",
@@ -141,6 +144,8 @@ const SILENT_ROUTES: &[&str] = &[
     "PUT /api/v1/chat-tool-servers/{id}/groups",
     "POST /api/v1/chat-tool-servers/{id}/lastfm-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}/lastfm-sign-in",
+    "POST /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
+    "DELETE /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}",
     "POST /api/v1/projects",
     "POST /api/v1/tasks",
@@ -204,6 +209,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/wellness/holds",
     "PUT /api/v1/wellness/puzzles/{puzzle}/today",
     "DELETE /api/v1/wellness/puzzles/{puzzle}/today",
+    "POST /api/v1/wellness/puzzles/wordle/guesses",
+    "POST /api/v1/wellness/puzzles/connections/guesses",
     "POST /api/v1/usage/resets",
     "POST /api/v1/instructions/pull",
     "PUT /api/v1/instruction-source",
@@ -1141,12 +1148,31 @@ async fn setting_pausing_and_clearing_a_goal_is_streamed() {
     assert_eq!((set.text.as_str(), set.state), ("Tests pass", mycelium_proto::api::GoalState::Active));
 
     server.user.json(server.user.patch(&url).json(&json!({"paused": true}))).await;
-    let paused = stream.until(|message| match message { StreamMessage::Goal(goal) => Some(goal), _ => None }).await;
-    assert_eq!(paused.state, mycelium_proto::api::GoalState::Paused);
+    let paused = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.state == mycelium_proto::api::GoalState::Paused => Some(goal), _ => None }).await;
+    assert_eq!(paused.text, "Tests pass");
 
     server.user.json(server.user.delete(&url)).await;
     let cleared = stream.until(|message| match message { StreamMessage::GoalCleared { conversation_id } => Some(conversation_id), _ => None }).await;
     assert_eq!(cleared, conversation.id);
+}
+
+#[tokio::test]
+async fn sending_a_failed_goal_again_is_streamed_as_pending() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Build it")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    let url = format!("/api/v1/conversations/{}/goal", conversation.id);
+    server.user.json(server.user.put(&url).json(&json!({"text": "Tests pass", "token_budget": 100}))).await;
+    sqlx::query("update goals set delivery_state = 'failed', delivery_reason = 'laptop did not answer' where conversation_id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
+    let mut stream = server.user.stream().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("{url}/send"))).await;
+    let resent = stream.until(|message| match message { StreamMessage::Goal(goal) => Some(goal), _ => None }).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((resent.conversation_id, resent.delivery), (conversation.id, mycelium_proto::api::GoalDelivery::Pending));
 }
 
 #[tokio::test]

@@ -139,7 +139,7 @@ async fn puzzle_played_today_toggles() {
 #[tokio::test]
 async fn a_result_read_from_the_game_is_recorded_and_summarised() {
     let server = Server::start().await;
-    let reading = json!({"solved": true, "guesses": 4, "source": "read"});
+    let reading = json!({"solved": true, "score": 4, "source": "read"});
 
     let (status, _) = server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&reading)).await;
     assert_eq!(status, 204);
@@ -147,7 +147,7 @@ async fn a_result_read_from_the_game_is_recorded_and_summarised() {
     let wordle = puzzles(&server).await;
     let wordle = puzzle(&wordle, "wordle");
 
-    assert_eq!((wordle["today"]["solved"].clone(), wordle["today"]["guesses"].clone(), wordle["today"]["source"].clone()), (json!(true), json!(4), json!("read")));
+    assert_eq!((wordle["today"]["solved"].clone(), wordle["today"]["score"].clone(), wordle["today"]["source"].clone()), (json!(true), json!(4), json!("read")));
     assert_eq!((wordle["stats"]["played"].clone(), wordle["stats"]["solved"].clone(), wordle["stats"]["average"].clone()), (json!(1), json!(1), json!(4.0)));
     assert_eq!(wordle["stats"]["distribution"], json!([{"value": 4, "count": 1}]));
 
@@ -156,10 +156,10 @@ async fn a_result_read_from_the_game_is_recorded_and_summarised() {
 }
 
 #[tokio::test]
-async fn an_unfinished_game_is_played_but_stays_out_of_the_average() {
+async fn a_failed_wordle_is_played_but_stays_out_of_the_average() {
     let server = Server::start().await;
 
-    server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&json!({"guesses": 2, "source": "read"}))).await;
+    server.user.json(server.user.put("/api/v1/wellness/puzzles/wordle/today").json(&json!({"solved": false, "source": "read"}))).await;
 
     let all = puzzles(&server).await;
     let wordle = puzzle(&all, "wordle");

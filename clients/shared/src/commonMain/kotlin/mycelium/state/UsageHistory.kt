@@ -48,6 +48,17 @@ fun priceRatio(account: UsageHistoryAccount): String? {
     return "API equivalent is ${tenths / 10}.${tenths % 10} times the price"
 }
 
+fun yourPriceCaption(account: UsageHistoryAccount): String? {
+    val price = account.yourPrice ?: return null
+    val yearly = if (price.period == "yearly") "${formatMoney(price.amount, price.currency)} a year." else null
+    val listed = account.planPriceUsd?.let { "${planName(account.plan.orEmpty())} lists $${it.toInt()}." }
+    val usd = price.monthlyUsd?.takeIf { it > 0 }
+    val equivalent = account.apiEquivalentMonthUsd
+    val ratio = if (usd != null && equivalent != null) (equivalent / usd * 10).roundToInt().let { "API equivalent is ${it / 10}.${it % 10} times this" } else null
+
+    return listOfNotNull(yearly, listed, ratio).joinToString(" ").ifEmpty { null }
+}
+
 fun dateTimeLabel(iso: String, localDateTime: (Long) -> String?): String {
     val moment = instantOrNull(iso) ?: return iso
     val local = localDateTime(moment.toEpochMilliseconds()) ?: moment.toString().substringBefore('Z')

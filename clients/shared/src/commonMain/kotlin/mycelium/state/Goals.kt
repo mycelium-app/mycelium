@@ -1,6 +1,7 @@
 package mycelium.state
 
 import mycelium.api.Goal
+import mycelium.api.GoalDelivery
 import mycelium.api.GoalState
 import kotlin.math.roundToInt
 import kotlin.time.Clock
@@ -14,7 +15,8 @@ fun goalProgress(goal: Goal, now: Instant = Clock.System.now()): String {
     val tokens = if (!goal.tokensKnown) "Token usage pending" else goal.tokenBudget?.let { "${formatTokens(goal.tokensUsed)} of ${formatTokens(it)} tokens" } ?: "${formatTokens(goal.tokensUsed)} tokens"
     val time = goal.timeLimitSeconds?.let { limit ->
         val started = goal.startedAt?.let { instantOrNull(it) }
-        val left = started?.let { limit - (now - it).inWholeSeconds }
+        val held = goal.heldSeconds + (goal.heldSince?.let { instantOrNull(it) }?.let { (now - it).inWholeSeconds.coerceAtLeast(0) } ?: 0)
+        val left = started?.let { limit - (now - it).inWholeSeconds + held }
 
         left?.let { if (it <= 0) "time limit reached" else "${formatTimeLeft(it)} left" }
     }
@@ -40,8 +42,16 @@ fun formatTimeLeft(seconds: Long): String {
     }
 }
 
-fun goalMessage(goal: Goal): String? = when (goal.state) {
-    GoalState.Active -> null
+fun goalIsHeld(goal: Goal): Boolean = goal.state == GoalState.Active && goal.heldSince != null
+
+fun goalMessage(goal: Goal, agent: String = ""): String? = when (goal.state) {
+    GoalState.Active -> when {
+        goal.heldSince != null -> "The goal carries on when the limit resets. Time on hold does not count towards the time limit."
+        goal.delivery == GoalDelivery.Pending && goal.turnActive -> "Sends to ${agentName(agent)} when its current turn ends."
+        goal.delivery == GoalDelivery.Pending -> "Sending the goal to ${agentName(agent)}."
+        goal.delivery == GoalDelivery.Failed -> goal.deliveryReason
+        else -> null
+    }
     GoalState.Paused -> goal.reason ?: "Paused"
     GoalState.Met -> "Goal met. ${goal.reason.orEmpty()}".trim()
     GoalState.Stuck -> "Goal stuck. ${goal.reason.orEmpty()}".trim()

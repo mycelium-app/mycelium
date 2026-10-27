@@ -59,9 +59,7 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     } else {
         Column(Modifier.fillMaxSize()) {
             Bar {
-                LocalOpenList.current?.let { openList ->
-                    MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
-                }
+                OpenListButton()
 
                 title()
                 Box(Modifier.weight(1f))

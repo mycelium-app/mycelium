@@ -347,7 +347,7 @@ fun subagentSections(conversations: Collection<Conversation>, conversationId: St
 }
 
 fun subagentsOf(conversations: Collection<Conversation>, parentId: String): List<Conversation> =
-    conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedBy { it.createdAt }
+    conversations.filter { it.archivedAt == null && it.parentId == parentId && it.isSubagent }.sortedByDescending { it.createdAt }
 
 internal fun Map<String, List<String>>.withoutFirst(conversationId: String, text: String?): Map<String, List<String>> {
     val current = this[conversationId] ?: return this

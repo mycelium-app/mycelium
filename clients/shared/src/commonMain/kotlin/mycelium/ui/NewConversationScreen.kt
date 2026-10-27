@@ -26,7 +26,14 @@ import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.Store
 import mycelium.state.SignInPrefix
+import mycelium.state.RoutingPrefix
 import mycelium.state.accountChoiceId
+import mycelium.state.anyAccountId
+import mycelium.state.groupedByAgent
+import mycelium.state.routingAgent
+import mycelium.state.routingButtonText
+import mycelium.state.routingChoices
+import mycelium.api.Routing
 import mycelium.state.accountChoices
 import mycelium.state.accountMenuTitle
 import mycelium.state.accountsElsewhere
@@ -69,8 +76,10 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
 
+    val agentSettings = rememberAgentSettings(store)
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
-    val chosenAccount = accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+    val routing = account?.takeIf { it.startsWith(RoutingPrefix) }?.removePrefix(RoutingPrefix)?.takeIf { it == Routing.AnyModel || it == anyAccountId(chosenAgent.orEmpty()).removePrefix(RoutingPrefix) }
+    val chosenAccount = if (routing != null) null else accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
 
     val models = if (node != null && chosenAgent != null) modelMenu(node, chosenAgent, chosenAccount?.account) else null
     val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
@@ -101,6 +110,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                     node.id,
                     chosenAgent,
                     account = chosenAccount?.account,
+                    routing = routing,
                     cwd = if (project == null) cwd.trim() else null,
                     projectId = project?.id,
                     branch = if (project != null && worktree) branch.trim() else null,
@@ -172,10 +182,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                             if (accounts.isNotEmpty()) {
                                 OptionMenu(
                                     "Account",
-                                    accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()),
-                                    chosenAccount?.let(::accountChoiceId),
+                                    routingChoices(node?.logins.orEmpty(), agentSettings.anyModel, "starts on") + groupedByAgent(accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()), chosenAgent.orEmpty()),
+                                    routing?.let { "$RoutingPrefix$it" } ?: chosenAccount?.let(::accountChoiceId),
                                     title = accountMenuTitle(chosenAgent.orEmpty()),
                                     icon = MyIcon.Person,
+                                    buttonText = routingButtonText(routing?.let { "$RoutingPrefix$it" }),
                                     onSelect = { picked ->
                                         if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
                                             store.act {
@@ -184,6 +195,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                             }
                                         } else {
                                             account = picked
+                                            routingAgent(picked)?.let { agent = it }
                                         }
                                     },
                                 )

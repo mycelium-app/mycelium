@@ -89,6 +89,12 @@ pub struct PendingLastFm {
     pub created: std::time::Instant,
 }
 
+pub struct PendingFreeAgent {
+    pub owner: Uuid,
+    pub server: Uuid,
+    pub created: std::time::Instant,
+}
+
 pub struct ProcessAnswer {
     pub ok: bool,
     pub error: Option<String>,
@@ -192,6 +198,7 @@ pub struct Hub {
     backups: Mutex<std::collections::HashSet<Uuid>>,
     oauth_sign_ins: Mutex<HashMap<String, PendingOAuth>>,
     lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
+    freeagent_sign_ins: Mutex<HashMap<String, PendingFreeAgent>>,
     reset_requests: PendingRequests<ResetAnswer>,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
@@ -501,6 +508,19 @@ impl Hub {
 
     pub fn take_lastfm(&self, sign_in: &str) -> Option<PendingLastFm> {
         let pending = self.lastfm_sign_ins.lock().ok()?.remove(sign_in)?;
+
+        (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
+    }
+
+    pub fn track_freeagent(&self, sign_in: String, pending: PendingFreeAgent) {
+        if let Ok(mut sign_ins) = self.freeagent_sign_ins.lock() {
+            sign_ins.retain(|_, held| held.created.elapsed() < OAUTH_SIGN_IN_LIFETIME);
+            sign_ins.insert(sign_in, pending);
+        }
+    }
+
+    pub fn take_freeagent(&self, sign_in: &str) -> Option<PendingFreeAgent> {
+        let pending = self.freeagent_sign_ins.lock().ok()?.remove(sign_in)?;
 
         (pending.created.elapsed() < OAUTH_SIGN_IN_LIFETIME).then_some(pending)
     }

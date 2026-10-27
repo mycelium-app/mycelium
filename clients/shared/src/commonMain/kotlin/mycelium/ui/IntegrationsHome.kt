@@ -43,6 +43,7 @@ fun IntegrationMark(integration: Integration, size: androidx.compose.ui.unit.Dp 
                 "caldav" -> MyIcon.Calendar
                 "outline" -> MyIcon.File
                 "litellm" -> MyIcon.Cloud
+                "freeagent" -> MyIcon.Receipt
                 else -> MyIcon.Server
             }
 

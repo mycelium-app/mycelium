@@ -9,6 +9,7 @@ data class ModelChoice(
     @SerialName("provider_id") val providerId: String? = null,
     val model: String? = null,
     val account: String? = null,
+    @SerialName("any_model") val anyModel: Boolean = false,
 )
 
 @Serializable

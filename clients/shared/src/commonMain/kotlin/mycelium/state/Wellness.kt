@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 import mycelium.Platform
 import mycelium.api.MyceliumApi
 import mycelium.api.PuzzleResult
@@ -124,12 +127,32 @@ data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes
     fun endBreak(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
 }
 
+fun countdownText(left: Duration): String {
+    val seconds = left.inWholeSeconds.coerceAtLeast(0)
+
+    return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+}
+
+fun minutesLeftText(left: Duration): String {
+    val minutes = ((left.inWholeSeconds + 59) / 60).coerceAtLeast(1)
+
+    return "$minutes ${if (minutes == 1L) "minute" else "minutes"}"
+}
+
+fun stillWorkingOnBreak(working: Int): String = when (working) {
+    0 -> "Results and notifications wait until the break ends."
+    1 -> "1 agent is still working. Its results and notifications wait until the break ends."
+    else -> "$working agents are still working. Their results and notifications wait until the break ends."
+}
+
 data class HeldNotification(val title: String, val conversationId: String, val groupId: String? = null)
 
 data class WellnessState(
     val settings: WellnessSettings = DefaultWellnessSettings,
     val overview: WellnessOverview? = null,
     val clock: BreakClock = BreakClock(),
+    val breakStartedAt: Instant? = null,
+    val breakEndsAt: Instant? = null,
     val held: List<HeldNotification> = emptyList(),
     val puzzles: List<PuzzleSummary> = emptyList(),
     val unreadable: Set<String> = emptySet(),
@@ -147,7 +170,19 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         val current = overview?.currentBreak
         val phase = if (current != null) BreakPhase.OnBreak else mutableState.value.clock.phase.takeUnless { it == BreakPhase.OnBreak } ?: BreakPhase.Idle
 
-        mutableState.update { it.copy(settings = settings, overview = overview ?: it.overview, clock = it.clock.copy(phase = phase), loaded = true) }
+        val startedAt = current?.startedAt?.let(::instantOrNull)
+        val endsAt = current?.endsAt?.let(::instantOrNull)
+
+        mutableState.update {
+            it.copy(
+                settings = settings,
+                overview = overview ?: it.overview,
+                clock = it.clock.copy(phase = phase),
+                breakStartedAt = if (phase == BreakPhase.OnBreak) startedAt ?: it.breakStartedAt else null,
+                breakEndsAt = if (phase == BreakPhase.OnBreak) endsAt ?: it.breakEndsAt else null,
+                loaded = true,
+            )
+        }
     }
 
     fun reload() {
@@ -221,8 +256,9 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
 
     fun startBreak() {
         val minutes = mutableState.value.let { it.clock.breakLength(it.settings) }
+        val startedAt = Clock.System.now()
 
-        mutableState.update { it.copy(clock = it.clock.startBreak()) }
+        mutableState.update { it.copy(clock = it.clock.startBreak(), breakStartedAt = startedAt, breakEndsAt = startedAt + minutes.minutes) }
         scope.launch {
             catching { api.startWellnessBreak(minutes) }
             load()
@@ -230,11 +266,23 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     }
 
     fun endBreak() {
-        mutableState.update { it.copy(clock = it.clock.endBreak()) }
+        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null) }
         scope.launch {
             catching { api.endWellnessBreak() }
             load()
         }
+    }
+
+    fun finishBreakIfOver(now: Instant) {
+        val current = mutableState.value
+        val endsAt = current.breakEndsAt ?: return
+
+        if (current.clock.phase != BreakPhase.OnBreak || now < endsAt) {
+            return
+        }
+
+        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null) }
+        reload()
     }
 
     suspend fun loadPuzzles() {
@@ -251,11 +299,9 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         mutableState.update { it.copy(unreadable = it.unreadable - puzzle) }
     }
 
-    fun setPlayed(puzzle: String, played: Boolean) {
-        scope.launch {
-            catching { api.setPuzzlePlayed(puzzle, played) }
-            loadPuzzles()
-        }
+    suspend fun recordManualResult(puzzle: String, result: PuzzleResult) {
+        api.recordPuzzleResult(puzzle, result.copy(source = "manual"))
+        loadPuzzles()
     }
 
     fun recordResult(puzzle: String, result: PuzzleResult) {

@@ -1,3 +1,4 @@
+use crate::routing::Routing;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -150,6 +151,8 @@ pub struct Conversation {
     pub assistant_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub teach_me: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<Routing>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

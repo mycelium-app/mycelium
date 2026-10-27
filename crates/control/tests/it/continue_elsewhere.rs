@@ -48,11 +48,11 @@ async fn finished_turns(server: &Server, id: Uuid, turns: usize) {
     common::eventually("the reply to end", || async { (server.events(id).await.iter().filter(|event| event["kind"] == "turn_end").count() == turns).then_some(()) }).await;
 }
 
-fn login(account: &str, state: LoginState) -> LoginInfo {
+pub fn login(account: &str, state: LoginState) -> LoginInfo {
     LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
 }
 
-async fn next_command(link: &mut NodeLink) -> ControlToNode {
+pub async fn next_command(link: &mut NodeLink) -> ControlToNode {
     loop {
         let message = link.next().await;
 
@@ -62,14 +62,14 @@ async fn next_command(link: &mut NodeLink) -> ControlToNode {
     }
 }
 
-async fn expect_prompt(link: &mut NodeLink) -> String {
+pub async fn expect_prompt(link: &mut NodeLink) -> String {
     match next_command(link).await {
         ControlToNode::Prompt { text, .. } => text,
         other => panic!("expected prompt, got {other:?}"),
     }
 }
 
-async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
+pub async fn node_with_accounts(server: &Server, version: &str, accounts: Vec<LoginInfo>) -> NodeLink {
     let mut link = server.online_node_as("laptop", version).await;
     link.send(NodeToControl::Logins { logins: accounts }).await;
 
@@ -382,7 +382,7 @@ async fn read_earlier_turns_pages_back_and_searches_this_conversation_only() {
     assert_eq!(elsewhere, "No earlier messages match.");
 }
 
-fn limit_message() -> String {
+pub fn limit_message() -> String {
     let resets = chrono::Utc::now() + chrono::Duration::hours(2);
 
     format!("Internal error: You've hit your session limit · resets {} (UTC)", resets.format("%-I:%M%P"))
@@ -393,7 +393,7 @@ async fn switch_on_usage_limit(server: &Server) {
     assert_eq!(status, 200);
 }
 
-fn with_usage(account: &str, left: u8) -> LoginInfo {
+pub fn with_usage(account: &str, left: u8) -> LoginInfo {
     LoginInfo { usage_left: Some(left), ..login(account, LoginState::SignedIn) }
 }
 
@@ -433,7 +433,7 @@ async fn a_full_window_switches_to_the_account_with_most_usage_left() {
 }
 
 #[tokio::test]
-async fn a_goal_still_stops_when_the_switch_fails_and_no_reset_is_known() {
+async fn a_goal_is_held_not_stopped_when_the_switch_fails_and_no_reset_is_known() {
     let server = Server::start().await;
     switch_on_usage_limit(&server).await;
     let mut link = node_with_accounts(&server, "v0.9.0", vec![with_usage("sam@example.com", 0), with_usage("work@example.org", 80)]).await;
@@ -442,7 +442,8 @@ async fn a_goal_still_stops_when_the_switch_fails_and_no_reset_is_known() {
 
     link.send(NodeToControl::SessionFailed { conversation_id: id, seq: 3, message: "You've hit your usage limit. Try again later.".into() }).await;
     let user = server.user.clone();
-    common::eventually("the goal to stop", || async { (user.json(user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1["state"] == "stuck").then_some(()) }).await;
+    let goal = common::eventually("the goal to be held", || async { Some(user.json(user.get(&format!("/api/v1/conversations/{id}/goal"))).await.1).filter(|goal| goal["held_since"].is_string()) }).await;
+    assert_eq!(goal["state"], "active");
 }
 
 #[tokio::test]

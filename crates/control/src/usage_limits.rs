@@ -337,6 +337,10 @@ async fn resume_one(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()> {
 
     retry_failed(state, owner, id).await?;
 
+    if crate::goals::resumed(state, owner, id).await? {
+        return Ok(());
+    }
+
     continue_unless_queued(state, owner, id, CONTINUE_TEXT).await
 }
 

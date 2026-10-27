@@ -8,6 +8,8 @@ data class Schedule(
     val id: String,
     @SerialName("node_id") val nodeId: String? = null,
     val agent: String? = null,
+    val account: String? = null,
+    val routing: String? = null,
     val cwd: String,
     @SerialName("project_id") val projectId: String? = null,
     val prompt: String,
@@ -30,6 +32,8 @@ data class Schedule(
 data class CreateScheduleRequest(
     @SerialName("node_id") val nodeId: String? = null,
     val agent: String? = null,
+    val account: String? = null,
+    val routing: String? = null,
     val prompt: String,
     val cron: String,
     @SerialName("each_run") val eachRun: String,

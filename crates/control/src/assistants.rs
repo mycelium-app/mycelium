@@ -444,6 +444,8 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                 preferences.nodes = vec![node_id];
             }
 
+            preferences.models = crate::routing::expand_any_model(state, owner, std::mem::take(&mut preferences.models)).await?;
+
             if preferences.models.is_empty() {
                 return Err(ApiError::bad_request("model_required", "Choose a model for this assistant in its settings, then send your message again."));
             }
@@ -462,7 +464,8 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                     chats::send(state, owner, started.id, text, request.attachments).await?
                 }
                 Choice::Workspace { agent, account, node_id, .. } => {
-                    let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None };
+                    let account = account_for(state, owner, node_id, agent, account).await?;
+                    let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
                     let started = conversations::start_for(state, owner, started, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
@@ -731,6 +734,20 @@ pub fn choose(preferences: &AssistantPreferences, facts: &Facts, workspace_only:
     })
 }
 
+async fn effective_preferences(state: &AppState, owner: Uuid, assistant: &Assistant) -> ApiResult<AssistantPreferences> {
+    let models = crate::routing::expand_any_model(state, owner, assistant.preferences.models.clone()).await?;
+
+    Ok(AssistantPreferences { models, ..assistant.preferences.clone() })
+}
+
+async fn account_for(state: &AppState, owner: Uuid, node_id: Uuid, agent: AgentId, account: Option<String>) -> ApiResult<Option<String>> {
+    if account.is_some() {
+        return Ok(account);
+    }
+
+    crate::routing::best_account(state, owner, node_id, agent).await
+}
+
 pub async fn facts_of(state: &AppState, owner: Uuid, assistant_id: Uuid) -> ApiResult<Facts> {
     let available = sqlx::query_as::<_, (Uuid, String)>(
         "select n.id, a.agent from nodes n join agents a on a.node_id = n.id and a.available where n.created_by = $1 and n.revoked_at is null and not n.draining order by n.name, n.id",
@@ -877,9 +894,11 @@ async fn move_to_workspace(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult
     };
     let assistant = find_owned(state, assistant_id, owner).await?;
     let facts = facts_of(state, owner, assistant_id).await?;
-    let Some(Choice::Workspace { agent, account, node_id, .. }) = choose(&assistant.preferences, &facts, true) else {
+    let preferences = effective_preferences(state, owner, &assistant).await?;
+    let Some(Choice::Workspace { agent, account, node_id, .. }) = choose(&preferences, &facts, true) else {
         return Err(ApiError::conflict("no_choice_available", "No node can run this assistant right now."));
     };
+    let account = account_for(state, owner, node_id, agent, account).await?;
 
     copy_down(state, node_id, assistant_id).await?;
 
@@ -1029,8 +1048,9 @@ pub async fn use_workspace_tool(state: &AppState, conversation_id: Option<Uuid>)
 
     let assistant = find_owned(state, assistant_id, owner).await?;
     let facts = facts_of(state, owner, assistant_id).await?;
+    let preferences = effective_preferences(state, owner, &assistant).await?;
 
-    let Some(Choice::Workspace { node_id, .. }) = choose(&assistant.preferences, &facts, true) else {
+    let Some(Choice::Workspace { node_id, .. }) = choose(&preferences, &facts, true) else {
         return Ok(("No node can run this assistant right now. Tell the person to bring one of its nodes online and signed in, or to add one in the assistant's settings.".to_string(), true));
     };
 
@@ -1100,8 +1120,9 @@ async fn label_of(state: &AppState, choice: &Choice) -> ApiResult<String> {
 
 async fn next_choice_label(state: &AppState, owner: Uuid, assistant: &Assistant) -> ApiResult<Option<String>> {
     let facts = facts_of(state, owner, assistant.id).await?;
+    let preferences = effective_preferences(state, owner, assistant).await?;
 
-    match choose(&assistant.preferences, &facts, false) {
+    match choose(&preferences, &facts, false) {
         Some(choice) => Ok(Some(label_of(state, &choice).await?)),
         None => Ok(None),
     }
@@ -1129,14 +1150,18 @@ async fn try_fall_back(state: &AppState, owner: Uuid, conversation_id: Uuid, rea
         return Ok(false);
     }
 
-    if let (Some(until), Some(index)) = (until, current_index(&assistant.preferences, &row)) {
+    let preferences = effective_preferences(state, owner, &assistant).await?;
+
+    if let (Some(until), Some(index)) = (until, current_index(&preferences, &row)) {
         sqlx::query("update assistants set limited = limited || jsonb_build_object($2::text, $3::text) where id = $1").bind(assistant_id).bind(index.to_string()).bind(until.to_rfc3339()).execute(&state.pool).await?;
     }
 
     let facts = facts_of(state, owner, assistant_id).await?;
-    let target = match choose(&assistant.preferences, &facts, false) {
+    let target = match choose(&preferences, &facts, false) {
         Some(Choice::Chat { provider_id, model, .. }) => Target { agent: chats::CHAT_AGENT.to_string(), account: None, provider_id: Some(provider_id), model, node_id: None, cwd: None },
         Some(Choice::Workspace { agent, account, node_id, .. }) => {
+            let account = account_for(state, owner, node_id, agent, account).await?;
+
             copy_down(state, node_id, assistant_id).await?;
 
             Target { agent: enum_text(&agent), account, provider_id: None, model: None, node_id: Some(node_id), cwd: Some(folder_of(assistant_id)) }
@@ -1187,11 +1212,11 @@ mod tests {
     use mycelium_proto::api::ModelChoice;
 
     fn chat(model: &str) -> ModelChoice {
-        ModelChoice { agent: None, provider_id: Some(Uuid::from_u128(1)), model: Some(model.into()), account: None }
+        ModelChoice { agent: None, provider_id: Some(Uuid::from_u128(1)), model: Some(model.into()), account: None, any_model: false }
     }
 
     fn harness(agent: AgentId, account: Option<&str>) -> ModelChoice {
-        ModelChoice { agent: Some(agent), provider_id: None, model: None, account: account.map(str::to_string) }
+        ModelChoice { agent: Some(agent), provider_id: None, model: None, account: account.map(str::to_string), any_model: false }
     }
 
     fn node(id: u128, agents: &[&str], accounts: &[(&str, &str)]) -> NodeFacts {

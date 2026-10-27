@@ -33,6 +33,13 @@ pub async fn request(State(state): State<AppState>, user: AuthUser, Path(id): Pa
     user.require_full_access()?;
     let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).map(str::to_string);
     let target = Target { agent: request.agent, account, provider_id: request.provider_id, model: request.model, node_id: request.node_id, cwd: request.cwd };
+
+    if let Some(routing) = request.routing {
+        let row = crate::routing::choose(&state, user.id, id, routing).await?;
+
+        return Ok(Json(row.to_proto()?));
+    }
+
     let row = continue_on(&state, user.id, id, target, None).await?;
 
     Ok(Json(row.to_proto()?))
@@ -47,11 +54,19 @@ async fn provider_name(state: &AppState, provider_id: Option<Uuid>) -> ApiResult
 }
 
 pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target, reason: Option<&str>) -> ApiResult<ConversationRow> {
+    continue_with(state, owner, id, target, reason, json!({})).await
+}
+
+pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Target, reason: Option<&str>, detail: Value) -> ApiResult<ConversationRow> {
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, owner).await?;
 
-    if matches!(before.status.as_str(), "working" | "input") {
+    if reason.is_none() && matches!(before.status.as_str(), "working" | "input") {
         return Err(ApiError::conflict("conversation_busy", "This conversation is still working. Wait for the turn to finish or stop it, then continue elsewhere."));
+    }
+
+    if reason.is_none() {
+        sqlx::query("update conversations set routing = null where id = $1").bind(id).execute(&mut *tx).await?;
     }
 
     let from_chat = chats::is_chat(&before);
@@ -95,7 +110,7 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
             .bind(&target.account)
             .fetch_one(&mut *tx)
             .await?;
-        payload = json!({"kind": "account", "agent": target.agent, "account": target.account, "from": from, "reason": reason});
+        payload = json!({"kind": "account", "agent": target.agent, "account": target.account, "model": before.model, "from": from, "reason": reason});
     } else if to_chat {
         let Some(provider_id) = target.provider_id else {
             return Err(ApiError::bad_request("model_required", "Choose a model for this chat."));
@@ -147,7 +162,7 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
         let project_id = if node_id == before.node_id { before.project_id } else { earlier_project };
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "update conversations set agent = $2, account = $3, provider_id = null, model = null, node_id = $4, cwd = $5, project_id = $6,
+            "update conversations set agent = $2, account = $3, provider_id = null, model = $7, node_id = $4, cwd = $5, project_id = $6,
                  previous_session_ids = case when acp_session_id is null then previous_session_ids else array_append(previous_session_ids, acp_session_id) end, acp_session_id = null
              where id = $1 returning {CONVERSATION_COLUMNS}"
         )))
@@ -157,13 +172,20 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
         .bind(node_id)
         .bind(&cwd)
         .bind(project_id)
+        .bind(&target.model)
         .fetch_one(&mut *tx)
         .await?;
         let moved = (node_id != before.node_id).then_some((node_id, node_name));
         payload = json!({
-            "kind": "handoff", "agent": target.agent, "account": target.account, "cwd": cwd,
+            "kind": "handoff", "agent": target.agent, "account": target.account, "model": target.model, "cwd": cwd,
             "node_id": moved.as_ref().map(|(id, _)| id), "node_name": moved.as_ref().map(|(_, name)| name), "from": from, "reason": reason,
         });
+    }
+
+    let mut payload = payload;
+
+    if let (Some(payload), Some(detail)) = (payload.as_object_mut(), detail.as_object()) {
+        payload.extend(detail.clone());
     }
 
     let event = append_event(&mut tx, id, EventKind::Continued, &payload, None).await?;

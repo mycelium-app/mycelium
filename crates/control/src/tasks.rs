@@ -211,7 +211,7 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     let task = move_to(&state, &user, id, TaskStatus::Open, TaskStatus::Claimed).await?;
     let prompt = task.prompt.clone().unwrap_or_else(|| task.title.clone());
-    let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt), parent_id: None, side_kind: None, model: None };
+    let request = CreateConversationRequest { account: None, node_id: task.node_id, agent: task.agent, cwd: task.cwd, project_id: task.project_id, branch: task.branch, title: Some(task.title), prompt: Some(prompt), parent_id: None, side_kind: None, model: None, routing: None };
     let started = conversations::start(&state, user.id, request).await;
 
     match started {

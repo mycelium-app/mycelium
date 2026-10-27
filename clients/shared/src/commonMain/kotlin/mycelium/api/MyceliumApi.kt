@@ -308,6 +308,13 @@ class MyceliumApi(
         call("/chat-tool-servers/$id/lastfm-sign-in") { client.delete(it) { authorise() } }
     }
 
+    suspend fun startFreeAgentSignIn(id: String): OAuthStart =
+        call("/chat-tool-servers/$id/freeagent-sign-in") { client.post(it) { authorise() } }.body()
+
+    suspend fun signOutOfFreeAgent(id: String) {
+        call("/chat-tool-servers/$id/freeagent-sign-in") { client.delete(it) { authorise() } }
+    }
+
     suspend fun patchChatToolServer(id: String, request: PatchChatToolServerRequest): ChatToolServer =
         call("/chat-tool-servers/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
@@ -495,6 +502,21 @@ class MyceliumApi(
     suspend fun saveUsageLimitSetting(setting: UsageLimitSetting): UsageLimitSetting =
         call("/usage-limit") { client.put(it) { authorise(); json(setting) } }.body()
 
+    suspend fun agentSettings(): AgentSettings = call("/agent-settings") { client.get(it) { authorise() } }.body()
+
+    suspend fun saveAgentSettings(request: SaveAgentSettingsRequest): AgentSettings =
+        call("/agent-settings") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun setAccountMode(request: SetAccountModeRequest) {
+        call("/agent-settings/account-mode") { client.put(it) { authorise(); json(request) } }
+    }
+
+    suspend fun accountPrices(): List<AccountPrice> = call("/account-prices") { client.get(it) { authorise() } }.body()
+
+    suspend fun setAccountPrice(request: SetAccountPriceRequest) {
+        call("/account-prices") { client.put(it) { authorise(); json(request) } }
+    }
+
     suspend fun wellnessSettings(): WellnessSettings = call("/wellness/settings") { client.get(it) { authorise() } }.body()
 
     suspend fun saveWellnessSettings(settings: WellnessSettings): WellnessSettings =
@@ -513,17 +535,21 @@ class MyceliumApi(
         call("/wellness/breaks/current") { client.delete(it) { authorise() } }
     }
 
-    suspend fun setPuzzlePlayed(puzzle: String, played: Boolean) {
-        call("/wellness/puzzles/$puzzle/today") { if (played) client.put(it) { authorise() } else client.delete(it) { authorise() } }
-    }
-
     suspend fun recordPuzzleResult(puzzle: String, result: PuzzleResult) {
         call("/wellness/puzzles/$puzzle/today") { client.put(it) { authorise(); json(result) } }
     }
 
     suspend fun learned(limit: Int = 5): List<LearnedItem> = call("/wellness/learned?limit=$limit") { client.get(it) { authorise() } }.body()
 
-    suspend fun puzzles(days: Int = 30): List<PuzzleSummary> = call("/wellness/puzzles?days=$days") { client.get(it) { authorise() } }.body()
+    suspend fun puzzles(days: Int = 366): List<PuzzleSummary> = call("/wellness/puzzles?days=$days") { client.get(it) { authorise() } }.body()
+
+    suspend fun wordleGame(): WordleGame = call("/wellness/puzzles/wordle/game") { client.get(it) { authorise() } }.body()
+
+    suspend fun guessWordle(word: String): WordleGame = call("/wellness/puzzles/wordle/guesses") { client.post(it) { authorise(); json(WordleGuessRequest(word)) } }.body()
+
+    suspend fun connectionsGame(): ConnectionsGame = call("/wellness/puzzles/connections/game") { client.get(it) { authorise() } }.body()
+
+    suspend fun guessConnections(words: List<String>): ConnectionsGuessAnswer = call("/wellness/puzzles/connections/guesses") { client.post(it) { authorise(); json(ConnectionsGuessRequest(words)) } }.body()
 
     suspend fun holdQuietly(kind: String, subject: String, groupId: String?) {
         call("/wellness/holds") { client.post(it) { authorise(); json(HoldRequest(kind, subject, groupId)) } }
@@ -812,6 +838,8 @@ class MyceliumApi(
     suspend fun setGoal(id: String, request: SetGoalRequest): Goal = call("/conversations/$id/goal") { client.put(it) { authorise(); json(request) } }.body()
 
     suspend fun pauseGoal(id: String, paused: Boolean): Goal = call("/conversations/$id/goal") { client.patch(it) { authorise(); json(PatchGoalRequest(paused)) } }.body()
+
+    suspend fun sendGoalAgain(id: String): Goal = call("/conversations/$id/goal/send") { client.post(it) { authorise() } }.body()
 
     suspend fun clearGoal(id: String) {
         call("/conversations/$id/goal") { client.delete(it) { authorise() } }

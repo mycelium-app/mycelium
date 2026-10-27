@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.runBlocking
@@ -77,16 +78,27 @@ class WellnessScreenTest {
     }
 
     @Test
-    fun aPuzzleOpensItsSiteAndPlayedTodayIsSelfReported() {
+    fun aPuzzleNotPlayedHereOpensInTheBrowserAndItsResultIsRecordedByHand() {
         show()
 
         rule.onNodeWithText("Puzzles").performClick()
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Wordle").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Open Daily Orbs").fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithContentDescription("Open Wordle").performClick()
-        assertEquals(listOf("https://www.nytimes.com/games/wordle/index.html"), platform.opened)
+        rule.onNodeWithContentDescription("Open Daily Orbs").performClick()
+        assertEquals(listOf("https://dailyorbs.com"), platform.opened)
 
-        rule.onNodeWithContentDescription("Connections played today").performClick()
-        rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/puzzles/connections/today") != null }
+        rule.onNodeWithContentDescription("Record a result for Daily Orbs").performClick()
+        rule.onNodeWithContentDescription("Orbs collected").performTextInput("6")
+        rule.onNodeWithText("Save").performClick()
+        rule.waitUntil(5_000) { requests.sent("PUT", "/wellness/puzzles/daily-orbs/today") != null }
+    }
+
+    @Test
+    fun theOverviewCountsThePuzzlesPlayedToday() {
+        show()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("3 of 5").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Puzzles today").assertIsDisplayed()
+        rule.onNodeWithText("Connections, Daily Orbs left").assertIsDisplayed()
     }
 }

@@ -13,8 +13,20 @@ async fn working_conversation(server: &Server, link: &mut NodeLink) -> Uuid {
     conversation.id
 }
 
+async fn put_goal(server: &Server, id: Uuid, body: Value) -> (u16, Value) {
+    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&body)).await
+}
+
+async fn already_delivered(server: &Server, id: Uuid) {
+    sqlx::query("delete from queued_prompts where conversation_id = $1 and origin = 'goal'").bind(id).execute(&server.pool).await.unwrap();
+    sqlx::query("update goals set delivery_state = 'sent', delivered_at = now() where conversation_id = $1").bind(id).execute(&server.pool).await.unwrap();
+}
+
 async fn set_goal(server: &Server, id: Uuid, text: &str, budget: i64) -> (u16, Value) {
-    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&json!({"text": text, "token_budget": budget}))).await
+    let result = put_goal(server, id, json!({"text": text, "token_budget": budget})).await;
+    already_delivered(server, id).await;
+
+    result
 }
 
 async fn goal_of(server: &Server, id: Uuid) -> Value {
@@ -299,7 +311,10 @@ async fn set_goal_with(server: &Server, id: Uuid, limits: Value) -> (u16, Value)
     let mut body = json!({"text": "Every test passes"});
     body.as_object_mut().unwrap().extend(limits.as_object().unwrap().clone());
 
-    server.user.json(server.user.put(&format!("/api/v1/conversations/{id}/goal")).json(&body)).await
+    let result = put_goal(server, id, body).await;
+    already_delivered(server, id).await;
+
+    result
 }
 
 async fn report_windows(link: &mut NodeLink, windows: &[(&str, f64)]) {
@@ -661,4 +676,104 @@ async fn a_cached_window_that_has_reset_is_visible_but_is_not_used_by_a_goal() {
     assert_eq!(nodes[0]["logins"][0]["windows"][0]["used_percent"], 100.0);
     let cached_at: chrono::DateTime<chrono::Utc> = nodes[0]["logins"][0]["usage_read_at"].as_str().unwrap().parse().unwrap();
     assert_eq!(cached_at.timestamp(), read_at.timestamp());
+}
+
+#[tokio::test]
+async fn a_goal_set_during_a_turn_waits_for_the_turn_to_end_and_then_reaches_the_agent() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+
+    let (status, goal) = put_goal(&server, id, json!({"text": "Release 0.13"})).await;
+
+    assert_eq!(status, 200, "{goal}");
+    assert_eq!(goal["delivery"], "pending");
+    assert!(!user_messages(&server, id).await.iter().any(|text| text.contains("Release 0.13")));
+
+    end_turn(&mut link, id, 2, 0).await;
+
+    assert_eq!(link.expect_prompt().await.1, "Work towards this goal: Release 0.13");
+    let goal = goal_of(&server, id).await;
+    assert_eq!(goal["delivery"], "sent");
+    assert!(goal["delivered_at"].is_string(), "{goal}");
+    let sent = server.events(id).await.into_iter().filter(|event| event["kind"] == "user_message").last().unwrap();
+    assert_eq!((sent["payload"]["origin"].as_str(), sent["payload"]["sent_at"].is_string()), (Some("goal"), true));
+}
+
+#[tokio::test]
+async fn a_goal_set_while_the_agent_is_idle_is_marked_sent_at_once() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    end_turn(&mut link, id, 2, 0).await;
+    link.barrier(id, 3).await;
+
+    let (_, goal) = put_goal(&server, id, json!({"text": "Release 0.13"})).await;
+
+    assert_eq!(link.expect_prompt().await.1, "Work towards this goal: Release 0.13");
+    let delivered = common::eventually("the goal to be marked sent", || async { (goal_of(&server, id).await["delivery"] == "sent").then_some(()) }).await;
+    assert_eq!((goal["state"].as_str(), delivered), (Some("active"), ()));
+}
+
+#[tokio::test]
+async fn a_goal_that_cannot_be_sent_because_the_node_is_offline_says_so_and_can_be_sent_again() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    end_turn(&mut link, id, 2, 0).await;
+    link.barrier(id, 3).await;
+    let (node_id, token) = (link.id, link.token.clone());
+    drop(link);
+    common::eventually("the node to go offline", || async {
+        let (_, nodes) = server.user.json(server.user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|candidate| candidate["id"] == json!(node_id) && candidate["online"] == false).then_some(())
+    })
+    .await;
+
+    let (_, goal) = put_goal(&server, id, json!({"text": "Release 0.13"})).await;
+
+    assert_eq!(goal["delivery"], "failed");
+    assert_eq!(goal["delivery_reason"], "Mycelium could not send the goal to Claude Code because laptop did not answer. Check that laptop is online, then send the goal again.");
+
+    let mut returned = server.connect_node(node_id, &token).await;
+    returned.hello(vec![(id, 3)]).await;
+    let (status, again) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/goal/send"))).await;
+
+    assert_eq!(status, 200, "{again}");
+    loop {
+        if let ControlToNode::Prompt { text, .. } = returned.next().await {
+            assert_eq!(text, "Work towards this goal: Release 0.13");
+            break;
+        }
+    }
+    assert_eq!(goal_of(&server, id).await["delivery"], "sent");
+}
+
+#[tokio::test]
+async fn a_goal_that_reached_the_agent_cannot_be_sent_again() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal(&server, id, "Release 0.13", 1000).await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/goal/send"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("goal_delivered")));
+}
+
+#[tokio::test]
+async fn time_held_at_a_usage_limit_does_not_count_towards_the_time_limit() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = working_conversation(&server, &mut link).await;
+    set_goal_with(&server, id, json!({"time_limit_seconds": 7200})).await;
+    sqlx::query("update goals set started_at = now() - interval '3 hours', held_seconds = 7200 where conversation_id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    end_turn(&mut link, id, 2, 0).await;
+    let (check, _) = expect_check(&mut link).await;
+    answer_check(&mut link, check, "{\"verdict\": \"continue\", \"reason\": \"More to do.\"}").await;
+
+    assert_eq!(link.expect_prompt().await.1, "Continue towards the goal: Every test passes\n\nMore to do.");
+    assert_eq!(goal_of(&server, id).await["state"], "active");
 }

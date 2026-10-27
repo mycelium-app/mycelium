@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -31,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.Dp
@@ -64,6 +67,8 @@ import mycelium.state.SignInPrefix
 import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
 import mycelium.state.continueChoices
+import mycelium.state.routedLabel
+import mycelium.state.routedStatus
 import mycelium.state.currentContinueId
 import mycelium.state.agentName
 import mycelium.state.switchableAccounts
@@ -76,6 +81,8 @@ import mycelium.state.sessionOptions
 import mycelium.state.slashCommands
 import mycelium.state.turnIsOpen
 import mycelium.state.SubagentSection
+import mycelium.state.ago
+import mycelium.state.relativeTime
 import mycelium.state.subagentSections
 import kotlinx.serialization.json.JsonPrimitive
 import mycelium.state.loginMethodName
@@ -116,8 +123,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         mutableStateOf(saved?.toFloatOrNull()?.dp ?: Tokens.Size.SidePanel)
     }
 
+    var chatForced by remember(id) { mutableStateOf(false) }
+
     fun openPanel(chosen: SidePanel?) {
         panel = chosen
+        chatForced = false
 
         if (!compact) {
             platform?.savePreference("$SidePanelPreference:$id", chosen?.name.orEmpty())
@@ -125,6 +135,26 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     var chatWidth by remember { mutableStateOf(Dp.Unspecified) }
+    var areaWidth by remember { mutableStateOf(Dp.Unspecified) }
+    val demand = LocalPanelDemand.current
+    val sidePanels = !compact && panels && conversation?.isChat != true
+    val narrow = sidePanels && areaWidth != Dp.Unspecified && panelTakesOver(areaWidth)
+    val takeover = narrow && panel != null && !chatForced
+    val browserPanel = panel == SidePanel.Outline
+
+    SideEffect {
+        demand?.width = if (sidePanels) panelDemand(panelWidth, panel != null, browserPanel) else 0.dp
+    }
+
+    DisposableEffect(demand) {
+        onDispose { demand?.width = 0.dp }
+    }
+
+    LaunchedEffect(narrow) {
+        if (!narrow) {
+            chatForced = false
+        }
+    }
 
     fun resizePanel(width: Dp) {
         val panelMax = if (chatWidth == Dp.Unspecified) Tokens.Size.SidePanelMax else maxOf(Tokens.Size.SidePanelMin, panelWidth + chatWidth - Tokens.Size.ChatMin)
@@ -278,8 +308,34 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
         val density = LocalDensity.current
 
-        Row(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { chatWidth = with(density) { it.width.toDp() } }) {
+        val panelContent: @Composable () -> Unit = {
+            when (panel) {
+                SidePanel.Details -> Inspector(conversation, node, groupName)
+                SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
+                SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
+                SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
+                SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
+                SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
+                null -> Unit
+            }
+        }
+
+        Row(Modifier.fillMaxSize().onSizeChanged { areaWidth = with(density) { it.width.toDp() } }) {
+            Column(
+                Modifier
+                    .then(if (takeover) Modifier.width(0.dp) else Modifier.weight(1f))
+                    .fillMaxHeight()
+                    .layout { measurable, constraints ->
+                        if (takeover) {
+                            layout(0, 0) {}
+                        } else {
+                            val placeable = measurable.measure(constraints)
+
+                            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                        }
+                    }
+                    .onSizeChanged { chatWidth = with(density) { it.width.toDp() } },
+            ) {
                 ConversationHeader(
                     slots = header,
                     conversation = conversation,
@@ -451,9 +507,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                         accountLocked = conversation.acpSessionId != null,
                         continueOn = run {
-                            val choices = remember(conversation, state.nodes, providers) { continueChoices(conversation, state.nodes.values, providers) }
+                            val agentSettings = rememberAgentSettings(store)
+                            val choices = remember(conversation, state.nodes, providers, agentSettings) { continueChoices(conversation, state.nodes.values, providers, agentSettings.anyModel) }
+                            val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
 
-                            ContinueControls(choices, currentContinueId(conversation)) { choice -> store.act { store.continueOn(id, choice) } }
+                            ContinueControls(choices, currentContinueId(conversation), { choice -> store.act { store.continueOn(id, choice) } }, routedLabel(conversation, providers), routedStatus(conversation, login))
                         },
                         onSetAccount = { account ->
                             store.act {
@@ -476,29 +534,44 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onPause = { store.act { store.pauseGoal(id, true) } },
                             onResume = { store.act { store.pauseGoal(id, false) } },
                             onClear = { store.act { store.clearGoal(id) } },
+                            onSendAgain = { store.act { store.sendGoalAgain(id) } },
+                            agent = conversation.agent,
                         ),
                     )
                 }
             }
 
             if (!compact && !chat && panels) {
-                if (panel != null) {
+                if (takeover) {
+                    Column(Modifier.weight(1f).fillMaxHeight().background(MyTheme.colors.bgPanel)) {
+                        Bar {
+                            OpenListButton()
+                            MyButton({ chatForced = true }, text = "Back to conversation", icon = MyIcon.ChevronLeft, muted = true)
+                        }
+
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            panelContent()
+                        }
+                    }
+                } else if (panel != null && !narrow) {
                     ResizeHandle("Resize the side panel") { moved -> resizePanel(panelWidth - moved) }
 
-                    Box(Modifier.width(if (panel == SidePanel.Outline) maxOf(panelWidth, Tokens.Size.SidePanelBrowser) else panelWidth).fillMaxHeight()) {
-                        when (panel) {
-                            SidePanel.Details -> Inspector(conversation, node, groupName)
-                            SidePanel.Subagents -> SubagentsPanel(subagentSections(state.conversations.values, id), id, subagentParent, onOpenConversation, store::closeSession)
-                            SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxSize(), onExited = { openPanel(null) }) }
-                            SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
-                            SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
-                            SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
-                            null -> Unit
-                        }
+                    Box(Modifier.width(shownPanelWidth(panelWidth, areaWidth, browserPanel)).fillMaxHeight()) {
+                        panelContent()
                     }
                 }
 
-                Rail(panel, outlinePage != null) { chosen -> openPanel(if (panel == chosen) null else chosen) }
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null) { chosen ->
+                    if (narrow) {
+                        if (panel == chosen && !chatForced) {
+                            chatForced = true
+                        } else {
+                            openPanel(chosen)
+                        }
+                    } else {
+                        openPanel(if (panel == chosen) null else chosen)
+                    }
+                }
             }
         }
     }
@@ -566,9 +639,7 @@ private fun ConversationHeader(
     val archived = conversation.archivedAt != null
 
     Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
-        LocalOpenList.current?.let { openList ->
-            MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
-        }
+        OpenListButton()
 
         if (slots != null) {
             slots.title(this)
@@ -780,7 +851,6 @@ private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, p
 @Composable
 private fun SubagentsList(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
     val colors = MyTheme.colors
-    val stamp = timestamper()
 
     if (parent != null) {
         BackButton(parent.title, { onOpen(parent.id) }, Modifier.padding(horizontal = Tokens.Space.S2), showText = true)
@@ -801,7 +871,7 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
 
         section.subagents.forEach { subagent ->
             val status = statusSectionName(subagent.status)
-            val since = stamp(subagent.updatedAt, false)
+            val since = relativeTime(subagent.createdAt)
 
             val menu = rememberRowMenuState()
             val running = subagent.status == ConversationStatus.Working || subagent.status == ConversationStatus.Input
@@ -810,7 +880,7 @@ private fun SubagentsList(sections: List<SubagentSection>, currentId: String, pa
                 Modifier
                     .fillMaxWidth()
                     .rowContextMenu(menu)
-                    .pressable({ onOpen(subagent.id) }, selected = subagent.id == currentId, shape = BlockShape, description = "${subagent.title}, $status, $since")
+                    .pressable({ onOpen(subagent.id) }, selected = subagent.id == currentId, shape = BlockShape, description = "${subagent.title}, $status, started ${ago(subagent.createdAt)}")
                     .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1_5),
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,

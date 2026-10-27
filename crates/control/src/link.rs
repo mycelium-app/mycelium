@@ -334,15 +334,15 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
     let resume_at = limit.as_ref().and_then(|limit| limit.resume_at);
     let switch_to = limit.as_ref().and_then(|limit| limit.switch_to.clone());
     let limited_account = limit.as_ref().and_then(|limit| limit.account.clone());
+    let limited_window = limit.as_ref().and_then(|limit| limit.payload["usage_limit"]["window"].as_str().map(str::to_string));
 
-    if resume_at.is_none()
-        && switch_to.is_none()
-        && let Err(error) = crate::goals::session_failed(state, conversation_id).await
-    {
+    let hit_limit = limit.is_some();
+    let goal_handled = if hit_limit { crate::goals::hold(state, conversation_id).await } else { crate::goals::session_failed(state, conversation_id).await };
+
+    if let Err(error) = goal_handled {
         tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
     }
 
-    let hit_limit = limit.is_some();
     let payload = limit.map_or_else(|| json!({"message": message}), |limit| limit.payload);
     let recorded = record(state, node_id, conversation_id, seq, EventKind::Error, payload, Some(ConversationStatus::Failed)).await?;
 
@@ -361,6 +361,19 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
         }
     }
 
+    if let Some(owner) = owner.filter(|_| recorded && hit_limit && !switched) {
+        let window = limited_window.as_deref().unwrap_or("usage");
+
+        if crate::routing::switch_after_limit(state, owner, conversation_id, window).await {
+            let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
+
+            match crate::routing::carry_on(state, owner, conversation_id, &text).await {
+                Ok(()) => switched = true,
+                Err(error) => tracing::warn!("carrying on {conversation_id} after it moved account failed: {}", error.message()),
+            }
+        }
+    }
+
     if let Some((owner, account)) = owner.zip(switch_to).filter(|_| recorded && !switched) {
         let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
         let target = crate::continuation::Target { agent, account: Some(account), provider_id: None, model: None, node_id: None, cwd: None };
@@ -371,17 +384,15 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
                 let text = format!("The usage limit was reached on {}. Continue from where you stopped.", limited_account.as_deref().unwrap_or("the account in use"));
 
                 crate::prompts::retry_failed(state, owner, conversation_id).await?;
-                crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
+
+                if !crate::goals::resumed(state, owner, conversation_id).await? {
+                    crate::prompts::continue_unless_queued(state, owner, conversation_id, &text).await?;
+                }
+
                 switched = true;
             }
             Err(error) => {
                 tracing::warn!("switching {conversation_id} to another account after its usage limit failed: {}", error.message());
-
-                if resume_at.is_none()
-                    && let Err(error) = crate::goals::session_failed(state, conversation_id).await
-                {
-                    tracing::warn!("goal handling after a failed session failed for {conversation_id}: {}", error.message());
-                }
             }
         }
     }
@@ -552,6 +563,10 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
 
         if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
             tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());
+        }
+
+        if before.mode.is_none() && let Err(error) = crate::agent_settings::apply_default_mode(state, updated.owner, conversation_id).await {
+            tracing::warn!("could not set the default mode of conversation {conversation_id}: {}", error.message());
         }
     }
 

@@ -3,6 +3,9 @@
 const PROXY_BODY_LIMIT: usize = 25 * 1024 * 1024;
 
 mod account_usage;
+mod agent_settings;
+mod routing;
+mod subscription_prices;
 mod activity;
 mod activity_sweep;
 mod api_access;
@@ -55,6 +58,7 @@ mod group_connections;
 mod decision_providers;
 mod model_providers;
 mod provider_usage;
+mod puzzles;
 mod moves;
 mod node_updates;
 mod nodes;
@@ -91,6 +95,10 @@ mod web;
 mod worktrees;
 mod workflows;
 mod lastfm;
+mod freeagent;
+mod discord;
+mod actual;
+mod paperless;
 mod stoat;
 mod zulip;
 
@@ -146,6 +154,7 @@ fn router(state: AppState) -> Router {
         .route("/auth/callback", get(auth::callback))
         .route("/integrations/oauth/callback", get(mcp_oauth::callback))
         .route("/integrations/lastfm/callback", get(lastfm::callback))
+        .route("/integrations/freeagent/callback", get(freeagent::callback))
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
         .route("/api/v1/workflows", get(workflows::list).post(workflows::create))
@@ -179,6 +188,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/side", post(conversations::side))
         .route("/api/v1/conversations/{id}/usage", get(activity::for_conversation))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
+        .route("/api/v1/conversations/{id}/goal/send", post(goals::send_again))
         .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
         .route("/api/v1/walkthroughs/{id}/uncovered", get(walkthroughs::uncovered))
         .route("/api/v1/walkthroughs/{id}/notes", get(walkthroughs::notes).post(walkthroughs::add_note))
@@ -291,6 +301,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
         .route("/api/v1/chat-tool-servers/{id}/groups", put(chat_tool_servers::set_groups))
         .route("/api/v1/chat-tool-servers/{id}/lastfm-sign-in", post(lastfm::start_sign_in).delete(lastfm::sign_out))
+        .route("/api/v1/chat-tool-servers/{id}/freeagent-sign-in", post(freeagent::start_sign_in).delete(freeagent::sign_out))
         .route("/api/v1/chat-tool-servers/{id}/api-access", get(integration_proxy::grants))
         .route("/api/v1/integrations/{server_id}/calendars", get(caldav::calendars))
         .route("/api/v1/integrations/{server_id}/proxy/{*path}", axum::routing::any(integration_proxy::proxy).layer(axum::extract::DefaultBodyLimit::max(PROXY_BODY_LIMIT)))
@@ -379,7 +390,14 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/wellness/puzzles", get(wellness::puzzles))
         .route("/api/v1/wellness/holds", post(wellness::hold))
         .route("/api/v1/wellness/puzzles/{puzzle}/today", put(wellness::mark_puzzle).delete(wellness::unmark_puzzle))
+        .route("/api/v1/wellness/puzzles/wordle/game", get(puzzles::wordle_game))
+        .route("/api/v1/wellness/puzzles/wordle/guesses", post(puzzles::wordle_guess))
+        .route("/api/v1/wellness/puzzles/connections/game", get(puzzles::connections_game))
+        .route("/api/v1/wellness/puzzles/connections/guesses", post(puzzles::connections_guess))
         .route("/api/v1/usage-limit", get(usage_limits::get_setting).put(usage_limits::save_setting))
+        .route("/api/v1/agent-settings", get(agent_settings::get).put(agent_settings::save))
+        .route("/api/v1/agent-settings/account-mode", put(agent_settings::set_account_mode))
+        .route("/api/v1/account-prices", get(subscription_prices::list).put(subscription_prices::set))
         .route("/api/v1/worktrees", get(worktrees::list))
         .route("/api/v1/tasks", get(tasks::list).post(tasks::create))
         .route("/api/v1/tasks/{id}", delete(tasks::delete))

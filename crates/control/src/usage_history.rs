@@ -231,11 +231,14 @@ async fn account_history(state: &AppState, owner: Uuid, agent: AgentId, account:
         })
         .collect();
 
+    let your_price = crate::subscription_prices::your_price(state, owner, agent, &account).await?;
+
     Ok(UsageHistoryAccount {
         agent,
         account,
         plan_price_usd: price,
         plan_price_as_of: price.map(|_| PLAN_PRICES_AS_OF.to_string()),
+        your_price,
         plan,
         readings_since,
         orchestrator_until,

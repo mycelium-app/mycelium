@@ -82,6 +82,7 @@ import mycelium.state.parsePasted
 import mycelium.state.MarkdownListItem
 import mycelium.state.parseUiBlock
 import mycelium.state.pinnedCards
+import mycelium.state.agentName
 import mycelium.state.clockTime
 import mycelium.state.quietFor
 import mycelium.state.stalled
@@ -258,7 +259,7 @@ fun ThreadView(
 @Composable
 private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images)
+        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, agent)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -283,7 +284,7 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         }
         is ThreadItem.Workflow -> if (workflowPinKey(item.progress.runId) in LocalPinnedKeys.current) PinnedReference("Workflow") else WorkflowCard(item.progress, onStopWorkflow)
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")
-        is ThreadItem.Continued -> ModelChangedDivider(item.text)
+        is ThreadItem.Continued -> if (item.why != null) SwitchLine(item.text, item.why) else ModelChangedDivider(item.text)
         is ThreadItem.TeachMode -> ModelChangedDivider(if (item.on) "Teach me on" else "Teach me off")
         is ThreadItem.Note -> Label(item.text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
     }
@@ -301,8 +302,25 @@ private fun ModelChangedDivider(text: String) {
 }
 
 @Composable
-private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>) {
+private fun SwitchLine(text: String, why: String) {
     val colors = MyTheme.colors
+
+    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S0_5)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Hairline(Modifier.weight(1f))
+            Icon(MyIcon.Refresh, colors.textMuted, Tokens.Size.IconSm)
+            Label(text, style = Tokens.Type.Meta, color = colors.textMuted)
+            Hairline(Modifier.weight(1f))
+        }
+
+        Label(why, style = Tokens.Type.Meta, color = colors.textMuted)
+    }
+}
+
+@Composable
+private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, agent: String) {
+    val colors = MyTheme.colors
+    val platform = LocalPlatform.current
 
     Annotatable {
         Column(
@@ -312,6 +330,10 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
                 .border(Tokens.Size.Hairline, colors.border, BlockShape)
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
         ) {
+            if (goalSentAt != null) {
+                Label("Sent to ${agentName(agent)} by Mycelium at ${clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }}", style = Tokens.Type.Meta, color = colors.textMuted)
+            }
+
             for (segment in remember(text) { parsePasted(text) }) {
                 when (segment) {
                     is PastedSegment.Plain -> if (segment.text.isNotBlank()) {
@@ -1078,14 +1100,16 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
 
             Label("Workflow", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
 
-            if (progress.agents.isNotEmpty()) {
-                Label("${progress.finishedCount} of ${progress.agents.size}", if (totals == null && outcome == null) Modifier.weight(1f) else Modifier, Tokens.Type.Meta, colors.textMuted, maxLines = 1)
-            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                if (progress.agents.isNotEmpty()) {
+                    Label("${progress.finishedCount} of ${progress.agents.size}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                }
 
-            if (outcome != null) {
-                Label(outcome, Modifier.weight(1f), Tokens.Type.Meta, if (progress.failed) colors.statusFailed else colors.textMuted, maxLines = 1)
-            } else if (totals != null) {
-                Label(totals, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                if (outcome != null) {
+                    Label(outcome, Modifier.weight(1f, fill = false), Tokens.Type.Meta, if (progress.failed) colors.statusFailed else colors.textMuted, maxLines = 1)
+                } else if (totals != null) {
+                    Label(totals, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+                }
             }
 
             if (!progress.over) {

@@ -41,6 +41,10 @@ private const val EmailType = "Email"
 private const val StoatType = "Stoat"
 private const val LastFmType = "Last.fm"
 private const val CalDavType = "Calendar"
+private const val DiscordType = "Discord"
+private const val FreeAgentType = "FreeAgent"
+private const val ActualType = "Actual Budget"
+private const val PaperlessType = "Paperless-ngx"
 
 private sealed interface IntegrationsView {
     data object Home : IntegrationsView
@@ -64,6 +68,10 @@ private fun flowId(kind: String): String = when (kind) {
     EmailType -> "email"
     StoatType -> "stoat"
     CalDavType -> "caldav"
+    DiscordType -> "discord"
+    FreeAgentType -> "freeagent"
+    ActualType -> "actual"
+    PaperlessType -> "paperless"
     else -> "mcp"
 }
 
@@ -75,6 +83,10 @@ private fun formKind(entry: CatalogueEntry): String = when (entry.kind) {
     "lastfm" -> LastFmType
     "litellm" -> LiteLlmType
     "caldav" -> CalDavType
+    "discord" -> DiscordType
+    "freeagent" -> FreeAgentType
+    "actual" -> ActualType
+    "paperless" -> PaperlessType
     else -> McpType
 }
 
@@ -116,6 +128,11 @@ fun ChatToolsSettings(store: Store) {
     fun reauthenticate(target: ChatToolServer) {
         if (target.kind == "lastfm") {
             signInToLastFm(target)
+        } else if (target.kind == "freeagent") {
+            store.act {
+                val start = store.api.startFreeAgentSignIn(target.id)
+                platform?.openUrl(start.authorizeUrl)
+            }
         } else if (target.oauth) {
             store.act {
                 val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(target.name, target.url, if (target.settings?.get("app")?.jsonPrimitive?.content == "outline") "outline" else null, forgeId = target.forgeId))
@@ -147,7 +164,7 @@ fun ChatToolsSettings(store: Store) {
                     { integration ->
                         val only = integration.accounts.singleOrNull()
 
-                        if (only != null && (only.oauth || only.kind == "lastfm")) {
+                        if (only != null && (only.oauth || only.kind == "lastfm" || only.kind == "freeagent")) {
                             reauthenticate(only)
                         } else {
                             view = IntegrationsView.Page(integration.key)
@@ -188,7 +205,7 @@ fun ChatToolsSettings(store: Store) {
                             { view = IntegrationsView.Home },
                             {
                                 val kind = formKind(entryFor(integration) ?: AnyMcpEntry)
-                                flow = SetupRequest(kind, integration.accounts.first().url.takeIf { kind != LastFmType && kind != EmailType })
+                                flow = SetupRequest(kind, integration.accounts.first().url.takeIf { kind !in setOf(LastFmType, EmailType, DiscordType, FreeAgentType) })
                             },
                             ::replace,
                             { removed -> servers = servers.filter { it.id != removed.id } },
@@ -242,7 +259,7 @@ fun ChatToolsSettings(store: Store) {
             { added ->
                 servers = servers.filter { it.id != added.id } + added
 
-                if (request.kind == LastFmType) {
+                if (request.kind == LastFmType || request.kind == FreeAgentType) {
                     view = IntegrationsView.Page(integrationsOf(servers).first { integration -> integration.accounts.any { it.id == added.id } }.key)
                 }
             },

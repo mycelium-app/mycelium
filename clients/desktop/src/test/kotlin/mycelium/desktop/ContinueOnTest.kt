@@ -58,7 +58,7 @@ class ContinueOnTest {
 
     private val requests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
 
-    private fun shell(experiments: String, events: String = "[]") {
+    private fun shell(experiments: String, events: String = "[]", started: String = Started) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -66,8 +66,8 @@ class ContinueOnTest {
                 path.endsWith("/experiments") -> experiments
                 path.endsWith("/continue") -> Started.replace("claude", "codex")
                 path.endsWith("/nodes") -> Nodes
-                path.endsWith("/conversations") -> "[$Started]"
-                path.endsWith("/conversations/c1") -> Started
+                path.endsWith("/conversations") -> "[$started]"
+                path.endsWith("/conversations/c1") -> started
                 path.endsWith("/events") -> events
                 path.endsWith("/queue") || path.endsWith("/model-providers") -> "[]"
                 else -> "{}"
@@ -105,10 +105,45 @@ class ContinueOnTest {
 
     @Test
     fun aFallbackDividerSaysWhyTheTurnMoved() {
-        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\""))
+        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"five_hour\""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Usage limit reached · continued with Codex as codex@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Usage limit reached · continued with Codex as codex@example.com").assertIsDisplayed()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Codex as codex@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Continued with Codex as codex@example.com").assertIsDisplayed()
+        rule.onNodeWithText("From Claude Code as sam@example.com: 5-hour limit reached").assertIsDisplayed()
+    }
+
+    @Test
+    fun aMoveBecauseEveryAccountIsAtItsLimitSaysSo() {
+        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_limit\",\"window\":\"seven_day\",\"every_account\":true"))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("From Claude Code as sam@example.com: weekly limit reached on every Claude Code account").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun aMoveBackUpTheListSaysTheHarnessHasUsageAgain() {
+        shell(EnabledExperiments, Continued.replace("\"kind\":\"handoff\"", "\"kind\":\"handoff\",\"reason\":\"usage_returned\"").replace("\"agent\":\"codex\",\"account\":\"codex@example.com\"", "\"agent\":\"claude\",\"account\":\"sam@example.com\"").replace("\"from\":{\"agent\":\"claude\",\"account\":\"sam@example.com\"}", "\"from\":{\"agent\":\"codex\",\"account\":\"codex@example.com\",\"model\":\"gpt-5.5\"}"))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Continued with Claude Code as sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("From Codex as codex@example.com, gpt-5.5: Claude Code has usage again").assertIsDisplayed()
+    }
+
+    @Test
+    fun anyAccountIsOfferedFirstAndSentAsARoutingChoice() {
+        shell(EnabledExperiments)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Continue on…: Claude Code · sam@example.com").performClick()
+        rule.onNodeWithText("Claude Code, any account").performClick()
+
+        rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
+        assertEquals("""{"agent":"claude","routing":"claude_any"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
+    }
+
+    @Test
+    fun aRoutedConversationShowsAnyAccountWithTheAccountItIsOn() {
+        shell(EnabledExperiments, started = Started.replace("\"account\":\"sam@example.com\"", "\"account\":\"work@example.org\",\"routing\":\"claude_any\""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Any account: work@example.org").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

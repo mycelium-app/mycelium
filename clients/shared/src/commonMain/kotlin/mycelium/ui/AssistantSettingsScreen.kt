@@ -42,7 +42,10 @@ import mycelium.state.NoGroup
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.formatSize
+import mycelium.state.addModelChoices
 import mycelium.state.harnessModelChoices
+import mycelium.state.modelChoiceFrom
+import mycelium.state.modelChoiceName
 
 enum class AssistantSection(val label: String, val icon: MyIcon) {
     Identity("Identity", MyIcon.Person),
@@ -284,10 +287,8 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
                 }
             }
 
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                ModelPicker(ModelPickerControls(providers, null, null) { provider, model -> models = models + ModelChoice(providerId = provider.id, model = model) })
-                MyButton({ models = models + ModelChoice(agent = "claude") }, text = "Add Claude Code", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
-                MyButton({ models = models + ModelChoice(agent = "codex") }, text = "Add Codex", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+            Row {
+                OptionMenu("Add a model", addModelChoices(state.nodes.values, providers, includeAnyModel = true), null, { picked -> modelChoiceFrom(picked)?.let { added -> models = models + added } }, title = "Add a model", icon = MyIcon.Plus)
             }
         }
 
@@ -341,7 +342,8 @@ private fun ModelsSection(store: Store, state: AppState, assistant: Assistant, o
 }
 
 private fun modelName(choice: ModelChoice, providers: List<ModelProvider>): String = when {
-    choice.agent != null -> harnessName(choice.agent)
+    choice.anyModel -> modelChoiceName(choice, providers)
+    choice.agent != null -> modelChoiceName(choice.copy(model = null), providers)
     else -> "${providers.firstOrNull { it.id == choice.providerId }?.name ?: "Removed provider"} · ${choice.model.orEmpty()}"
 }
 
@@ -357,7 +359,7 @@ private fun harnessName(agent: String): String = if (agent == "codex") "Codex" e
 private fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().also { it.add(to, it.removeAt(from)) }
 
 @Composable
-private fun OrderedRows(names: List<String>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, extra: (@Composable (Int) -> Unit)? = null) {
+internal fun OrderedRows(names: List<String>, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, extra: (@Composable (Int) -> Unit)? = null) {
     if (names.isEmpty()) {
         return
     }

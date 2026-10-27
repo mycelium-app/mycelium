@@ -369,10 +369,15 @@ fun Bar(
 }
 
 @Composable
+fun OpenListButton() {
+    val openList = LocalOpenList.current ?: return
+
+    MyButton(openList, icon = MyIcon.Menu, description = if (LocalTouch.current) "Conversations" else "Show the sidebar", muted = true)
+}
+
+@Composable
 fun BarTitle(text: String, modifier: Modifier = Modifier) {
-    LocalOpenList.current?.let { openList ->
-        MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
-    }
+    OpenListButton()
 
     Label(text, modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
 }
@@ -464,6 +469,7 @@ fun TextInput(
     masked: Boolean = false,
     leadingIcon: MyIcon? = null,
     hint: String? = null,
+    focusRequester: FocusRequester? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -491,6 +497,7 @@ fun TextInput(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .focusRing(focused, ControlShape, always = true)
                 .background(colors.bgContent, ControlShape)
                 .border(Tokens.Size.Hairline, borderColor, ControlShape)

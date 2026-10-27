@@ -40,6 +40,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     }
 
+    if !first_start {
+        crate::routing::before_turn(state, conversation_id).await;
+    }
+
     let mut tx = state.pool.begin().await?;
     let locked = sqlx::query_as::<_, LockedTurn>(sqlx::AssertSqlSafe(format!(
         "select owner, node_id, archived_at is not null as archived,
@@ -67,13 +71,13 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     }
 
-    let next = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 order by position limit 1 for update")
+    let next = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>, Option<String>)>("select id, text, attachments, origin from queued_prompts where conversation_id = $1 order by position limit 1 for update")
         .bind(conversation_id)
         .fetch_optional(&mut *tx)
         .await?;
     tx.rollback().await?;
 
-    let Some((prompt_id, text, sqlx::types::Json(attachments))) = next else {
+    let Some((prompt_id, text, sqlx::types::Json(attachments), origin)) = next else {
         return Ok(());
     };
 
@@ -98,7 +102,15 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     }
 
-    let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &json!({"text": text, "prompt_id": prompt_id, "attachments": attachments}), None).await?;
+    let from_goal = origin.as_deref() == Some(crate::goals::GOAL_ORIGIN);
+    let mut message = json!({"text": text, "prompt_id": prompt_id, "attachments": attachments});
+
+    if from_goal {
+        message["origin"] = json!(crate::goals::GOAL_ORIGIN);
+        message["sent_at"] = json!(chrono::Utc::now());
+    }
+
+    let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &message, None).await?;
 
     sqlx::query("update conversations set predicted_title = coalesce(predicted_title, $2), title = case when title_user_set then title else coalesce(predicted_title, $2) end where id = $1")
         .bind(conversation_id)
@@ -130,6 +142,10 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
 
     state.publish(Some(owner), StreamMessage::Conversation(row.to_proto()?));
     publish_queue(state, owner, conversation_id).await?;
+
+    if from_goal {
+        crate::goals::delivered(state, conversation_id).await?;
+    }
 
     Ok(())
 }

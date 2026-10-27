@@ -25,6 +25,18 @@ enum class GoalState {
 }
 
 @Serializable
+enum class GoalDelivery {
+    @SerialName("pending")
+    Pending,
+
+    @SerialName("sent")
+    Sent,
+
+    @SerialName("failed")
+    Failed,
+}
+
+@Serializable
 data class Goal(
     @SerialName("conversation_id") val conversationId: String,
     val text: String,
@@ -41,6 +53,12 @@ data class Goal(
     @SerialName("weekly_used") val weeklyUsed: Double? = null,
     @SerialName("tokens_known") val tokensKnown: Boolean = true,
     @SerialName("turn_active") val turnActive: Boolean = false,
+    val delivery: GoalDelivery = GoalDelivery.Sent,
+    @SerialName("delivered_at") val deliveredAt: String? = null,
+    @SerialName("delivery_reason") val deliveryReason: String? = null,
+    @SerialName("held_since") val heldSince: String? = null,
+    @SerialName("held_seconds") val heldSeconds: Long = 0,
+    @SerialName("resumes_at") val resumesAt: String? = null,
 )
 
 @Serializable

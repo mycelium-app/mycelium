@@ -74,7 +74,7 @@ pub async fn start(state: &AppState, owner: Uuid, request: CreateConversationReq
     start_for(state, owner, request, None).await
 }
 
-pub async fn start_for(state: &AppState, owner: Uuid, request: CreateConversationRequest, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
+pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConversationRequest, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
     let project = match request.project_id {
         Some(project_id) => Some(projects::find_owned(state, project_id, owner).await?),
         None => None,
@@ -107,6 +107,14 @@ pub async fn start_for(state: &AppState, owner: Uuid, request: CreateConversatio
 
     if !state.hub.is_online(request.node_id) {
         return Err(node_offline());
+    }
+
+    if let Some(routing) = request.routing {
+        let picked = crate::routing::start_pick(state, owner, request.node_id, routing).await?;
+
+        request.agent = picked.agent;
+        request.account = Some(picked.account);
+        request.model = request.model.take().or(picked.model);
     }
 
     let available = sqlx::query_scalar::<_, bool>("select available from agents where node_id = $1 and agent = $2").bind(request.node_id).bind(enum_text(&request.agent)).fetch_optional(&state.pool).await?;
@@ -165,7 +173,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, request: CreateConversatio
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model, routing) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15, $16)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -184,6 +192,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, request: CreateConversatio
     .bind(&worktree_branch)
     .bind(assistant_id)
     .bind(request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()))
+    .bind(request.routing.map(|routing| routing.as_str()))
     .fetch_one(&mut *tx)
     .await?;
 
@@ -266,6 +275,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         parent_id: Some(id),
         side_kind: Some(request.kind),
         model: None,
+        routing: None,
     };
     let conversation = start(&state, user.id, started).await?;
 

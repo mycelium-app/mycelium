@@ -166,6 +166,17 @@ class IntegrationsTest {
     }
 
     @Test
+    fun theCatalogueFindsFreeAgentBySearchingForInvoice() {
+        show()
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.onNodeWithContentDescription("Search services and tools").performTextInput("invoice")
+
+        rule.onNodeWithText("FreeAgent").assertExists()
+        rule.onNodeWithText("Discord").assertDoesNotExist()
+    }
+
+    @Test
     fun choosingAnAddedTileOpensItsPageAndAnUnaddedOneOpensItsSetupDialog() {
         show()
 

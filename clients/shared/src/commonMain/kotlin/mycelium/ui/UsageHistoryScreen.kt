@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlin.time.Instant
+import mycelium.api.AccountPrice
 import mycelium.api.UsageHistory
 import mycelium.api.UsageHistoryAccount
 import mycelium.api.UsageReading
@@ -33,6 +34,8 @@ import mycelium.state.approximateDollars
 import mycelium.state.approximateTokens
 import mycelium.state.dateTimeLabel
 import mycelium.state.dayLabel
+import mycelium.state.formatMoney
+import mycelium.state.yourPriceCaption
 import mycelium.state.instantOrNull
 import mycelium.state.planName
 import mycelium.state.priceRatio
@@ -54,8 +57,10 @@ fun UsageHistoryScreen(store: Store) {
     var menu by remember { mutableStateOf(false) }
     var everyAccount by remember { mutableStateOf<UsageHistory?>(null) }
     var history by remember { mutableStateOf<UsageHistory?>(null) }
+    var pricing by remember { mutableStateOf<UsageHistoryAccount?>(null) }
+    var revision by remember { mutableStateOf(0) }
 
-    LaunchedEffect(range, chosen) {
+    LaunchedEffect(range, chosen, revision) {
         store.act {
             val loaded = store.api.usageHistory(range, chosen)
 
@@ -107,17 +112,29 @@ fun UsageHistoryScreen(store: Store) {
             }
 
             for (account in loaded.accounts) {
-                AccountHistory(account, platform?.let { it::localDateTime })
+                AccountHistory(account, platform?.let { it::localDateTime }, onSetPrice = { pricing = it })
             }
 
             Label(usageEstimateNote(loaded.accounts), style = Tokens.Type.Meta, color = colors.textMuted)
         }
     }
+
+    pricing?.let { account ->
+        PriceDialog(
+            store,
+            account.agent,
+            account.account,
+            account.yourPrice?.let { AccountPrice(account.agent, account.account, it.amount, it.currency, it.period) },
+            listPrice = account.planPriceUsd?.let { "${planName(account.plan.orEmpty())} list price of $${it.toInt()} a month" },
+            onSaved = { revision += 1 },
+            onDismiss = { pricing = null },
+        )
+    }
 }
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) -> String?)?) {
+private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) -> String?)?, onSetPrice: (UsageHistoryAccount) -> Unit) {
     val colors = MyTheme.colors
     val name = usageAccountName(account)
     val agent = agentName(account.agent)
@@ -138,13 +155,17 @@ private fun AccountHistory(account: UsageHistoryAccount, localDateTime: ((Long) 
             Kpi("Tokens per 1% of the 5-hour window", perPoint.fiveHour?.let(::approximateTokens) ?: "Not enough readings", kpiSlot(), caption = if (perPoint.fiveHour != null) sampleCount(perPoint.fiveHourSamples, "window", "windows") else "No 5-hour window has risen 5 points yet")
             Kpi("Tokens per 1% of the weekly window", perPoint.sevenDay?.let(::approximateTokens) ?: "Not enough readings", kpiSlot(), caption = if (perPoint.sevenDay != null) sampleCount(perPoint.sevenDaySamples, "week", "weeks") else "No weekly window has risen 5 points yet")
             Kpi("API equivalent", account.apiEquivalentMonthUsd?.let { "${approximateDollars(it)} this month" } ?: "Not reported", kpiSlot(), caption = account.apiEquivalentPerWindowUsd?.let { "${approximateDollars(it)} per 5-hour window" })
+            val mine = account.yourPrice
+
             Kpi(
-                "Subscription",
-                account.planPriceUsd?.let { "$${it.toInt()} a month" } ?: "Plan price unknown",
+                if (mine != null) "Your price" else "Subscription",
+                mine?.let { "${formatMoney(it.monthlyAmount, it.currency)} a month" } ?: account.planPriceUsd?.let { "$${it.toInt()} a month" } ?: "Plan price unknown",
                 kpiSlot(),
-                caption = priceRatio(account) ?: if (account.plan == null) "$agent did not report a plan" else "No published price for ${planName(account.plan)}",
+                caption = if (mine != null) yourPriceCaption(account) else priceRatio(account) ?: if (account.plan == null) "$agent did not report a plan" else "No published price for ${planName(account.plan)}",
             )
         }
+
+        MyButton({ onSetPrice(account) }, text = if (account.yourPrice == null) "Set your price" else "Change your price", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
 
         val readingTimes = account.readings.mapNotNull { instantOrNull(it.at)?.toEpochMilliseconds() }
         val from = readingTimes.minOrNull() ?: 0L

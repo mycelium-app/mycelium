@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import mycelium.PageReading
@@ -63,7 +64,7 @@ class PuzzleBrowserTest {
 
         val body = requests.sent("PUT", "/wellness/puzzles/wordle/today")!!.third
 
-        assertTrue(body.contains("\"guesses\":3") && body.contains("\"solved\":true") && body.contains("\"source\":\"read\""), body)
+        assertTrue(body.contains("\"score\":3") && body.contains("\"solved\":true") && body.contains("\"source\":\"read\""), body)
         rule.onNodeWithText("Solved in 3 guesses, recorded").assertIsDisplayed()
     }
 
@@ -90,7 +91,7 @@ class PuzzleBrowserTest {
         val store = show("{}")
 
         rule.waitUntil(5_000) { requests.sent("GET", "/wellness/puzzles") != null }
-        rule.onNodeWithText("Back to puzzles").performClick()
+        rule.onNodeWithContentDescription("Back to puzzles").performClick()
 
         assertTrue(wentBack)
         assertEquals(emptySet(), store.wellness.state.value.unreadable)

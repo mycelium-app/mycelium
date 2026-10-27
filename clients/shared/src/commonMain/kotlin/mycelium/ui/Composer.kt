@@ -122,7 +122,7 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
     else -> emptyList()
 }
 
-data class ContinueControls(val choices: List<Choice>, val current: String?, val onPick: (String) -> Unit)
+data class ContinueControls(val choices: List<Choice>, val current: String?, val onPick: (String) -> Unit, val buttonText: String? = null, val tooltip: String? = null)
 
 @Composable
 fun Composer(
@@ -428,7 +428,7 @@ fun Composer(
 
     val pickers: @Composable () -> Unit = {
         if (accountLocked && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
+            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person, buttonText = continueOn.buttonText, tooltip = continueOn.tooltip)
         } else if (accounts.isNotEmpty() && accountLocked) {
             Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
         } else if (accounts.isNotEmpty()) {
@@ -452,7 +452,7 @@ fun Composer(
         }
 
         if (modelPicker != null && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person)
+            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person, buttonText = continueOn.buttonText, tooltip = continueOn.tooltip)
         }
     }
 
@@ -468,7 +468,7 @@ fun Composer(
                     .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
-                goal?.goal?.let { GoalBar(it, goal.onPause, goal.onResume, goal.onClear) }
+                goal?.goal?.let { GoalBar(it, goal.onPause, goal.onResume, goal.onClear, goal.onSendAgain, goal.agent) }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
                     QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
@@ -506,7 +506,7 @@ fun Composer(
 
         goal?.goal?.let { held ->
             Box(measured) {
-                GoalBar(held, goal.onPause, goal.onResume, goal.onClear)
+                GoalBar(held, goal.onPause, goal.onResume, goal.onClear, goal.onSendAgain, goal.agent)
             }
         }
 
@@ -792,15 +792,17 @@ fun OptionMenu(
     fill: Boolean = false,
     label: String? = null,
     footer: OptionFooter? = null,
+    buttonText: String? = null,
+    tooltip: String? = null,
 ) {
-    val buttonLabel = choices.firstOrNull { it.id == current }?.name ?: label ?: current ?: name
+    val buttonLabel = buttonText ?: choices.firstOrNull { it.id == current }?.name ?: label ?: current ?: name
     var open by remember { mutableStateOf(false) }
     var search by remember(open) { mutableStateOf("") }
     val searchable = choices.size > SearchableChoices
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
-        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = name, fill = fill)
+        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = tooltip ?: name, fill = fill)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {

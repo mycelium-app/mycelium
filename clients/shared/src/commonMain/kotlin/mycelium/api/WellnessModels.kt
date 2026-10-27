@@ -96,9 +96,8 @@ data class HoldRequest(val kind: String, val subject: String, @SerialName("group
 @Serializable
 data class PuzzleResult(
     val solved: Boolean? = null,
-    val guesses: Int? = null,
-    val mistakes: Int? = null,
-    val score: String? = null,
+    val score: Int? = null,
+    val seconds: Int? = null,
     val source: String? = null,
 )
 
@@ -117,6 +116,9 @@ data class PuzzleStats(
     val played: Long = 0,
     val solved: Long = 0,
     val average: Double? = null,
+    @SerialName("average_seconds") val averageSeconds: Double? = null,
+    val streak: Long = 0,
+    @SerialName("best_streak") val bestStreak: Long = 0,
     val distribution: List<PuzzleBucket> = emptyList(),
 )
 
@@ -128,3 +130,39 @@ data class PuzzleSummary(
     val history: List<PuzzleDay> = emptyList(),
     val stats: PuzzleStats = PuzzleStats(),
 )
+
+@Serializable
+data class WordleGuess(val word: String, val marks: List<String>)
+
+@Serializable
+data class WordleGame(
+    val day: String,
+    val status: String,
+    val guesses: List<WordleGuess> = emptyList(),
+    val answer: String? = null,
+    val seconds: Int? = null,
+)
+
+@Serializable
+data class WordleGuessRequest(val word: String)
+
+@Serializable
+data class ConnectionsGroup(val title: String, val words: List<String>, val level: Int)
+
+@Serializable
+data class ConnectionsGame(
+    val day: String,
+    val status: String,
+    val words: List<String> = emptyList(),
+    val solved: List<ConnectionsGroup> = emptyList(),
+    val unsolved: List<ConnectionsGroup> = emptyList(),
+    val mistakes: Int = 0,
+    @SerialName("mistakes_allowed") val mistakesAllowed: Int = 4,
+    val seconds: Int? = null,
+)
+
+@Serializable
+data class ConnectionsGuessRequest(val words: List<String>)
+
+@Serializable
+data class ConnectionsGuessAnswer(val outcome: String, val game: ConnectionsGame)

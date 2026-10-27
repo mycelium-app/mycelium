@@ -352,6 +352,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(assistants = assistants.associateBy { assistant -> assistant.id }) }
     }
 
+    suspend fun agentSettings(): mycelium.api.AgentSettings? = orNull { api.agentSettings() }
+
+    suspend fun accountPrices(): List<mycelium.api.AccountPrice>? = orNull { api.accountPrices() }
+
     suspend fun refreshAssistantActions(assistantId: String) {
         val actions = orNull { api.assistantActions(assistantId) } ?: return
 
@@ -441,6 +445,12 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     suspend fun pauseGoal(conversationId: String, paused: Boolean) {
         val goal = api.pauseGoal(conversationId, paused)
+
+        mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
+    }
+
+    suspend fun sendGoalAgain(conversationId: String) {
+        val goal = api.sendGoalAgain(conversationId)
 
         mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
     }
@@ -1006,6 +1016,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     suspend fun continueOn(id: String, choice: String) {
         val conversation = mutableState.value.conversations[id] ?: return
         val request = when {
+            choice.startsWith(RoutingPrefix) -> ContinueRequest(conversation.agent, routing = choice.removePrefix(RoutingPrefix))
             choice.startsWith(ContinueAccountPrefix) -> accountRequest(conversation.agent, choice.removePrefix(ContinueAccountPrefix))
             choice.startsWith(ContinueAgentPrefix) -> choice.removePrefix(ContinueAgentPrefix).let { accountRequest(it.substringBefore(':'), it.substringAfter(':')) }
             choice.startsWith(ContinueNodePrefix) -> choice.removePrefix(ContinueNodePrefix).split(':', limit = 3).let { accountRequest(it[1], it[2]).copy(nodeId = it[0]) }

@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Mutex;
 use uuid::Uuid;
 
-const PUZZLES: [&str; 4] = ["wordle", "connections", "daily-orbs", "catfishing"];
+pub const PUZZLES: [&str; 5] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse"];
+const PUZZLE_STATS_DAYS: i64 = 30;
 const HEARTBEAT_CAP_SECONDS: i32 = 90;
 const OVERVIEW_DAYS_LIMIT: i64 = 31;
 
@@ -349,17 +350,35 @@ pub async fn end_break(State(state): State<AppState>, user: AuthUser) -> ApiResu
 
 fn require_puzzle(puzzle: &str) -> ApiResult<()> {
     if !PUZZLES.contains(&puzzle) {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "puzzle_not_found", "That puzzle is not on the list. Choose wordle, connections, daily-orbs or catfishing."));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "puzzle_not_found", "That puzzle is not on the list. Choose wordle, connections, daily-orbs, catfishing or enclose-horse."));
     }
 
     Ok(())
 }
 
-async fn today_of(state: &AppState, owner: Uuid) -> ApiResult<NaiveDate> {
+pub async fn today_of(state: &AppState, owner: Uuid) -> ApiResult<NaiveDate> {
     let settings = load_settings(state, owner).await?;
     let zone = zone_of(state, owner, settings.time_zone.as_deref()).await?;
 
     Ok(Utc::now().with_timezone(&zone).date_naive())
+}
+
+pub async fn save_puzzle_result(state: &AppState, owner: Uuid, puzzle: &str, day: NaiveDate, result: &PuzzleResult, source: &str) -> ApiResult<()> {
+    sqlx::query(
+        "insert into puzzle_plays (owner, puzzle, day, solved, score, seconds, source) values ($1, $2, $3, $4, $5, $6, $7)
+         on conflict (owner, puzzle, day) do update set solved = excluded.solved, score = excluded.score, seconds = excluded.seconds, source = excluded.source, recorded_at = now()",
+    )
+    .bind(owner)
+    .bind(puzzle)
+    .bind(day)
+    .bind(result.solved)
+    .bind(result.score)
+    .bind(result.seconds)
+    .bind(source)
+    .execute(&state.pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn mark_puzzle(State(state): State<AppState>, user: AuthUser, Path(puzzle): Path<String>, body: Bytes) -> ApiResult<StatusCode> {
@@ -371,27 +390,18 @@ pub async fn mark_puzzle(State(state): State<AppState>, user: AuthUser, Path(puz
     if body.is_empty() {
         sqlx::query("insert into puzzle_plays (owner, puzzle, day) values ($1, $2, $3) on conflict do nothing").bind(user.id).bind(&puzzle).bind(day).execute(&state.pool).await?;
     } else {
-        let result = serde_json::from_slice::<PuzzleResult>(&body).map_err(|_| ApiError::bad_request("puzzle_result_invalid", "Send the result as solved, guesses, mistakes, score and source."))?;
+        let result = serde_json::from_slice::<PuzzleResult>(&body).map_err(|_| ApiError::bad_request("puzzle_result_invalid", "Send the result as solved, score, seconds and source."))?;
         let source = result.source.as_deref().unwrap_or("manual");
 
         if !["manual", "read"].contains(&source) {
             return Err(ApiError::bad_request("puzzle_source_invalid", "Record a puzzle result as manual or read."));
         }
 
-        sqlx::query(
-            "insert into puzzle_plays (owner, puzzle, day, solved, guesses, mistakes, score, source) values ($1, $2, $3, $4, $5, $6, $7, $8)
-             on conflict (owner, puzzle, day) do update set solved = excluded.solved, guesses = excluded.guesses, mistakes = excluded.mistakes, score = excluded.score, source = excluded.source, recorded_at = now()",
-        )
-        .bind(user.id)
-        .bind(&puzzle)
-        .bind(day)
-        .bind(result.solved)
-        .bind(result.guesses)
-        .bind(result.mistakes)
-        .bind(&result.score)
-        .bind(source)
-        .execute(&state.pool)
-        .await?;
+        if result.score.is_some_and(|score| score < 0) || result.seconds.is_some_and(|seconds| seconds < 0) {
+            return Err(ApiError::bad_request("puzzle_result_invalid", "Enter a score and a time of zero or more."));
+        }
+
+        save_puzzle_result(&state, user.id, &puzzle, day, &result, source).await?;
     }
 
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
@@ -416,35 +426,69 @@ pub struct PuzzlesQuery {
     days: Option<i64>,
 }
 
-type PuzzleRow = (String, NaiveDate, Option<bool>, Option<i32>, Option<i32>, Option<String>, String, DateTime<Utc>);
+type PuzzleRow = (String, NaiveDate, Option<bool>, Option<i32>, Option<i32>, String, DateTime<Utc>);
+
+fn streaks(days: &BTreeSet<NaiveDate>, today: NaiveDate) -> (i64, i64) {
+    let mut cursor = if days.contains(&today) { today } else { today - Duration::days(1) };
+    let mut current = 0;
+
+    while days.contains(&cursor) {
+        current += 1;
+        cursor -= Duration::days(1);
+    }
+
+    let mut best = 0;
+    let mut run = 0;
+    let mut previous: Option<NaiveDate> = None;
+
+    for day in days {
+        run = if previous.is_some_and(|before| *day - before == Duration::days(1)) { run + 1 } else { 1 };
+        best = best.max(run);
+        previous = Some(*day);
+    }
+
+    (current, best)
+}
+
+fn mean(values: &[i32]) -> Option<f64> {
+    (!values.is_empty()).then(|| values.iter().map(|value| f64::from(*value)).sum::<f64>() / values.len() as f64)
+}
 
 pub async fn puzzles(State(state): State<AppState>, user: AuthUser, Query(query): Query<PuzzlesQuery>) -> ApiResult<Json<Vec<PuzzleSummary>>> {
     let count = query.days.unwrap_or(30).clamp(1, 366);
     let today = today_of(&state, user.id).await?;
     let first = today - Duration::days(count - 1);
-    let rows = sqlx::query_as::<_, PuzzleRow>("select puzzle, day, solved, guesses, mistakes, score, source, recorded_at from puzzle_plays where owner = $1 and day >= $2 order by day desc").bind(user.id).bind(first).fetch_all(&state.pool).await?;
+    let stats_first = today - Duration::days(PUZZLE_STATS_DAYS - 1);
+    let rows = sqlx::query_as::<_, PuzzleRow>("select puzzle, day, solved, score, seconds, source, recorded_at from puzzle_plays where owner = $1 order by day desc").bind(user.id).fetch_all(&state.pool).await?;
 
     let summaries = PUZZLES
         .iter()
         .map(|name| {
             let own: Vec<&PuzzleRow> = rows.iter().filter(|row| row.0 == *name).collect();
-            let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, guesses: row.3, mistakes: row.4, score: row.5.clone(), source: Some(row.6.clone()) };
-            let values: Vec<i32> = own.iter().filter(|row| row.2 == Some(true)).filter_map(|row| row.3.or(row.4)).collect();
+            let recent: Vec<&PuzzleRow> = own.iter().copied().filter(|row| row.1 >= stats_first).collect();
+            let result = |row: &PuzzleRow| PuzzleResult { solved: row.2, score: row.3, seconds: row.4, source: Some(row.5.clone()) };
+            let scores: Vec<i32> = recent.iter().filter_map(|row| row.3).collect();
+            let times: Vec<i32> = recent.iter().filter_map(|row| row.4).collect();
+            let streak_days: BTreeSet<NaiveDate> = own.iter().filter(|row| row.2 != Some(false)).map(|row| row.1).collect();
+            let (streak, best_streak) = streaks(&streak_days, today);
             let mut distribution: BTreeMap<i32, i64> = BTreeMap::new();
 
-            for value in &values {
-                *distribution.entry(*value).or_default() += 1;
+            for score in &scores {
+                *distribution.entry(*score).or_default() += 1;
             }
 
             PuzzleSummary {
                 puzzle: name.to_string(),
                 day: today.to_string(),
                 today: own.iter().find(|row| row.1 == today).map(|row| result(row)),
-                history: own.iter().map(|row| PuzzleDay { day: row.1.to_string(), result: result(row), recorded_at: row.7 }).collect(),
+                history: own.iter().filter(|row| row.1 >= first).map(|row| PuzzleDay { day: row.1.to_string(), result: result(row), recorded_at: row.6 }).collect(),
                 stats: PuzzleStats {
-                    played: own.len() as i64,
-                    solved: own.iter().filter(|row| row.2 == Some(true)).count() as i64,
-                    average: (!values.is_empty()).then(|| values.iter().map(|value| f64::from(*value)).sum::<f64>() / values.len() as f64),
+                    played: recent.len() as i64,
+                    solved: recent.iter().filter(|row| row.2 == Some(true)).count() as i64,
+                    average: mean(&scores),
+                    average_seconds: mean(&times),
+                    streak,
+                    best_streak,
                     distribution: distribution.into_iter().map(|(value, count)| PuzzleBucket { value, count }).collect(),
                 },
             }

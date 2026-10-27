@@ -18,6 +18,8 @@ pub struct UsageHistoryAccount {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_price_as_of: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub your_price: Option<crate::routing::YourPrice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readings_since: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestrator_until: Option<chrono::DateTime<chrono::Utc>>,

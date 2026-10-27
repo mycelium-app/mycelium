@@ -52,6 +52,7 @@ private fun kindLine(integration: Integration): String {
 internal fun tokenLine(server: ChatToolServer): String = when {
     server.oauth -> "Signed in with OAuth"
     server.kind == "lastfm" && server.signedIn -> "Signed in to Last.fm"
+    server.kind == "freeagent" && server.signedIn -> "Signed in to FreeAgent"
     server.tokenHint != null -> "Ends in ${server.tokenHint}"
     else -> "No token"
 }
