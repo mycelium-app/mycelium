@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::error::ApiResult;
 use crate::forge_cache::ForgeCache;
 use crate::rate_limit::RateLimiter;
 use crate::state::{AppState, Hub, Readiness};
@@ -110,6 +111,28 @@ async fn apply_migrations(state: &AppState) -> Result<()> {
 
 pub fn is_ready(state: &AppState) -> bool {
     state.readiness.lock().is_ok_and(|current| *current == Readiness::Ready)
+}
+
+pub async fn run_while_ready<Tick, Ticked>(state: &AppState, name: &str, period: Duration, mut tick: Tick)
+where
+    Tick: FnMut() -> Ticked,
+    Ticked: Future<Output = ApiResult<()>>,
+{
+    loop {
+        if !is_ready(state) {
+            tokio::time::sleep(period.min(RETRY_INTERVAL)).await;
+
+            continue;
+        }
+
+        let ticked = tick().await;
+
+        if let Err(cause) = ticked {
+            tracing::error!("could not {name}: {}", cause.message());
+        }
+
+        tokio::time::sleep(period).await;
+    }
 }
 
 pub async fn healthz() -> &'static str {

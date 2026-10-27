@@ -1,3 +1,5 @@
+use crate::boot::run_while_ready;
+use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::store::{enum_text, node_summaries};
 use anyhow::{Context, Result, bail};
@@ -76,18 +78,18 @@ async fn refresh(state: &AppState) -> bool {
     changed
 }
 
-pub async fn refresh_regularly(state: AppState) {
-    loop {
-        if refresh(&state).await
-            && let Ok(summaries) = node_summaries(&state, None).await
-        {
-            for summary in summaries {
-                state.publish(None, StreamMessage::Node(summary));
-            }
+async fn announce_refreshed(state: &AppState) -> ApiResult<()> {
+    if refresh(state).await {
+        for summary in node_summaries(state, None).await? {
+            state.publish(None, StreamMessage::Node(summary));
         }
-
-        tokio::time::sleep(state.config.version_check_interval).await;
     }
+
+    Ok(())
+}
+
+pub async fn refresh_regularly(state: AppState) {
+    run_while_ready(&state, "announce the latest versions", state.config.version_check_interval, || announce_refreshed(&state)).await;
 }
 
 #[cfg(test)]

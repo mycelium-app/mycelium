@@ -428,16 +428,7 @@ async fn dispatched(
 }
 
 pub async fn run_regularly(state: AppState) {
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-    loop {
-        interval.tick().await;
-        if !boot::is_ready(&state) {
-            continue;
-        }
-        if let Err(error) = tick(&state).await {
-            tracing::warn!(error = error.message(), "workflow scheduler failed");
-        }
-    }
+    boot::run_while_ready(&state, "advance the running workflows", std::time::Duration::from_secs(1), || tick(&state)).await;
 }
 
 async fn tick(state: &AppState) -> ApiResult<()> {
@@ -497,7 +488,9 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
         }
         let spec = &plan.steps[index];
         if steps[index].status == "starting" {
-            let conversation = steps[index].conversation_id.unwrap();
+            let Some(conversation) = steps[index].conversation_id else {
+                return Err(ApiError::internal(format!("workflow {id} step {} is starting without a conversation", spec.key)));
+            };
             let (ready, status): (bool, String) = sqlx::query_as(
                 "select acp_session_id is not null,status from conversations where id=$1",
             )
@@ -619,7 +612,10 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
             steps[index].conversation_id = Some(conversation);
             steps[index].status = "running".into();
         } else {
-            if !state.hub.is_online(spec.node_id.unwrap()) {
+            let (Some(node_id), Some(agent)) = (spec.node_id, spec.agent) else {
+                return Err(ApiError::internal(format!("workflow {id} step {} has no provider, node or agent", spec.key)));
+            };
+            if !state.hub.is_online(node_id) {
                 continue;
             }
             let conversation = match claim(state, id, row.round, &spec.key, "start").await? {
@@ -629,8 +625,8 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                         state,
                         &user,
                         CreateConversationRequest {
-                            node_id: spec.node_id.unwrap(),
-                            agent: spec.agent.unwrap(),
+                            node_id,
+                            agent,
                             account: spec.account.clone(),
                             cwd: spec.cwd.clone(),
                             project_id: spec.project_id,

@@ -1,6 +1,6 @@
 use crate::account_usage::windows_of;
 use crate::auth::AuthUser;
-use crate::boot::is_ready;
+use crate::boot::run_while_ready;
 use crate::chats::CHAT_AGENT;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
@@ -252,19 +252,7 @@ pub async fn save_setting(State(state): State<AppState>, user: AuthUser, Json(re
 }
 
 pub async fn resume_regularly(state: AppState) {
-    loop {
-        tokio::time::sleep(state.config.scheduler_tick).await;
-
-        if !is_ready(&state) {
-            continue;
-        }
-
-        let resumed = resume_due(&state).await;
-
-        if let Err(cause) = resumed {
-            tracing::error!("could not resume the conversations that reached a usage limit: {}", cause.message());
-        }
-    }
+    run_while_ready(&state, "resume the conversations that reached a usage limit", state.config.scheduler_tick, || resume_due(&state)).await;
 }
 
 async fn resume_due(state: &AppState) -> ApiResult<()> {

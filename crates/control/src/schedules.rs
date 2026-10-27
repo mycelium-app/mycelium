@@ -1,6 +1,6 @@
 use crate::assistants;
 use crate::auth::AuthUser;
-use crate::boot::is_ready;
+use crate::boot::run_while_ready;
 use crate::conversations;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
@@ -439,19 +439,7 @@ pub async fn run_now(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 }
 
 pub async fn run_regularly(state: AppState) {
-    loop {
-        tokio::time::sleep(state.config.scheduler_tick).await;
-
-        if !is_ready(&state) {
-            continue;
-        }
-
-        let ran = run_due(&state).await;
-
-        if let Err(cause) = ran {
-            tracing::error!("could not run the due schedules: {}", cause.message());
-        }
-    }
+    run_while_ready(&state, "run the due schedules", state.config.scheduler_tick, || run_due(&state)).await;
 }
 
 async fn run_due(state: &AppState) -> ApiResult<()> {
