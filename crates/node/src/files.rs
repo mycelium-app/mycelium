@@ -1,5 +1,5 @@
+use crate::git::git;
 use std::path::Path;
-use std::process::Command;
 
 const MOST_MATCHES: usize = 50;
 const MOST_WALKED: usize = 20_000;
@@ -22,13 +22,9 @@ pub fn matching_files(cwd: &Path, query: &str) -> Vec<String> {
 }
 
 fn tracked_files(cwd: &Path) -> Option<Vec<String>> {
-    let output = Command::new("git").arg("-C").arg(cwd).args(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).output().ok()?;
+    let listing = git(cwd, &["ls-files", "--cached", "--others", "--exclude-standard", "-z"], &[]).ok()?;
 
-    if !output.status.success() {
-        return None;
-    }
-
-    Some(output.stdout.split(|byte| *byte == 0).filter(|path| !path.is_empty()).map(|path| String::from_utf8_lossy(path).into_owned()).collect())
+    Some(listing.split(|byte| *byte == 0).filter(|path| !path.is_empty()).map(|path| String::from_utf8_lossy(path).into_owned()).collect())
 }
 
 fn walked_files(cwd: &Path) -> Vec<String> {
@@ -81,8 +77,7 @@ mod tests {
     #[test]
     fn a_git_repository_lists_what_git_would_and_skips_ignored_files() {
         let dir = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| Command::new("git").arg("-C").arg(dir.path()).args(args).output().unwrap();
-        git(&["init", "-q"]);
+        git(dir.path(), &["init", "-q"], &[]).unwrap();
         std::fs::write(dir.path().join(".gitignore"), "secret.txt\n").unwrap();
         std::fs::write(dir.path().join("secret.txt"), "").unwrap();
         std::fs::write(dir.path().join("readme.md"), "").unwrap();

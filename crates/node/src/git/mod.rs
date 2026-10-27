@@ -16,6 +16,7 @@ use mycelium_proto::link::GitCommand;
 use repository::{add_worktree, clone, register};
 use serde_json::Value;
 use stack::{run_town, stack};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -81,15 +82,32 @@ pub(crate) fn git(cwd: &Path, args: &[&str], accepted: &[i32]) -> Result<Vec<u8>
 }
 
 fn git_with_env(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
+    git_with_stdin(cwd, args, accepted, env, &[])
+}
+
+pub(crate) fn git_with_input(cwd: &Path, args: &[&str], input: &[u8]) -> Result<Vec<u8>, String> {
+    git_with_stdin(cwd, args, &[], &[], input)
+}
+
+fn git_with_stdin(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)], input: &[u8]) -> Result<Vec<u8>, String> {
+    let could_not_start = |cause: std::io::Error| format!("Git could not be started: {cause}.");
+    let mut child = Command::new("git")
         .arg("-C")
         .arg(cwd)
         .args(args)
         .envs(env.iter().map(|(name, value)| (name, value)))
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|cause| format!("Git could not be started: {cause}."))?;
+        .stdin(if input.is_empty() { Stdio::null() } else { Stdio::piped() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(could_not_start)?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input).map_err(could_not_start)?;
+    }
+
+    let output = child.wait_with_output().map_err(could_not_start)?;
 
     if output.status.success() || output.status.code().is_some_and(|code| accepted.contains(&code)) {
         return Ok(output.stdout);
@@ -121,6 +139,18 @@ pub(crate) fn within(root: &Path, requested: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_reaches_git_on_standard_input_and_a_failure_returns_its_message() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q"], &[]).unwrap();
+
+        let hash = git_with_input(dir.path(), &["hash-object", "--stdin"], b"hello\n").unwrap();
+        let refused = git_with_input(dir.path(), &["apply", "--check"], b"not a patch\n").unwrap_err();
+
+        assert_eq!(String::from_utf8(hash).unwrap().trim(), "ce013625030ba8dba906f756967f9e9ca394464a");
+        assert!(!refused.is_empty());
+    }
 
     #[test]
     fn a_folder_outside_the_projects_root_or_climbing_out_of_it_is_refused() {

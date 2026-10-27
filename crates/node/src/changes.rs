@@ -1,4 +1,4 @@
-use crate::git::git;
+use crate::git::{git, git_with_input};
 use crate::git::history::status;
 use mycelium_proto::link::RowRange;
 use serde_json::{Value, json};
@@ -126,25 +126,17 @@ pub fn apply_hunk(cwd: &Path, path: &str, row: u32, fingerprint: &str, action: &
             let starts: Vec<usize> = lines.iter().enumerate().filter_map(|(index, line)| line.starts_with("@@ ").then_some(index)).collect();
             let mut patch = lines[..starts[0]].concat();
             patch.push_str(&lines[starts[index]..starts.get(index + 1).copied().unwrap_or(lines.len())].concat());
-            let mut apply = std::process::Command::new("git");
-            apply.arg("-C").arg(cwd).args(["apply", "--recount"]);
+            let mut args = vec!["apply", "--recount"];
 
             if action != "revert" {
-                apply.arg("--cached");
+                args.push("--cached");
             }
 
             if action != "stage" {
-                apply.arg("--reverse");
+                args.push("--reverse");
             }
 
-            let mut child = apply.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|cause| cause.to_string())?;
-            use std::io::Write;
-            child.stdin.take().unwrap().write_all(patch.as_bytes()).map_err(|cause| cause.to_string())?;
-            let output = child.wait_with_output().map_err(|cause| cause.to_string())?;
-
-            if !output.status.success() {
-                return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-            }
+            git_with_input(cwd, &args, patch.as_bytes())?;
 
             return Ok(json!({}));
         }
