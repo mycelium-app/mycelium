@@ -240,7 +240,7 @@ async fn transfer(state: &AppState, owner: Uuid, conversation_id: Uuid, progress
     let retry = format!("Nothing has changed: the conversation is still on {source_name}. Choose Move to try again.");
     let reason = |text: &str| format!("{text} {retry}");
 
-    if !matches!(route.source.status.as_str(), "review" | "done") {
+    if !matches!(route.source.status.as_str(), "review" | "done" | "failed") {
         return Err(reason("The conversation is not between turns."));
     }
 

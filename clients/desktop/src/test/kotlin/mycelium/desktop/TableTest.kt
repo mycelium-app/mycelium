@@ -214,4 +214,29 @@ class TableTest {
         rule.waitForIdle()
         rule.onNodeWithText("Notes").assertExists()
     }
+
+    @Test
+    fun aShortCellSitsOnTheCentreOfTheFirstLineWhenAColumnWraps() {
+        rule.setContent {
+            MyceliumTheme(true) {
+                Table(
+                    listOf(Col("Repository", 160.dp, weight = 1f), Col("Set up on", 120.dp, overflow = Overflow.Wrap)),
+                    1,
+                    { _, column ->
+                        if (column == 0) {
+                            TableCell.Text("example.org")
+                        } else {
+                            TableCell.Slot("progress") { Box(Modifier.requiredWidth(40.dp).height(4.dp).testTag("bar")) }
+                        }
+                    },
+                )
+            }
+        }
+
+        val text = bounds("example.org")
+        val bar = boundsOf(rule.onNodeWithTag("bar", useUnmergedTree = true))
+        val offset = ((bar.top + bar.bottom) / 2 - (text.top + text.bottom) / 2).value
+
+        assertTrue(kotlin.math.abs(offset) <= 1f, "the bar is ${offset}dp off the text's centre line")
+    }
 }

@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
@@ -35,7 +36,7 @@ class RetryTest {
 
     private val retried = CopyOnWriteArrayList<String>()
 
-    private fun store(): Store {
+    private fun store(events: String = LimitError): Store {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
@@ -49,8 +50,8 @@ class RetryTest {
             val body = when {
                 path.endsWith("/conversations") -> "[$FailedJson]"
                 path.endsWith("/conversations/c1") -> FailedJson
-                path.endsWith("/events") -> LimitError
-                path.endsWith("/queue") || path.endsWith("/nodes") -> "[]"
+                path.endsWith("/events") -> events
+                path.endsWith("/queue") || path.endsWith("/nodes") || path.endsWith("/groups") || path.endsWith("/projects") -> "[]"
                 else -> "{}"
             }
 
@@ -67,17 +68,29 @@ class RetryTest {
     }
 
     @Test
-    fun aFailedConversationCanBeRetriedFromItsHeader() {
+    fun aFailedConversationHasOneRetryAndItIsInTheError() {
         show(store())
 
-        rule.onNodeWithContentDescription("Retry Plan the rollout").performClick()
-        rule.waitUntil(5_000) { retried.isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Retry", substring = true).fetchSemanticsNodes().isNotEmpty() }
 
-        assertEquals(listOf("/api/v1/conversations/c1/retry"), retried)
+        assertEquals(1, rule.onAllNodesWithContentDescription("Retry", substring = true).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithContentDescription("Retry Plan the rollout").fetchSemanticsNodes().size)
+        rule.onNodeWithContentDescription("Error: This node already runs 4 conversations, its limit.").assertExists()
     }
 
     @Test
-    fun theFailureInTheThreadOffersRetryBesideItsMessage() {
+    fun aFailedConversationWithNoErrorEventStillHasOneRetry() {
+        show(store(events = "[]"))
+
+        rule.onNodeWithContentDescription("Error: The agent stopped with an error.").assertExists()
+        assertEquals(1, rule.onAllNodesWithContentDescription("Retry", substring = true).fetchSemanticsNodes().size)
+
+        rule.onNodeWithContentDescription("Retry this conversation").performClick()
+        rule.waitUntil(5_000) { retried.isNotEmpty() }
+    }
+
+    @Test
+    fun retryInTheErrorRetriesTheConversation() {
         show(store())
 
         rule.onNodeWithContentDescription("Error: This node already runs 4 conversations, its limit.").assertExists()

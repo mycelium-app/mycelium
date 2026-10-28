@@ -141,6 +141,38 @@ async fn continuing_on_another_account_resumes_the_same_session_there() {
 }
 
 #[tokio::test]
+async fn continuing_on_another_node_that_lacks_the_folder_is_refused_and_says_to_move() {
+    let server = Server::start().await;
+    let mut laptop = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn)]).await;
+    let id = idle_conversation(&server, &mut laptop, "sam@example.com").await;
+    let mut desktop = server.online_node_as("desktop", "v0.11.0").await;
+    desktop.send(NodeToControl::Logins { logins: vec![login("sam@example.com", LoginState::SignedIn)] }).await;
+    let user = server.user.clone();
+    let desktop_id = desktop.id;
+    common::eventually("the desktop's account", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(desktop_id) && !node["logins"].as_array().unwrap().is_empty()).then_some(())
+    })
+    .await;
+
+    let answer_missing = async {
+        loop {
+            if let ControlToNode::Git { request_id, .. } = desktop.next().await {
+                desktop.send(NodeToControl::GitResult { request_id, ok: false, output: Value::Null, error: Some("The folder /work/app does not exist on this node.".into()) }).await;
+
+                break;
+            }
+        }
+    };
+    let ((status, body), ()) = tokio::join!(continue_on(&server, id, json!({"agent": "claude", "account": "sam@example.com", "node_id": desktop_id})), answer_missing);
+    let (_, unchanged) = server.user.json(server.user.get(&format!("/api/v1/conversations/{id}"))).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("folder_missing")), "{body}");
+    assert_eq!(unchanged["node_id"], json!(laptop.id));
+}
+
+#[tokio::test]
 async fn continuing_on_an_account_that_is_not_signed_in_is_refused() {
     let server = Server::start().await;
     let mut link = node_with_accounts(&server, "v0.11.0", vec![login("sam@example.com", LoginState::SignedIn), login("work@example.org", LoginState::SignedOut)]).await;

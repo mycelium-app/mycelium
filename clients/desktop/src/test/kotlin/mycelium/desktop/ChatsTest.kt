@@ -210,13 +210,13 @@ class ChatsTest {
     fun theModelMenuGroupsModelsByProviderAndTheChoiceIsWhatTheChatStartsWith() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
 
         rule.onAllNodesWithText("Ollama").onFirst().assertIsDisplayed()
         rule.onNodeWithText("Anthropic").assertIsDisplayed()
 
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
-        rule.onNodeWithContentDescription("Model: Anthropic · claude-sonnet-5-5").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Account: Anthropic · claude-sonnet-5-5").assertIsDisplayed()
         rule.onNodeWithContentDescription("Message").performTextInput("Hello")
         rule.onNodeWithContentDescription("Send").performClick()
 
@@ -228,13 +228,13 @@ class ChatsTest {
     fun searchingTheModelMenuNarrowsItToMatchingModelsAndEnterPicksTheFirst() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Search models").performTextInput("qwen")
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search accounts, nodes and models").performTextInput("qwen")
 
         assertEquals(0, rule.onAllNodesWithText("claude-sonnet-5-5").fetchSemanticsNodes().size)
-        rule.onNodeWithContentDescription("Search models").performImeAction()
+        rule.onNodeWithContentDescription("Search accounts, nodes and models").performImeAction()
 
-        rule.onNodeWithContentDescription("Model: Ollama · qwen3").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Account: Ollama · qwen3").assertIsDisplayed()
     }
 
     @Test
@@ -242,8 +242,8 @@ class ChatsTest {
         providers = "[$Provider,$OpenRouter]"
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
-        rule.onNodeWithContentDescription("Search models").performTextInput("router sonnet")
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search accounts, nodes and models").performTextInput("router sonnet")
 
         rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
         assertEquals(0, rule.onAllNodesWithText("anthropic/claude-haiku-5-5").fetchSemanticsNodes().size)
@@ -255,7 +255,7 @@ class ChatsTest {
         providers = "[$Provider,$OpenRouter]"
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
 
         rule.onNodeWithText("OpenRouter · anthropic").assertIsDisplayed()
         rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
@@ -265,7 +265,7 @@ class ChatsTest {
     fun starringAModelPutsItUnderFavouritesAndSavesIt() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
         rule.onNodeWithContentDescription("Add qwen3 to favourites").performClick()
 
         rule.onNodeWithText("Favourites").assertIsDisplayed()
@@ -278,7 +278,7 @@ class ChatsTest {
     fun aModelUsedInAnEarlierChatIsListedUnderRecent() {
         newChatScreen()
 
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
 
         rule.onNodeWithText("Recent").assertIsDisplayed()
     }
@@ -303,8 +303,8 @@ class ChatsTest {
     fun anOpenChatShowsItsProviderAndModelAndSwitchingPatchesTheConversation() {
         shell(Route.Chat("c1"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Ollama · llama3.2").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Ollama · llama3.2").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Ollama · llama3.2").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Account: Ollama · llama3.2").performClick()
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }
@@ -312,12 +312,12 @@ class ChatsTest {
     }
 
     @Test
-    fun aChatWhoseProviderWasRemovedAsksForAModelInTheComposer() {
+    fun aChatWhoseProviderWasRemovedAsksForAModelInTheAccountControl() {
         removedProvider = true
         shell(Route.Chat("c1"))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Choose a model").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Model: Choose a model").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Choose a model").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Account: Choose a model").performClick()
         rule.onNodeWithText("qwen3").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Patch } }

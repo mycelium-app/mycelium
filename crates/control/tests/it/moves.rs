@@ -286,6 +286,21 @@ async fn the_project_is_cloned_on_the_other_node_when_it_is_missing_there() {
 }
 
 #[tokio::test]
+async fn a_failed_conversation_is_between_turns_and_moves() {
+    let mut moving = start(true, false).await;
+    mirror_transcript(&mut moving).await;
+    sqlx::query("update conversations set status = 'failed' where id = $1").bind(moving.conversation).execute(&moving.server.pool).await.unwrap();
+    request_move(&moving, false).await;
+
+    answer_next(&mut moving.source, Ok(snapshot())).await;
+    answer_next(&mut moving.target, Ok(json!({"applied_files": 0}))).await;
+    next_command(&mut moving.target).await;
+    next_command(&mut moving.target).await;
+
+    assert!(matches!(next_command(&mut moving.target).await, ControlToNode::StartSession { .. }));
+}
+
+#[tokio::test]
 async fn a_conversation_in_a_subfolder_of_the_project_continues_in_the_same_subfolder() {
     let mut moving = start(true, false).await;
     mirror_transcript(&mut moving).await;

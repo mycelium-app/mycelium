@@ -154,3 +154,27 @@ async fn a_queued_message_whose_attachment_is_lost_stays_queued_and_the_conversa
 
     assert_eq!(queue.as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn editing_a_queued_message_keeps_its_image_and_can_swap_it() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("hello")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.expect_prompt().await;
+    let (_, shot) = upload(&server.user, conversation.id, "shot.png", "image/png", PNG.to_vec()).await;
+    let (_, other) = upload(&server.user, conversation.id, "other.png", "image/png", [PNG.to_vec(), vec![1]].concat()).await;
+    server.user.json(server.user.post(&format!("/api/v1/conversations/{}/prompt", conversation.id)).json(&json!({"text": "later", "attachments": [shot]}))).await;
+    let queue_url = format!("/api/v1/conversations/{}/queue", conversation.id);
+    let (_, queue) = server.user.json(server.user.get(&queue_url)).await;
+    let url = format!("{queue_url}/{}", queue[0]["id"].as_str().unwrap());
+
+    server.user.json(server.user.patch(&url).json(&json!({"text": "later, reworded"}))).await;
+    let (_, reworded) = server.user.json(server.user.get(&queue_url)).await;
+    server.user.json(server.user.patch(&url).json(&json!({"attachments": [other]}))).await;
+    let (_, swapped) = server.user.json(server.user.get(&queue_url)).await;
+
+    assert_eq!((reworded[0]["text"].as_str(), &reworded[0]["attachments"]), (Some("later, reworded"), &json!([shot])));
+    assert_eq!((swapped[0]["text"].as_str(), &swapped[0]["attachments"]), (Some("later, reworded"), &json!([other])));
+}

@@ -216,16 +216,16 @@ private fun VoiceProblemBlock(problem: VoiceProblem, actions: VoiceCardActions) 
 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
             if (problem == VoiceProblem.NoSpeechProvider) {
-                MyButton(actions.onOpenProviders, text = "Providers", variant = ButtonVariant.Outline)
+                MyButton(actions.onOpenProviders, text = "Providers", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             } else {
-                MyButton(actions.onTryAgain, text = "Try again", variant = ButtonVariant.Outline)
+                MyButton(actions.onTryAgain, text = "Try again", icon = MyIcon.Refresh, size = ButtonSize.Sm, variant = ButtonVariant.Outline)
             }
 
             if (problem == VoiceProblem.MicrophoneDenied && actions.onOpenAndroidSettings != null) {
-                MyButton(actions.onOpenAndroidSettings, text = "Open Android settings", muted = true)
+                MyButton(actions.onOpenAndroidSettings, text = "Open Android settings", size = ButtonSize.Sm, muted = true)
             }
 
-            MyButton(actions.onTypeInstead, text = "Type instead", muted = true)
+            MyButton(actions.onTypeInstead, text = "Type instead", size = ButtonSize.Sm, muted = true)
         }
     }
 }

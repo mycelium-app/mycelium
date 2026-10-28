@@ -31,7 +31,7 @@ const DAY_MINUTES: u32 = 24 * 60;
 const FLIP_SEARCH_DAYS: i64 = 8;
 
 const RECENT_BREAKS: i64 = 20;
-const BREAK_COLUMNS: &str = "id, started_at, ends_at, ended_early_at, planned_minutes, case when ended_early_at is not null or ends_at <= now() then coalesce(ended_early_at, ends_at) end, ended_early_at is not null, note, noted_at";
+const BREAK_COLUMNS: &str = "id, started_at, ends_at, ended_early_at, planned_minutes, case when ended_early_at is not null then ended_early_at when ends_at <= now() then greatest(ends_at, coalesce(noted_at, ends_at)) end, ended_early_at is not null, note, noted_at";
 
 type BreakRow = (Uuid, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>, i32, Option<DateTime<Utc>>, bool, Option<String>, Option<DateTime<Utc>>);
 

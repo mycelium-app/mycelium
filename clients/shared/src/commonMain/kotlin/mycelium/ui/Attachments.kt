@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -8,10 +9,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -23,6 +26,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -30,6 +36,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import mycelium.api.Attachment
@@ -73,6 +81,12 @@ class AttachmentDrafts(initial: List<DraftAttachment> = emptyList()) {
         }
 
         drafts = held
+    }
+
+    fun replace(held: List<DraftAttachment>) {
+        drafts = held
+        problem = null
+        nextId = maxOf(nextId, (held.maxOfOrNull { it.id } ?: -1) + 1)
     }
 
     fun remove(draft: DraftAttachment) {
@@ -131,14 +145,34 @@ fun AttachmentChips(controls: AttachmentControls) {
 
                 Row(
                     Modifier
+                        .height(Tokens.Size.ControlMd + Tokens.Size.Hairline * 2)
                         .border(Tokens.Size.Hairline, colors.border, ControlShape)
-                        .padding(start = Tokens.Space.S1)
+                        .padding(start = if (thumbnail != null) Tokens.Size.Hairline else Tokens.Space.S1_5, top = Tokens.Size.Hairline, end = Tokens.Size.Hairline, bottom = Tokens.Size.Hairline)
                         .semantics { contentDescription = "Attached: ${file.name}, $size" },
                     horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (thumbnail != null) {
-                        Image(thumbnail, contentDescription = null, Modifier.size(Tokens.Size.ControlMd).clip(ControlShape), contentScale = ContentScale.Crop)
+                        val tileWidth = (Tokens.Size.ControlMd * (thumbnail.width.toFloat() / thumbnail.height)).coerceIn(Tokens.Size.TileMin, Tokens.Size.TileMax)
+                        val tileShape = RoundedCornerShape(topStart = Tokens.Radius.Tile, bottomStart = Tokens.Radius.Tile)
+
+                        Image(
+                            thumbnail,
+                            contentDescription = null,
+                            Modifier
+                                .testTag("attachment-tile")
+                                .size(tileWidth, Tokens.Size.ControlMd)
+                                .clip(tileShape)
+                                .background(colors.bgContent, tileShape)
+                                .drawWithContent {
+                                    drawContent()
+
+                                    val line = Tokens.Size.Hairline.toPx()
+
+                                    drawRect(colors.border, Offset(this.size.width - line, 0f), Size(line, this.size.height))
+                                },
+                            contentScale = ContentScale.Fit,
+                        )
                     } else {
                         Icon(if (isImage(file.mediaType)) MyIcon.Image else MyIcon.File, colors.textMuted, Tokens.Size.IconSm)
                     }
@@ -194,7 +228,7 @@ fun MessageAttachments(files: List<Attachment>, images: List<ThreadImage>) {
 }
 
 @Composable
-fun ThreadImageView(image: ThreadImage, alt: String) {
+fun ThreadImageView(image: ThreadImage, alt: String, tileHeight: Dp? = null) {
     val colors = MyTheme.colors
     val jump = LocalImageJump.current
     val sameAs = image.sameAs
@@ -213,8 +247,7 @@ fun ThreadImageView(image: ThreadImage, alt: String) {
         bitmap != null -> Image(
             bitmap,
             contentDescription = alt,
-            Modifier
-                .heightIn(max = Tokens.Size.Measure / 3)
+            (if (tileHeight == null) Modifier.heightIn(max = Tokens.Size.Measure / 3) else Modifier.testTag("queued-thumbnail").size((tileHeight * (bitmap.width.toFloat() / bitmap.height)).coerceIn(Tokens.Size.TileMin, Tokens.Size.Measure / 4), tileHeight).background(colors.bgPanel))
                 .clip(ControlShape)
                 .border(Tokens.Size.Hairline, colors.border, ControlShape)
                 .clickable(onClickLabel = "Open larger", role = Role.Button) { enlarged = true },

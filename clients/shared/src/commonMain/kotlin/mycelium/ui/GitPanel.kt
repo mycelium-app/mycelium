@@ -152,7 +152,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
             }
         }
 
-        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }, onRetry = { runner { refresh() } }) }
+        runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }, actions = { MyButton({ runner { refresh() } }, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline) }) }
 
         val open = viewing
         val shown = diff

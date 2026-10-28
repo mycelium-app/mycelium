@@ -58,6 +58,8 @@ private class FolderRow(val folder: Project, val updatedAt: String) : ProjectRow
 
 private const val RepositoriesList = "repositories"
 
+private val ProjectActionsExtra = Tokens.Size.IconSm + Tokens.Space.S1_5 * 5 + Tokens.Space.S1 * 2
+
 @Composable
 fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) -> Unit) {
     val colors = MyTheme.colors
@@ -245,7 +247,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                         Col("Repository", 200.dp, weight = 1f),
                         Col("Forge", 72.dp, max = 160.dp, priority = 1),
                         Col("Set up on", 120.dp, max = 280.dp, overflow = Overflow.Wrap, priority = 1),
-                        Col("", 190.dp, preferred = 190.dp, align = ColumnAlign.End),
+                        Col("", 190.dp, align = ColumnAlign.End, rigid = true),
                     ),
                     rows.size,
                     { index, column ->
@@ -323,7 +325,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                         }
                                     }
 
-                                    else -> TableCell.Slot {
+                                    else -> TableCell.Slot("${projectGroupLabel(state, setUp)} New conversation", ProjectActionsExtra) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                                             if (setUp.isNotEmpty()) {
                                                 ProjectGroupMenu(store, state, setUp, repository.fullName)
@@ -362,7 +364,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
                                         }
                                     }
 
-                                    else -> TableCell.Slot {
+                                    else -> TableCell.Slot("${projectGroupLabel(state, listOf(folder))} New conversation", ProjectActionsExtra) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                                             ProjectGroupMenu(store, state, listOf(folder), folder.name)
 

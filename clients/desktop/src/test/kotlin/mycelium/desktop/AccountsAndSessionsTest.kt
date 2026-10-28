@@ -22,18 +22,16 @@ import mycelium.DeviceInfo
 import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
-import mycelium.api.LoginInfo
-import mycelium.api.LoginState
 import mycelium.api.MyceliumApi
-import mycelium.state.Choice
+import mycelium.state.PickerAccount
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
 import mycelium.state.SessionOptions
 import mycelium.state.Store
-import mycelium.state.accountChoices
 import mycelium.state.accountsElsewhere
 import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
+import mycelium.ui.AccountPickerControls
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NodesScreen
 import mycelium.ui.SessionsSettings
@@ -45,7 +43,7 @@ import kotlin.test.assertTrue
 private const val NodesJson = """[
 {"id":"n1","name":"willow","hostname":"willow","os":"linux","arch":"x86_64","version":"0.1.0","address":"100.64.4.18","online":true,"draining":false,
  "agents":[{"agent":"claude","version":"2.1.308","available":true}],
- "logins":[{"agent":"claude","account":"sam@example.com","method":"oauth_token","state":"signed_in"},{"agent":"claude","account":"work@acme.example","method":"oauth_token","state":"signed_in"}]},
+ "logins":[{"agent":"claude","account":"sam@example.com","method":"oauth_token","state":"signed_in"},{"agent":"claude","account":"work@example.net","method":"oauth_token","state":"signed_in"}]},
 {"id":"n2","name":"atlas","hostname":"atlas","os":"linux","arch":"x86_64","version":"0.1.0","address":"10.0.0.12","online":false,"last_seen_at":"2026-10-22T10:00:00Z","draining":false,
  "agents":[{"agent":"claude","version":"2.1.308","available":true}],
  "logins":[{"agent":"claude","account":"sam@example.com","method":"oauth_token","state":"expired"}]}]"""
@@ -120,17 +118,21 @@ class AccountsAndSessionsTest {
         return store
     }
 
-    private fun composerWith(accounts: List<Choice>, started: Boolean, onSetAccount: (String) -> Unit = {}) {
-        val conversation = Conversation("c1", "u", "n1", "claude", "/work", "t", ConversationStatus.Done, acpSessionId = if (started) "s" else null, account = "work@acme.example", createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
+    private fun willow() = store().state.value.nodes.values.first { it.name == "willow" }
+
+    private fun account(id: String, name: String?, usage: String = "Usage unknown") = PickerAccount(id, "claude", name, willow(), true, usage)
+
+    private fun composerWith(accounts: List<PickerAccount>, started: Boolean, onSetAccount: (String) -> Unit = {}) {
+        val conversation = Conversation("c1", "u", "n1", "claude", "/work", "t", ConversationStatus.Done, acpSessionId = if (started) "s" else null, account = "work@example.net", createdAt = "2026-10-22T10:00:00Z", updatedAt = "2026-10-22T10:00:00Z")
 
         rule.setContent {
             MyceliumTheme(true) {
                 Composer(
                     conversation = conversation, working = false, queue = emptyList(), sending = emptyList(), onSend = {}, onStop = {},
-                    onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                    onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
-                    accounts = accounts, accountLocked = started, onSetAccount = onSetAccount,
+                    accountPicker = AccountPickerControls("Continue on", { picked, done -> onSetAccount(picked); done(null) }, "work@example.net", accounts = accounts, current = "work@example.net"),
                 )
             }
         }
@@ -142,7 +144,7 @@ class AccountsAndSessionsTest {
         rule.setContent { MyceliumTheme(true) { AccountsSettings(store) } }
 
         assertEquals(1, rule.onAllNodesWithText("sam@example.com").fetchSemanticsNodes().size)
-        rule.onNodeWithText("work@acme.example").assertExists()
+        rule.onNodeWithText("work@example.net").assertExists()
         assertEquals(2, rule.onAllNodesWithText("willow").fetchSemanticsNodes().size)
         rule.onNodeWithText("atlas: expired").assertExists()
     }
@@ -231,29 +233,25 @@ class AccountsAndSessionsTest {
     }
 
     @Test
-    fun theComposerShowsNoAccountPickerWithoutTwoAccounts() {
-        composerWith(accounts = emptyList(), started = false)
-
-        rule.onNodeWithContentDescription("Account: work@acme.example").assertDoesNotExist()
-        rule.onNodeWithText("Account").assertDoesNotExist()
-    }
-
-    @Test
     fun aNewSessionCanPickAnotherAccount() {
         var picked: String? = null
-        composerWith(accounts = listOf(Choice("sam@example.com", "sam@example.com"), Choice("work@acme.example", "work@acme.example")), started = false, onSetAccount = { picked = it })
+        composerWith(accounts = listOf(account("sam@example.com", "sam@example.com"), account("work@example.net", "work@example.net")), started = false, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
-        rule.onNodeWithText("sam@example.com").performClick()
+        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithText("Claude Code · sam@example.com").performClick()
 
         assertEquals("sam@example.com", picked)
     }
 
     @Test
-    fun aStartedSessionShowsItsAccountWithoutAPicker() {
-        composerWith(accounts = listOf(Choice("sam@example.com", "sam@example.com"), Choice("work@acme.example", "work@acme.example")), started = true)
+    fun aStartedSessionCanStillSwitchAccount() {
+        var picked: String? = null
+        composerWith(accounts = listOf(account("sam@example.com", "sam@example.com"), account("work@example.net", "work@example.net")), started = true, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@acme.example, fixed once the conversation has started").assertExists()
+        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithText("Claude Code · sam@example.com").performClick()
+
+        assertEquals("sam@example.com", picked)
     }
 
     @Test
@@ -274,12 +272,16 @@ class AccountsAndSessionsTest {
     fun thePickerOffersToSignInOnThisNodeToAnAccountKnownElsewhere() {
         var picked: String? = null
         composerWith(
-            accounts = listOf(Choice("sam@example.com", "sam@example.com"), Choice("work@acme.example", "work@acme.example"), Choice(SignInPrefix + "side@example.com", "side@example.com", "Sign in on willow")),
+            accounts = listOf(
+                account("sam@example.com", "sam@example.com"),
+                account("work@example.net", "work@example.net"),
+                PickerAccount(SignInPrefix + "side@example.com", "claude", "side@example.com", willow(), true, "Sign in on willow", signIn = true),
+            ),
             started = false,
             onSetAccount = { picked = it },
         )
 
-        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
+        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
         rule.onNodeWithText("Sign in on willow").performClick()
 
         assertEquals("sign in:side@example.com", picked)
@@ -287,26 +289,21 @@ class AccountsAndSessionsTest {
 
     @Test
     fun thePickerShowsEachAccountsUsageLeftOrThatItIsUnknown() {
-        val logins = listOf(
-            LoginInfo("claude", "sam@example.com", "token", LoginState.SignedIn, usageLeft = 18),
-            LoginInfo("claude", "work@acme.example", "token", LoginState.SignedIn),
-        )
-        composerWith(accounts = accountChoices(logins, listOf("side@example.com"), "willow"), started = false)
+        composerWith(accounts = listOf(account("sam@example.com", "sam@example.com", "18% left"), account("work@example.net", "work@example.net")), started = false)
 
-        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
+        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
 
-        rule.onNodeWithText("18% left").assertExists()
-        rule.onNodeWithText("Usage unknown").assertExists()
-        rule.onNodeWithText("Sign in on willow").assertExists()
+        rule.onNodeWithContentDescription("Claude Code · sam@example.com on this device, 18% left").assertExists()
+        rule.onNodeWithContentDescription("Claude Code · work@example.net on this device, Usage unknown").assertExists()
     }
 
     @Test
     fun theDefaultAccountIsAnExplicitChoice() {
         var picked: String? = null
-        composerWith(accounts = listOf(Choice(DefaultAccountId, "Default account"), Choice("work@acme.example", "work@acme.example")), started = false, onSetAccount = { picked = it })
+        composerWith(accounts = listOf(account(DefaultAccountId, null), account("work@example.net", "work@example.net")), started = false, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@acme.example").performClick()
-        rule.onNodeWithText("Default account").performClick()
+        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithText("Claude Code · Default account").performClick()
 
         assertEquals(DefaultAccountId, picked)
     }

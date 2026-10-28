@@ -16,7 +16,7 @@ import mycelium.state.slashCommands
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private fun conversation(options: String?, model: String? = null) = Conversation(
+private fun conversation(options: String?, model: String? = null, mode: String? = null) = Conversation(
     id = "c1",
     owner = "u",
     nodeId = "n",
@@ -25,6 +25,7 @@ private fun conversation(options: String?, model: String? = null) = Conversation
     title = "t",
     status = ConversationStatus.Done,
     model = model,
+    mode = mode,
     options = options?.let { MyceliumJson.parseToJsonElement(it).jsonObject },
     createdAt = "2026-10-22T10:00:00Z",
     updatedAt = "2026-10-22T10:00:00Z",
@@ -58,6 +59,13 @@ class SessionTest {
         assertEquals("opus", options.currentModel)
         assertEquals("medium", options.settings.single().current)
         assertEquals(listOf("low", "medium"), options.settings.single().choices.map { it.id })
+    }
+
+    @Test
+    fun theShownModeIsTheOneTheSessionReportedNotAnUpdateFromAnEarlierSession() {
+        val events = listOf(update(1, """{"sessionUpdate": "current_mode_update", "currentModeId": "plan"}"""))
+
+        assertEquals("default", sessionOptions(conversation(offered, mode = "default"), events).currentMode)
     }
 
     @Test

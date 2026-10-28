@@ -183,6 +183,8 @@ pub struct QueuedPrompt {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub editing: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

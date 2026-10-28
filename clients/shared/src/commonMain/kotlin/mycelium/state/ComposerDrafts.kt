@@ -8,13 +8,16 @@ data class ComposerDraft(
     val attachments: List<DraftAttachment> = emptyList(),
 )
 
+data class QueueEditing(val queueId: String, val stash: ComposerDraft)
+
 class ComposerDrafts {
     private val held = mutableMapOf<String, ComposerDraft>()
 
     operator fun get(key: String): ComposerDraft = held[key] ?: ComposerDraft()
 
     fun update(key: String, change: ComposerDraft.() -> ComposerDraft) {
-        val updated = get(key).change()
+        val changed = get(key).change()
+        val updated = changed.copy(cursor = changed.cursor.coerceIn(0, changed.text.length))
 
         if (updated == ComposerDraft()) {
             held.remove(key)

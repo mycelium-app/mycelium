@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -93,13 +94,13 @@ fun ForgesSettings(store: Store) {
 
 
             refusedMcp?.let { forge ->
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
-                    ErrorBanner(forge.mcpError.orEmpty(), onDismiss = { refusedMcp = null })
-
-                    if (forge.kind == "gitlab") {
-                        MyButton({ signInToMcp(forge) }, text = "Sign in to ${forgeName(forge)}'s MCP server", variant = ButtonVariant.Outline)
-                    }
+                val signIn: (@Composable RowScope.() -> Unit)? = if (forge.kind == "gitlab") {
+                    { MyButton({ signInToMcp(forge) }, text = "Sign in to ${forgeName(forge)}'s MCP server", size = ButtonSize.Sm, variant = ButtonVariant.Outline) }
+                } else {
+                    null
                 }
+
+                ErrorBanner(forge.mcpError.orEmpty(), onDismiss = { refusedMcp = null }, actions = signIn)
             }
 
             ListSearch(query, { query = it }, "forges")

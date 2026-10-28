@@ -181,14 +181,10 @@ fun breakWhen(local: String, today: String): String {
 }
 
 fun WellnessBreak.lengthText(): String {
-    if (!endedEarly) {
-        return "$plannedMinutes min"
-    }
-
     val ran = startedAt.let(::instantOrNull)?.let { start -> endedAt?.let(::instantOrNull)?.minus(start) }
-    val minutes = ran?.let { ((it.inWholeSeconds + 30) / 60).toInt() }?.coerceAtLeast(1) ?: 1
+    val minutes = ran?.let { ((it.inWholeSeconds + 30) / 60).toInt() }?.coerceAtLeast(1) ?: plannedMinutes
 
-    return "$minutes min, ended early"
+    return if (endedEarly) "$minutes min, ended early" else "$minutes min"
 }
 
 data class BreakEnd(val endedAt: Instant, val earlyMinutes: Int? = null)

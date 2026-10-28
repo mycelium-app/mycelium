@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -44,6 +45,7 @@ import mycelium.ProviderDictation
 import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Project
+import mycelium.api.ApiException
 import mycelium.api.ConversationStatus
 import mycelium.api.EnvironmentState
 import mycelium.api.ConfigRequest
@@ -51,7 +53,10 @@ import mycelium.api.LoginInfo
 import mycelium.api.NodeSummary
 import mycelium.api.ModelProvider
 import mycelium.api.PatchConversationRequest
+import mycelium.api.PatchQueueRequest
 import mycelium.state.Annotation
+import mycelium.state.QueueEditing
+import mycelium.state.ComposerDraft
 import mycelium.state.Ide
 import mycelium.state.OutlinePage
 import mycelium.state.DiffTabs
@@ -64,16 +69,20 @@ import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
 import mycelium.state.Store
 import mycelium.state.ThreadItem
-import mycelium.state.DefaultAccountId
-import mycelium.state.SignInPrefix
-import mycelium.state.accountChoices
-import mycelium.state.accountsElsewhere
-import mycelium.state.continueChoices
+import mycelium.state.continueAccountId
+import mycelium.state.pickerAccounts
+import mycelium.state.reachableLogins
+import mycelium.state.routingChoices
+import mycelium.state.signInAccounts
+import mycelium.state.ContinueChatPrefix
 import mycelium.state.routedLabel
 import mycelium.state.routedStatus
 import mycelium.state.currentContinueId
 import mycelium.state.agentName
-import mycelium.state.switchableAccounts
+import mycelium.state.currentContinueLabel
+import mycelium.state.ContinueAccountPrefix
+import mycelium.state.DefaultAccountId
+import mycelium.state.SignInPrefix
 import mycelium.state.isLaptop
 import mycelium.state.isChat
 import mycelium.state.isSubagent
@@ -97,12 +106,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val platform = LocalPlatform.current
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
+    var moveTo by remember { mutableStateOf<String?>(null) }
     var phoneEnvironment by remember(id) { mutableStateOf(false) }
     var viewedArtefact by remember(id) { mutableStateOf<String?>(null) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
     var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
-    var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val compact = LocalTouch.current
+    var signIn by remember { mutableStateOf<LoginSession?>(null) }
     val conversation = state.conversations[id] ?: fetched
     val workspace = conversation?.let { "${it.nodeId}:${it.cwd}" }
     val threadAssistant = conversation?.assistantId?.let { state.assistants[it] }
@@ -261,12 +271,64 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val node = if (chat) null else state.nodes[conversation.nodeId]
-    val continueControls = run {
+    val accountPicker = run {
         val agentSettings = rememberAgentSettings(store)
-        val choices = remember(conversation, state.nodes, providers, agentSettings) { continueChoices(conversation, state.nodes.values, providers, agentSettings.anyModel) }
         val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
+        val accounts = remember(conversation, state.nodes) {
+            pickerAccounts(state.nodes.values, conversation.nodeId) { pickedNode, pickedLogin -> continueAccountId(conversation, pickedNode, pickedLogin) } +
+                node?.let { signInAccounts(state.nodes.values, it, conversation.agent) }.orEmpty()
+        }
 
-        ContinueControls(choices, currentContinueId(conversation), { choice -> store.act { store.continueOn(id, choice) } }, routedLabel(conversation, providers), routedStatus(conversation, login))
+        AccountPickerControls(
+            title = "Continue on",
+            label = routedLabel(conversation, providers) ?: currentContinueLabel(conversation, providers).takeUnless { chat && providers.none { it.id == conversation.providerId } },
+            tooltip = routedStatus(conversation, login),
+            accounts = accounts,
+            routing = routingChoices(reachableLogins(state.nodes.values).map { it.second }, agentSettings.anyModel, "moves to"),
+            current = currentContinueId(conversation),
+            providers = providers,
+            providerId = conversation.providerId.takeIf { chat },
+            model = conversation.model.takeIf { chat },
+            recent = recentModels(state.conversations.values, providers),
+            onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = change(providers) }, picked, favouriteModel, on) },
+            onPickModel = { chosen, picked ->
+                store.act {
+                    if (chat) {
+                        api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = picked))
+                    } else {
+                        store.continueOn(id, "$ContinueChatPrefix${chosen.id}:$picked")
+                    }
+                }
+            },
+            onMove = { moveTo = it },
+            onPick = { picked, done ->
+                store.act {
+                    val row = accounts.firstOrNull { it.id == picked }
+
+                    try {
+                        when {
+                            picked.startsWith(SignInPrefix) && node != null -> {
+                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), picked.removePrefix(SignInPrefix))
+                                signIn = LoginSession(started.loginId, conversation.agent)
+                            }
+                            conversation.acpSessionId == null && picked == "$ContinueAccountPrefix$DefaultAccountId" -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
+                            conversation.acpSessionId == null && picked.startsWith(ContinueAccountPrefix) -> api.patchConversation(id, PatchConversationRequest(account = picked.removePrefix(ContinueAccountPrefix)))
+                            else -> store.continueOn(id, picked)
+                        }
+
+                        done(null)
+                    } catch (refused: ApiException) {
+                        val target = row?.node
+
+                        if (refused.code != "folder_missing" || target == null) {
+                            throw refused
+                        }
+
+                        done(PickerRefusal(refused.message, picked, target.id, target.name))
+                    }
+                }
+            },
+        )
     }
     val ides = LocalIdes.current
     val ideTarget = if (node != null && !chat && ides != null) IdeTarget(node, conversation.cwd) else null
@@ -293,7 +355,50 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val initialQueued = if (starting) queue.minByOrNull { it.position } else null
     val goesStraight = conversation.status in setOf(ConversationStatus.Review, ConversationStatus.Done) && queue.isEmpty()
     val delivering = sending.take(if (goesStraight || (starting && initialQueued == null)) 1 else 0)
+    val unexplainedFailure = ThreadItem.Failure("failed", "The agent stopped with an error.").takeIf { conversation.status == ConversationStatus.Failed && thread.none { it is ThreadItem.Failure } }
     val initialMessage = initialQueued?.let { ThreadItem.UserMessage("queued:${it.id}", it.text, files = it.attachments) }
+    val shownQueue = queue.filter { it.id != initialQueued?.id }
+    var queueEditing by remember(id) { mutableStateOf<QueueEditing?>(null) }
+    val loadAttachmentBytes = LocalAttachmentBytes.current
+
+    fun leaveQueueEdit(editing: QueueEditing) {
+        if (queueEditing != editing) {
+            return
+        }
+
+        annotations = editing.stash.annotations
+        attached.replace(editing.stash.attachments)
+        store.composerDrafts.update(id) { editing.stash.copy(attachments = attached.drafts) }
+        queueEditing = null
+    }
+
+    val queueEdit = queueEditing?.let { editing ->
+        QueueEdit(
+            number = shownQueue.indexOfFirst { it.id == editing.queueId } + 1,
+            onSave = { text ->
+                store.act {
+                    val uploaded = attached.drafts.map { api.uploadAttachment(id, it.file.name, it.file.mediaType, it.file.bytes) }
+
+                    api.editQueued(id, editing.queueId, PatchQueueRequest(text = text, attachments = uploaded, editing = false))
+                    leaveQueueEdit(editing)
+                }
+            },
+            onCancel = {
+                store.act {
+                    api.editQueued(id, editing.queueId, PatchQueueRequest(editing = false))
+                    leaveQueueEdit(editing)
+                }
+            },
+        )
+    }
+
+    LaunchedEffect(queueEditing, shownQueue.map { it.id }) {
+        val editing = queueEditing
+
+        if (editing != null && shownQueue.none { it.id == editing.queueId }) {
+            leaveQueueEdit(editing)
+        }
+    }
 
     val annotate = remember(id) {
         AnnotateActions(
@@ -373,7 +478,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
-                    continueOn = continueControls.takeIf { conversation.scratch },
+                    onOpenNodes = onOpenNodes,
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     ide = ideControls,
                     onDetails = { openPanel(SidePanel.Details) },
@@ -389,13 +494,16 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onPin = { store.pin(conversation, conversation.pinnedAt == null) },
                     onCloseSession = { store.closeSession(conversation) },
                     onArchive = {
+                        val archiving = conversation.archivedAt == null
+
                         store.act {
-                            api.patchConversation(id, PatchConversationRequest(archived = conversation.archivedAt == null))
-                            onArchived()
+                            api.patchConversation(id, PatchConversationRequest(archived = archiving))
+
+                            if (archiving) {
+                                onArchived()
+                            }
                         }
                     },
-                    onRetry = { store.act { api.retryConversation(id) } },
-                    onDismissFailure = { store.dismissFailure(conversation) },
                     dismissedWalkthrough = !chat && state.walkthroughs[id]?.dismissed == true,
                     onShowWalkthrough = { store.setWalkthroughDismissed(id, false) },
                     onDelete = {
@@ -473,7 +581,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {
                     ThreadView(
-                        items = thread + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
+                        items = thread + listOfNotNull(unexplainedFailure) + listOfNotNull(initialMessage) + delivering.map { ThreadItem.UserMessage("sending", it) },
                         hasOlder = state.hasOlderEvents(id),
                         loadingOlder = id in state.loadingOlderEvents,
                         onLoadOlder = { store.act { store.loadOlder(id) } },
@@ -482,6 +590,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         modifier = Modifier.weight(1f),
                         onSuggest = ::send,
                         onRetry = if (conversation.status == ConversationStatus.Failed) ({ store.act { api.retryConversation(id) } }) else null,
+                        onDismissFailure = if (conversation.status == ConversationStatus.Failed) ({ store.dismissFailure(conversation) }) else null,
                         limitActions = if (conversation.status == ConversationStatus.Failed) limitActions else null,
                         agent = conversation.agent,
                         dismissedPins = dismissedPins,
@@ -505,69 +614,71 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         MyButton({ onOpenConversation(parentId) }, text = "Open the conversation it belongs to", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                     }
                 } else {
-                    Composer(
-                        conversation = conversation,
-                        usage = { ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd }) },
-                        working = agentWorking,
-                        queue = queue.filter { it.id != initialQueued?.id },
-                        sending = sending.drop(delivering.size),
-                        onSend = ::send,
-                        annotations = annotations,
-                        onRemoveAnnotation = { removed -> annotations = annotations - removed },
-                        attachments = attached.controls(),
-                        assistantActions = assistantActions,
-                        dictation = dictation,
-                        initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
-                        onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
-                        initialImages = draft.images,
-                        onImagesChange = { held -> store.composerDrafts.update(id) { copy(images = held) } },
-                        modelPicker = if (chat) ModelPickerControls(
-                            providers,
-                            conversation.providerId,
-                            conversation.model,
-                            recent = recentModels(state.conversations.values, providers),
-                            onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = change(providers) }, picked, favouriteModel, on) },
-                        ) { chosen, model -> store.act { api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = model)) } } else null,
+                    key(id, queueEditing?.queueId) {
+                        Composer(
+                            conversation = conversation,
+                            usage = { ConversationUsageBar(api, id, state.events[id].orEmpty().count { it.kind == mycelium.api.EventKinds.TurnEnd }) },
+                            working = agentWorking,
+                            queue = shownQueue.map { if (it.id == queueEditing?.queueId) it.copy(editing = true) else it },
+                            sending = sending.drop(delivering.size),
+                            onSend = ::send,
+                            annotations = annotations,
+                            onRemoveAnnotation = { removed -> annotations = annotations - removed },
+                            attachments = attached.controls(),
+                            assistantActions = assistantActions,
+                            dictation = dictation,
+                            initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
+                            onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
+                            initialImages = draft.images,
+                            onImagesChange = { held -> store.composerDrafts.update(id) { copy(images = held) } },
+                            accountPicker = accountPicker,
                         onStop = { store.act { api.cancel(id) } },
-                        onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
-                        onSendAllQueuedNow = { store.act { api.sendAllQueuedNow(id) } },
-                        onEditQueued = { queueId, text -> store.act { api.editQueued(id, queueId, text) } },
-                        onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
-                        options = remember(conversation, state.events[id], state.sessionUpdates[id], state.nodes[conversation.nodeId]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(state.nodes[conversation.nodeId], conversation.agent, conversation.account)) },
-                        commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
-                        onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
-                        onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
-                        onSearchFiles = { query -> api.files(id, query) },
-                        accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
-                        accountLocked = conversation.acpSessionId != null,
-                        continueOn = continueControls,
-                        onSetAccount = { account ->
-                            store.act {
-                                when {
-                                    account.startsWith(SignInPrefix) && node != null -> {
-                                        val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), account.removePrefix(SignInPrefix))
-                                        signIn = LoginSession(started.loginId, conversation.agent)
-                                    }
-                                    account == DefaultAccountId -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
-                                    else -> api.patchConversation(id, PatchConversationRequest(account = account))
+                            onSendQueuedNow = { queueId -> store.act { api.sendQueuedNow(id, queueId) } },
+                            onSendAllQueuedNow = { store.act { api.sendAllQueuedNow(id) } },
+                            onEditQueued = { item ->
+                                store.act {
+                                    val files = item.attachments.map { held -> PickedFile(held.name, held.mediaType, loadAttachmentBytes(held.sha256) ?: error("${held.name} could not be loaded. Try again.")) }
+                                    api.editQueued(id, item.id, PatchQueueRequest(editing = true))
+
+                                    val stash = store.composerDrafts[id].copy(annotations = annotations, attachments = attached.drafts)
+
+                                    annotations = emptyList()
+                                    attached.replace(emptyList())
+                                    attached.add(files)
+                                    store.composerDrafts.update(id) { ComposerDraft(text = item.text, cursor = item.text.length, attachments = attached.drafts) }
+                                    queueEditing = QueueEditing(item.id, stash)
                                 }
-                            }
-                        },
-                        onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
-                        onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
-                        onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
-                        goal = if (chat || conversation.scratch) null else GoalControls(
-                            goal = state.goals[id],
-                            onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
-                            onPause = { store.act { store.pauseGoal(id, true) } },
-                            onResume = { store.act { store.pauseGoal(id, false) } },
-                            onClear = { store.act { store.clearGoal(id) } },
-                            onSendAgain = { store.act { store.sendGoalAgain(id) } },
-                            onNudge = { store.act { store.nudgeGoal(id) } },
-                            onContinue = { note -> store.act { store.continueGoal(id, note) } },
-                            agent = conversation.agent,
-                        ),
-                    )
+                            },
+                            onMoveQueued = { queueId, index ->
+                                store.act {
+                                    val neighbour = shownQueue[index]
+
+                                    api.moveQueued(id, queueId, queue.indexOfFirst { it.id == neighbour.id })
+                                }
+                            },
+                            queueEdit = queueEdit,
+                            onRemoveQueued = { queueId -> store.act { api.removeQueued(id, queueId) } },
+                            options = remember(conversation, state.events[id], state.sessionUpdates[id], state.nodes[conversation.nodeId]) { sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(state.nodes[conversation.nodeId], conversation.agent, conversation.account)) },
+                            commands = remember(state.events[id], state.sessionUpdates[id]) { slashCommands(state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty()) },
+                            onSetMode = { mode -> store.act { api.setConfig(id, ConfigRequest(mode = mode)) } },
+                            onSetModel = { model -> store.act { api.setConfig(id, ConfigRequest(model = model)) } },
+                            onSearchFiles = { query -> api.files(id, query) },
+                            onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
+                            onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
+                            onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
+                            goal = GoalControls(
+                                goal = state.goals[id],
+                                onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
+                                onPause = { store.act { store.pauseGoal(id, true) } },
+                                onResume = { store.act { store.pauseGoal(id, false) } },
+                                onClear = { store.act { store.clearGoal(id) } },
+                                onSendAgain = { store.act { store.sendGoalAgain(id) } },
+                                onNudge = { store.act { store.nudgeGoal(id) } },
+                                onContinue = { note -> store.act { store.continueGoal(id, note) } },
+                                agent = conversation.agent,
+                            ),
+                        )
+                    }
                 }
             }
 
@@ -620,8 +731,6 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
-    signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
-
     if (compact && phoneEnvironment) {
         FullScreenSheet({ phoneEnvironment = false }) {
             EnvironmentPanel(store, state, conversation, true, { phoneEnvironment = it }, { phoneEnvironment = false }, onOpenNode, onOpenConversation, onOpenNodes)
@@ -635,6 +744,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     if (compact && moveOpen) {
         MoveSheet(store, state, conversation, { moveOpen = false }, onOpenConversation)
     }
+
+    moveTo?.let { target -> MoveSheet(store, state, conversation, { moveTo = null }, onOpenConversation, target) }
+
+    signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 }
 
 @Composable
@@ -645,7 +758,7 @@ private fun ConversationHeader(
     chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
-    continueOn: ContinueControls?,
+    onOpenNodes: () -> Unit,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     ide: IdeControls?,
     onDetails: () -> Unit,
@@ -661,8 +774,6 @@ private fun ConversationHeader(
     onPin: () -> Unit,
     onCloseSession: () -> Unit,
     onArchive: () -> Unit,
-    onRetry: () -> Unit,
-    onDismissFailure: () -> Unit,
     dismissedWalkthrough: Boolean,
     onShowWalkthrough: () -> Unit,
     onDelete: () -> Unit,
@@ -675,9 +786,37 @@ private fun ConversationHeader(
     var nodeMenuOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
     var projectMenuOpen by remember { mutableStateOf(false) }
+    var ideMenuOpen by remember { mutableStateOf(false) }
     val archived = conversation.archivedAt != null
+    val density = LocalDensity.current
+    val titleSource = remember { MutableInteractionSource() }
+    var barWidth by remember { mutableStateOf(0.dp) }
+    var placeWidth by remember { mutableStateOf(0.dp) }
+    var ideWidth by remember { mutableStateOf(0.dp) }
+    val fixedWidth = Tokens.Size.ControlMd * 2 + Tokens.Space.S3 + Tokens.Space.S2 * 7
+    val reserved = fixedWidth + Tokens.Size.HeaderTitleMin
+    val measured = barWidth > 0.dp
+    val ideInMore = !compact && ide != null && measured && barWidth < reserved + placeWidth + ideWidth
+    val placeInMore = !compact && measured && barWidth < reserved + placeWidth
+    val titleMax = (barWidth - fixedWidth - (if (placeInMore) 0.dp else placeWidth) - (if (ideInMore || ide == null) 0.dp else ideWidth)).coerceIn(Tokens.Size.HeaderTitleMin, Tokens.Size.Measure / 2)
 
-    Bar(startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
+    val nodeMenu: @Composable () -> Unit = {
+        if (nodeMenuOpen) {
+            MenuPopup(onDismiss = { nodeMenuOpen = false }) {
+                if (!conversation.scratch) {
+                    MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
+                }
+
+                MenuItem("All nodes", onClick = { nodeMenuOpen = false; onOpenNodes() }, leading = MyIcon.Server)
+            }
+        }
+
+        if (moveOpen) {
+            moveSheet { moveOpen = false }
+        }
+    }
+
+    Bar(Modifier.onSizeChanged { barWidth = with(density) { it.width.toDp() } }, startPadding = if (compact) Tokens.Space.S1 else Tokens.Space.S3) {
         OpenListButton()
 
         if (slots != null) {
@@ -691,17 +830,19 @@ private fun ConversationHeader(
             MyButton({ renaming = false; draft = conversation.title }, text = "Cancel", size = ButtonSize.Sm, muted = true)
         } else {
             Row(
-                (if (compact) Modifier.weight(1f) else Modifier.widthIn(max = Tokens.Size.Measure / 2))
+                (if (compact) Modifier.weight(1f) else Modifier.widthIn(max = titleMax))
                     .heightIn(min = touchMin(0.dp))
                     .pressable(
                         { if (compact) menuOpen = true else renaming = true },
                         description = if (compact) "${conversation.title}, rename or archive" else "Rename conversation ${conversation.title}",
                         shape = ControlShape,
+                        source = titleSource,
                     )
                     .padding(horizontal = Tokens.Space.S1),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Label(conversation.title, style = Tokens.Type.Title, maxLines = 1)
+                Tooltip(conversation.title, titleSource)
             }
         }
 
@@ -720,54 +861,41 @@ private fun ConversationHeader(
 
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
-            if (chat) {
-                Label(conversation.model.orEmpty(), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            } else if (!conversation.scratch) {
-                ProjectBreadcrumb(project, projects, nodes, onProject, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = onSetUp)
-            }
-
-            if (node != null) {
-                Box {
-                    MyButton({ nodeMenuOpen = true }, text = node.name, icon = nodeIcon(node), trailingIcon = MyIcon.ChevronDown, description = "Running on ${node.name}, open the node menu", size = ButtonSize.Sm, muted = true)
-
-                    if (nodeMenuOpen) {
-                        MenuPopup(onDismiss = { nodeMenuOpen = false }) {
-                            if (continueOn != null) {
-                                MenuLabel("Continue on")
-                                continueOn.choices.forEach { choice -> MenuItem(choice.name, onClick = { nodeMenuOpen = false; continueOn.onPick(choice.id) }, checked = choice.id == continueOn.current, hint = choice.description) }
-                            } else {
-                                MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
-                            }
-                        }
+            if (!placeInMore) {
+                Row(Modifier.onSizeChanged { placeWidth = with(density) { it.width.toDp() } }, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                    if (!chat && !conversation.scratch) {
+                        ProjectBreadcrumb(project, projects, nodes, onProject, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = onSetUp)
                     }
 
-                    if (moveOpen) {
-                        moveSheet { moveOpen = false }
+                    if (node != null) {
+                        Box {
+                            MyButton({ nodeMenuOpen = true }, text = node.name, icon = nodeIcon(node), trailingIcon = MyIcon.ChevronDown, description = "Running on ${node.name}, open the node menu", size = ButtonSize.Sm, muted = true)
+                            nodeMenu()
+                        }
                     }
                 }
             }
 
             if (archived) {
                 Tag("Archived")
-            } else if (conversation.status == ConversationStatus.Failed) {
-                MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry ${conversation.title}")
-                MyButton(onDismissFailure, text = "Dismiss", size = ButtonSize.Sm, muted = true, description = "Dismiss the failure of ${conversation.title}")
             }
 
             Box(Modifier.weight(1f))
         }
 
-        if (ide != null && !compact) {
-            SplitButton(
-                "Open in ${ide.main.label}",
-                { ide.open(ide.main) },
-                ide.others.map { SplitAlternative("Open in ${it.label}", { ide.open(it) }) } + SplitAlternative("IDE settings", ide.onSettings, separated = true),
-                variant = ButtonVariant.Ghost,
-                size = ButtonSize.Sm,
-                menuLabel = ide.where,
-                icon = MyIcon.Code,
-                muted = true,
-            )
+        if (ide != null && !compact && !ideInMore) {
+            Box(Modifier.onSizeChanged { ideWidth = with(density) { it.width.toDp() } }) {
+                SplitButton(
+                    "Open in ${ide.main.label}",
+                    { ide.open(ide.main) },
+                    ide.others.map { SplitAlternative("Open in ${it.label}", { ide.open(it) }) } + SplitAlternative("IDE settings", ide.onSettings, separated = true),
+                    variant = ButtonVariant.Ghost,
+                    size = ButtonSize.Sm,
+                    menuLabel = ide.where,
+                    icon = MyIcon.Code,
+                    muted = true,
+                )
+            }
         }
 
         Box {
@@ -775,8 +903,34 @@ private fun ConversationHeader(
                 MyButton({ menuOpen = true }, icon = MyIcon.MoreVertical, description = if (slots != null) "More for ${conversation.title}" else "More", muted = true)
             }
 
+            if (placeInMore) {
+                nodeMenu()
+            }
+
+            if (ideMenuOpen && ide != null) {
+                MenuPopup(onDismiss = { ideMenuOpen = false }) {
+                    MenuLabel(ide.where)
+                    MenuItem("Open in ${ide.main.label}", onClick = { ideMenuOpen = false; ide.open(ide.main) }, leading = MyIcon.Code)
+                    ide.others.forEach { other -> MenuItem("Open in ${other.label}", onClick = { ideMenuOpen = false; ide.open(other) }, leading = MyIcon.Code) }
+                    Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+                    MenuItem("IDE settings", onClick = { ideMenuOpen = false; ide.onSettings() }, leading = MyIcon.Settings)
+                }
+            }
+
             if (menuOpen) {
                 MenuPopup(onDismiss = { menuOpen = false }) {
+                    if (placeInMore && !chat && !conversation.scratch) {
+                        MenuItem("Project", onClick = { menuOpen = false; projectMenuOpen = true }, hint = project?.name ?: "None", leading = MyIcon.Folder)
+                    }
+
+                    if (placeInMore && node != null) {
+                        MenuItem("Running on", onClick = { menuOpen = false; nodeMenuOpen = true }, hint = node.name, leading = nodeIcon(node))
+                    }
+
+                    if (ideInMore && ide != null) {
+                        MenuItem("Open in ${ide.main.label}", onClick = { menuOpen = false; ideMenuOpen = true }, hint = ide.where, leading = MyIcon.Code)
+                    }
+
                     if (slots != null) {
                         slots.menu { menuOpen = false }
                     } else {

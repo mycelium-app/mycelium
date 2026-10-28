@@ -160,6 +160,10 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
             require_signed_in_account(state, node_id, agent, account).await?;
         }
 
+        if node_id != before.node_id && !before.scratch && !from_chat && crate::git::relay(state, node_id, cwd.clone(), mycelium_proto::link::GitCommand::Register).await.is_err() {
+            return Err(ApiError::conflict("folder_missing", format!("The folder {cwd} is not on {node_name}. Move the conversation to {node_name} first, then choose this account.")));
+        }
+
         let earlier_project = earlier.as_ref().filter(|earlier| earlier["node_id"].as_str() == Some(node_id.to_string().as_str())).and_then(|earlier| earlier["project_id"].as_str()?.parse::<Uuid>().ok());
         let project_id = if node_id == before.node_id { before.project_id } else { earlier_project };
 

@@ -1,6 +1,7 @@
 package mycelium.desktop
 
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performKeyInput
@@ -50,6 +51,8 @@ private object ConsistencyPlatform : Platform {
 
 private const val AssistantWithThread = """{"id":"a1","name":"Stand-up","preferences":{},"state":"idle","session_count":1,"conversation_id":"c1","created_at":"2026-10-22T10:00:00Z"}"""
 
+private const val FailureEvent = """[{"conversation_id":"c1","seq":1,"kind":"error","payload":{"message":"The agent could not start a session: Authentication required."}}]"""
+
 private fun thread(status: String) = """{"id":"c1","owner":"u","node_id":"n1","agent":"claude","cwd":"/work/c1","title":"Daily summary","status":"$status",
 "acp_session_id":null,"mode":null,"model":null,"group_id":null,"assistant_id":"a1","created_at":"2026-10-22T10:00:00Z","updated_at":"2026-10-22T10:00:00Z","archived_at":null,"pinned_at":null}"""
 
@@ -75,8 +78,8 @@ class UiConsistencyTest {
                 path.endsWith("/experiments") -> EnabledExperiments
                 path.endsWith("/assistants") -> "[$AssistantWithThread]"
                 path.endsWith("/conversations") -> "[${thread(status)}]"
-                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") -> "[]"
-                path.endsWith("/events") -> "[]"
+                path.endsWith("/groups") || path.endsWith("/projects") || path.endsWith("/nodes") || path.endsWith("/queue") || path.endsWith("/model-providers") -> "[]"
+                path.endsWith("/events") -> if (status == "failed") FailureEvent else "[]"
                 else -> "{}"
             }
 
@@ -127,13 +130,13 @@ class UiConsistencyTest {
     }
 
     @Test
-    fun theAssistantThreadHeaderOffersRetryAndDismissWhenTheSessionFailed() {
+    fun theAssistantThreadOffersRetryAndDismissInTheErrorWhenTheSessionFailed() {
         show("failed", Route.Assistant("a1"))
-        appears("Dismiss the failure of Daily summary")
+        appears("Retry this conversation")
 
-        assertTrue(rule.onAllNodesWithContentDescription("Retry Daily summary").fetchSemanticsNodes().isNotEmpty())
+        assertEquals(1, rule.onAllNodesWithContentDescription("Retry", substring = true).fetchSemanticsNodes().size)
 
-        rule.onNodeWithContentDescription("Dismiss the failure of Daily summary").performClick()
+        rule.onNode(hasContentDescription("Dismiss").and(hasAnyAncestor(hasContentDescription("Error: The agent could not start", substring = true)))).performClick()
 
         rule.waitUntil(5_000) { "/api/v1/conversations/c1/dismiss" in posts }
     }

@@ -47,7 +47,7 @@ class QueueSendAllTest {
             MyceliumTheme(true) {
                 Composer(
                     conversation = conversation, working = true, queue = queue, sending = emptyList(), onSend = {}, onStop = {},
-                    onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                    onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
                     onSendAllQueuedNow = { runBlocking { api.sendAllQueuedNow("c1") } },

@@ -462,7 +462,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 
             match choice {
                 Choice::Chat { provider_id, model, .. } => {
-                    let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, model, prompt: None, parent_id: None }, None, Some(id)).await?;
+                    let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, node_id: None, model, prompt: None, parent_id: None }, None, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
 

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
+import mycelium.api.ConversationStatus
 import mycelium.api.Conversation
 import mycelium.api.MovePlan
 import mycelium.api.MoveRequest
@@ -122,7 +123,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                     MyButton({ scope.launch { failure = attempt { store.cancelMove(conversation.id) } } }, text = "Cancel move", size = ButtonSize.Sm, muted = true)
                 } else if (!busy) {
                     MyButton({ submit(true) }, text = "Fork instead", size = ButtonSize.Sm)
-                    MyButton({ submit(false) }, text = "Move after this turn", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+                    MyButton({ submit(false) }, text = if (conversation.status == ConversationStatus.Working || conversation.status == ConversationStatus.Input) "Move after this turn" else "Move", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
                 }
             }
         }

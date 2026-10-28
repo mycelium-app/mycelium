@@ -87,12 +87,24 @@ class ContinueOnTest {
     fun continuingOnTheOtherHarnessSendsTheRequest() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Continue on…: Claude Code · sam@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
         rule.onNodeWithText("Codex · codex@example.com").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
         assertEquals("""{"agent":"codex","account":"codex@example.com"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
+    }
+
+    @Test
+    fun aConversationWithoutASessionChangesAccountFromTheSameMenu() {
+        shell(EnabledExperiments, started = Started.replace("\"acp_session_id\":\"s\",", ""))
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
+        rule.onNodeWithText("Claude Code · work@example.org").performClick()
+
+        rule.waitUntil(5_000) { requests.toList().any { it.first == "PATCH /api/v1/conversations/c1" } }
+        assertEquals("""{"account":"work@example.org"}""", requests.toList().last { it.first == "PATCH /api/v1/conversations/c1" }.second)
     }
 
     @Test
@@ -131,8 +143,8 @@ class ContinueOnTest {
     fun anyAccountIsOfferedFirstAndSentAsARoutingChoice() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Continue on…: Claude Code · sam@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
         rule.onNodeWithText("Claude Code, any account").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
@@ -143,7 +155,7 @@ class ContinueOnTest {
     fun aRoutedConversationShowsAnyAccountWithTheAccountItIsOn() {
         shell(EnabledExperiments, started = Started.replace("\"account\":\"sam@example.com\"", "\"account\":\"work@example.org\",\"routing\":\"claude_any\""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Continue on…: Any account: work@example.org").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Any account: work@example.org").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

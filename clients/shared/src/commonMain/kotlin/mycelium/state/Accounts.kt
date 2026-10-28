@@ -5,7 +5,6 @@ import mycelium.api.Event
 import mycelium.api.EventKinds
 import mycelium.api.LoginInfo
 import mycelium.api.LoginState
-import mycelium.api.ModelChoice
 import mycelium.api.ModelProvider
 import mycelium.api.NodeSummary
 import mycelium.api.ResetCredits
@@ -59,7 +58,7 @@ fun splitSignedOut(accounts: List<AgentAccount>): AgentAccountSplit {
     return AgentAccountSplit(real, signedOut.flatMap { it.nodes.map { node -> node.nodeName } }.distinct().sorted())
 }
 
-data class AgentPick(val agent: String, val account: String?, val label: String, val hint: String)
+data class AgentPick(val agent: String, val account: String?, val label: String, val hint: String, val nodeId: String? = null)
 
 fun agentPicks(nodes: Collection<NodeSummary>): List<AgentPick> =
     listOf("claude", "codex").flatMap { agent ->
@@ -142,44 +141,55 @@ const val ContinueChatPrefix = "chat:"
 
 const val ContinueNodePrefix = "on:"
 
-private const val LowUsageLeft = 10
-
-private const val ChatGroup = "Chat"
-
-private fun lowUsageHint(login: LoginInfo): String? = login.usageLeft?.takeIf { it < LowUsageLeft }?.let { "$it% left" }
-
 fun currentContinueId(conversation: Conversation): String? = when {
     conversation.routing != null -> "$RoutingPrefix${conversation.routing}"
     conversation.agent == "chat" -> conversation.providerId?.let { provider -> conversation.model?.let { "$ContinueChatPrefix$provider:$it" } }
     else -> "$ContinueAccountPrefix${conversation.account ?: DefaultAccountId}"
 }
 
-fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, providers: List<ModelProvider>, anyModel: List<ModelChoice> = emptyList()): List<Choice> {
-    val reachable = nodes.filter { it.online }.sortedBy { if (it.id == conversation.nodeId) 0 else 1 }
-    val accounts = reachable.flatMap { node ->
+fun currentContinueLabel(conversation: Conversation, providers: List<ModelProvider>): String = when (conversation.agent) {
+    "chat" -> "${providers.firstOrNull { it.id == conversation.providerId }?.name ?: "Chat"}${conversation.model?.let { " · $it" }.orEmpty()}"
+    else -> "${agentName(conversation.agent)} · ${conversation.account ?: "Default account"}"
+}
+
+fun reachableLogins(nodes: Collection<NodeSummary>, firstNodeId: String? = null): List<Pair<NodeSummary, LoginInfo>> =
+    nodes.filter { it.online }.sortedBy { if (it.id == firstNodeId) 0 else 1 }.flatMap { node ->
         node.logins.filter { login -> login.state == LoginState.SignedIn && node.agents.any { it.agent == login.agent && it.available } }.map { node to it }
     }
-    val harnesses = (listOf("claude", "codex") + accounts.map { it.second.agent }).distinct()
-    val perHarness = harnesses.flatMap { agent ->
-        accounts.filter { it.second.agent == agent }.map { (node, login) ->
-            val here = node.id == conversation.nodeId
-            val id = when {
-                here && agent == conversation.agent -> "$ContinueAccountPrefix${accountChoiceId(login)}"
-                here -> "$ContinueAgentPrefix$agent:${accountChoiceId(login)}"
-                else -> "$ContinueNodePrefix${node.id}:$agent:${accountChoiceId(login)}"
-            }
-            val hint = listOfNotNull(lowUsageHint(login), if (here) null else "on ${node.name}").joinToString(", ").ifEmpty { null }
 
-            Choice(id, "${agentName(agent)} · ${login.account ?: "Default account"}", hint, group = agentName(agent))
-        }
-    }
-    val current = providers.firstOrNull { it.id == conversation.providerId }?.let { provider -> conversation.model?.takeIf { conversation.agent == "chat" && it != provider.defaultModel }?.let { provider to it } }
-    val defaults = providers.mapNotNull { provider -> provider.defaultModel?.let { provider to it } }
-    val models = (defaults + listOfNotNull(current)).map { (provider, model) -> Choice("$ContinueChatPrefix${provider.id}:$model", "${provider.name} · $model", group = ChatGroup) }
+fun continueAccountId(conversation: Conversation, node: NodeSummary, login: LoginInfo): String = when {
+    node.id == conversation.nodeId && login.agent == conversation.agent -> "$ContinueAccountPrefix${accountChoiceId(login)}"
+    node.id == conversation.nodeId -> "$ContinueAgentPrefix${login.agent}:${accountChoiceId(login)}"
+    else -> "$ContinueNodePrefix${node.id}:${login.agent}:${accountChoiceId(login)}"
+}
 
-    val routing = routingChoices(accounts.map { it.second }, anyModel, "moves to")
+data class PickerAccount(val id: String, val agent: String, val account: String?, val node: NodeSummary?, val here: Boolean, val usage: String, val signIn: Boolean = false) {
+    val label: String = "${agentName(agent)} · ${account ?: "Default account"}"
+}
 
-    return routing + perHarness + models
+const val UsageUnknown = "Usage unknown"
+
+fun loginUsage(login: LoginInfo): String {
+    val nearest = login.windows.maxByOrNull { it.usedPercent }
+    val left = nearest?.let { 100 - it.usedPercent.roundToInt().coerceIn(0, 100) } ?: login.usageLeft
+
+    return if (left == null) UsageUnknown else "$left% left"
+}
+
+fun pickerAccounts(nodes: Collection<NodeSummary>, hereNodeId: String?, idOf: (NodeSummary, LoginInfo) -> String): List<PickerAccount> =
+    reachableLogins(nodes, hereNodeId).map { (node, login) -> PickerAccount(idOf(node, login), login.agent, login.account, node, node.id == hereNodeId, loginUsage(login)) }
+
+fun signInAccounts(nodes: Collection<NodeSummary>, node: NodeSummary, agent: String): List<PickerAccount> =
+    accountsElsewhere(nodes, node, agent).map { PickerAccount(SignInPrefix + it, agent, it, node, true, "Sign in on ${node.name}", signIn = true) }
+
+fun newChatAccounts(nodes: Collection<NodeSummary>): List<PickerAccount> {
+    val online = pickerAccounts(nodes, null) { node, login -> "$ContinueNodePrefix${node.id}:${login.agent}:${accountChoiceId(login)}" }.filter { it.account != null }
+    val offline = nodes.flatMap { it.logins }
+        .filter { login -> login.state == LoginState.SignedIn && login.account != null && online.none { it.agent == login.agent && it.account == login.account } }
+        .distinctBy { it.agent to it.account }
+        .map { login -> PickerAccount("$ContinueNodePrefix:${login.agent}:${accountChoiceId(login)}", login.agent, login.account, null, false, "") }
+
+    return online + offline
 }
 
 fun windowName(name: String): String = when (name) {

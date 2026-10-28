@@ -142,11 +142,11 @@ class MoveTest {
     }
 
     @Test
-    fun moveAfterThisTurnAsksTheControlPlaneToMoveToTheChosenNode() {
+    fun moveAsksTheControlPlaneToMoveToTheChosenNode() {
         sheet(store(Movable, progress("waiting")))
         waitForPlan()
 
-        rule.onNodeWithText("Move after this turn").performClick()
+        rule.onNodeWithText("Move").performClick()
 
         rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/move" } }
         assertEquals("""{"node_id":"n2"}""", requests.last { it.first == "POST /api/v1/conversations/c1/move" }.second)
@@ -172,7 +172,7 @@ class MoveTest {
         sheet(store(Movable, progress("done", result = "c1")))
         waitForPlan()
 
-        rule.onNodeWithText("Move after this turn").performClick()
+        rule.onNodeWithText("Move").performClick()
         rule.waitUntil(5_000) { opened.isNotEmpty() }
 
         assertEquals(listOf("dismissed"), opened)
@@ -183,14 +183,14 @@ class MoveTest {
         sheet(store(Movable, progress("waiting")))
         waitForPlan()
 
-        rule.onNodeWithText("Move after this turn").performClick()
+        rule.onNodeWithText("Move").performClick()
         waitForText("Cancel move")
         rule.onNodeWithText("Cancel move").performClick()
         rule.waitUntil(5_000) { requests.any { it.first == "DELETE /api/v1/conversations/c1/move" } }
 
         assertEquals(true, requests.any { it.first == "DELETE /api/v1/conversations/c1/move" })
-        waitForText("Move after this turn")
-        rule.onNodeWithText("Move after this turn").assertIsDisplayed()
+        waitForText("Move")
+        rule.onNodeWithText("Move").assertIsDisplayed()
     }
 
     @Test
@@ -198,13 +198,13 @@ class MoveTest {
         sheet(store(Movable, progress("failed", message = "The project folder on this node has uncommitted changes. Nothing has changed: the conversation is still on willow. Choose Move to try again.")))
         waitForPlan()
 
-        rule.onNodeWithText("Move after this turn").performClick()
+        rule.onNodeWithText("Move").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("uncommitted changes", substring = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithContentDescription("uncommitted changes", substring = true).assertIsDisplayed()
-        rule.onNodeWithContentDescription("Dismiss the error").performClick()
-        waitForText("Move after this turn")
-        rule.onNodeWithText("Move after this turn").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Dismiss").performClick()
+        waitForText("Move")
+        rule.onNodeWithText("Move").assertIsDisplayed()
     }
 
     @Test
@@ -213,7 +213,7 @@ class MoveTest {
         val reason = "not on a branch"
         rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription(reason, substring = true).fetchSemanticsNodes().isNotEmpty() }
 
-        rule.onNodeWithText("Move after this turn").performClick()
+        rule.onNodeWithText("Move").performClick()
         rule.waitForIdle()
 
         rule.onNodeWithContentDescription(reason, substring = true).assertIsDisplayed()

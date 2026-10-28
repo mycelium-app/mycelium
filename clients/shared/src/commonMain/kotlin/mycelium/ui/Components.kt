@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -232,6 +233,7 @@ fun MyButton(
     tooltip: String? = if (text == null) description else null,
     fill: Boolean = false,
     stateDescription: String? = null,
+    maxWidth: Dp? = null,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -286,7 +288,16 @@ fun MyButton(
             }
 
             if (text != null) {
-                BasicText(text, if (fill) Modifier.weight(1f) else Modifier, style = textStyle.themed().copy(color = contentColor), softWrap = false, overflow = TextOverflow.Visible)
+                val iconSlots = listOfNotNull(icon, trailingIcon).size
+                val textMaxWidth = maxWidth?.let { it - padding * 2 - (iconSize + gap) * iconSlots }
+
+                BasicText(
+                    text,
+                    (if (fill) Modifier.weight(1f) else Modifier).then(if (textMaxWidth != null) Modifier.widthIn(max = textMaxWidth) else Modifier),
+                    style = textStyle.themed().copy(color = contentColor),
+                    softWrap = false,
+                    overflow = if (textMaxWidth != null) TextOverflow.Ellipsis else TextOverflow.Visible,
+                )
             }
 
             if (trailingIcon != null) {
@@ -889,14 +900,14 @@ fun RenameDialog(title: String, label: String, value: String, onValueChange: (St
 }
 
 @Composable
-fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null) {
+fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint: String? = null, leading: MyIcon? = null, meter: Int? = null, trailing: (@Composable () -> Unit)? = null, leadingContent: (@Composable () -> Unit)? = null, description: String? = null, hintContent: (@Composable () -> Unit)? = null, checkSlot: Boolean = false) {
     val colors = MyTheme.colors
 
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = rowHeight())
-            .pressable(onClick, role = Role.RadioButton, shape = ControlShape, stateDescription = if (checked) "Selected" else null)
+            .pressable(onClick, role = Role.RadioButton, description = description, shape = ControlShape, stateDescription = if (checked) "Selected" else null)
             .semantics { selected = checked }
             .padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
@@ -916,6 +927,10 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
                     Meter(meter, hint.orEmpty())
                 }
             }
+        } else if (hintContent != null) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                hintContent()
+            }
         } else if (hint == null) {
             Box(Modifier.weight(1f))
         }
@@ -926,6 +941,8 @@ fun MenuItem(label: String, onClick: () -> Unit, checked: Boolean = false, hint:
 
         if (checked) {
             Icon(MyIcon.Check, colors.text)
+        } else if (checkSlot) {
+            Spacer(Modifier.size(Tokens.Size.IconMd))
         }
 
         trailing?.invoke()
@@ -970,29 +987,30 @@ fun ReconnectingBanner(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
+fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier, actions: (@Composable RowScope.() -> Unit)? = null) {
     val colors = MyTheme.colors
 
-    Row(
+    Column(
         modifier
             .fillMaxWidth()
-            .background(colors.bgPanel)
-            .padding(start = Tokens.Space.S3, end = Tokens.Space.S2)
+            .background(colors.bgPanel, ControlShape)
+            .border(Tokens.Size.Hairline, colors.statusFailed, ControlShape)
+            .padding(start = Tokens.Space.S3, top = Tokens.Space.S1, end = Tokens.Space.S1, bottom = Tokens.Space.S2)
             .semantics {
                 contentDescription = "Error: $message"
                 liveRegion = LiveRegionMode.Polite
             },
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
     ) {
-        Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
-        Label(message, Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5), Tokens.Type.Meta, colors.statusFailed)
-
-        if (onRetry != null) {
-            MyButton(onRetry, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.Top) {
+            Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm, Modifier.padding(top = Tokens.Space.S1))
+            Label(message, Modifier.weight(1f).padding(top = Tokens.Space.S0_5), Tokens.Type.Meta)
+            MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss", size = ButtonSize.Sm, muted = true)
         }
 
-        MyButton(onDismiss, icon = MyIcon.Close, description = "Dismiss the error", size = ButtonSize.Sm, muted = true)
+        if (actions != null) {
+            Row(Modifier.padding(start = Tokens.Size.IconSm + Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), content = actions)
+        }
     }
 }
 

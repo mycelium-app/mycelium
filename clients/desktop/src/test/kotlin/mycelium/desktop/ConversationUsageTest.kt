@@ -64,10 +64,10 @@ class ConversationUsageTest {
     fun aNarrowConversationShowsHowFullItsContextIsAndWhatItHasSpentSeparately() {
         showUsage(ConversationSpend)
 
-        rule.waitUntil { rule.onAllNodesWithText("26%  ~$0.25").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Conversation usage").assertIsDisplayed()
+        rule.waitUntil { rule.onAllNodesWithText("26%").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Conversation usage: 26% of the context, ~$0.25").assertIsDisplayed()
         rule.onNodeWithText("Context 52k of 200k (26%)").assertDoesNotExist()
-        rule.onNodeWithContentDescription("Conversation usage").performClick()
+        rule.onNodeWithContentDescription("Conversation usage: 26% of the context, ~$0.25").performClick()
         rule.onNodeWithText("Context 52k of 200k (26%)").assertIsDisplayed()
         rule.onNodeWithText("Spent ~$0.25").assertIsDisplayed()
     }
@@ -98,6 +98,6 @@ class ConversationUsageTest {
         showUsage("""{"input_tokens":0,"output_tokens":0,"cache_read_tokens":0,"cache_write_tokens":0}""")
         rule.waitForIdle()
 
-        rule.onNodeWithContentDescription("Conversation usage").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Conversation usage", substring = true).assertDoesNotExist()
     }
 }

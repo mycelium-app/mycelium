@@ -36,7 +36,7 @@ class PasteBadgeTest {
             MyceliumTheme(true) {
                 Composer(
                     conversation = conversation, working = false, queue = emptyList(), sending = emptyList(), onSend = { sent += it }, onStop = {},
-                    onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                    onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
                 )

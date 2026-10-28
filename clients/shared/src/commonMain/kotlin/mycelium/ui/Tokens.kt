@@ -175,7 +175,16 @@ object Tokens {
         val DiffNumber: Dp = 36.dp
         val DiffSign: Dp = 16.dp
         val ComposerInput: Dp = 44.dp
-        val ImagePreview: Dp = 160.dp
+        val AccountControl: Dp = 200.dp
+        val AccountControlInCard: Dp = 280.dp
+        val HeaderTitleMin: Dp = 160.dp
+        val ImagePreviewMaxWidth: Dp = 320.dp
+        val ImagePreviewMaxHeight: Dp = 240.dp
+        val ImagePreviewLoadingWidth: Dp = 200.dp
+        val ImagePreviewLoadingHeight: Dp = 120.dp
+        val TileMin: Dp = 20.dp
+        val TileMax: Dp = 56.dp
+        val QueueThumbnail: Dp = 48.dp
         val ProgressBar: Dp = 4.dp
         val FormColumn: Dp = 320.dp
         val ApproveColumn: Dp = 420.dp
@@ -189,6 +198,7 @@ object Tokens {
     }
 
     object Radius {
+        val Tile: Dp = 3.dp
         val Control: Dp = 4.dp
         val Block: Dp = 6.dp
         val Float: Dp = 8.dp

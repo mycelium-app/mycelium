@@ -74,6 +74,7 @@ class BreakScreenTest {
         assertEquals("25 Oct, 09:00", breakWhen("2026-10-25T09:00", "2026-10-28"))
         assertEquals("5 min", WellnessBreak("b", "2026-10-28T14:30:00Z", "2026-10-28T14:35:00Z", plannedMinutes = 5).lengthText())
         assertEquals("1 min, ended early", WellnessBreak("b", "2026-10-28T11:05:00Z", "2026-10-28T11:10:00Z", plannedMinutes = 5, endedAt = "2026-10-28T11:06:00Z", endedEarly = true).lengthText())
+        assertEquals("40 min", WellnessBreak("b", "2026-10-28T17:00:00Z", "2026-10-28T17:05:00Z", plannedMinutes = 5, endedAt = "2026-10-28T17:40:00Z").lengthText())
     }
 
     @Test

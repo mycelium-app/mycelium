@@ -222,6 +222,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
             placeholder = if (assistant.builtinKey == VoiceAssistantKey) "Ask ${assistant.name}" else "Message ${assistant.name}",
             onSubmit = ::send,
             attachments = AttachmentControls(emptyList(), problem, { problem = "Send your first message, then attach files to the next one." }, {}),
+            kind = ConversationKind.Assistant,
             modifier = Modifier.widthIn(max = readingMeasure()),
             error = missing,
             assistantActions = actions,

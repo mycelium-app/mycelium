@@ -73,7 +73,7 @@ class AnnotationsTest {
             MyceliumTheme(true) {
                 Composer(
                     conversation = conversation, working = false, queue = emptyList(), sending = emptyList(), onSend = onSend, onStop = {},
-                    onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                    onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
                     annotations = annotations, onRemoveAnnotation = onRemove,

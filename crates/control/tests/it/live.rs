@@ -82,6 +82,7 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "PATCH /api/v1/conversations/{id}/queue/{queue_id}",
     "DELETE /api/v1/conversations/{id}/queue/{queue_id}",
     "POST /api/v1/conversations/{id}/queue/{queue_id}/send-now",
+    "POST /api/v1/conversations/{id}/queue/{queue_id}/move",
     "POST /api/v1/conversations/{id}/queue/send-all-now",
     "POST /api/v1/conversations/{id}/permission",
     "POST /api/v1/conversations/{id}/responses/{request_id}",
@@ -1196,10 +1197,10 @@ async fn sending_a_failed_goal_again_is_streamed_as_pending() {
     let mut stream = server.user.stream().await;
 
     let (status, body) = server.user.json(server.user.post(&format!("{url}/send"))).await;
-    let resent = stream.until(|message| match message { StreamMessage::Goal(goal) => Some(goal), _ => None }).await;
+    let resent = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.delivery == mycelium_proto::api::GoalDelivery::Pending => Some(goal), _ => None }).await;
 
     assert_eq!(status, 200, "{body}");
-    assert_eq!((resent.conversation_id, resent.delivery), (conversation.id, mycelium_proto::api::GoalDelivery::Pending));
+    assert_eq!(resent.conversation_id, conversation.id);
 }
 
 #[tokio::test]

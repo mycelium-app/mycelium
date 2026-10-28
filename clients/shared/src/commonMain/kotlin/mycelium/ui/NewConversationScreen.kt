@@ -29,20 +29,23 @@ import mycelium.state.SignInPrefix
 import mycelium.state.RoutingPrefix
 import mycelium.state.accountChoiceId
 import mycelium.state.anyAccountId
-import mycelium.state.groupedByAgent
 import mycelium.state.routingAgent
-import mycelium.state.routingButtonText
 import mycelium.state.routingChoices
 import mycelium.api.Routing
-import mycelium.state.accountChoices
-import mycelium.state.accountMenuTitle
-import mycelium.state.accountsElsewhere
+import mycelium.state.PickerAccount
+import mycelium.state.UsageUnknown
+import mycelium.state.loginUsage
+import mycelium.state.signInAccounts
+import mycelium.state.DefaultAccountId
+import mycelium.state.accountsOn
 import mycelium.state.agentName
 import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
 import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
 import mycelium.state.modelMenu
+
+private const val AgentAccountSeparator = "|"
 
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
@@ -80,6 +83,17 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
     val routing = account?.takeIf { it.startsWith(RoutingPrefix) }?.removePrefix(RoutingPrefix)?.takeIf { it == Routing.AnyModel || it == anyAccountId(chosenAgent.orEmpty()).removePrefix(RoutingPrefix) }
     val chosenAccount = if (routing != null) null else accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+
+    val shownAccount = chosenAccount ?: node?.let { accountsOn(it, chosenAgent.orEmpty()) }.orEmpty().firstOrNull { it.state == LoginState.SignedIn }
+    val accountRows = node?.let { held ->
+        agents.flatMap { info ->
+            val signedIn = accountsOn(held, info.agent).filter { it.state == LoginState.SignedIn }
+            val owned = signedIn.map { PickerAccount("${info.agent}$AgentAccountSeparator${accountChoiceId(it)}", info.agent, it.account, held, true, loginUsage(it)) }
+
+            owned.ifEmpty { listOf(PickerAccount("${info.agent}$AgentAccountSeparator$DefaultAccountId", info.agent, null, held, true, UsageUnknown)) } +
+                signInAccounts(state.nodes.values, held, info.agent).map { it.copy(id = "${info.agent}$AgentAccountSeparator${it.id}") }
+        }
+    }.orEmpty()
 
     val models = if (node != null && chosenAgent != null) modelMenu(node, chosenAgent, chosenAccount?.account) else null
     val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
@@ -171,37 +185,45 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         placeholder = "Ask, plan or build",
                         onSubmit = ::create,
                         attachments = attached.controls(),
-                        trailing = {
+                        kind = ConversationKind.NewConversation,
+                        account = {
                             if (agents.isNotEmpty()) {
-                                OptionMenu("Agent", agents.map { Choice(it.agent, agentName(it.agent)) }, chosenAgent, { agent = it })
-                            }
+                                AccountPicker(
+                                    AccountPickerControls(
+                                        title = "Start on",
+                                        label = when {
+                                            routing == Routing.AnyModel -> "Any model"
+                                            routing != null -> "${agentName(chosenAgent.orEmpty())}, any account"
+                                            else -> "${agentName(chosenAgent.orEmpty())} · ${shownAccount?.account ?: "Default account"}"
+                                        },
+                                        accounts = accountRows,
+                                        routing = routingChoices(node?.logins.orEmpty(), agentSettings.anyModel, "starts on"),
+                                        current = routing?.let { "$RoutingPrefix$it" } ?: chosenAgent?.let { "$it$AgentAccountSeparator${shownAccount?.let(::accountChoiceId) ?: DefaultAccountId}" },
+                                        onPick = { picked, done ->
+                                            val pickedAgent = picked.substringBefore(AgentAccountSeparator)
+                                            val pickedAccount = picked.substringAfter(AgentAccountSeparator)
 
-                            if (models != null) {
-                                OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title)
-                            }
-
-                            if (accounts.isNotEmpty()) {
-                                OptionMenu(
-                                    "Account",
-                                    routingChoices(node?.logins.orEmpty(), agentSettings.anyModel, "starts on") + groupedByAgent(accountChoices(accounts, node?.let { accountsElsewhere(state.nodes.values, it, chosenAgent.orEmpty()) }.orEmpty(), node?.name.orEmpty()), chosenAgent.orEmpty()),
-                                    routing?.let { "$RoutingPrefix$it" } ?: chosenAccount?.let(::accountChoiceId),
-                                    title = accountMenuTitle(chosenAgent.orEmpty()),
-                                    icon = MyIcon.Person,
-                                    buttonText = routingButtonText(routing?.let { "$RoutingPrefix$it" }),
-                                    onSelect = { picked ->
-                                        if (picked.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
-                                            store.act {
-                                                val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), picked.removePrefix(SignInPrefix))
-                                                signIn = LoginSession(started.loginId, chosenAgent)
+                                            if (picked.startsWith(RoutingPrefix)) {
+                                                account = picked
+                                                routingAgent(picked)?.let { agent = it }
+                                            } else if (pickedAccount.startsWith(SignInPrefix) && node != null) {
+                                                store.act {
+                                                    val started = store.api.startLogin(node.id, pickedAgent, loginMethodFor(pickedAgent), pickedAccount.removePrefix(SignInPrefix))
+                                                    signIn = LoginSession(started.loginId, pickedAgent)
+                                                }
+                                            } else {
+                                                agent = pickedAgent
+                                                account = pickedAccount
                                             }
-                                        } else {
-                                            account = picked
-                                            routingAgent(picked)?.let { agent = it }
-                                        }
-                                    },
+
+                                            done(null)
+                                        },
+                                    ),
+                                    Tokens.Size.AccountControlInCard,
                                 )
                             }
                         },
+                        model = if (models != null) ({ OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title) }) else null,
                     )
 
                     if (agents.isEmpty()) {

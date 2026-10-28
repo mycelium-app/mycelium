@@ -1145,8 +1145,12 @@ class MyceliumApi(
 
     suspend fun queue(id: String): List<QueuedPrompt> = call("/conversations/$id/queue") { client.get(it) { authorise() } }.body()
 
-    suspend fun editQueued(id: String, queueId: String, text: String) {
-        call("/conversations/$id/queue/$queueId") { client.patch(it) { authorise(); json(PatchQueueRequest(text)) } }
+    suspend fun editQueued(id: String, queueId: String, request: PatchQueueRequest) {
+        call("/conversations/$id/queue/$queueId") { client.patch(it) { authorise(); json(request) } }
+    }
+
+    suspend fun moveQueued(id: String, queueId: String, index: Int) {
+        call("/conversations/$id/queue/$queueId/move") { client.post(it) { authorise(); json(MoveQueuedRequest(index)) } }
     }
 
     suspend fun removeQueued(id: String, queueId: String) {

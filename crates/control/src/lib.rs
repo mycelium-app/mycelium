@@ -287,6 +287,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/prompt", post(prompts::prompt))
         .route("/api/v1/conversations/{id}/queue", get(prompts::queue))
         .route("/api/v1/conversations/{id}/queue/{queue_id}", patch(prompts::edit_queued).delete(prompts::remove_queued))
+        .route("/api/v1/conversations/{id}/queue/{queue_id}/move", post(prompts::move_queued))
         .route("/api/v1/conversations/{id}/queue/{queue_id}/send-now", post(prompts::send_now))
         .route("/api/v1/conversations/{id}/queue/send-all-now", post(prompts::send_all_now))
         .route("/api/v1/conversations/{id}/retry", post(prompts::retry))

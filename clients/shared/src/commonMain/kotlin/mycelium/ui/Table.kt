@@ -276,13 +276,14 @@ private fun TableRow(widths: List<Int>, minHeight: Dp, topAligned: Boolean, modi
     Layout(content, modifier) { cells, constraints ->
         val placeables = cells.mapIndexed { index, cell -> cell.measure(Constraints(minWidth = widths[index], maxWidth = widths[index])) }
         val pad = verticalPad.roundToPx()
+        val firstLine = Tokens.Type.Ui.lineHeight.roundToPx()
         val height = maxOf(minHeight.roundToPx(), (placeables.maxOfOrNull { it.height } ?: 0) + pad * 2)
 
         layout(widths.sum(), height) {
             var x = 0
 
             placeables.forEachIndexed { index, placeable ->
-                placeable.place(x, if (topAligned) pad else (height - placeable.height) / 2)
+                placeable.place(x, if (topAligned) pad + maxOf(0, (firstLine - placeable.height) / 2) else (height - placeable.height) / 2)
                 x += widths[index]
             }
         }

@@ -93,8 +93,13 @@ class MemoriesLiveTest {
     fun aFailedLoadShowsAnErrorAndCanBeRetried() {
         var attempts = 0
         val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine {
+        val engine = MockEngine { request ->
+            if (!request.url.encodedPath.endsWith("/memories")) {
+                return@MockEngine respond("[]", HttpStatusCode.OK, json)
+            }
+
             attempts++
+
             if (attempts == 1) {
                 respond("{\"error\":\"unavailable\",\"message\":\"Memories are temporarily unavailable.\"}", HttpStatusCode.ServiceUnavailable, json)
             } else {

@@ -116,6 +116,7 @@ fun ThreadView(
     modifier: Modifier = Modifier,
     onSuggest: (String) -> Unit = {},
     onRetry: (() -> Unit)? = null,
+    onDismissFailure: (() -> Unit)? = null,
     limitActions: LimitActions? = null,
     agent: String = "",
     dismissedPins: Set<String> = emptySet(),
@@ -231,7 +232,7 @@ fun ThreadView(
                             )
                         } else {
                             CompositionLocalProvider(LocalImageJump provides jumpToImage, LocalImageGallery provides gallery, LocalPinnedKeys provides pinnedKeys) {
-                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) limitActions else null, agent)
+                                ThreadRow(item, onAnswer, onStopWorkflow, if (index == lastFailure) onRetry else null, if (index == lastFailure) onDismissFailure else null, if (index == lastFailure) limitActions else null, agent)
                             }
                         }
                     }
@@ -274,7 +275,7 @@ fun ThreadView(
 val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
+private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, onDismissFailure: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
     when (item) {
         is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
         is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
@@ -293,12 +294,12 @@ private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onSt
         is ThreadItem.Permission -> ToolApprovalCard(item, onAnswer)
         is ThreadItem.ResponseEdit -> ResponseEditorCard(item)
         is ThreadItem.TurnEnd -> Unit
-        is ThreadItem.Failure -> if (item.limit != null) UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: ")) else Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-            StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.weight(1f, fill = false).semantics { contentDescription = "Error: ${item.message}" })
-
-            if (onRetry != null) {
-                MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry this conversation")
-            }
+        is ThreadItem.Failure -> if (item.limit != null) {
+            UsageLimitCard(item.limit, agent, limitActions, item.message.removePrefix("Internal error: "))
+        } else if (onRetry != null && onDismissFailure != null) {
+            ErrorBanner(item.message, onDismiss = onDismissFailure, actions = { MyButton(onRetry, text = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Retry this conversation") })
+        } else {
+            StatusMark(item.message, Tone.Failed, MyIcon.Failed, Modifier.semantics { contentDescription = "Error: ${item.message}" })
         }
         is ThreadItem.Workflow -> if (workflowPinKey(item.progress.runId) in LocalPinnedKeys.current) PinnedReference("Workflow") else WorkflowCard(item.progress, onStopWorkflow)
         is ThreadItem.ModelChanged -> ModelChangedDivider("Switched to ${item.provider} · ${item.model}")

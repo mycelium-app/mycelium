@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
@@ -19,7 +21,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.Image
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
@@ -71,8 +84,6 @@ import androidx.compose.ui.window.PopupProperties
 import mycelium.Dictation
 import mycelium.DictationProblem
 import mycelium.state.Choice
-import mycelium.state.DefaultAccountId
-import mycelium.state.accountMenuTitle
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
@@ -123,8 +134,6 @@ fun fallbackModes(agent: String): List<Choice> = when (agent) {
     else -> emptyList()
 }
 
-data class ContinueControls(val choices: List<Choice>, val current: String?, val onPick: (String) -> Unit, val buttonText: String? = null, val tooltip: String? = null)
-
 @Composable
 fun Composer(
     conversation: Conversation,
@@ -134,7 +143,7 @@ fun Composer(
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onSendQueuedNow: (String) -> Unit,
-    onEditQueued: (String, String) -> Unit,
+    onEditQueued: (QueuedPrompt) -> Unit,
     onRemoveQueued: (String) -> Unit,
     options: SessionOptions,
     commands: List<SlashCommand>,
@@ -143,22 +152,20 @@ fun Composer(
     onSetSetting: (String, String) -> Unit,
     onSearchFiles: suspend (String) -> List<String>,
     modifier: Modifier = Modifier,
-    accounts: List<Choice> = emptyList(),
-    accountLocked: Boolean = false,
-    continueOn: ContinueControls? = null,
-    onSetAccount: (String) -> Unit = {},
+    accountPicker: AccountPickerControls? = null,
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
     annotations: List<Annotation> = emptyList(),
     onRemoveAnnotation: (Annotation) -> Unit = {},
     goal: GoalControls? = null,
     attachments: AttachmentControls? = null,
-    modelPicker: ModelPickerControls? = null,
     dictation: Dictation? = null,
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
     initialImages: Map<Char, Int> = emptyMap(),
     onImagesChange: (Map<Char, Int>) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
+    onMoveQueued: (String, Int) -> Unit = { _, _ -> },
+    queueEdit: QueueEdit? = null,
     onTeachMe: ((Boolean) -> Unit)? = null,
     assistantActions: AssistantActionControls? = null,
     usage: @Composable () -> Unit = {},
@@ -249,6 +256,12 @@ fun Composer(
 
     fun submit() {
         val trimmed = serialisedPastes(text.text, pastes).trim()
+
+        if (queueEdit != null) {
+            queueEdit.onSave(trimmed)
+
+            return
+        }
 
         if (trimmed.isNotEmpty() || annotations.isNotEmpty() || attachments?.drafts?.isNotEmpty() == true) {
             val side = sideChatOf(trimmed)
@@ -349,10 +362,12 @@ fun Composer(
         }
     }
 
+    val fieldFocus = remember { FocusRequester() }
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         Column(fieldModifier) {
             Box {
                 MessageField(
+                    modifier = Modifier.focusRequester(fieldFocus),
                     text = text,
                     visualTransformation = remember(display, colors.textMuted) { PasteMarkerTransformation(display, colors.textMuted) },
                     badges = display.badgeRanges().values.toList(),
@@ -372,6 +387,7 @@ fun Composer(
                     },
                     onKey = { key ->
                         when {
+                            key == Key.Escape && matches.isEmpty() && queueEdit != null -> { queueEdit.onCancel(); true }
                             key == Key.Escape && matches.isEmpty() && working -> { onStop(); true }
                             matches.isEmpty() -> false
                             key == Key.DirectionDown -> { highlighted = (highlighted + 1) % matches.size; true }
@@ -397,9 +413,15 @@ fun Composer(
         }
     }
 
-    val actionsButton: @Composable () -> Unit = {
-        if (assistantActions != null) {
-            ActionsButton(assistantActions)
+    LaunchedEffect(queueEdit != null) {
+        if (queueEdit != null) {
+            fieldFocus.requestFocus()
+        }
+    }
+
+    val editStrip: @Composable () -> Unit = {
+        if (queueEdit != null) {
+            QueueEditStrip(queueEdit, ::submit)
         }
     }
     val actionChips: @Composable () -> Unit = {
@@ -408,16 +430,18 @@ fun Composer(
         }
     }
 
-    val attach: @Composable () -> Unit = {
-        if (attachments != null && platform != null) {
-            MyButton({ platform.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
-        }
-    }
+    val controls = barControls(
+        conversationKind(conversation, working),
+        HarnessReport(voice = dictation != null, teachMe = onTeachMe != null, working = working, models = options.models.isNotEmpty(), modes = modes.isNotEmpty(), settings = settings.isNotEmpty()),
+    ).filterNot { it == BarControl.Send && queueEdit != null }
 
-    val teachMe: @Composable () -> Unit = {
-        if (onTeachMe != null) {
-            MyButton(
-                { onTeachMe(!conversation.teachMe) },
+    val control: @Composable (BarControl) -> Unit = { which ->
+        when (which) {
+            BarControl.Attach -> MyButton({ attachments?.let { platform?.pickFiles(it.onAdd) } }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
+            BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
+            BarControl.Dictate -> MyButton(::toggleDictation, icon = MyIcon.Microphone, description = if (listening) "Stop dictating" else "Dictate", selected = listening, muted = !listening)
+            BarControl.TeachMe -> MyButton(
+                { onTeachMe?.invoke(!conversation.teachMe) },
                 icon = MyIcon.GraduationCap,
                 description = "Teach me",
                 stateDescription = if (conversation.teachMe) "On" else "Off",
@@ -425,47 +449,29 @@ fun Composer(
                 selected = conversation.teachMe,
                 muted = !conversation.teachMe,
             )
-        }
-    }
-
-    val dictate: @Composable () -> Unit = {
-        if (dictation != null) {
-            MyButton(::toggleDictation, icon = MyIcon.Microphone, description = if (listening) "Stop dictating" else "Dictate", selected = listening, muted = !listening)
-        }
-    }
-
-    val pickers: @Composable () -> Unit = {
-        if (accountLocked && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person, buttonText = continueOn.buttonText, tooltip = continueOn.tooltip)
-        } else if (accounts.isNotEmpty() && accountLocked) {
-            Label(conversation.account ?: "Default account", Modifier.padding(horizontal = Tokens.Space.S2).semantics { contentDescription = "Account: ${conversation.account ?: "default"}, fixed once the conversation has started" }, Tokens.Type.Ui, colors.textMuted, maxLines = 1)
-        } else if (accounts.isNotEmpty()) {
-            OptionMenu("Account", accounts, conversation.account ?: DefaultAccountId.takeIf { id -> accounts.any { it.id == id } }, onSetAccount, title = accountMenuTitle(conversation.agent), icon = MyIcon.Person)
-        }
-
-        if (modes.isNotEmpty()) {
-            OptionMenu("Mode", modes, options.currentMode, onSetMode)
-        }
-
-        if (modelPicker != null) {
-            ModelPicker(modelPicker)
-        } else if (options.models.isNotEmpty()) {
-            OptionMenu("Model", options.models, options.currentModel, onSetModel)
-        } else if (options.currentModel != null) {
-            Label(options.currentModel, Modifier.padding(horizontal = Tokens.Space.S2), Tokens.Type.Ui, colors.textMuted, maxLines = 1)
-        }
-
-        for (setting in settings) {
-            OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
-        }
-
-        if (modelPicker != null && continueOn != null && continueOn.choices.isNotEmpty()) {
-            OptionMenu("Continue on…", continueOn.choices, continueOn.current, continueOn.onPick, title = "Continue on", icon = MyIcon.Person, buttonText = continueOn.buttonText, tooltip = continueOn.tooltip)
+            BarControl.Goal -> goal?.let { GoalButton(it) }
+            BarControl.Account -> accountPicker?.let { AccountPicker(it) }
+            BarControl.Model -> OptionMenu("Model", options.models, options.currentModel, onSetModel)
+            BarControl.Mode -> OptionMenu("Mode", modes, options.currentMode, onSetMode)
+            BarControl.Settings -> {
+                for (setting in settings) {
+                    OptionMenu(setting.name, setting.choices, setting.current, { value -> onSetSetting(setting.id, value) })
+                }
+            }
+            BarControl.Usage -> usage()
+            BarControl.Stop -> MyButton(onStop, icon = MyIcon.Stop, description = "Stop the agent", variant = ButtonVariant.Outline)
+            BarControl.Send -> MyButton(::submit, icon = MyIcon.Send, description = if (working) "Queue message" else "Send", muted = true)
         }
     }
 
     if (LocalTouch.current) {
         val shape = RoundedCornerShape(Tokens.Radius.Card)
+        var optionsOpen by remember(conversation.id) { mutableStateOf(false) }
+        val accountName = accountPicker?.label
+        val harnessChoices = listOfNotNull(
+            (options.models.firstOrNull { it.id == options.currentModel }?.name ?: options.currentModel).takeIf { BarControl.Model in controls },
+            (modes.firstOrNull { it.id == options.currentMode }?.name ?: options.currentMode).takeIf { BarControl.Mode in controls },
+        )
 
         Column(modifier.fillMaxWidth().padding(start = Tokens.Space.S2, end = Tokens.Space.S2, bottom = Tokens.Space.S2)) {
             Column(
@@ -479,29 +485,43 @@ fun Composer(
                 goal?.goal?.let { GoalBar(it, goal) }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
-                    QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
+                    QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
                 }
 
+                editStrip()
                 actionChips()
                 AnnotationChips(annotations, onRemoveAnnotation)
                 unmarked?.let { AttachmentChips(it) }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f).padding(start = Tokens.Space.S2))
-                    SendButtons(working, onStop, ::submit)
+                    controls.inGroups(BarGroup.Turn).forEach { control(it) }
                 }
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                        attach()
-                        actionsButton()
-                        dictate()
-                        teachMe()
-                        goal?.let { GoalButton(it) }
-                        pickers()
-                    }
+                Row(Modifier.fillMaxWidth().horizontalScrollFaded(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    controls.inGroups(BarGroup.Tools).forEach { control(it) }
 
-                    usage()
+                    if (controls.inGroups(BarGroup.Pickers, BarGroup.Usage).isNotEmpty()) {
+                        MyButton(
+                            { optionsOpen = true },
+                            text = harnessChoices.joinToString(" · ").ifEmpty { accountName ?: "Options" },
+                            icon = MyIcon.Sliders,
+                            description = "Conversation options: ${(listOfNotNull(accountName) + harnessChoices).joinToString(", ")}",
+                            muted = true,
+                            selected = optionsOpen,
+                            maxWidth = Tokens.Size.AccountControl,
+                        )
+                    }
+                }
+
+                if (optionsOpen) {
+                    BottomSheet({ optionsOpen = false }) {
+                        MenuLabel("Conversation options")
+
+                        Column(Modifier.padding(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                            controls.inGroups(BarGroup.Pickers, BarGroup.Usage).forEach { control(it) }
+                        }
+                    }
                 }
             }
         }
@@ -520,7 +540,7 @@ fun Composer(
 
         if (queue.isNotEmpty() || sending.isNotEmpty()) {
             Box(measured) {
-                QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
+                QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onMoveQueued, onRemoveQueued)
             }
         }
 
@@ -535,6 +555,10 @@ fun Composer(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(measured.padding(horizontal = Tokens.Space.S2)) {
+                editStrip()
+            }
+
+            Box(measured.padding(horizontal = Tokens.Space.S2)) {
                 actionChips()
                 AnnotationChips(annotations, onRemoveAnnotation)
             }
@@ -545,31 +569,7 @@ fun Composer(
 
             field(measured.padding(start = Tokens.Space.S4, top = Tokens.Space.S2, end = Tokens.Space.S4))
 
-            Row(
-                measured.padding(start = Tokens.Space.S2, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                attach()
-                actionsButton()
-                dictate()
-                teachMe()
-                goal?.let { GoalButton(it) }
-                Row(
-                    Modifier.weight(1f).horizontalScrollFaded(),
-                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (working) {
-                        Icon(MyIcon.Working, colors.statusWorking, modifier = Modifier.padding(horizontal = Tokens.Space.S1).semantics { contentDescription = "Working" })
-                    }
-
-                    pickers()
-                }
-
-                usage()
-                SendButtons(working, onStop, ::submit)
-            }
+            ComposerBar(controls, measured.padding(start = Tokens.Space.S2, top = Tokens.Space.S1, end = Tokens.Space.S2, bottom = Tokens.Space.S2), control)
         }
     }
 }
@@ -704,14 +704,55 @@ fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, s
 
                     val shownRange = previewed
                     val bytes = shownRange?.let(previews::get)
-                    val image = remember(bytes) { bytes?.let(::bitmapOf) }
+                    val decoded by produceState<Pair<Boolean, ImageBitmap?>>(false to null, bytes) {
+                        value = false to null
+                        value = true to bytes?.let { withContext(Dispatchers.Default) { bitmapOf(it) } }
+                    }
                     val anchor = shownRange?.let { range -> layout?.let { badgeLineRects(it, range).firstOrNull() } }
 
-                    if (image != null && anchor != null) {
-                        val lift = with(LocalDensity.current) { (Tokens.Size.ImagePreview + Tokens.Space.S2).toPx() }
+                    if (bytes != null && anchor != null) {
+                        val gap = with(LocalDensity.current) { Tokens.Space.S2.roundToPx() }
+                        val position = remember(anchor.left, gap) {
+                            object : PopupPositionProvider {
+                                override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize) =
+                                    IntOffset(anchorBounds.left + anchor.left.toInt(), anchorBounds.top - gap - popupContentSize.height)
+                            }
+                        }
+                        val image = decoded.second
 
-                        Popup(offset = IntOffset(anchor.left.toInt(), (anchor.top - lift).toInt()), properties = PopupProperties(focusable = false)) {
-                            Image(image, contentDescription = "Image preview", modifier = Modifier.size(Tokens.Size.ImagePreview).clip(ControlShape).border(Tokens.Size.Hairline, colors.border, ControlShape), contentScale = ContentScale.Crop)
+                        Popup(popupPositionProvider = position, properties = PopupProperties(focusable = false)) {
+                            Box(
+                                Modifier
+                                    .shadow(Tokens.Space.S2, FloatShape, ambientColor = colors.shadowFloat, spotColor = colors.shadowFloat)
+                                    .background(colors.bgRaised, FloatShape)
+                                    .border(Tokens.Size.Hairline, colors.border, FloatShape)
+                                    .padding(Tokens.Space.S1),
+                            ) {
+                                if (image != null) {
+                                    val natural = with(LocalDensity.current) { DpSize(image.width.toDp(), image.height.toDp()) }
+                                    val fit = minOf(1f, Tokens.Size.ImagePreviewMaxWidth / natural.width, Tokens.Size.ImagePreviewMaxHeight / natural.height)
+
+                                    Image(
+                                        image,
+                                        contentDescription = "Image preview",
+                                        modifier = Modifier.size(natural * fit).clip(ControlShape),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                } else {
+                                    Column(
+                                        Modifier.size(Tokens.Size.ImagePreviewLoadingWidth, Tokens.Size.ImagePreviewLoadingHeight),
+                                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.CenterVertically),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        if (decoded.first) {
+                                            Label("The image could not be shown", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
+                                        } else {
+                                            Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
+                                            Label("Loading the image", Modifier.semantics { liveRegion = LiveRegionMode.Polite }, Tokens.Type.Meta, colors.textMuted)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -774,20 +815,6 @@ internal fun PastedBadge(lines: Int, expanded: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun SendButtons(working: Boolean, onStop: () -> Unit, onSend: () -> Unit) {
-    if (working) {
-        MyButton(onStop, icon = MyIcon.Stop, description = "Stop the agent", variant = ButtonVariant.Outline)
-    }
-
-    MyButton(
-        onClick = onSend,
-        icon = MyIcon.Send,
-        description = if (working) "Queue message" else "Send",
-        muted = true,
-    )
-}
-
 class OptionFooter(val name: String, val hint: String, val icon: MyIcon, val onClick: () -> Unit)
 
 @Composable
@@ -804,15 +831,16 @@ fun OptionMenu(
     footer: OptionFooter? = null,
     buttonText: String? = null,
     tooltip: String? = null,
+    maxWidth: Dp? = null,
 ) {
-    val buttonLabel = buttonText ?: choices.firstOrNull { it.id == current }?.name ?: label ?: current ?: name
+    val buttonLabel = buttonText ?: choices.firstOrNull { it.id == current }?.name ?: label ?: name
     var open by remember { mutableStateOf(false) }
     var search by remember(open) { mutableStateOf("") }
     val searchable = choices.size > SearchableChoices
     val shown = if (search.isBlank()) choices else choices.filter { it.name.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
 
     Box(if (fill) Modifier.fillMaxWidth() else Modifier) {
-        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = tooltip ?: name, fill = fill)
+        MyButton({ open = true }, text = buttonLabel, icon = icon, description = "$name: $buttonLabel", size = size, muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = tooltip ?: name, fill = fill, maxWidth = maxWidth)
 
         if (open) {
             MenuPopup(onDismiss = { open = false }, width = if (choices.any { it.description != null }) Tokens.Size.Popover else Tokens.Size.Menu) {
@@ -907,107 +935,6 @@ private fun CompletionPopup(title: String, completions: List<Completion>, highli
                     Label(selected.description, style = Tokens.Type.Ui)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun QueuedMessages(
-    queue: List<QueuedPrompt>,
-    sending: List<String>,
-    onSendNow: (String) -> Unit,
-    onSendAllNow: () -> Unit,
-    onEdit: (String, String) -> Unit,
-    onRemove: (String) -> Unit,
-) {
-    val colors = MyTheme.colors
-    var expanded by remember { mutableStateOf(true) }
-    var editing by remember { mutableStateOf<String?>(null) }
-    var draft by remember { mutableStateOf("") }
-    val touch = LocalTouch.current
-
-    Column(Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" }) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = Tokens.Space.S1, end = Tokens.Space.S2),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MyButton(
-                { expanded = !expanded },
-                text = "${queue.size + sending.size} queued ${if (queue.size + sending.size == 1) "message" else "messages"}",
-                description = if (expanded) "Collapse queued messages" else "Expand queued messages",
-                size = ButtonSize.Sm,
-                muted = true,
-                trailingIcon = if (expanded) MyIcon.ChevronDown else MyIcon.ChevronRight,
-            )
-            Box(Modifier.weight(1f))
-
-            if (queue.isNotEmpty()) {
-                MyButton(onSendAllNow, text = "Send all now", size = ButtonSize.Sm, muted = true)
-                MyButton({ queue.forEach { onRemove(it.id) } }, text = "Clear all", size = ButtonSize.Sm, muted = true)
-            }
-        }
-
-        if (!expanded) {
-            Hairline()
-
-            return@Column
-        }
-
-        for ((index, item) in queue.withIndex()) {
-            val source = remember { MutableInteractionSource() }
-            val hovered by source.collectIsHoveredAsState()
-            var focused by remember { mutableStateOf(false) }
-            val showActions = touch || hovered || focused || editing == item.id
-
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = rowHeight())
-                    .hoverable(source)
-                    .onFocusChanged { focused = it.hasFocus }
-                    .padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (editing == item.id) {
-                    TextInput(draft, { draft = it }, label = "Queued message", modifier = Modifier.weight(1f), showLabel = false)
-                    MyButton({ onEdit(item.id, draft.trim()); editing = null }, text = "Save", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
-                    MyButton({ editing = null }, text = "Cancel", size = ButtonSize.Sm, muted = true)
-                } else {
-                    Box(Modifier.semantics { contentDescription = if (index == 0) "Next message" else "Queued" }) {
-                        Dot(if (index == 0) colors.statusAttention else colors.textFaint, hollow = index != 0)
-                    }
-
-                    Label(pastedSummary(item.text).replace('\n', ' ').trim(), Modifier.weight(1f), maxLines = 1)
-
-                    Row(Modifier.alpha(if (showActions) 1f else 0f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                        MyButton({ onRemove(item.id) }, icon = MyIcon.Close, description = "Remove queued message", size = ButtonSize.Sm, muted = true)
-                        MyButton({ draft = item.text; editing = item.id }, icon = MyIcon.Pencil, description = "Edit queued message", size = ButtonSize.Sm, muted = true)
-                        MyButton({ onSendNow(item.id) }, text = "Send now", size = ButtonSize.Sm, muted = true)
-
-                        if (index == 0) {
-                            Label("Enter", style = Tokens.Type.Meta, color = colors.textFaint)
-                        }
-                    }
-                }
-            }
-
-            Hairline()
-        }
-
-        for (text in sending) {
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = Tokens.Space.S3, end = Tokens.Space.S2),
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(MyIcon.Working, colors.textMuted, Tokens.Size.IconSm, Modifier.semantics { contentDescription = "Sending" })
-                Label(text, Modifier.weight(1f), maxLines = 1)
-                Label("Sending", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
-
-            Hairline()
         }
     }
 }

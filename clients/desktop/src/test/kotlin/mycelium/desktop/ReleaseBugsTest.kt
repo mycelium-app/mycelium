@@ -42,7 +42,7 @@ class ReleaseBugsTest {
                     Composer(
                         conversation = conversation, working = true, queue = emptyList(), sending = emptyList(),
                         onSend = { sent += it }, onStop = { stopped = true },
-                        onSendQueuedNow = {}, onEditQueued = { _, _ -> }, onRemoveQueued = {},
+                        onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                         options = SessionOptions(choices, "chosen", choices, "chosen", (1..5).map { Setting("s$it", "Setting $it", null, "chosen", choices) }),
                         commands = emptyList(), onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
                     )

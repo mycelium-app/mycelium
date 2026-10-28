@@ -49,7 +49,7 @@ fun FolderBrowserDialog(store: Store, nodeId: String, nodeName: String, start: S
     Dialog(onDismiss) {
         Label("Choose a folder on $nodeName", Modifier.semantics { heading() }, Tokens.Type.Title)
 
-        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, onRetry = { attempts += 1 }) }
+        failure?.let { ErrorBanner(it, onDismiss = { failure = null }, actions = { MyButton({ attempts += 1 }, text = "Retry", description = "Retry", size = ButtonSize.Sm, variant = ButtonVariant.Outline) }) }
 
         val shown = listing
 

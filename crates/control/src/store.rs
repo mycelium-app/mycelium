@@ -313,14 +313,14 @@ pub async fn highest_node_seqs(pool: &PgPool, conversation_ids: &[Uuid]) -> sqlx
 }
 
 pub async fn queue_of(pool: &PgPool, conversation_id: Uuid) -> sqlx::Result<Vec<QueuedPrompt>> {
-    let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, chrono::DateTime<chrono::Utc>)>(
-        "select id, position, text, attachments, created_at from queued_prompts where conversation_id = $1 order by position",
+    let rows = sqlx::query_as::<_, (Uuid, i32, String, sqlx::types::Json<Vec<Attachment>>, bool, chrono::DateTime<chrono::Utc>)>(
+        "select id, position, text, attachments, editing, created_at from queued_prompts where conversation_id = $1 order by position",
     )
     .bind(conversation_id)
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|(id, position, text, attachments, created_at)| QueuedPrompt { id, conversation_id, position, text, attachments: attachments.0, created_at }).collect())
+    Ok(rows.into_iter().map(|(id, position, text, attachments, editing, created_at)| QueuedPrompt { id, conversation_id, position, text, attachments: attachments.0, editing, created_at }).collect())
 }
 
 pub async fn publish_queue(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
@@ -342,7 +342,7 @@ pub async fn enqueue(tx: &mut sqlx::PgConnection, conversation_id: Uuid, text: &
 }
 
 pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> sqlx::Result<Option<Uuid>> {
-    let rows = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 order by position for update")
+    let rows = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>)>("select id, text, attachments from queued_prompts where conversation_id = $1 and not editing order by position for update")
         .bind(conversation_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -362,7 +362,7 @@ pub async fn merge_queue(tx: &mut sqlx::PgConnection, conversation_id: Uuid) -> 
             .bind(conversation_id)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
+        sqlx::query("delete from queued_prompts where conversation_id = $1 and id <> $2 and not editing").bind(conversation_id).bind(first_id).execute(&mut *tx).await?;
     }
 
     Ok(Some(*first_id))

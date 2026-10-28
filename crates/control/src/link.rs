@@ -610,8 +610,8 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     let options = json!({"modes": modes, "models": models, "config_options": config_options});
     let updated = sqlx::query_as::<_, crate::store::ConversationRow>(sqlx::AssertSqlSafe(format!(
         "update conversations set
-            mode = case when acp_session_id = $2 then coalesce(mode, $3) else coalesce($3, mode) end,
-            model = case when acp_session_id = $2 then coalesce(model, $4) else coalesce($4, model) end,
+            mode = coalesce($3, mode),
+            model = coalesce($4, model),
             acp_session_id = $2, options = $5, updated_at = now() where id = $1 returning {}",
         crate::store::CONVERSATION_COLUMNS
     )))
@@ -651,13 +651,14 @@ async fn session_started(state: &AppState, node_id: Uuid, conversation_id: Uuid,
     if before.acp_session_id.is_none() {
         crate::assistants::session_started(state, updated.owner, conversation_id).await;
 
-        if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
-            tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());
-        }
+    }
 
-        if before.mode.is_none() && let Err(error) = crate::agent_settings::apply_default_mode(state, updated.owner, conversation_id).await {
-            tracing::warn!("could not set the default mode of conversation {conversation_id}: {}", error.message());
-        }
+    if let Some(chosen) = before.model.as_deref() && updated.model.as_deref() != Some(chosen) && let Err(error) = crate::prompts::apply_model(state, updated.owner, conversation_id, Some(chosen), None).await {
+        tracing::warn!("could not set the model {chosen} chosen for conversation {conversation_id}: {}", error.message());
+    }
+
+    if let Err(error) = crate::agent_settings::apply_session_mode(state, &updated, before.mode.as_deref()).await {
+        tracing::warn!("could not set the mode of conversation {conversation_id}: {}", error.message());
     }
 
     pump(state, conversation_id, before.acp_session_id.is_none()).await
@@ -880,6 +881,19 @@ async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, up
     let predicted = update["update"]["title"].as_str().filter(|_| update["update"]["sessionUpdate"] == "session_info_update").map(|title| title.trim().chars().take(PREDICTED_TITLE_LIMIT).collect::<String>()).filter(|title| !title.is_empty());
     let mut session_update = update["update"].clone();
     without_nul(&mut session_update);
+
+    if let Some(mode) = session_update["currentModeId"].as_str().filter(|_| session_update["sessionUpdate"] == "current_mode_update") {
+        let changed = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set mode = $3 where id = $1 and node_id = $2 and mode is distinct from $3 returning {CONVERSATION_COLUMNS}")))
+            .bind(conversation_id)
+            .bind(node_id)
+            .bind(mode)
+            .fetch_optional(&state.pool)
+            .await?;
+
+        if let Some(changed) = changed {
+            state.publish(Some(changed.owner), StreamMessage::Conversation(changed.to_proto()?));
+        }
+    }
 
     if SESSION_STATE_UPDATES.contains(&session_update["sessionUpdate"].as_str().unwrap_or_default()) {
         sqlx::query("insert into conversation_session_state (conversation_id, update_kind, update) values ($1, $2, $3) on conflict (conversation_id, update_kind) do update set update = excluded.update")

@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -178,6 +179,11 @@ class ForgesSettingsTest {
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Sign in to GitLab's MCP server").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("GitLab's MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead.").assertExists()
+
+        val alert = rule.onNodeWithContentDescription("Error: GitLab's MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead.").getBoundsInRoot()
+        val signIn = rule.onNodeWithText("Sign in to GitLab's MCP server").getBoundsInRoot()
+
+        assertTrue(signIn.left >= alert.left && signIn.right <= alert.right && signIn.top >= alert.top && signIn.bottom <= alert.bottom)
     }
 
     @Test

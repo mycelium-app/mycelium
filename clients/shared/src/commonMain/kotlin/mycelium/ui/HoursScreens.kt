@@ -143,10 +143,10 @@ fun BreakScreen(store: Store, platform: Platform?) {
     val colors = MyTheme.colors
     val endEarly = remember { FocusRequester() }
     val noteField = remember { FocusRequester() }
-    var note by remember { mutableStateOf("") }
-    var noteProblem by remember { mutableStateOf<String?>(null) }
-    val saving = rememberAction()
     val startedAt = wellness.breakStartedAt
+    var note by remember(startedAt) { mutableStateOf("") }
+    var noteProblem by remember(startedAt) { mutableStateOf<String?>(null) }
+    val saving = rememberAction()
     val endsAt = wellness.breakEndsAt
     val ended = wellness.ended
 

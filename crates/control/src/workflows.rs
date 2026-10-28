@@ -775,6 +775,7 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                             provider_id: Some(provider),
                             agent: None,
                             account: None,
+                            node_id: None,
                             model: spec.model.clone(),
                             prompt: Some(text),
                             parent_id: None,

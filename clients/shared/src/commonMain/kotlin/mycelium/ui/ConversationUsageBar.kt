@@ -40,23 +40,17 @@ fun ConversationUsageBar(api: MyceliumApi, id: String, refreshOn: Any?) {
     }
 
     var open by remember(id) { mutableStateOf(false) }
-    val compactContext = current.contextUsed?.let { used ->
-        val size = current.contextSize
-
-        if (size != null && size > 0) {
-            "${percentOf(used, size)}%"
-        } else {
-            formatTokens(used)
-        }
-    }
-    val summary = listOfNotNull(compactContext, current.costUsd?.let { formatCost(it) }).joinToString("  ").ifEmpty { "Usage" }
+    val size = current.contextSize?.takeIf { it > 0 }
+    val compactContext = current.contextUsed?.let { used -> if (size != null) "${percentOf(used, size)}%" else formatTokens(used) }
+    val cost = current.costUsd?.let { formatCost(it) }
+    val named = listOfNotNull(compactContext?.let { if (size != null) "$it of the context" else "$it used" }, cost).joinToString(", ")
 
     Box {
         MyButton(
             { open = !open },
-            text = summary,
+            text = compactContext ?: cost ?: "Usage",
             icon = MyIcon.Gauge,
-            description = "Conversation usage",
+            description = if (named.isEmpty()) "Conversation usage" else "Conversation usage: $named",
             size = ButtonSize.Sm,
             muted = true,
             selected = open,

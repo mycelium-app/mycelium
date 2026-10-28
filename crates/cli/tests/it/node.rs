@@ -136,6 +136,10 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("projects").join("demo")).unwrap();
         std::fs::create_dir_all(root.path().join("home")).unwrap();
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", root.path().join("home"));
+            std::env::set_var("XDG_DATA_DIRS", root.path().join("home"));
+        }
 
         let config = NodeConfig {
             control_plane: control_plane.to_string(),

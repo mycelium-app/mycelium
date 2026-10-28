@@ -73,6 +73,29 @@ async fn any_account_picks_a_node_with_the_agent_signed_in() {
 }
 
 #[tokio::test]
+async fn a_chat_on_an_agent_starts_on_the_node_the_request_names() {
+    let server = Server::start().await;
+    let _first = node_signed_in(&server, "atlas", "sam@example.com").await;
+    let second = node_signed_in(&server, "laptop", "sam@example.com").await;
+
+    let (status, chat) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com", "node_id": second.id}))).await;
+
+    assert_eq!(status, 201, "{chat}");
+    assert_eq!(chat["node_id"], json!(second.id));
+}
+
+#[tokio::test]
+async fn a_chat_on_a_node_without_that_account_is_refused() {
+    let server = Server::start().await;
+    let _signed_in = node_signed_in(&server, "atlas", "sam@example.com").await;
+    let bare = server.online_node("laptop").await;
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/chats").json(&json!({"agent": "claude", "account": "sam@example.com", "node_id": bare.id}))).await;
+
+    assert_eq!((status, body["error"].as_str()), (409, Some("no_node_online")));
+}
+
+#[tokio::test]
 async fn a_chat_on_an_agent_with_no_node_online_says_what_to_do() {
     let server = Server::start().await;
     server.join("node", "willow").await;

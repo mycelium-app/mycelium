@@ -86,7 +86,7 @@ pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
     if let Some(agent) = request.agent {
         let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
-        let signed_in = routing::candidates(&state, user.id, agent, None).await?;
+        let signed_in = routing::candidates(&state, user.id, agent, request.node_id).await?;
         let matching: Vec<_> = signed_in.into_iter().filter(|candidate| account.is_none_or(|account| candidate.account == account)).collect();
         let chosen = routing::best(&matching).or_else(|| routing::most_left(matching.iter()));
         let Some(chosen) = chosen else {
@@ -584,7 +584,7 @@ async fn finish(state: &AppState, owner: Uuid, id: Uuid, stop_reason: &str, usag
         return Ok(());
     }
 
-    let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 order by position limit 1 for update) returning text, attachments")
+    let queued = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("delete from queued_prompts where id = (select id from queued_prompts where conversation_id = $1 and not editing order by position limit 1 for update) returning text, attachments")
         .bind(id)
         .fetch_optional(&state.pool)
         .await?;

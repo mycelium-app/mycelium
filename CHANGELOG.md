@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.15.2
+
+Every screen change in this release was designed in the canonical design artefact first.
+
+- The composer bar shows the same controls in the same order everywhere, each once: a failed conversation keeps the account control so you can switch to an account that works, and a chat on a chat model has one model control that also lists your agent accounts.
+- The account control always names the current account or model in words, never an internal id.
+- One account picker everywhere you choose an agent account or chat model: the composer, New conversation, New chat and open chats. It has search across accounts, nodes and models, favourites and recents, clear section headings, and each account shows its node (or This device) beside its usage.
+- Continuing a conversation on an account on another node is refused when that node does not have the conversation's folder, with Move to that node offered instead, so a conversation can no longer end up on a node where it cannot run.
+- A new chat started on an account on a given node starts on that node.
+- The mode and model you chose are applied every time a session starts or resumes, and the composer shows what the agent reports, so a conversation that says Auto runs in Auto.
+- A failed conversation can be moved, and the move button says Move unless a turn is running.
+- The conversation header moves the project, node and Open in IDE into its menu when space runs out instead of dropping them, and a failed conversation shows one Retry, inside the error.
+- Queued messages show their images, and editing one opens it in the composer with its images; it is held back until you save. Queued messages can be reordered from the keyboard.
+- An alert's actions sit inside the alert, such as signing in to GitLab's MCP server.
+- Images in the composer and its hover preview are shown whole instead of cropped to a square.
+- A break that ran over records how long you were actually away, the break note box starts empty each time, and restoring an archived conversation keeps it open.
+- The setup progress bar in Projects sits on its row's centre line, and the New conversation button there is no longer cut off.
+
 ## v0.15.1
 
 - Every chat can have an environment, including chats on a chat model: the Environment tab is in every chat, and starting one uses a node that can run environments, with Run on to choose when there are several.

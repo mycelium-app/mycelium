@@ -407,7 +407,8 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: true });
     round_trip(&SavePrivacyRequest { voice_enabled: true });
     round_trip(&SpeechRequest { text: "hi".into(), voice: Some("alloy".into()), speed: None });
-    round_trip(&PatchQueueRequest { text: "edit".into() });
+    round_trip(&PatchQueueRequest { text: Some("edit".into()), attachments: None, editing: Some(true) });
+    round_trip(&MoveQueuedRequest { index: 2 });
     round_trip(&Me { id: id(), email: "a@b".into(), name: "n".into() });
 }
 

@@ -13,13 +13,19 @@ import mycelium.state.Store
 private const val MixedGroups = "Mixed groups"
 private const val NoGroupName = "No group"
 
+fun projectGroupLabel(state: AppState, projects: List<Project>): String {
+    val shared = projects.map { it.groupId }.distinct()
+
+    return if (shared.size > 1) MixedGroups else state.groups[shared.singleOrNull()]?.name ?: NoGroupName
+}
+
 @Composable
 fun ProjectGroupMenu(store: Store, state: AppState, projects: List<Project>, name: String) {
     var open by remember { mutableStateOf(false) }
     var changingIcon by remember { mutableStateOf(false) }
     val shared = projects.map { it.groupId }.distinct()
     val current = shared.singleOrNull()
-    val label = if (shared.size > 1) MixedGroups else state.groups[current]?.name ?: NoGroupName
+    val label = projectGroupLabel(state, projects)
 
     fun assign(groupId: String?) {
         open = false

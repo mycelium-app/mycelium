@@ -42,7 +42,7 @@ fun sessionOptions(conversation: Conversation, events: List<Event>, kept: List<J
     val configUpdate = latestUpdate(events, kept, "config_option_update")
     val settings = if (configUpdate != null) settingsFrom(configUpdate["configOptions"]) else settingsFrom(stored?.get("config_options"))
     val modeUpdate = latestUpdate(events, kept, "current_mode_update") { it.string("currentModeId") != null }
-    val currentMode = modeUpdate?.string("currentModeId") ?: conversation.mode ?: modes?.string("currentModeId")
+    val currentMode = conversation.mode ?: modeUpdate?.string("currentModeId") ?: modes?.string("currentModeId")
 
     return SessionOptions(
         modes = choicesFrom(modes?.get("availableModes"), "id"),

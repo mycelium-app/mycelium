@@ -2,7 +2,12 @@ package mycelium.desktop
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -23,6 +28,7 @@ import mycelium.ui.ProjectsScreen
 import org.junit.Rule
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 private const val AppProject = """{"id":"p1","node_id":"n1","name":"homelab","path":"/p/homelab","group_id":"GROUP","created_at":"2026-10-22T10:00:00Z"}"""
 
@@ -37,7 +43,7 @@ class ProjectGroupMenuTest {
 
     private val patches = CopyOnWriteArrayList<Pair<String, String>>()
 
-    private fun show(group: String?) {
+    private fun show(group: String?, width: Dp = 1024.dp) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val project = AppProject.replace("\"GROUP\"", group?.let { "\"$it\"" } ?: "null")
         val engine = MockEngine { request ->
@@ -62,7 +68,7 @@ class ProjectGroupMenuTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } }
+        rule.setContent { MyceliumTheme(true) { Box(Modifier.width(width)) { val state by store.state.collectAsState(); ProjectsScreen(store, state, onNewConversation = {}) } } }
     }
 
     @Test
@@ -88,5 +94,16 @@ class ProjectGroupMenuTest {
 
         rule.waitUntil(5_000) { patches.isNotEmpty() }
         assertEquals("{}", patches.single().second)
+    }
+
+    @Test
+    fun theNewConversationButtonKeepsItsPaddingOnANarrowWindow() {
+        show(null, width = 760.dp)
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("homelab").fetchSemanticsNodes().isNotEmpty() }
+        val button = rule.onNodeWithContentDescription("New conversation in homelab").fetchSemanticsNode().boundsInRoot
+        val label = rule.onNodeWithText("New conversation", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+        assertTrue(button.right - label.right >= 4f, "the label ends ${button.right - label.right}px from the button's edge")
     }
 }

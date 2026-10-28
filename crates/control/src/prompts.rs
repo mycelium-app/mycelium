@@ -12,7 +12,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mycelium_proto::api::{ConfigRequest, PatchQueueRequest, PermissionAnswer, PromptRequest};
+use mycelium_proto::api::{ConfigRequest, MoveQueuedRequest, PatchQueueRequest, PermissionAnswer, PromptRequest};
 use mycelium_proto::conversation::{Attachment, ConversationStatus, EventKind, QueuedPrompt};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
@@ -71,7 +71,7 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         return Ok(());
     }
 
-    let next = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>, Option<String>)>("select id, text, attachments, origin from queued_prompts where conversation_id = $1 order by position limit 1 for update")
+    let next = sqlx::query_as::<_, (Uuid, String, sqlx::types::Json<Vec<Attachment>>, Option<String>)>("select id, text, attachments, origin from queued_prompts where conversation_id = $1 and not editing order by position limit 1 for update")
         .bind(conversation_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -312,18 +312,63 @@ pub async fn queue(State(state): State<AppState>, user: AuthUser, Path(id): Path
 pub async fn edit_queued(State(state): State<AppState>, user: AuthUser, Path((id, queue_id)): Path<(Uuid, Uuid)>, Json(request): Json<PatchQueueRequest>) -> ApiResult<StatusCode> {
     find_owned(&state.pool, id, user.id).await?;
 
-    let text = request.text.trim();
+    let mut tx = state.pool.begin().await?;
+    let held = sqlx::query_as::<_, (String, sqlx::types::Json<Vec<Attachment>>)>("select text, attachments from queued_prompts where id = $2 and conversation_id = $1 for update")
+        .bind(id)
+        .bind(queue_id)
+        .fetch_optional(&mut *tx)
+        .await?;
 
-    if text.is_empty() {
+    let Some((held_text, sqlx::types::Json(held_attachments))) = held else {
+        return Err(ApiError::not_found("That queued message"));
+    };
+
+    let text = request.text.as_deref().map(str::trim).unwrap_or(&held_text);
+    let attachments = match &request.attachments {
+        Some(requested) => attachments::confirm(&state, user.id, requested).await?,
+        None => held_attachments,
+    };
+
+    if text.is_empty() && attachments.is_empty() {
         return Err(ApiError::bad_request("text_required", "Enter a message to send."));
     }
 
-    let updated = sqlx::query("update queued_prompts set text = $3 where id = $2 and conversation_id = $1").bind(id).bind(queue_id).bind(text).execute(&state.pool).await?;
+    sqlx::query("update queued_prompts set text = $3, attachments = $4, editing = $5 where id = $2 and conversation_id = $1")
+        .bind(id)
+        .bind(queue_id)
+        .bind(text)
+        .bind(sqlx::types::Json(&attachments))
+        .bind(request.editing.unwrap_or(false))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
 
-    if updated.rows_affected() == 0 {
-        return Err(ApiError::not_found("That queued message"));
+    publish_queue(&state, user.id, id).await?;
+
+    if request.editing != Some(true) {
+        pump(&state, id, false).await?;
     }
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn move_queued(State(state): State<AppState>, user: AuthUser, Path((id, queue_id)): Path<(Uuid, Uuid)>, Json(request): Json<MoveQueuedRequest>) -> ApiResult<StatusCode> {
+    let mut tx = state.pool.begin().await?;
+    lock_owned(&mut tx, id, user.id).await?;
+
+    let mut order = sqlx::query_scalar::<_, Uuid>("select id from queued_prompts where conversation_id = $1 order by position for update").bind(id).fetch_all(&mut *tx).await?;
+    let Some(from) = order.iter().position(|held| *held == queue_id) else {
+        return Err(ApiError::not_found("That queued message"));
+    };
+
+    order.remove(from);
+    order.insert(request.index.min(order.len()), queue_id);
+
+    for (index, held) in order.iter().enumerate() {
+        sqlx::query("update queued_prompts set position = $2 where id = $1").bind(held).bind(index as i32 + 1).execute(&mut *tx).await?;
+    }
+
+    tx.commit().await?;
     publish_queue(&state, user.id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -545,6 +590,24 @@ pub async fn config(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
 pub async fn set_config(state: &AppState, owner: Uuid, id: Uuid, request: ConfigRequest) -> ApiResult<()> {
     let row = find_owned(&state.pool, id, owner).await?;
+
+    let mut row = row;
+
+    if row.acp_session_id.is_none() && request.model.is_none() && request.config.is_none() && let Some(mode) = &request.mode {
+        let chosen = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set mode = $2 where id = $1 and acp_session_id is null returning {CONVERSATION_COLUMNS}")))
+            .bind(id)
+            .bind(mode)
+            .fetch_optional(&state.pool)
+            .await?;
+
+        if let Some(chosen) = chosen {
+            state.publish(Some(owner), StreamMessage::Conversation(chosen.to_proto()?));
+
+            return Ok(());
+        }
+
+        row = find_owned(&state.pool, id, owner).await?;
+    }
 
     if row.acp_session_id.is_none() {
         return Err(ApiError::conflict("session_not_started", "The session is still starting. Try again in a moment."));

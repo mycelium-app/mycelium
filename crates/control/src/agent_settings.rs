@@ -144,22 +144,45 @@ pub async fn default_mode(state: &AppState, owner: Uuid, agent: AgentId, account
     Ok(chosen)
 }
 
-pub async fn apply_default_mode(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
-    let row = crate::store::find_owned(&state.pool, conversation_id, owner).await?;
+pub async fn apply_session_mode(state: &AppState, row: &crate::store::ConversationRow, chosen: Option<&str>) -> ApiResult<()> {
+    let (owner, conversation_id) = (row.owner, row.id);
 
-    if row.side_kind.as_deref() == Some("subagent") {
+    if row.options.as_ref().and_then(|options| options["modes"]["availableModes"].as_array()).is_none() {
         return Ok(());
     }
 
-    let Ok(agent) = parse_enum::<AgentId>(&row.agent) else {
-        return Ok(());
-    };
-    let Some(wanted) = default_mode(state, owner, agent, row.account.as_deref()).await? else {
-        return Ok(());
-    };
-    let offered = row.options.as_ref().and_then(|options| options["modes"]["availableModes"].as_array()).is_some_and(|modes| modes.iter().any(|mode| mode["id"].as_str() == Some(wanted.as_str())));
+    let offered = |mode: &str| row.options.as_ref().and_then(|options| options["modes"]["availableModes"].as_array()).is_some_and(|modes| modes.iter().any(|offer| offer["id"].as_str() == Some(mode)));
+    let carried = chosen.filter(|mode| offered(mode)).map(str::to_string);
 
-    if !offered || row.mode.as_deref() == Some(wanted.as_str()) {
+    if let Some(chosen) = chosen.filter(|_| carried.is_none()) {
+        tracing::warn!("the mode {chosen} chosen for conversation {conversation_id} is not offered by its session");
+    }
+
+    let wanted = match carried {
+        Some(carried) => carried,
+        None => {
+            if row.side_kind.as_deref() == Some("subagent") {
+                return Ok(());
+            }
+
+            let Ok(agent) = parse_enum::<AgentId>(&row.agent) else {
+                return Ok(());
+            };
+            let Some(default) = default_mode(state, owner, agent, row.account.as_deref()).await? else {
+                return Ok(());
+            };
+
+            if !offered(&default) {
+                tracing::warn!("the default mode {default} for conversation {conversation_id} is not offered by its session");
+
+                return Ok(());
+            }
+
+            default
+        }
+    };
+
+    if row.mode.as_deref() == Some(wanted.as_str()) {
         return Ok(());
     }
 

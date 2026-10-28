@@ -119,7 +119,10 @@ data class PromptRequest(val text: String, val attachments: List<Attachment> = e
 data class PromptAccepted(val queued: Boolean, val message: String)
 
 @Serializable
-data class PatchQueueRequest(val text: String)
+data class PatchQueueRequest(val text: String? = null, val attachments: List<Attachment>? = null, val editing: Boolean? = null)
+
+@Serializable
+data class MoveQueuedRequest(val index: Int)
 
 @Serializable
 data class ResponseToEdit(
@@ -253,4 +256,5 @@ data class QueuedPrompt(
     val text: String,
     @SerialName("created_at") val createdAt: String,
     val attachments: List<Attachment> = emptyList(),
+    val editing: Boolean = false,
 )

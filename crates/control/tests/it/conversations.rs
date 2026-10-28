@@ -338,8 +338,8 @@ async fn a_session_started_replayed_on_reconnect_keeps_the_mode_and_model_the_pe
     let started = |link_id: Uuid| NodeToControl::SessionStarted {
         conversation_id: link_id,
         acp_session_id: "acp-1".into(),
-        modes: Some(json!({"currentModeId": "default"})),
-        models: Some(json!({"currentModelId": "sonnet"})),
+        modes: Some(json!({"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]})),
+        models: Some(json!({"currentModelId": "sonnet", "availableModels": [{"modelId": "sonnet", "name": "Sonnet"}, {"modelId": "opus", "name": "Opus"}]})),
         config_options: None,
     };
 
@@ -501,6 +501,73 @@ async fn queued_prompts_can_be_edited_and_removed() {
     let remaining = queue(&server, id).await;
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0]["text"], "second, reworded");
+}
+
+#[tokio::test]
+async fn a_queued_message_being_edited_is_held_back_when_the_turn_ends_and_sent_after_it_is_saved() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    prompt(&server, id, "second").await;
+    prompt(&server, id, "third").await;
+    let second = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+    let url = format!("/api/v1/conversations/{id}/queue/{second}");
+
+    let (status, _) = server.user.json(server.user.patch(&url).json(&json!({"editing": true}))).await;
+    assert_eq!(status, 204);
+    assert_eq!(queue(&server, id).await[0]["editing"], true);
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    assert_eq!(link.expect_prompt().await.1, "third");
+
+    let held = queue(&server, id).await;
+    assert_eq!((held.len(), held[0]["text"].as_str()), (1, Some("second")));
+
+    let (status, _) = server.user.json(server.user.patch(&url).json(&json!({"text": "second, reworded", "editing": false}))).await;
+    assert_eq!(status, 204);
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 5, stop_reason: "end_turn".into(), usage: None }).await;
+    assert_eq!(link.expect_prompt().await.1, "second, reworded");
+}
+
+#[tokio::test]
+async fn a_queued_message_saved_after_the_turn_ended_is_sent_straight_away() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    prompt(&server, id, "second").await;
+    let second = queue(&server, id).await[0]["id"].as_str().unwrap().to_string();
+    let url = format!("/api/v1/conversations/{id}/queue/{second}");
+    server.user.json(server.user.patch(&url).json(&json!({"editing": true}))).await;
+
+    link.send(NodeToControl::TurnEnd { conversation_id: id, seq: 3, stop_reason: "end_turn".into(), usage: None }).await;
+    assert_eq!(queue(&server, id).await.len(), 1);
+
+    server.user.json(server.user.patch(&url).json(&json!({"editing": false}))).await;
+
+    assert_eq!(link.expect_prompt().await.1, "second");
+}
+
+#[tokio::test]
+async fn a_queued_message_moves_to_the_place_it_is_dropped() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let id = started_conversation(&server, &mut link, Some("first")).await;
+    link.expect_prompt().await;
+
+    prompt(&server, id, "second").await;
+    prompt(&server, id, "third").await;
+    prompt(&server, id, "fourth").await;
+    let third = queue(&server, id).await[1]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = server.user.json(server.user.post(&format!("/api/v1/conversations/{id}/queue/{third}/move")).json(&json!({"index": 0}))).await;
+
+    assert_eq!(status, 204);
+    assert_eq!(queue(&server, id).await.iter().map(|item| item["text"].as_str().unwrap().to_string()).collect::<Vec<_>>(), vec!["third", "second", "fourth"]);
 }
 
 #[tokio::test]

@@ -115,13 +115,11 @@ class UsageHistoryTest {
         open()
 
         rule.onNodeWithText("30 days").performClick()
-        rule.waitForIdle()
-        assertEquals("range=30d", asked.last())
+        rule.waitUntil(5_000) { asked.last() == "range=30d" }
 
         rule.onNodeWithContentDescription("Choose accounts").performClick()
         rule.onAllNodesWithText("example.org")[1].performClick()
-        rule.waitForIdle()
-        assertEquals("range=30d&account=codex%3Asam%40example.org", asked.last())
+        rule.waitUntil(5_000) { asked.last() == "range=30d&account=codex%3Asam%40example.org" }
     }
 
     @Test

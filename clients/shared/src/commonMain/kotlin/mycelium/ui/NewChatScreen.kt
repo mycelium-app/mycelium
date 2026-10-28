@@ -27,11 +27,19 @@ import androidx.compose.ui.semantics.semantics
 import mycelium.api.ApiException
 import mycelium.api.Conversation
 import mycelium.api.LoginState
+import mycelium.api.Routing
 import mycelium.api.CreateChatRequest
 import mycelium.api.ModelProvider
 import mycelium.state.AgentPick
 import mycelium.state.Store
+import mycelium.state.RoutingPrefix
 import mycelium.state.agentPicks
+import mycelium.state.anyAccountId
+import mycelium.state.newChatAccounts
+import mycelium.state.reachableLogins
+import mycelium.state.routingAgent
+import mycelium.state.routingChoices
+import mycelium.state.routingName
 
 @Composable
 fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSettings: () -> Unit = {}, onOpenNodes: () -> Unit = {}) {
@@ -47,6 +55,8 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     var agentProblem by remember { mutableStateOf<String?>(null) }
     val accountFocus = remember { FocusRequester() }
     val picks = remember(state.nodes) { agentPicks(state.nodes.values) }
+    val accounts = remember(state.nodes) { newChatAccounts(state.nodes.values) }
+    val routing = remember(state.nodes) { routingChoices(reachableLogins(state.nodes.values).map { it.second }, emptyList(), "starts on").filter { it.id != "$RoutingPrefix${Routing.AnyModel}" } }
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -81,7 +91,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
         messageError = null
         agentProblem = null
         val files = attached.drafts.map { it.file }
-        val request = if (picked != null) CreateChatRequest(agent = picked.agent, account = picked.account) else CreateChatRequest(provider?.id, chosenModel)
+        val request = if (picked != null) CreateChatRequest(agent = picked.agent, account = picked.account, nodeId = picked.nodeId) else CreateChatRequest(provider?.id, chosenModel)
 
         store.act {
             try {
@@ -151,21 +161,33 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                     placeholder = "Ask anything",
                     onSubmit = ::create,
                     attachments = attached.controls(),
+                    kind = ConversationKind.NewChat,
                     error = messageError,
-                    trailing = {
-                        ModelPicker(
-                            ModelPickerControls(
-                                loaded.orEmpty(),
-                                provider?.id,
-                                chosenModel,
+                    account = {
+                        AccountPicker(
+                            AccountPickerControls(
+                                title = "Start on",
+                                label = agentPick?.label,
+                                accounts = accounts,
+                                routing = routing,
+                                current = agentPick?.let { picked -> if (picked.account == null) anyAccountId(picked.agent) else accounts.firstOrNull { it.agent == picked.agent && it.account == picked.account && it.node?.id == picked.nodeId }?.id },
+                                providers = loaded.orEmpty(),
+                                providerId = provider?.id.takeIf { agentPick == null },
+                                model = chosenModel.takeIf { agentPick == null },
                                 recent = recentModels(state.conversations.values, loaded.orEmpty()),
                                 onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = providers?.let(change) }, picked, favouriteModel, on) },
-                                agents = picks,
-                                agent = agentPick,
-                                onSelectAgent = { agentPick = it; agentProblem = null },
+                                onPickModel = { picked, chosenPick -> agentPick = null; providerId = picked.id; model = chosenPick },
                                 focus = accountFocus,
                                 problem = agentProblem,
-                            ) { picked, chosenPick -> agentPick = null; providerId = picked.id; model = chosenPick },
+                                onPick = { picked, done ->
+                                    val row = accounts.firstOrNull { it.id == picked }
+
+                                    agentPick = if (row != null) AgentPick(row.agent, row.account, row.label, "", row.node?.id) else routingAgent(picked)?.let { AgentPick(it, null, routingName(picked.removePrefix(RoutingPrefix)), "") }
+                                    agentProblem = null
+                                    done(null)
+                                },
+                            ),
+                            Tokens.Size.AccountControlInCard,
                         )
                     },
                 )

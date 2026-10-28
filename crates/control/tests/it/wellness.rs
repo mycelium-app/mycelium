@@ -137,6 +137,20 @@ async fn an_ended_break_awaits_a_note_until_one_is_given() {
 }
 
 #[tokio::test]
+async fn a_break_that_ran_over_lasts_until_the_person_came_back() {
+    let server = Server::start().await;
+    let (_, started) = server.user.json(server.user.post("/api/v1/wellness/breaks").json(&json!({"minutes": 5}))).await;
+    let id: uuid::Uuid = started["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("update breaks set started_at = now() - interval '40 minutes', ends_at = now() - interval '35 minutes' where id = $1").bind(id).execute(&server.pool).await.unwrap();
+
+    let (_, saved) = server.user.json(server.user.put(&format!("/api/v1/wellness/breaks/{id}/note")).json(&json!({"note": "Sat in a meeting"}))).await;
+    let started_at = chrono::DateTime::parse_from_rfc3339(saved["started_at"].as_str().unwrap()).unwrap();
+    let ended_at = chrono::DateTime::parse_from_rfc3339(saved["ended_at"].as_str().unwrap()).unwrap();
+
+    assert!((ended_at - started_at).num_minutes() >= 39, "{saved}");
+}
+
+#[tokio::test]
 async fn a_break_still_running_cannot_be_noted() {
     let server = Server::start().await;
 
