@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.14.0
+
+Every screen in this release was designed in the canonical design artefact first.
+
+- Mycelium manages goals: after each turn it decides whether to nudge the agent and says why, the agent reports a goal done or blocked with report_goal, repeated outcomes back off and then stop, an open question holds the goal, and Stop never nudges. Nudge now and Continue are on the goal bar.
+- Workflows have their own icon and a proper page: a table with status, where each workflow is, where it started and its project; a page with steps as lanes, every round kept, gates you approve or send back with a reason, a confirmed Stop, Re-run, and failures that name the step and the error. Claude Code workflow runs are listed too.
+- New artefact kinds: Excalidraw drawings, Typst documents with a live preview and PDF, Docs, Slides with a presenter view, Grafana-compatible dashboards, Motion, and Design systems that designs can use. Artefacts can be created from the app.
+- Apps: add Coolify and an Apps tab appears above Artefacts, with each app's status, deployments, build logs, environment variables and the conversation that built it. Agents create and deploy apps after you approve.
+- Tandoor integration: recipes, meal plans and the shopping list.
+- Cowork: a conversation can have its own environment, a headless Wayland desktop with a browser on a node, shown in the right sidebar. Agents see and act in it, and you can take over and hand back. It never shows your own screen.
+- Voice: a built-in Voice assistant with its own instructions. With voice on, a microphone beside the usage gauge listens only when you press it or use Ctrl or Cmd+Shift+Space, and can read replies aloud through your provider. Settings has a Privacy page. The wake phrase is not available yet on any device.
+- Wellness & Learning has an Activity tab: what was on screen through the day as a timeline, and the last week by hour.
+- GitHub's MCP server uses your GitHub forge's token, from the forge or the catalogue, instead of a sign-in GitHub does not support.
+- A pasted image keeps its place in a draft when you switch away and back, and the arrow keys no longer stick on an image in the composer.
+- The built-in browser follows its container when the sidebar or a side panel is resized.
+- Large files read from a node arrive in pieces, so reading one no longer drops the node's connection.
+
 ## v0.13.1
 
 - During a break the keyboard stays on the break screen: Tab no longer reaches the app behind it, screen readers skip it, and End break early has focus.
