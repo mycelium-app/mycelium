@@ -91,6 +91,7 @@ data class AppState(
     val exitedTerminals: Set<String> = emptySet(),
     val environments: Map<String, mycelium.api.Environment> = emptyMap(),
     val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
+    val lastEnvironmentNodeId: String? = null,
     val sending: Map<String, List<String>> = emptyMap(),
     val connected: Boolean = false,
 )
@@ -239,6 +240,9 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.TerminalExited ->
         state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
+
+    is StreamMessage.ProjectChanged ->
+        state.copy(projects = state.projects + (message.project.id to message.project))
 
     is StreamMessage.EnvironmentChanged ->
         state.copy(environments = state.environments + (message.environment.conversationId to message.environment))

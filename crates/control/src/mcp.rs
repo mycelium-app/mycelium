@@ -85,7 +85,7 @@ fn area_of(tool: &str) -> Option<Area> {
         "decide" => Some(Area::Decide),
         "request_ssh_access" => Some(Area::SshAccess),
         "find_artifacts" | "request_artifact_access" | "create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback" => Some(Area::Artifacts),
-        "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" | "environment_launch" => Some(Area::Environment),
+        "environment_start" | "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" | "environment_launch" => Some(Area::Environment),
         "browser_task" => Some(Area::BrowserTask),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
@@ -155,6 +155,8 @@ pub fn tool_definitions() -> Value {
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())
 }
 
+pub const COWORK_INSTRUCTIONS: &str = "Cowork: when the person asks for something done in a browser or another app, do it in this conversation's environment. If none is running, start one with environment_start. For a goal on a web page, hand it to browser_task first; it runs each step quickly and tells you when it is done or blocked, and you carry on with screenshots and clicks only then. Click by describing the target (environment_click with target) rather than by coordinates when you can. Open other apps with environment_launch. When the person takes over, wait until they hand back, then take a screenshot before relying on what you saw earlier.";
+
 pub fn tools_instructions() -> String {
     let lines: Vec<String> = tool_definitions()
         .as_array()
@@ -164,7 +166,7 @@ pub fn tools_instructions() -> String {
         .collect();
 
     format!(
-        "You are running inside Mycelium, and its MCP server, mycelium, gives you these tools. They are MCP tools named mcp__mycelium__<name>, not skills. Your own memory features are off on purpose: use remember and recall instead.\n{}",
+        "You are running inside Mycelium, and its MCP server, mycelium, gives you these tools. They are MCP tools named mcp__mycelium__<name>, not skills. Your own memory features are off on purpose: use remember and recall instead.\n{}\n\n{COWORK_INSTRUCTIONS}",
         lines.join("\n")
     )
 }

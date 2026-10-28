@@ -58,6 +58,14 @@ class ContinueChoicesTest {
     }
 
     @Test
+    fun aChatOnAModelOtherThanItsProvidersDefaultIsNamedByThatModel() {
+        val chat = conversation("chat").copy(providerId = "p1", model = "qwen3")
+        val choices = continueChoices(chat, listOf(Node), Providers)
+
+        assertEquals("Ollama · qwen3", choices.first { it.id == currentContinueId(chat) }.name)
+    }
+
+    @Test
     fun theCurrentAccountIsTheCheckedOne() {
         assertEquals("account:sam@example.com", currentContinueId(conversation("claude", "sam@example.com")))
         assertEquals("account:(default)", currentContinueId(conversation("codex")))

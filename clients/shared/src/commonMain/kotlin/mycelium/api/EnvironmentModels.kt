@@ -149,7 +149,10 @@ data class EnvironmentCapability(
 )
 
 @Serializable
-data class StartEnvironmentRequest(val width: Int? = null, val height: Int? = null, val apps: List<String>? = null)
+data class StartEnvironmentRequest(val width: Int? = null, val height: Int? = null, val apps: List<String>? = null, @SerialName("node_id") val nodeId: String? = null)
+
+@Serializable
+data class LastEnvironmentNode(@SerialName("node_id") val nodeId: String? = null)
 
 @Serializable
 data class OpenEnvironmentAppRequest(val app: String)

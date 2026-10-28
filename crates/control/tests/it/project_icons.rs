@@ -1,5 +1,6 @@
 use crate::common;
 use crate::common::{Client, Server};
+use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -288,4 +289,16 @@ async fn finding_a_logo_on_an_older_node_returns_unchanged_without_sending_an_un
 
     assert_eq!(status, 200);
     assert_eq!(project["avatar_sha256"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_new_logo_is_streamed_so_every_list_showing_the_project_updates() {
+    let server = Server::start().await;
+    let id = project(&server).await;
+    let mut stream = server.user.stream().await;
+
+    upload_logo(&server.user, id, "image/png", PNG.to_vec()).await;
+    let streamed = stream.until(|message| match message { StreamMessage::Project(project) if project.id == id => Some(project), _ => None }).await;
+
+    assert!(streamed.avatar_sha256.is_some());
 }

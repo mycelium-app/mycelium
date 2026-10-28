@@ -173,7 +173,9 @@ fun continueChoices(conversation: Conversation, nodes: Collection<NodeSummary>, 
             Choice(id, "${agentName(agent)} · ${login.account ?: "Default account"}", hint, group = agentName(agent))
         }
     }
-    val models = providers.mapNotNull { provider -> provider.defaultModel?.let { Choice("$ContinueChatPrefix${provider.id}:$it", "${provider.name} · $it", group = ChatGroup) } }
+    val current = providers.firstOrNull { it.id == conversation.providerId }?.let { provider -> conversation.model?.takeIf { conversation.agent == "chat" && it != provider.defaultModel }?.let { provider to it } }
+    val defaults = providers.mapNotNull { provider -> provider.defaultModel?.let { provider to it } }
+    val models = (defaults + listOfNotNull(current)).map { (provider, model) -> Choice("$ContinueChatPrefix${provider.id}:$model", "${provider.name} · $model", group = ChatGroup) }
 
     val routing = routingChoices(accounts.map { it.second }, anyModel, "moves to")
 

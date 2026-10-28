@@ -93,6 +93,7 @@ fun WorkflowsScreen(store: Store, state: AppState, onOpenConversation: (String) 
 
     Column(Modifier.fillMaxSize().background(colors.bgContent)) {
         Bar {
+            OpenListButton()
             BarTitle("Workflows")
             Box(Modifier.weight(1f))
             MyButton({ creating = !creating }, text = "New workflow", icon = MyIcon.Plus, variant = ButtonVariant.Outline)

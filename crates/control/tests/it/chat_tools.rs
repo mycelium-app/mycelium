@@ -376,6 +376,18 @@ async fn the_system_prompt_lists_each_connected_server_and_its_tools_without_sen
 }
 
 #[tokio::test]
+async fn the_system_prompt_tells_the_model_how_to_work_in_an_environment() {
+    let rig = rig(vec![Reply::Say("Hello.")]).await;
+    let id = rig.chat("Book me a table.").await;
+    rig.turns_ended(&id, 1).await;
+
+    let request = rig.model.request(0);
+    let system = request["messages"][0]["content"].as_str().unwrap();
+
+    assert!(system.contains("start one with environment_start") && system.contains("browser_task"), "{system}");
+}
+
+#[tokio::test]
 async fn tool_search_ranks_name_matches_above_description_matches_and_says_when_nothing_matches() {
     let rig = rig(vec![
         Reply::Call("tool_search", json!({"query": "files"})),

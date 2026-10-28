@@ -97,6 +97,7 @@ fun SettingsScreen(store: Store, me: Me, controlPlane: String, startOn: Settings
                 BackButton("settings", { section = null })
                 Label(opened.label, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
             } else {
+                OpenListButton()
                 BarTitle("Settings")
             }
         }

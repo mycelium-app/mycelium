@@ -5,11 +5,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -29,22 +31,36 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import kotlin.time.Clock
 import mycelium.Platform
 import mycelium.api.Reflection
+import mycelium.api.WellnessBreak
 import mycelium.state.LearningState
 import mycelium.state.ReflectionSection
 import mycelium.state.Store
+import mycelium.state.breakWhen
 import mycelium.state.draftedLabel
+import mycelium.state.instantOrNull
+import mycelium.state.lengthText
+import mycelium.state.localTimeOf
 import mycelium.state.text
 import mycelium.state.wasEdited
 import mycelium.state.weekLabel
 
 private val SectionHeight = 72.dp
 
+private val SideBySideWidth = 1000.dp
+
+private val BreaksWidth = 480.dp
+
 @Composable
 fun ReflectionsTab(store: Store, platform: Platform, onOpenAssistant: (String) -> Unit) {
     val learning by store.learning.state.collectAsState()
     val app by store.state.collectAsState()
+    val wellness by store.wellness.state.collectAsState()
+    val recentBreaks = wellness.overview?.recentBreaks.orEmpty()
+    val today = localTimeOf(platform, Clock.System.now()).substringBefore('T')
+    val whenOf = { past: WellnessBreak -> breakWhen(localTimeOf(platform, instantOrNull(past.startedAt) ?: Clock.System.now()), today) }
     val wellnessWakes = app.assistants.values.firstOrNull { it.builtinKey == "wellness" }?.wakes
 
     LaunchedEffect(Unit) {
@@ -52,21 +68,59 @@ fun ReflectionsTab(store: Store, platform: Platform, onOpenAssistant: (String) -
         store.learning.load()
     }
 
-    Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
-        learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
+    val reflectionsColumn: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+            learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
 
-        Label(
-            wellnessWakes?.let { "$it, the Wellness assistant drafts this from the week's conversations and your break notes." } ?: "The Wellness assistant drafts this from the week's conversations and your break notes.",
-            color = MyTheme.colors.textMuted,
-        )
-        MyButton({ store.act { onOpenAssistant(store.api.wellnessAssistant().id) } }, text = "Open the Wellness assistant", variant = ButtonVariant.Outline)
+            Label(
+                wellnessWakes?.let { "$it, the Wellness assistant drafts this from the week's conversations and your break notes." } ?: "The Wellness assistant drafts this from the week's conversations and your break notes.",
+                color = MyTheme.colors.textMuted,
+            )
+            MyButton({ store.act { onOpenAssistant(store.api.wellnessAssistant().id) } }, text = "Open the Wellness assistant", variant = ButtonVariant.Outline)
 
-        if (learning.reflections.isNotEmpty()) {
-            Label("Redraft rewrites only the sections you have not edited.", color = MyTheme.colors.textMuted)
+            if (learning.reflections.isNotEmpty()) {
+                Label("Redraft rewrites only the sections you have not edited.", color = MyTheme.colors.textMuted)
+            }
+
+            for (reflection in learning.reflections) {
+                ReflectionCard(store, platform, reflection, learning)
+            }
         }
+    }
+    val breaksColumn: @Composable (Modifier) -> Unit = { modifier ->
+        val muted = MyTheme.colors.textMuted
 
-        for (reflection in learning.reflections) {
-            ReflectionCard(store, platform, reflection, learning)
+        if (recentBreaks.isNotEmpty()) {
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                Label("Recent breaks", Modifier.semantics { heading() }, Tokens.Type.Title)
+                Table(
+                    listOf(Col("When", 140.dp, preferred = 140.dp), Col("Length", 150.dp, preferred = 150.dp), Col("What you did", 160.dp, weight = 1f, overflow = Overflow.Wrap)),
+                    recentBreaks.size,
+                    { row, column ->
+                        when (column) {
+                            0 -> TableCell.Text(whenOf(recentBreaks[row]), color = muted)
+                            1 -> TableCell.Text(recentBreaks[row].lengthText(), color = muted)
+                            else -> TableCell.Text(recentBreaks[row].note.orEmpty())
+                        }
+                    },
+                    rowKey = { recentBreaks[it].id },
+                    rowDescription = { "Break ${whenOf(recentBreaks[it])}" },
+                )
+            }
+        }
+    }
+
+    BoxWithConstraints {
+        if (maxWidth >= SideBySideWidth) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
+                reflectionsColumn(Modifier.weight(1f))
+                breaksColumn(Modifier.width(BreaksWidth))
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
+                reflectionsColumn(Modifier)
+                breaksColumn(Modifier)
+            }
         }
     }
 }

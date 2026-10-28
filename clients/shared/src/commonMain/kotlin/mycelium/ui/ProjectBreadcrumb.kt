@@ -35,7 +35,7 @@ fun ProjectBreadcrumb(project: Project?, projects: List<Project>, nodes: Map<Str
                 Icon(MyIcon.Folder, MyTheme.colors.textMuted, Tokens.Size.IconSm)
             }
 
-            Label(name, style = Tokens.Type.Title, color = MyTheme.colors.textMuted, maxLines = 1)
+            Label(name, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
             Icon(MyIcon.ChevronDown, MyTheme.colors.textMuted, Tokens.Size.IconSm)
         }
 

@@ -104,6 +104,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("New chat")
         }
 

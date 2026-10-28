@@ -196,11 +196,13 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
     match inserted {
         Ok(row) => {
             link_conversations(&state, user.id, &row).await?;
-            let background = state.clone();
             let (owner, project_id) = (user.id, row.id);
+            let project = row.to_proto();
+            state.publish(Some(owner), StreamMessage::Project(project.clone()));
+            let background = state.clone();
             tokio::spawn(async move { find_automatic_icon(&background, owner, project_id).await });
 
-            Ok((StatusCode::CREATED, Json(row.to_proto())))
+            Ok((StatusCode::CREATED, Json(project)))
         }
         Err(sqlx::Error::Database(cause)) if cause.is_unique_violation() => Err(ApiError::conflict("project_exists", "This folder is already a project on this node.")),
         Err(cause) => Err(cause.into()),
@@ -247,7 +249,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(ApiError::not_found("That project"));
     };
 
-    publish_conversations(&state, user.id, id).await?;
+    publish_project(&state, user.id, id).await?;
 
     Ok(Json(row.to_proto()))
 }
@@ -269,7 +271,7 @@ pub async fn set_avatar(state: &AppState, owner: Uuid, id: Uuid, media_type: &st
 
     let row = store_avatar(state, owner, id, media_type, body, false).await?.ok_or_else(|| ApiError::not_found("That project"))?;
 
-    publish_conversations(state, owner, id).await?;
+    publish_project(state, owner, id).await?;
 
     Ok(row.to_proto())
 }
@@ -331,11 +333,14 @@ pub async fn find_automatic_icon(state: &AppState, owner: Uuid, id: Uuid) {
     }
 
     if let Ok(Some(_)) = store_avatar(state, owner, id, media_type, &bytes, true).await {
-        let _ = publish_conversations(state, owner, id).await;
+        let _ = publish_project(state, owner, id).await;
     }
 }
 
-async fn publish_conversations(state: &AppState, owner: Uuid, project_id: Uuid) -> ApiResult<()> {
+async fn publish_project(state: &AppState, owner: Uuid, project_id: Uuid) -> ApiResult<()> {
+    let project = find_owned(state, project_id, owner).await?;
+    state.publish(Some(owner), StreamMessage::Project(project.to_proto()));
+
     let conversations = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("select {CONVERSATION_COLUMNS} from conversations where project_id = $1 and owner = $2")))
         .bind(project_id)
         .bind(owner)

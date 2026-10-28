@@ -1,7 +1,10 @@
 package mycelium.desktop
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -81,6 +84,16 @@ class ReflectionsTabTest {
         rule.waitUntil(5_000) { opened.isNotEmpty() }
         assertEquals(listOf("w1"), opened.toList())
         assertEquals(emptyList(), sent.toList())
+    }
+
+    @Test
+    fun recentBreaksListWhenLengthAndWhatYouDidBesideTheReflections() {
+        show()
+
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Recent breaks").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Recent breaks") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).assertIsDisplayed()
+        rule.onNodeWithText("5 min").assertIsDisplayed()
+        rule.onNodeWithText("Made a tea and stood in the garden").assertIsDisplayed()
     }
 
     @Test

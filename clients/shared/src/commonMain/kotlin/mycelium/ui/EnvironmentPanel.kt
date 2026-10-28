@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +41,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -56,6 +60,7 @@ import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentSize
 import mycelium.api.EnvironmentTarget
 import mycelium.api.NodeSummary
+import mycelium.state.isChat
 import mycelium.state.AppState
 import mycelium.state.EnvironmentStage
 import mycelium.state.Store
@@ -65,7 +70,11 @@ import mycelium.state.environmentAppsToStart
 import mycelium.state.environmentCurrentWindow
 import mycelium.state.environmentDefaultApps
 import mycelium.state.environmentDescription
+import mycelium.state.EnvironmentLastUsedHint
+import mycelium.state.EnvironmentNoNodeText
 import mycelium.state.environmentMissingText
+import mycelium.state.environmentNodes
+import mycelium.state.environmentRunOn
 import mycelium.state.environmentStage
 import mycelium.state.environmentKindText
 import mycelium.state.environmentStartHint
@@ -96,11 +105,22 @@ fun EnvironmentPanel(
     onClose: () -> Unit,
     onOpenNode: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
+    onOpenNodes: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val environment = state.environments[conversation.id]
-    val node = state.nodes[conversation.nodeId]
-    val stage = environmentStage(environment, node?.environment)
+    val chat = conversation.isChat
+    val eligible = environmentNodes(state.nodes.values)
+    var chosenId by remember(conversation.id) { mutableStateOf<String?>(null) }
+    val runOn = environmentRunOn(eligible, state.lastEnvironmentNodeId, chosenId)
+    val node = if (chat) environment?.let { state.nodes[it.nodeId] } ?: runOn else state.nodes[conversation.nodeId]
+    val stage = environmentStage(environment, node?.environment, noNode = chat && node == null)
+
+    LaunchedEffect(conversation.id) {
+        if (chat) {
+            store.act { store.loadLastEnvironmentNode() }
+        }
+    }
     val label = if (expanded) "Environment, expanded" else "Environment"
 
     Column(
@@ -120,7 +140,7 @@ fun EnvironmentPanel(
         if (stage == EnvironmentStage.Active && environment != null) {
             ActiveEnvironment(store, state, conversation, environment, expanded, onExpand, onClose, onOpenNode)
         } else {
-            ClosedEnvironment(store, state, conversation, stage, environment, node, onClose, onOpenNode, onOpenConversation)
+            ClosedEnvironment(store, state, conversation, stage, environment, node, eligible, { chosenId = it }, onClose, onOpenNode, onOpenNodes, onOpenConversation)
         }
     }
 }
@@ -133,8 +153,11 @@ private fun ColumnScope.ClosedEnvironment(
     stage: EnvironmentStage,
     environment: Environment?,
     node: NodeSummary?,
+    eligible: List<NodeSummary>,
+    onChooseNode: (String) -> Unit,
     onClose: () -> Unit,
     onOpenNode: (String) -> Unit,
+    onOpenNodes: () -> Unit,
     onOpenConversation: (String) -> Unit,
 ) {
     val colors = MyTheme.colors
@@ -145,7 +168,7 @@ private fun ColumnScope.ClosedEnvironment(
     var moving by remember(conversation.id) { mutableStateOf(false) }
 
     Bar {
-        BarTitle("Environment")
+        PanelTitle("Environment")
         Spacer(Modifier.weight(1f))
         MyButton(onClose, icon = MyIcon.Close, description = "Close the environment panel", size = ButtonSize.Sm, muted = true)
     }
@@ -156,17 +179,57 @@ private fun ColumnScope.ClosedEnvironment(
             EnvironmentStage.Starting -> "Starting the environment on $nodeName"
             EnvironmentStage.Failed -> "The environment did not start"
             EnvironmentStage.Stopped -> "Environment stopped"
+            EnvironmentStage.NoNode -> "No environment yet"
             else -> "$nodeName cannot run an environment"
         }
 
         Label(title, Modifier.semantics { heading() }, Tokens.Type.Title)
 
         when (stage) {
+            EnvironmentStage.NoNode -> {
+                Label(EnvironmentNoNodeText, color = colors.textMuted)
+                MyButton(onOpenNodes, text = "Nodes", variant = ButtonVariant.Outline)
+            }
+
             EnvironmentStage.Empty -> {
                 val offered = capability?.apps.orEmpty()
                 var ticked by remember(conversation.id, offered) { mutableStateOf(environmentDefaultApps(offered)) }
 
                 Label("Start a separate desktop on $nodeName. The agent can look at it, click, type and scroll while you watch, and you can take over at any time. It never shows your own screen.", color = colors.textMuted)
+
+                if (conversation.isChat && eligible.size > 1) {
+                    Label("Run on", Modifier.padding(top = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
+
+                    Column(Modifier.selectableGroup()) {
+                        for (option in eligible) {
+                            val chosen = option.id == node?.id
+
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = rowHeight())
+                                    .pressable({ onChooseNode(option.id) }, role = Role.RadioButton, shape = ControlShape, selected = chosen, stateDescription = if (chosen) "Selected" else null)
+                                    .semantics { this.selected = chosen }
+                                    .padding(horizontal = Tokens.Space.S1),
+                                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.size(Tokens.Size.IconMd).border(Tokens.Size.Hairline, colors.text, CircleShape).padding(Tokens.Space.S0_5).clearAndSetSemantics {}) {
+                                    if (chosen) {
+                                        Box(Modifier.fillMaxSize().background(colors.text, CircleShape))
+                                    }
+                                }
+
+                                Icon(nodeIcon(option), colors.textMuted, Tokens.Size.IconMd, Modifier.clearAndSetSemantics {})
+                                Label(option.name)
+
+                                if (option.id == state.lastEnvironmentNodeId) {
+                                    Label(EnvironmentLastUsedHint, Modifier.weight(1f), Tokens.Type.Meta.copy(textAlign = TextAlign.End), colors.textMuted, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if (offered.isNotEmpty()) {
                     Label("Start with", Modifier.padding(top = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
@@ -183,7 +246,7 @@ private fun ColumnScope.ClosedEnvironment(
                     }
                 }
 
-                MyButton({ store.startEnvironment(conversation.id, if (offered.isEmpty()) null else environmentAppsToStart(offered, ticked)) }, text = "Start environment", variant = ButtonVariant.Primary)
+                MyButton({ store.startEnvironment(conversation.id, if (offered.isEmpty()) null else environmentAppsToStart(offered, ticked), if (conversation.isChat) node?.id else null) }, text = "Start environment", variant = ButtonVariant.Primary)
             }
 
             EnvironmentStage.Starting -> {
@@ -257,7 +320,7 @@ private fun ColumnScope.ActiveEnvironment(
     val phone = LocalTouch.current && expanded
     var now by remember { mutableStateOf(Clock.System.now()) }
     val actions = state.environmentActions[conversation.id].orEmpty()
-    val apps = state.nodes[conversation.nodeId]?.environment?.apps.orEmpty()
+    val apps = state.nodes[environment.nodeId]?.environment?.apps.orEmpty()
     val currentWindow = environmentCurrentWindow(environment)
     var windowsOpen by remember { mutableStateOf(false) }
 
@@ -274,10 +337,10 @@ private fun ColumnScope.ActiveEnvironment(
             Label("Environment", Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
         } else if (expanded) {
             OpenListButton()
-            MyButton({ onExpand(false) }, text = "Back to conversation", icon = MyIcon.ChevronLeft, muted = true)
+            MyButton({ onExpand(false) }, icon = MyIcon.ChevronLeft, description = "Back to conversation", muted = true)
             Label("Environment", Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
         } else {
-            BarTitle("Environment")
+            PanelTitle("Environment")
         }
 
         StatusMark(environmentActivity(environment), if (person) Tone.Attention else Tone.Muted, if (person) MyIcon.Person else MyIcon.Agent, Modifier.weight(1f))

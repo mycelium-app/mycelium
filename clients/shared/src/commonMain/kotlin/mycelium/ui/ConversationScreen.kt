@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.unit.Dp
@@ -117,7 +118,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var panel by remember(id) {
         val saved = if (compact) null else platform?.loadPreference("$SidePanelPreference:$id")
 
-        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline })
+        mutableStateOf(SidePanel.entries.firstOrNull { it.name == saved && it != SidePanel.Outline && (conversation?.isChat != true || it == SidePanel.Environment) })
     }
     var panelWidth by remember(workspace) {
         val saved = workspace?.let { platform?.loadPreference("$SidePanelWidthPreference:$it") } ?: platform?.loadPreference(SidePanelWidthPreference)
@@ -139,7 +140,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     var chatWidth by remember { mutableStateOf(Dp.Unspecified) }
     var areaWidth by remember { mutableStateOf(Dp.Unspecified) }
     val demand = LocalPanelDemand.current
-    val sidePanels = !compact && panels && conversation?.isChat != true
+    val sidePanels = !compact && panels
     val narrow = sidePanels && areaWidth != Dp.Unspecified && panelTakesOver(areaWidth)
     var environmentExpanded by remember(id) { mutableStateOf(false) }
     val environmentRunning = state.environments[id]?.state == EnvironmentState.Running
@@ -344,7 +345,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
-                SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation) }
+                SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation, onOpenNodes) }
                 null -> Unit
             }
         }
@@ -352,7 +353,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         Row(Modifier.fillMaxSize().onSizeChanged { areaWidth = with(density) { it.width.toDp() } }) {
             Column(
                 Modifier
-                    .then(if (takeover) Modifier.width(0.dp) else Modifier.weight(1f))
+                    .then(if (takeover) Modifier.width(0.dp).clearAndSetSemantics {} else Modifier.weight(1f))
                     .fillMaxHeight()
                     .layout { measurable, constraints ->
                         if (takeover) {
@@ -570,20 +571,17 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 }
             }
 
-            if (!compact && !chat && panels) {
+            if (!compact && panels) {
                 if (environmentFillsArea) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         panelContent()
                     }
                 } else if (takeover) {
                     Column(Modifier.weight(1f).fillMaxHeight().background(MyTheme.colors.bgPanel)) {
-                        Bar {
-                            OpenListButton()
-                            MyButton({ chatForced = true }, text = "Back to conversation", icon = MyIcon.ChevronLeft, muted = true)
-                        }
-
                         Box(Modifier.weight(1f).fillMaxWidth()) {
-                            panelContent()
+                            CompositionLocalProvider(LocalPanelBack provides { chatForced = true }) {
+                                panelContent()
+                            }
                         }
                     }
                 } else if (panel != null && !narrow) {
@@ -594,7 +592,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch || chat) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -626,7 +624,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     if (compact && phoneEnvironment) {
         FullScreenSheet({ phoneEnvironment = false }) {
-            EnvironmentPanel(store, state, conversation, true, { phoneEnvironment = it }, { phoneEnvironment = false }, onOpenNode, onOpenConversation)
+            EnvironmentPanel(store, state, conversation, true, { phoneEnvironment = it }, { phoneEnvironment = false }, onOpenNode, onOpenConversation, onOpenNodes)
         }
     }
 
@@ -709,6 +707,7 @@ private fun ConversationHeader(
 
         if (compact && chat) {
             Box(Modifier.weight(0.001f))
+            MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
         } else if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
 
@@ -763,9 +762,11 @@ private fun ConversationHeader(
                 "Open in ${ide.main.label}",
                 { ide.open(ide.main) },
                 ide.others.map { SplitAlternative("Open in ${it.label}", { ide.open(it) }) } + SplitAlternative("IDE settings", ide.onSettings, separated = true),
-                variant = ButtonVariant.Outline,
+                variant = ButtonVariant.Ghost,
                 size = ButtonSize.Sm,
                 menuLabel = ide.where,
+                icon = MyIcon.Code,
+                muted = true,
             )
         }
 
@@ -881,7 +882,7 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
 
     Column(Modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = "Conversation details" }) {
         Bar {
-            BarTitle("Details")
+            PanelTitle("Details")
         }
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(top = Tokens.Space.S2, bottom = Tokens.Space.S4)) {
@@ -894,7 +895,7 @@ private fun Inspector(conversation: Conversation, node: NodeSummary?, groupName:
 private fun SubagentsPanel(sections: List<SubagentSection>, currentId: String, parent: Conversation?, onOpen: (String) -> Unit, onStop: (Conversation) -> Unit) {
     Column(Modifier.fillMaxSize().background(MyTheme.colors.bgPanel).semantics { contentDescription = "Subagents" }) {
         Bar {
-            BarTitle("Subagents")
+            PanelTitle("Subagents")
         }
 
         Column(Modifier.weight(1f).verticalScrollWithBar().padding(vertical = Tokens.Space.S2)) {

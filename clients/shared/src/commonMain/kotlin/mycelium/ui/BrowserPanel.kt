@@ -24,6 +24,7 @@ fun BrowserPanel(platform: Platform, url: String, title: String, onClose: () -> 
 
     Column(modifier.fillMaxSize().background(colors.bgPanel).semantics { contentDescription = title }) {
         Bar {
+            PanelLeading()
             Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconMd)
             Label(title, Modifier.weight(1f), Tokens.Type.Title, maxLines = 1)
             MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", size = ButtonSize.Sm, tooltip = "Open in browser")

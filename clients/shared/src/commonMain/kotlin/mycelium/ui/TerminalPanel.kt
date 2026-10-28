@@ -83,7 +83,7 @@ fun TerminalPanel(store: Store, state: AppState, conversation: Conversation, mod
 
     Column(modifier.background(colors.bgPanel)) {
         Bar {
-            BarTitle("Terminal")
+            PanelTitle("Terminal")
             Label("tmux  ·  ${projectName(conversation.cwd)}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
         }
 

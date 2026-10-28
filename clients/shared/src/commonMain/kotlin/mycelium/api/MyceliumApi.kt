@@ -233,6 +233,9 @@ class MyceliumApi(
     suspend fun startEnvironment(conversationId: String, request: StartEnvironmentRequest = StartEnvironmentRequest()): Environment =
         call("/conversations/$conversationId/environment") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun lastEnvironmentNode(): LastEnvironmentNode =
+        call("/environment/last-node") { client.get(it) { authorise() } }.body()
+
     suspend fun openEnvironmentApp(conversationId: String, app: String): Environment =
         call("/conversations/$conversationId/environment/apps") { client.post(it) { authorise(); json(OpenEnvironmentAppRequest(app)) } }.body()
 

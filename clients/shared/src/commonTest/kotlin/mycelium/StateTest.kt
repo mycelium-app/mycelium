@@ -55,6 +55,16 @@ class StateTest {
     }
 
     @Test
+    fun aStreamedProjectReplacesTheOneHeldSoANewLogoShowsEverywhere() {
+        val before = AppState(projects = mapOf("p1" to Project("p1", "n1", "app", "/work/app", createdAt = "2026-10-28T10:00:00Z")))
+        val message = parseStreamMessage("""{"type":"project","id":"p1","node_id":"n1","name":"app","path":"/work/app","created_at":"2026-10-28T10:00:00Z","avatar_sha256":"abc"}""")
+
+        val after = reduce(before, assertIs<StreamMessage.ProjectChanged>(message))
+
+        assertEquals("abc", after.projects.getValue("p1").avatarSha256)
+    }
+
+    @Test
     fun sidebarOrdersByNeedsInputThenFailedThenReviewThenWorkingThenDone() {
         val sections = sidebarSections(
             listOf(

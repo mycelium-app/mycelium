@@ -153,6 +153,7 @@ fun ArchiveScreen(store: Store, state: AppState, onOpen: (String) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Past conversations")
         }
 

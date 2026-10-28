@@ -954,3 +954,128 @@ async fn the_stop_task_route_ends_a_browser_task_without_taking_over() {
     assert_eq!((environment["browser_task"]["stopped_by"].clone(), environment["controller"].clone()), (json!("stop"), json!("agent")));
     assert_eq!(published.browser_task.unwrap().stopped_by.as_deref(), Some("stop"));
 }
+
+async fn make_chat(fixture: &Fixture) {
+    sqlx::query("update conversations set agent = 'chat' where id = $1").bind(fixture.conversation_id).execute(&fixture.server.pool).await.unwrap();
+}
+
+async fn second_capable_node(fixture: &Fixture, name: &str) -> NodeLink {
+    let mut link = fixture.server.online_node(name).await;
+    let id = link.id;
+
+    link.send(NodeToControl::EnvironmentCapability { capability: capable() }).await;
+
+    let user = fixture.server.user.clone();
+    common::eventually("the second node's environment capability", || async {
+        let (_, nodes) = user.json(user.get("/api/v1/nodes")).await;
+
+        nodes.as_array().unwrap().iter().any(|node| node["id"] == json!(id) && node["environment"]["available"] == json!(true)).then_some(())
+    })
+    .await;
+
+    link
+}
+
+async fn stop_environment(fixture: &Fixture) {
+    fixture.server.user.json(fixture.server.user.delete(&fixture.url(""))).await;
+}
+
+#[tokio::test]
+async fn a_chat_starts_its_environment_on_the_only_node_that_can_run_one() {
+    let mut fixture = fixture(Some(capable())).await;
+    make_chat(&fixture).await;
+
+    let (status, started) = fixture.start().await;
+
+    assert_eq!((status, started["node_name"].clone()), (200, json!("laptop")), "{started}");
+    assert!(matches!(fixture.link.next().await, ControlToNode::StartEnvironment { .. }));
+}
+
+#[tokio::test]
+async fn a_chat_starts_on_the_node_used_last_and_an_explicit_node_wins() {
+    let mut fixture = fixture(Some(capable())).await;
+    let mut desktop = second_capable_node(&fixture, "desktop").await;
+    make_chat(&fixture).await;
+
+    let (_, first) = fixture.server.user.json(fixture.server.user.post(&fixture.url("")).json(&json!({"node_id": desktop.id}))).await;
+    assert_eq!(first["node_name"], "desktop", "{first}");
+    assert!(matches!(desktop.next().await, ControlToNode::StartEnvironment { .. }));
+    stop_environment(&fixture).await;
+    assert!(matches!(desktop.next().await, ControlToNode::StopEnvironment { .. }));
+
+    let (_, again) = fixture.start().await;
+    assert_eq!(again["node_name"], "desktop", "{again}");
+    assert!(matches!(desktop.next().await, ControlToNode::StartEnvironment { .. }));
+    stop_environment(&fixture).await;
+
+    let (_, explicit) = fixture.server.user.json(fixture.server.user.post(&fixture.url("")).json(&json!({"node_id": fixture.link.id}))).await;
+    assert_eq!(explicit["node_name"], "laptop", "{explicit}");
+}
+
+#[tokio::test]
+async fn a_chat_with_no_node_that_can_run_an_environment_is_told_to_start_one() {
+    let fixture = fixture(Some(incapable())).await;
+    make_chat(&fixture).await;
+
+    let (status, body) = fixture.start().await;
+
+    assert_eq!((status, body["error"].clone(), body["message"].clone()), (409, json!("environment_no_node"), json!("No node that can run an environment is online. Start one from Nodes.")), "{body}");
+}
+
+#[tokio::test]
+async fn the_agent_starting_an_environment_in_a_chat_is_recorded_as_the_agent() {
+    let mut fixture = fixture(Some(capable())).await;
+    make_chat(&fixture).await;
+
+    let reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_start", json!({})).await;
+    let again = tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_start", json!({})).await;
+    let (_, actions) = fixture.server.user.json(fixture.server.user.get(&fixture.url("/actions"))).await;
+
+    assert!(matches!(fixture.link.next().await, ControlToNode::StartEnvironment { .. }));
+    assert_eq!((text_of(&reply).starts_with("Started the environment on laptop."), reply["result"]["isError"].clone()), (true, json!(false)), "{reply}");
+    assert_eq!(text_of(&again), "The environment is already running on laptop.");
+    assert_eq!(environment_lines(&fixture).await, ["The agent started the environment on laptop."]);
+    assert_eq!(actions[0]["label"], "The agent started the environment");
+}
+
+#[tokio::test]
+async fn the_agent_is_told_when_no_node_can_run_an_environment() {
+    let fixture = fixture(Some(incapable())).await;
+    make_chat(&fixture).await;
+
+    let reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_start", json!({})).await;
+
+    assert_eq!((text_of(&reply), reply["result"]["isError"].clone()), ("No node that can run an environment is online. Start one from Nodes.".to_string(), json!(true)));
+}
+
+#[tokio::test]
+async fn a_chats_screenshot_is_taken_on_the_node_the_environment_runs_on() {
+    let fixture = fixture(Some(capable())).await;
+    let mut desktop = second_capable_node(&fixture, "desktop").await;
+    make_chat(&fixture).await;
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("")).json(&json!({"node_id": desktop.id}))).await;
+    assert!(matches!(desktop.next().await, ControlToNode::StartEnvironment { .. }));
+    desktop.send(NodeToControl::EnvironmentChanged { conversation_id: fixture.conversation_id, state: EnvironmentState::Running, failure: None, browser: None }).await;
+
+    let user = fixture.server.user.clone();
+    let url = fixture.url("");
+    common::eventually("the environment running", || async {
+        let (_, environment) = user.json(user.get(&url)).await;
+
+        (environment["state"] == "running").then_some(())
+    })
+    .await;
+
+    let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG fake");
+    let (_, reply) = tokio::join!(
+        async {
+            let ControlToNode::EnvironmentScreenshot { request_id, .. } = desktop.next().await else {
+                panic!("expected the desktop node to be asked for a screenshot");
+            };
+            desktop.send(NodeToControl::EnvironmentScreenshotTaken { request_id, png: Some(png.clone()), error: None }).await;
+        },
+        tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_screenshot", json!({}))
+    );
+
+    assert_eq!(reply["result"]["content"][0], json!({"type": "image", "data": png, "mimeType": "image/png"}));
+}

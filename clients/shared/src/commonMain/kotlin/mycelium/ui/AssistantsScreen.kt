@@ -178,6 +178,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Assistants")
             Box(Modifier.weight(1f))
             MyButton(onNew, text = "New assistant", icon = MyIcon.Plus, variant = ButtonVariant.Outline)

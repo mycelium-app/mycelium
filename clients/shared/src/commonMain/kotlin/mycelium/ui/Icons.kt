@@ -73,6 +73,7 @@ enum class MyIcon(vararg val paths: String) {
     More("M5 12h.01M12 12h.01M19 12h.01"),
     MoreVertical("M12 5h.01M12 12h.01M12 19h.01"),
     Menu("M4 6h16M4 12h16M4 18h16"),
+    PanelLeft("M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z", "M9 3v18"),
     Send("M22 2 11 13", "M22 2 15 22l-4-9-9-4Z"),
     Microphone(rect(9f, 2f, 6f, 13f, 3f), "M19 10v2a7 7 0 0 1-14 0v-2", "M12 19v3"),
     Speaker("M11 5 6 9H2v6h4l5 4Z", "M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"),

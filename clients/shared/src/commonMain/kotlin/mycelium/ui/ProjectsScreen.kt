@@ -132,6 +132,7 @@ fun ProjectsScreen(store: Store, state: AppState, onNewConversation: (String) ->
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Projects")
             Box(Modifier.weight(1f))
             MyButton({ creating = true }, text = "New project", icon = MyIcon.Plus, variant = ButtonVariant.Outline)

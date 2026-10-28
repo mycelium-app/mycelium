@@ -12,14 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import kotlin.time.Clock
-import mycelium.api.WellnessBreak
 import mycelium.state.Store
 import mycelium.state.WindDownMinutes
-import mycelium.state.breakWhen
-import mycelium.state.instantOrNull
-import mycelium.state.lengthText
-import mycelium.state.localTimeOf
 
 private val ReminderChoices = listOf(25, 30, 45, 50, 60, 90)
 private val SnoozeChoices = listOf(5, 10, 15)
@@ -34,9 +28,6 @@ fun TimeAndFocusSettings(store: Store, onOpenGroup: (String) -> Unit = {}) {
     val settings = wellness.settings
     val platform = LocalPlatform.current
     val platformZone = platform?.timeZone()
-    val recentBreaks = wellness.overview?.recentBreaks.orEmpty()
-    val today = localTimeOf(platform, Clock.System.now()).substringBefore('T')
-    val whenOf = { past: WellnessBreak -> breakWhen(localTimeOf(platform, instantOrNull(past.startedAt) ?: Clock.System.now()), today) }
 
     Column(Modifier.widthIn(max = Tokens.Size.Page), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
         Label("Time and focus", Modifier.semantics { heading() }, Tokens.Type.Title)
@@ -47,24 +38,6 @@ fun TimeAndFocusSettings(store: Store, onOpenGroup: (String) -> Unit = {}) {
             Choice("Remind after", ReminderChoices, settings.breakAfterMinutes) { choice -> store.wellness.update { it.copy(breakAfterMinutes = choice) } }
             Choice("Snooze for", SnoozeChoices, settings.snoozeMinutes) { choice -> store.wellness.update { it.copy(snoozeMinutes = choice) } }
             Choice("Break length", BreakChoices, settings.breakMinutes) { choice -> store.wellness.update { it.copy(breakMinutes = choice) } }
-
-            if (recentBreaks.isNotEmpty()) {
-                Label("Recent breaks", Modifier.semantics { heading() }, Tokens.Type.Meta, colors.textMuted)
-                Table(
-                    listOf(Col("When", 140.dp, preferred = 140.dp), Col("Length", 150.dp, preferred = 150.dp), Col("What you did", 160.dp, weight = 1f, overflow = Overflow.Wrap)),
-                    recentBreaks.size,
-                    { row, column ->
-                        when (column) {
-                            0 -> TableCell.Text(whenOf(recentBreaks[row]), color = colors.textMuted)
-                            1 -> TableCell.Text(recentBreaks[row].lengthText(), color = colors.textMuted)
-                            else -> TableCell.Text(recentBreaks[row].note.orEmpty())
-                        }
-                    },
-                    rowKey = { recentBreaks[it].id },
-                    rowDescription = { "Break ${whenOf(recentBreaks[it])}" },
-                )
-                Label("The Wellness assistant reads these when it drafts your weekly reflection.", style = Tokens.Type.Meta, color = colors.textMuted)
-            }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

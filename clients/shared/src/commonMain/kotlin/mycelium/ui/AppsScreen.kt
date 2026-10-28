@@ -85,6 +85,7 @@ fun AppsScreen(store: Store, state: AppState, platform: Platform, onOpenApp: (St
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Apps")
         }
 

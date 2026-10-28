@@ -86,6 +86,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Nodes")
             Box(Modifier.weight(1f))
 

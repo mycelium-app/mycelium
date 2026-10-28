@@ -17,15 +17,16 @@ import mycelium.api.EnvironmentVersions
 import mycelium.api.EnvironmentWindow
 import mycelium.api.NodeSummary
 
-enum class EnvironmentStage { CannotRun, Empty, Starting, Failed, Active, Stopped }
+enum class EnvironmentStage { CannotRun, NoNode, Empty, Starting, Failed, Active, Stopped }
 
 const val EnvironmentStoppedAdvice = "The browser closed with it, so anything signed in there is signed out."
 
-fun environmentStage(environment: Environment?, capability: EnvironmentCapability?): EnvironmentStage = when {
+fun environmentStage(environment: Environment?, capability: EnvironmentCapability?, noNode: Boolean = false): EnvironmentStage = when {
     environment?.state == EnvironmentState.Starting -> EnvironmentStage.Starting
     environment?.state == EnvironmentState.Running -> EnvironmentStage.Active
     environment?.state == EnvironmentState.Failed -> EnvironmentStage.Failed
     capability != null && !capability.available -> EnvironmentStage.CannotRun
+    noNode && (environment == null || environment.state == EnvironmentState.Stopped) -> EnvironmentStage.NoNode
     environment?.state == EnvironmentState.Stopped -> EnvironmentStage.Stopped
     else -> EnvironmentStage.Empty
 }
@@ -159,6 +160,15 @@ fun environmentRunningFor(iso: String, now: Instant = Clock.System.now()): Strin
         else -> "${minutes / (24 * 60)} d"
     }
 }
+
+const val EnvironmentNoNodeText = "No node that can run an environment is online. Start one from Nodes."
+const val EnvironmentLastUsedHint = "Last used"
+
+fun environmentNodes(nodes: Collection<NodeSummary>): List<NodeSummary> =
+    nodes.filter { it.online && it.environment?.available == true }.sortedBy { it.name }
+
+fun environmentRunOn(eligible: List<NodeSummary>, lastUsedId: String?, chosenId: String?): NodeSummary? =
+    eligible.firstOrNull { it.id == chosenId } ?: eligible.firstOrNull { it.id == lastUsedId } ?: eligible.firstOrNull()
 
 fun nodeThatCanRunEnvironment(nodes: Collection<NodeSummary>, currentNodeId: String): NodeSummary? =
     nodes.filter { it.id != currentNodeId && it.online && !it.draining && it.environment?.available == true }.minByOrNull { it.name }

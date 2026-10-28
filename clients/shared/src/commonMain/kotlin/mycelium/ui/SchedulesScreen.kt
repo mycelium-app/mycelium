@@ -86,6 +86,7 @@ fun SchedulesScreen(store: Store, state: AppState) {
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Schedules")
             Box(Modifier.weight(1f))
             MyButton({ creating = true }, text = "New schedule", icon = MyIcon.Plus, variant = ButtonVariant.Outline)

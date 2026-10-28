@@ -1092,11 +1092,17 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
     }
 
-    fun startEnvironment(conversationId: String, apps: List<String>? = null) {
-        act {
-            val environment = api.startEnvironment(conversationId, StartEnvironmentRequest(apps = apps))
+    suspend fun loadLastEnvironmentNode() {
+        val last = orNull { api.lastEnvironmentNode() }
 
-            mutableState.update { it.copy(environments = it.environments + (conversationId to environment), environmentActions = it.environmentActions - conversationId) }
+        mutableState.update { it.copy(lastEnvironmentNodeId = last?.nodeId) }
+    }
+
+    fun startEnvironment(conversationId: String, apps: List<String>? = null, nodeId: String? = null) {
+        act {
+            val environment = api.startEnvironment(conversationId, StartEnvironmentRequest(apps = apps, nodeId = nodeId))
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment), environmentActions = it.environmentActions - conversationId, lastEnvironmentNodeId = environment.nodeId) }
         }
     }
 

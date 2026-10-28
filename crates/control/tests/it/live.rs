@@ -9,6 +9,10 @@ use std::time::Duration;
 use uuid::Uuid;
 
 const PUBLISHING_ROUTES: &[&str] = &[
+    "POST /api/v1/projects/{id}/find-icon",
+    "POST /api/v1/projects/{id}/avatar",
+    "PATCH /api/v1/projects/{id}",
+    "POST /api/v1/projects",
     "POST /api/v1/workflows",
     "POST /api/v1/workflows/{id}/control",
     "POST /api/v1/workflows/{id}/rerun",
@@ -160,7 +164,6 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}/freeagent-sign-in",
     "DELETE /api/v1/chat-tool-servers/{id}",
-    "POST /api/v1/projects",
     "POST /api/v1/tasks",
     "POST /api/v1/tasks/{id}/approve",
     "POST /api/v1/tasks/{id}/decline",
@@ -199,9 +202,6 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/groups/{id}/folders",
     "PUT /api/v1/groups/{id}/instructions",
     "DELETE /api/v1/groups/{id}/folders/{folder_id}",
-    "PATCH /api/v1/projects/{id}",
-    "POST /api/v1/projects/{id}/avatar",
-    "POST /api/v1/projects/{id}/find-icon",
     "PUT /api/v1/instructions/{layer}",
     "PUT /api/v1/extensions",
     "PUT /api/v1/experiments",

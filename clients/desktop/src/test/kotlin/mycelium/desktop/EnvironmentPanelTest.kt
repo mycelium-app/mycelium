@@ -114,7 +114,7 @@ class EnvironmentPanelTest {
         rule.setContent {
             MyceliumTheme(true) {
                 CompositionLocalProvider(LocalPlatform provides platform) {
-                    EnvironmentPanel(store, state, conversation, expanded, { expanded = it }, {}, {}, {})
+                    EnvironmentPanel(store, state, conversation, expanded, { expanded = it }, {}, {}, {}, {})
                 }
             }
         }
@@ -229,7 +229,7 @@ class EnvironmentPanelTest {
         rule.onNodeWithText("Take over").assertExists()
         rule.onNodeWithContentDescription("Stop the environment").assertExists()
 
-        rule.onNodeWithText("Back to conversation").performClick()
+        rule.onNodeWithContentDescription("Back to conversation").performClick()
         rule.waitForIdle()
 
         assertFalse(expanded)

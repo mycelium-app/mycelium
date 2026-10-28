@@ -2,6 +2,7 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -27,7 +28,7 @@ class BreakToastTest {
         rule.onNodeWithText("Time for a break").assertIsDisplayed()
         rule.onNodeWithText("Snooze").performClick()
         rule.onNodeWithText("Start break").performClick()
-        rule.onNodeWithText("Dismiss").performClick()
+        rule.onNodeWithContentDescription("Dismiss").performClick()
 
         assertEquals(listOf("snooze", "break", "dismiss"), taken)
     }

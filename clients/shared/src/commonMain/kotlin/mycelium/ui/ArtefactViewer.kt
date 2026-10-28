@@ -176,7 +176,13 @@ fun ArtefactsPanel(
     val viewed = selected?.let { state.artifacts[it] }
 
     if (viewed == null) {
-        ArtefactList(conversationArtefacts(state, conversationId), { onSelect(it.id) }, modifier)
+        Column(modifier) {
+            Bar {
+                PanelTitle("Artefacts")
+            }
+
+            ArtefactList(conversationArtefacts(state, conversationId), { onSelect(it.id) }, Modifier.weight(1f))
+        }
 
         return
     }

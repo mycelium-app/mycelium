@@ -55,7 +55,7 @@ fun durationText(minutes: Long): String = when {
 }
 
 @Composable
-fun WellnessPresence(store: Store, platform: Platform) {
+fun WellnessPresence(store: Store, platform: Platform, phone: Boolean, raised: Boolean) {
     val wellness by store.wellness.state.collectAsState()
     var focused by remember { mutableStateOf(platform.windowFocused()) }
     val due = wellness.clock.phase == BreakPhase.Due
@@ -90,15 +90,7 @@ fun WellnessPresence(store: Store, platform: Platform) {
         }
     }
 
-    Box(Modifier.fillMaxSize().padding(Tokens.Space.S4), contentAlignment = Alignment.BottomEnd) {
-        BreakToast(
-            wellness.clock,
-            wellness.clock.breakLength(wellness.settings),
-            onSnooze = store.wellness::snooze,
-            onStartBreak = store.wellness::startBreak,
-            onDismiss = store.wellness::dismiss,
-        )
-    }
+    ToastHost(store, phone, raised)
 }
 
 @Composable
@@ -121,6 +113,7 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
         }
 
         Bar {
+            OpenListButton()
             Icon(MyIcon.Leaf, MyTheme.colors.leaf, Tokens.Size.IconMd)
             BarTitle("Wellness & Learning")
         }

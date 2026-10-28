@@ -85,6 +85,8 @@ sealed interface StreamMessage {
 
     data class TerminalExited(val terminalId: String) : StreamMessage
 
+    data class ProjectChanged(val project: Project) : StreamMessage
+
     data class EnvironmentChanged(val environment: Environment) : StreamMessage
 
     data class EnvironmentActed(val conversationId: String, val action: EnvironmentAction) : StreamMessage
@@ -156,6 +158,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         )
         "terminal_output" -> StreamMessage.TerminalOutput(element.requireString("terminal_id"), element.requireString("data"))
         "terminal_exited" -> StreamMessage.TerminalExited(element.requireString("terminal_id"))
+        "project" -> StreamMessage.ProjectChanged(MyceliumJson.decodeFromJsonElement(Project.serializer(), element))
         "environment" -> StreamMessage.EnvironmentChanged(MyceliumJson.decodeFromJsonElement(Environment.serializer(), element))
         "environment_action" -> StreamMessage.EnvironmentActed(
             element.requireString("conversation_id"),

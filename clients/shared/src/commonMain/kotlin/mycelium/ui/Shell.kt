@@ -58,6 +58,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
@@ -221,8 +226,6 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
     }
 
     val state by store.state.collectAsState()
-    val problem by store.problem.collectAsState()
-    val retryable by store.retryable.collectAsState()
     val hours = rememberHoursView(store)
     val groupFilter = rememberGroupFilter(platform, state, hours)
     val shownScope = groupScope(groupFilter.value, hours.closedGroupIds)
@@ -246,12 +249,43 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
         platform.savePreference(SidebarWidthPreference, sidebarWidth.value.toString())
     }
 
+    var sidebarHidden by remember { mutableStateOf(platform.loadPreference(SidebarHiddenPreference) == true.toString()) }
     val demand = remember { PanelDemand() }
     var overlayOpen by remember { mutableStateOf(false) }
     val overlayFocus = remember { FocusRequester() }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.bgContent)) {
-        val docked = sidebarDocks(maxWidth, sidebarWidth, demand.width)
+        val fits = sidebarDocks(maxWidth, sidebarWidth, demand.width)
+        val docked = fits && !sidebarHidden
+
+        fun setSidebarHidden(hidden: Boolean) {
+            sidebarHidden = hidden
+            platform.savePreference(SidebarHiddenPreference, hidden.toString())
+        }
+
+        fun showSidebar() {
+            if (fits) {
+                setSidebarHidden(false)
+            } else {
+                overlayOpen = true
+            }
+        }
+
+        fun hideSidebar() {
+            if (docked) {
+                setSidebarHidden(true)
+            } else {
+                overlayOpen = false
+            }
+        }
+
+        fun toggleSidebar() {
+            if (docked || overlayOpen) {
+                hideSidebar()
+            } else {
+                showSidebar()
+            }
+        }
 
         LaunchedEffect(docked) {
             if (docked) {
@@ -265,7 +299,16 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
             }
         }
 
-        Row(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxSize().onKeyEvent { event ->
+                if (isSidebarToggle(event)) {
+                    toggleSidebar()
+                    true
+                } else {
+                    false
+                }
+            },
+        ) {
             if (docked) {
                 CompositionLocalProvider(LocalPlatform provides platform) {
                     Sidebar(
@@ -277,6 +320,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                         groupFilter = groupFilter,
                         hours = hours,
                         onOpenOutOfHours = { openRequest = OpenRequest(it) },
+                        onHide = ::hideSidebar,
                         modifier = Modifier.width(sidebarWidth).fillMaxHeight(),
                     )
                 }
@@ -289,11 +333,9 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                     ReconnectingBanner()
                 }
 
-                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
-
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    CompositionLocalProvider(LocalOpenList provides (if (docked) null else ({ overlayOpen = true })), LocalPanelDemand provides demand) {
-                        RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
+                    CompositionLocalProvider(LocalOpenList provides (if (docked) null else ::showSidebar), LocalPanelDemand provides demand) {
+                        RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut, phone = false)
                     }
                 }
             }
@@ -317,6 +359,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                     groupFilter = groupFilter,
                     hours = hours,
                     onOpenOutOfHours = { openRequest = OpenRequest(it) },
+                    onHide = ::hideSidebar,
                     modifier = Modifier
                         .width(sidebarWidth)
                         .fillMaxHeight()
@@ -325,6 +368,9 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
                         .onPreviewKeyEvent { event ->
                             if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
                                 overlayOpen = false
+                                true
+                            } else if (isSidebarToggle(event)) {
+                                toggleSidebar()
                                 true
                             } else {
                                 false
@@ -342,8 +388,6 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
 @Composable
 fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     val state by store.state.collectAsState()
-    val problem by store.problem.collectAsState()
-    val retryable by store.retryable.collectAsState()
     val hours = rememberHoursView(store)
     val groupFilter = rememberGroupFilter(platform, state, hours)
     val shownScope = groupScope(groupFilter.value, hours.closedGroupIds)
@@ -447,10 +491,8 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
                     ReconnectingBanner()
                 }
 
-                problem?.let { ErrorBanner(it, onDismiss = store::dismissProblem, onRetry = if (retryable != null) store::retryProblem else null) }
-
                 Box(Modifier.weight(1f).fillMaxWidth().then(if (route is Route.Artefact) Modifier else openDrag)) {
-                    RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut)
+                    RouteContent(store, state, platform, me, route, shownScope, hours, groupFilter.choose, onOpenOutOfHours = { openRequest = OpenRequest(it) }, onRoute = { route = it }, onSignOut = onSignOut, phone = true)
                 }
             }
         }
@@ -489,7 +531,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 }
 
 @Composable
-private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, hours: HoursView, onChooseGroup: (String) -> Unit, onOpenOutOfHours: (String?) -> Unit, onRoute: (Route) -> Unit, onSignOut: () -> Unit) {
+private fun RouteContent(store: Store, state: AppState, platform: Platform, me: Me, route: Route, groupFilter: String, hours: HoursView, onChooseGroup: (String) -> Unit, onOpenOutOfHours: (String?) -> Unit, onRoute: (Route) -> Unit, onSignOut: () -> Unit, phone: Boolean) {
     var settingsStart by remember { mutableStateOf<SettingsSection?>(null) }
     var settingsGroup by remember { mutableStateOf<String?>(null) }
     var settingsGroupTab by remember { mutableStateOf<String?>(null) }
@@ -580,7 +622,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
             }
         }
 
-        WellnessPresence(store, platform)
+        WellnessPresence(store, platform, phone, raised = route is Route.Chat || route is Route.New || route is Route.NewIn || route == Route.NewChat || route is Route.Assistant)
     }
 }
 
@@ -629,6 +671,7 @@ private fun EmptyMain(state: AppState, onNew: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         if (LocalOpenList.current != null) {
             Bar {
+                OpenListButton()
                 BarTitle("Mycelium")
             }
         }
@@ -654,7 +697,7 @@ private const val WorkspacesMode = "Workspaces"
 private const val ChatsMode = "Chats"
 
 @Composable
-private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, hours: HoursView, onOpenOutOfHours: (String?) -> Unit, modifier: Modifier = Modifier) {
+private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Route, onRoute: (Route) -> Unit, groupFilter: GroupFilterChoice, hours: HoursView, onOpenOutOfHours: (String?) -> Unit, modifier: Modifier = Modifier, onHide: (() -> Unit)? = null) {
     val colors = MyTheme.colors
     var settledOpen by remember { mutableStateOf(platform.loadPreference(SettledOpenPreference) == true.toString()) }
     val scope = groupScope(groupFilter.value, hours.closedGroupIds)
@@ -717,7 +760,13 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     }
 
     Column(modifier.background(colors.bgPanel)) {
-        Segmented(listOf(WorkspacesMode, ChatsMode), mode, { chosen -> mode = chosen; lastOpened[chosen]?.let(onRoute) }, groupLabel = "Sidebar mode", modifier = Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), stretch = true)
+        Row(Modifier.fillMaxWidth().padding(Tokens.Space.S1_5), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+            if (onHide != null) {
+                MyButton(onHide, icon = MyIcon.PanelLeft, description = "Hide the sidebar", tooltip = "Hide the sidebar (Ctrl or Cmd+B)", muted = true)
+            }
+
+            Segmented(listOf(WorkspacesMode, ChatsMode), mode, { chosen -> mode = chosen; lastOpened[chosen]?.let(onRoute) }, groupLabel = "Sidebar mode", modifier = Modifier.weight(1f), stretch = true)
+        }
 
         if (mode == WorkspacesMode && state.groups.isNotEmpty()) {
             val openGroups = state.groups.values.filter { it.id !in hours.closedGroupIds }
@@ -1177,6 +1226,11 @@ fun nodeColour(node: NodeSummary): Color {
 }
 
 private const val SidebarWidthPreference = "sidebar-width"
+
+private const val SidebarHiddenPreference = "sidebar-hidden"
+
+private fun isSidebarToggle(event: KeyEvent): Boolean =
+    event.type == KeyEventType.KeyDown && event.key == Key.B && (event.isCtrlPressed || event.isMetaPressed) && !event.isShiftPressed && !event.isAltPressed
 
 private const val UsageOpenPreference = "usage-card-open"
 

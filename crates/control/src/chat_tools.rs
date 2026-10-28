@@ -179,8 +179,10 @@ impl Toolbox {
             }
         }
 
+        let cowork = if self.tools.iter().any(|tool| tool.original.starts_with("environment_")) { format!("\n\n{}", crate::mcp::COWORK_INSTRUCTIONS) } else { String::new() };
+
         if servers.is_empty() {
-            return TOOLS_INSTRUCTIONS.to_string();
+            return format!("{TOOLS_INSTRUCTIONS}{cowork}");
         }
 
         let lines: Vec<String> = servers
@@ -196,7 +198,7 @@ impl Toolbox {
             })
             .collect();
 
-        format!("{TOOLS_INSTRUCTIONS}\n\nConnected tool servers, loaded with tool_search when needed:\n{}", lines.join("\n"))
+        format!("{TOOLS_INSTRUCTIONS}\n\nConnected tool servers, loaded with tool_search when needed:\n{}{cowork}", lines.join("\n"))
     }
 
     fn search(&mut self, query: &str) -> (String, Vec<String>) {

@@ -136,6 +136,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
             }
 
             if (LocalOpenList.current != null) {
+                OpenListButton()
                 BarTitle("New conversation")
                 breadcrumb()
             } else {

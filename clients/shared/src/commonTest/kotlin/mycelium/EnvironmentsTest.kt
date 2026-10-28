@@ -30,6 +30,9 @@ import mycelium.state.environmentCannotRunText
 import mycelium.state.environmentControl
 import mycelium.state.environmentMissingText
 import mycelium.state.environmentRunningFor
+import mycelium.state.EnvironmentNoNodeText
+import mycelium.state.environmentNodes
+import mycelium.state.environmentRunOn
 import mycelium.state.environmentStage
 import mycelium.state.environmentStoppedText
 import mycelium.state.environmentAppsToStart
@@ -272,6 +275,31 @@ class EnvironmentsTest {
         assertEquals("Chromium · agent", environmentWindowApp(environment, environment.windows[0], apps))
         assertEquals("Files", environmentWindowApp(environment, environment.windows[1], apps))
         assertEquals("Chromium, Files", environmentOpenApps(environment, apps))
+    }
+
+    @Test
+    fun onlyOnlineNodesThatCanRunAnEnvironmentAreOfferedToRunOn() {
+        val nodes = listOf(node("n1", "laptop", CanRun), node("n2", "atlas-box", CanRun), node("n3", "old-box", CannotRun), node("n4", "asleep", CanRun, online = false), node("n5", "unchecked", null))
+
+        assertEquals(listOf("atlas-box", "laptop"), environmentNodes(nodes).map { it.name })
+    }
+
+    @Test
+    fun runOnDefaultsToTheNodeUsedLastThenTheFirstAndTheChoiceWins() {
+        val eligible = environmentNodes(listOf(node("n1", "laptop", CanRun), node("n2", "atlas-box", CanRun)))
+
+        assertEquals("laptop", environmentRunOn(eligible, lastUsedId = "n1", chosenId = null)?.name)
+        assertEquals("atlas-box", environmentRunOn(eligible, lastUsedId = "n1", chosenId = "n2")?.name)
+        assertEquals("atlas-box", environmentRunOn(eligible, lastUsedId = "gone", chosenId = null)?.name)
+    }
+
+    @Test
+    fun aChatWithNoNodeOnlineShowsTheNoNodeStateUntilOneComesOnline() {
+        assertEquals(EnvironmentStage.NoNode, environmentStage(null, null, noNode = true))
+        assertEquals(EnvironmentStage.NoNode, environmentStage(environment(EnvironmentState.Stopped), null, noNode = true))
+        assertEquals(EnvironmentStage.Active, environmentStage(environment(), null, noNode = true))
+        assertEquals(EnvironmentStage.Empty, environmentStage(null, CanRun, noNode = false))
+        assertEquals("No node that can run an environment is online. Start one from Nodes.", EnvironmentNoNodeText)
     }
 }
 

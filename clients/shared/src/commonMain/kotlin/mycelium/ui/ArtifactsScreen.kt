@@ -117,6 +117,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Artefacts")
             Box(Modifier.weight(1f))
             MyButton({ creating = true }, text = "New artefact", icon = MyIcon.Plus, variant = ButtonVariant.Outline)

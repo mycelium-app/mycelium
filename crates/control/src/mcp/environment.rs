@@ -1,10 +1,11 @@
 use super::call::{ToolCall, ToolReply};
 use crate::decision_providers::{ask, box_of, provider_for};
-use crate::environments::{EnvironmentRecord, launch_app, record_action};
+use crate::environments::{EnvironmentRecord, Starter, launch_app, record_action, start_environment};
 use crate::error::ApiResult;
 use crate::nodes::node_offline;
 use crate::state::{AppState, EnvironmentInputAnswer, EnvironmentScreenshotAnswer};
-use mycelium_proto::api::{EnvironmentController, EnvironmentState, EnvironmentTarget};
+use crate::store::find_owned;
+use mycelium_proto::api::{EnvironmentController, EnvironmentState, EnvironmentTarget, StartEnvironmentRequest};
 use mycelium_proto::link::{ControlToNode, EnvironmentInputAction};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -22,8 +23,18 @@ const BUTTONS: [&str; 3] = ["left", "right", "middle"];
 pub fn definitions() -> Value {
     json!([
         {
+            "name": "environment_start",
+            "description": "Start the environment for this conversation: a separate desktop with its own browser. It runs on a node that can run environments; when several are online, the one the person used last. Does nothing if one is already running. Take a screenshot afterwards to see it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "apps": {"type": "array", "items": {"type": "string"}, "description": "App ids to open on start, from the node's apps. Defaults to the browser."},
+                },
+            },
+        },
+        {
             "name": "environment_screenshot",
-            "description": "Take a screenshot of the environment: a separate desktop with its own browser that the person started for you. It is never the person's own screen. Coordinates for the other environment tools are pixels in this image, from the top left. Returns an error if no environment is running; you cannot start one.",
+            "description": "Take a screenshot of the environment: a separate desktop with its own browser that the person started for you. It is never the person's own screen. Coordinates for the other environment tools are pixels in this image, from the top left. Returns an error if no environment is running; start one with environment_start.",
             "inputSchema": {"type": "object", "properties": {}},
         },
         {
@@ -202,6 +213,27 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let Some(conversation_id) = caller.conversation_id().await? else {
         return Ok(ToolReply::text("The environment belongs to a conversation, so use this tool from one.", true));
     };
+
+    if tool == "environment_start" {
+        if let Some(running) = state.hub.environment_of(conversation_id).filter(EnvironmentRecord::is_live) {
+            return Ok(ToolReply::text(&format!("The environment is already running on {}.", running.environment.node_name), false));
+        }
+
+        let apps = match arguments.get("apps") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(chosen)) => Some(chosen.iter().filter_map(Value::as_str).map(String::from).collect()),
+            Some(_) => return Ok(ToolReply::invalid("environment_start apps must be a list of app ids.")),
+        };
+        let owner = caller.owner().await?;
+        let row = find_owned(&state.pool, conversation_id, owner).await?;
+        let person = sqlx::query_scalar::<_, String>("select name from users where id = $1").bind(owner).fetch_one(&state.pool).await?;
+        let started = start_environment(state, &row, &person, StartEnvironmentRequest { width: None, height: None, apps, node_id: None }, Starter::Agent).await;
+
+        return Ok(match started {
+            Ok(record) => ToolReply::text(&format!("Started the environment on {}. Take a screenshot to see it once it is running.", record.environment.node_name), false),
+            Err(error) => ToolReply::text(error.message(), true),
+        });
+    }
     let record = match agent_environment(state, conversation_id) {
         Ok(record) => record,
         Err(reply) => return Ok(reply),

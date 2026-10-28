@@ -313,12 +313,14 @@ fun SplitButton(
     description: String? = null,
     menuWidth: Dp = Tokens.Size.Menu,
     menuLabel: String? = null,
+    icon: MyIcon? = null,
+    muted: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     val verb = text.replaceFirstChar { it.lowercase() }
 
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(Tokens.Size.Hairline), verticalAlignment = Alignment.CenterVertically) {
-        MyButton(onClick, text = text, variant = variant, size = size, description = description)
+        MyButton(onClick, text = text, icon = icon, variant = variant, size = size, description = description, muted = muted)
 
         Box {
             MyButton(
@@ -326,6 +328,7 @@ fun SplitButton(
                 icon = MyIcon.ChevronDown,
                 variant = variant,
                 size = size,
+                muted = muted,
                 description = "More ways to $verb",
                 selected = open,
                 stateDescription = if (open) "Expanded" else "Collapsed",
@@ -374,14 +377,30 @@ fun Bar(
 fun OpenListButton() {
     val openList = LocalOpenList.current ?: return
 
-    MyButton(openList, icon = MyIcon.Menu, description = if (LocalTouch.current) "Conversations" else "Show the sidebar", muted = true)
+    if (LocalTouch.current) {
+        MyButton(openList, icon = MyIcon.Menu, description = "Conversations", muted = true)
+    } else {
+        MyButton(openList, icon = MyIcon.PanelLeft, description = "Show the sidebar", tooltip = "Show the sidebar (Ctrl or Cmd+B)", muted = true)
+    }
 }
 
 @Composable
 fun BarTitle(text: String, modifier: Modifier = Modifier) {
-    OpenListButton()
-
     Label(text, modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
+}
+
+@Composable
+fun PanelTitle(text: String, modifier: Modifier = Modifier) {
+    PanelLeading()
+    BarTitle(text, modifier)
+}
+
+@Composable
+fun PanelLeading() {
+    val back = LocalPanelBack.current ?: return
+
+    OpenListButton()
+    MyButton(back, icon = MyIcon.ChevronLeft, description = "Back to conversation", muted = true)
 }
 
 @Composable

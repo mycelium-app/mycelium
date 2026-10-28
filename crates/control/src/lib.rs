@@ -255,6 +255,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/environment/stream", get(environments::stream))
         .route("/api/v1/conversations/{id}/environment/stream-ticket", post(environments::stream_ticket))
         .route("/api/v1/nodes/{id}/environment/check", post(environments::check))
+        .route("/api/v1/environment/last-node", get(environments::last_node))
         .route("/api/v1/conversations/{id}/attachments", post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
         .route("/api/v1/attachments/{sha256}", get(attachments::get))
         .route("/api/v1/artifacts", get(artifacts::list).post(artifacts::create).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))

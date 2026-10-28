@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.15.1
+
+- Every chat can have an environment, including chats on a chat model: the Environment tab is in every chat, and starting one uses a node that can run environments, with Run on to choose when there are several.
+- Agents start the environment themselves with environment_start, and are told how to work in one: start it when needed, hand web goals to browser_task, click by describing the target, and take a screenshot after you hand back.
+- Break notes are under Recent breaks in Wellness & Learning, Reflections, beside the weekly reflection, instead of in Settings.
+- A project's new logo shows in the sidebar and every list straight away, including one an agent sets, instead of only after opening Projects.
+- The project, node and Open in IDE controls in a conversation's header share one style.
+- The sidebar can be hidden at any width, with the button at the top of the sidebar or Ctrl or Cmd+B, and it stays hidden after a restart. There is one Show the sidebar button, and a panel that takes over the chat has one header with Back to conversation.
+- Moving a conversation no longer misses a file edited in the same second as the last commit.
+- A failed action shows as a toast in the corner, with Retry where it can be retried, instead of a bar across the top of the app. It stays until you dismiss it, and the break reminder uses the same toast.
+- A chat's account button names its model when it is not the provider's default, instead of showing an internal id.
+
 ## v0.15.0
 
 Cowork follow-ups. Every screen in this release was designed in the canonical design artefact first.

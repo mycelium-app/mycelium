@@ -125,6 +125,7 @@ fun TasksScreen(store: Store, state: AppState, platform: Platform, onOpen: (Stri
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Tasks")
             Box(Modifier.weight(1f))
 

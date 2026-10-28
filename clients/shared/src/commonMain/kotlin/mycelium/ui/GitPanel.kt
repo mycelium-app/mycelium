@@ -148,7 +148,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                 BackButton("the changes", { viewing = null; diff = null })
                 Label(open.path, Modifier.weight(1f), Tokens.Type.Code, maxLines = 1)
             } else {
-                BarTitle("Git")
+                PanelTitle("Git")
             }
         }
 

@@ -74,6 +74,7 @@ fun UsageHistoryScreen(store: Store) {
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Usage history")
             Box(Modifier.weight(1f))
             Segmented(ActivityRanges.map { it.first }, ActivityRanges.first { it.second == range }.first, { label -> range = ActivityRanges.first { it.first == label }.second }, groupLabel = "Period")

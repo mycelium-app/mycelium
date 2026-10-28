@@ -25,7 +25,11 @@ pub(super) fn working_tree_changes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>>
     let env = [("GIT_INDEX_FILE".to_string(), scratch.to_string_lossy().into_owned())];
 
     let prepared = if Path::new(&real_index).exists() {
-        std::fs::copy(&real_index, &scratch).map(|_| Vec::new()).map_err(|cause| anyhow!("Could not read the folder's index: {cause}."))
+        let copied = std::fs::copy(&real_index, &scratch)
+            .and_then(|_| std::fs::metadata(&real_index)?.modified())
+            .and_then(|written| std::fs::File::options().write(true).open(&scratch)?.set_modified(written));
+
+        copied.map(|_| Vec::new()).map_err(|cause| anyhow!("Could not read the folder's index: {cause}."))
     } else {
         git_with_env(cwd, &["read-tree", "HEAD"], &[], &env)
     };
@@ -408,6 +412,8 @@ mod tests {
         commit_all(&dir, "first");
         write(&dir, "a.txt", "two\n");
         write(&dir, "src/new.txt", "new\n");
+        let index_written = std::fs::metadata(dir.path().join(".git/index")).unwrap().modified().unwrap();
+        std::fs::File::options().write(true).open(dir.path().join("a.txt")).unwrap().set_modified(index_written).unwrap();
 
         let plan = run(dir.path(), GitCommand::MovePlan).unwrap();
         git(dir.path(), &["checkout", "--detach"], &[]).unwrap();

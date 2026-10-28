@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::chats;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
 use crate::rfb::ClientFilter;
@@ -27,6 +28,7 @@ const HEIGHT_LIMITS: (u32, u32) = (200, 2160);
 const CAPABILITY_WAIT: Duration = Duration::from_secs(5);
 const NODE_TIMEOUT: Duration = Duration::from_secs(15);
 const FALLBACK_PERSON: &str = "The person";
+const NO_ENVIRONMENT_NODE: &str = "No node that can run an environment is online. Start one from Nodes.";
 
 #[derive(Clone)]
 pub struct EnvironmentRecord {
@@ -396,24 +398,44 @@ fn live_environment(state: &AppState, conversation_id: Uuid, user_id: Uuid) -> A
     Ok(record)
 }
 
-pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<StartEnvironmentRequest>>) -> ApiResult<Json<Environment>> {
-    let row = find_owned(&state.pool, id, user.id).await?;
+pub enum Starter {
+    Person,
+    Agent,
+}
 
-    if let Some(existing) = state.hub.environment_of(id).filter(EnvironmentRecord::is_live) {
-        return Ok(Json(existing.environment));
+async fn eligible_environment_nodes(state: &AppState, owner: Uuid) -> ApiResult<Vec<Uuid>> {
+    let owned = sqlx::query_scalar::<_, Uuid>("select id from nodes where created_by = $1 and revoked_at is null order by name").bind(owner).fetch_all(&state.pool).await?;
+
+    Ok(owned.into_iter().filter(|node_id| state.hub.is_online(*node_id) && state.hub.environment_capability_of(*node_id).is_some_and(|capability| capability.available)).collect())
+}
+
+async fn environment_node(state: &AppState, row: &ConversationRow, requested: Option<Uuid>) -> ApiResult<Uuid> {
+    if row.agent != chats::CHAT_AGENT {
+        return Ok(row.node_id);
     }
 
-    if !state.hub.is_online(row.node_id) {
+    let eligible = eligible_environment_nodes(state, row.owner).await?;
+    let last_used = sqlx::query_scalar::<_, Option<Uuid>>("select environment_node_id from user_settings where owner = $1").bind(row.owner).fetch_optional(&state.pool).await?.flatten();
+    let chosen = requested.filter(|node_id| eligible.contains(node_id)).or(last_used.filter(|node_id| eligible.contains(node_id))).or(eligible.first().copied());
+
+    chosen.ok_or_else(|| ApiError::conflict("environment_no_node", NO_ENVIRONMENT_NODE))
+}
+
+pub async fn start_environment(state: &AppState, row: &ConversationRow, person: &str, requested: StartEnvironmentRequest, starter: Starter) -> ApiResult<EnvironmentRecord> {
+    let id = row.id;
+    let node_id = environment_node(state, row, requested.node_id).await?;
+
+    if !state.hub.is_online(node_id) {
         return Err(node_offline());
     }
 
     if row.archived_at.is_some() {
         let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(id).fetch_one(&state.pool).await?;
-        state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
+        state.publish(Some(row.owner), StreamMessage::Conversation(restored.to_proto()?));
     }
 
-    let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(row.node_id).fetch_one(&state.pool).await?;
-    let capability = state.hub.environment_capability_of(row.node_id);
+    let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(node_id).fetch_one(&state.pool).await?;
+    let capability = state.hub.environment_capability_of(node_id);
 
     let offered = capability.as_ref().map(|capability| capability.apps.clone()).unwrap_or_default();
 
@@ -427,7 +449,6 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         Some(_) => {}
     }
 
-    let requested = request.map(|Json(request)| request).unwrap_or(StartEnvironmentRequest { width: None, height: None, apps: None });
     let size = EnvironmentSize {
         width: requested.width.map_or(DEFAULT_SIZE.width, |width| width.clamp(WIDTH_LIMITS.0, WIDTH_LIMITS.1)),
         height: requested.height.map_or(DEFAULT_SIZE.height, |height| height.clamp(HEIGHT_LIMITS.0, HEIGHT_LIMITS.1)),
@@ -442,11 +463,11 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         }
         None => offered.iter().find(|app| app.kind == EnvironmentAppKind::Browser).map(|app| app.id.clone()).into_iter().collect(),
     };
-    let person = Some(user.name.trim()).filter(|name| !name.is_empty()).unwrap_or(FALLBACK_PERSON).to_string();
+    let person = Some(person.trim()).filter(|name| !name.is_empty()).unwrap_or(FALLBACK_PERSON).to_string();
     let record = EnvironmentRecord {
-        user_id: user.id,
+        user_id: row.owner,
         person: person.clone(),
-        environment: Environment { conversation_id: id, state: EnvironmentState::Starting, controller: EnvironmentController::Agent, node_id: row.node_id, node_name, size, started_at: Utc::now(), stopped_at: None, failure: None, browser: None, target: None, browser_task: None, windows: Vec::new(), agent_window: None, person: Some(person), closed_with_conversation: false },
+        environment: Environment { conversation_id: id, state: EnvironmentState::Starting, controller: EnvironmentController::Agent, node_id, node_name, size, started_at: Utc::now(), stopped_at: None, failure: None, browser: None, target: None, browser_task: None, windows: Vec::new(), agent_window: None, person: Some(person), closed_with_conversation: false },
         actions: VecDeque::new(),
         handed_back: false,
         interrupted: false,
@@ -454,16 +475,44 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     state.hub.begin_environment(record.clone());
 
-    if !state.hub.send(row.node_id, ControlToNode::StartEnvironment { conversation_id: id, width: size.width, height: size.height, apps }) {
+    if !state.hub.send(node_id, ControlToNode::StartEnvironment { conversation_id: id, width: size.width, height: size.height, apps }) {
         state.hub.change_environment(id, |record| record.environment.state = EnvironmentState::Stopped);
 
         return Err(node_offline());
     }
 
-    publish_environment(&state, &record);
-    record_thread_line(&state, &record, &format!("You started the environment on {}.", record.environment.node_name), None).await;
+    sqlx::query("insert into user_settings (owner, environment_node_id) values ($1, $2) on conflict (owner) do update set environment_node_id = excluded.environment_node_id").bind(row.owner).bind(node_id).execute(&state.pool).await?;
+
+    publish_environment(state, &record);
+
+    match starter {
+        Starter::Person => record_thread_line(state, &record, &format!("You started the environment on {}.", record.environment.node_name), None).await,
+        Starter::Agent => {
+            record_action(state, id, "The agent started the environment", |_| {});
+            record_thread_line(state, &record, &format!("The agent started the environment on {}.", record.environment.node_name), None).await;
+        }
+    }
+
+    Ok(record)
+}
+
+pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, request: Option<Json<StartEnvironmentRequest>>) -> ApiResult<Json<Environment>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+
+    if let Some(existing) = state.hub.environment_of(id).filter(EnvironmentRecord::is_live) {
+        return Ok(Json(existing.environment));
+    }
+
+    let requested = request.map(|Json(request)| request).unwrap_or(StartEnvironmentRequest { width: None, height: None, apps: None, node_id: None });
+    let record = start_environment(&state, &row, &user.name, requested, Starter::Person).await?;
 
     Ok(Json(record.environment))
+}
+
+pub async fn last_node(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<serde_json::Value>> {
+    let node_id = sqlx::query_scalar::<_, Option<Uuid>>("select environment_node_id from user_settings where owner = $1").bind(user.id).fetch_optional(&state.pool).await?.flatten();
+
+    Ok(Json(serde_json::json!({"node_id": node_id})))
 }
 
 pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Environment>> {

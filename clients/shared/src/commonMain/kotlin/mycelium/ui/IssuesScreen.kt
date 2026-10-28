@@ -89,6 +89,7 @@ fun IssuesScreen(store: Store, state: AppState, onOpened: (Conversation) -> Unit
 
     Column(Modifier.fillMaxSize()) {
         Bar {
+            OpenListButton()
             BarTitle("Issues")
         }
 

@@ -237,6 +237,8 @@ fun TextStyle.themedWith(fonts: Fonts, codeScale: Float): TextStyle {
 
 val LocalOpenList = staticCompositionLocalOf<(() -> Unit)?> { null }
 
+val LocalPanelBack = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 val LocalTouch = staticCompositionLocalOf { false }
 
 val LocalPalette = staticCompositionLocalOf { Tokens.Dark }
