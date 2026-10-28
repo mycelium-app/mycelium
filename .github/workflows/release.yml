@@ -1,0 +1,308 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - clients/gradle/libs.versions.toml
+      - clients/gradle/wrapper/gradle-wrapper.properties
+      - editor/pnpm-lock.yaml
+      - mise.toml
+      - .github/workflows/release.yml
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MYCELIUM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
+
+jobs:
+  binary:
+    name: Node and control plane binary
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    container: messense/rust-musl-cross:x86_64-musl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: musl
+          save-if: ${{ github.ref_type != 'tag' }}
+
+      - run: cargo build --release --locked --package mycelium-cli --target x86_64-unknown-linux-musl
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-musl/release/mycelium dist/mycelium-linux-x86_64
+          cd dist && sha256sum mycelium-linux-x86_64 | cut -d' ' -f1 > mycelium-linux-x86_64.sha256
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary
+          path: dist/
+
+  desktop-web:
+    name: Desktop and web clients
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: java
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref_type == 'tag' }}
+
+      - run: sudo apt-get install -y -qq --no-install-recommends fakeroot binutils libatomic1
+
+      - name: Build
+        working-directory: clients
+        run: |
+          export MYCELIUM_JBR_HOME="$JAVA_HOME"
+          ./gradlew --no-daemon --configuration-cache :desktop:packageDeb :desktop:createDistributable :web:wasmJsBrowserDistribution
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp clients/desktop/build/compose/binaries/main/deb/*.deb dist/mycelium-desktop-linux-x86_64.deb
+          tar -C clients/desktop/build/compose/binaries/main/app -czf dist/mycelium-desktop-linux-x86_64.tar.gz mycelium
+          tar -C clients/web/build/dist/wasmJs/productionExecutable -czf dist/mycelium-web.tar.gz .
+          cd dist && for file in *; do sha256sum "$file" | cut -d' ' -f1 > "$file.sha256"; done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-web
+          path: dist/
+
+  android:
+    name: Android app
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      ANDROID_PLATFORM: "37.0"
+      ANDROID_BUILD_TOOLS: "37.0.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: java
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref_type == 'tag' }}
+
+      - name: Android SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null
+          echo "sdk.dir=$ANDROID_HOME" > clients/local.properties
+
+      - name: Build
+        working-directory: clients
+        run: ./gradlew --no-daemon --configuration-cache :androidApp:assembleRelease
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp "$(find clients/androidApp/build/outputs/apk/release -name '*-unsigned.apk' | head -n1)" dist/mycelium-android-unsigned.apk
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-unsigned
+          path: dist/
+
+  sign-android:
+    name: Sign the Android app
+    if: github.ref_type == 'tag'
+    needs: android
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    env:
+      ANDROID_BUILD_TOOLS: "37.0.0"
+      APK: mycelium-android.apk
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-unsigned
+
+      - run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null'
+
+      - name: Sign
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keystore="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          tools="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          "$tools/apksigner" sign --ks "$keystore" --ks-key-alias mycelium \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out "$APK" mycelium-android-unsigned.apk
+          shred -u "$keystore"
+          "$tools/apksigner" verify "$APK"
+
+      - name: Check the version matches the tag
+        run: |
+          badging=$("$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2" dump badging "$APK")
+          id=$(echo "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          code=$(echo "$badging" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          name=$(echo "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          code_of() { v=${1#v}; echo $(( ${v%%.*} * 10000 + $(echo "$v" | cut -d. -f2) * 100 + $(echo "$v" | cut -d. -f3) )); }
+          expected=$(code_of "$GITHUB_REF_NAME")
+          previous=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^$GITHUB_REF_NAME$" | head -n1)
+          echo "apk id=$id versionCode=$code versionName=$name, expected code $expected, previous tag ${previous:-none}"
+          [ "$id" = "slop.mycelium" ] || { echo "::error::applicationId $id is not slop.mycelium"; exit 1; }
+          [ "$code" = "$expected" ] || { echo "::error::versionCode $code is not $expected from $GITHUB_REF_NAME"; exit 1; }
+          [ "$name" = "${GITHUB_REF_NAME#v}" ] || { echo "::error::versionName $name is not ${GITHUB_REF_NAME#v}"; exit 1; }
+          [ -z "$previous" ] || [ "$code" -gt "$(code_of "$previous")" ] || { echo "::error::versionCode $code is not above $previous"; exit 1; }
+          sha256sum "$APK" | cut -d' ' -f1 > "$APK.sha256"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android
+          path: |
+            mycelium-android.apk
+            mycelium-android.apk.sha256
+
+  image:
+    name: Control plane image
+    if: github.ref_type == 'tag'
+    needs: [binary, desktop-web]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Prebuilt stages
+        run: |
+          mkdir -p "$RUNNER_TEMP/binary" "$RUNNER_TEMP/web/web"
+          install -m 0755 dist/mycelium-linux-x86_64 "$RUNNER_TEMP/binary/mycelium"
+          tar -xzf dist/mycelium-web.tar.gz -C "$RUNNER_TEMP/web/web"
+
+      - name: Tags
+        id: tags
+        run: |
+          image=ghcr.io/${{ github.repository }}
+          newest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          tags="$image:${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_NAME" = "$newest" ] && tags="$tags,$image:latest"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-contexts: |
+            binary=${{ runner.temp }}/binary
+            web=${{ runner.temp }}/web
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max
+
+  flake:
+    name: Release flake
+    if: github.ref_type == 'tag'
+    needs: [binary, desktop-web]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - run: |
+          ci/release-flake.sh "$GITHUB_REF_NAME" "$(cat dist/mycelium-linux-x86_64.sha256)" "$(cat dist/mycelium-desktop-linux-x86_64.tar.gz.sha256)" mycelium-flake.tar.gz
+          sha256sum mycelium-flake.tar.gz | cut -d' ' -f1 > mycelium-flake.tar.gz.sha256
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flake
+          path: |
+            mycelium-flake.tar.gz
+            mycelium-flake.tar.gz.sha256
+
+  release:
+    name: GitHub release
+    if: github.ref_type == 'tag'
+    needs: [binary, desktop-web, sign-android, image, flake]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -f dist/mycelium-android-unsigned.apk
+          cp install.sh dist/install.sh
+          printf '%s' "$GITHUB_REF_NAME" > dist/latest
+          awk -v tag="## $GITHUB_REF_NAME" '$0 == tag {on=1; next} /^## / {on=0} on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          [ -s "$RUNNER_TEMP/notes.md" ] || echo "mycelium $GITHUB_REF_NAME." > "$RUNNER_TEMP/notes.md"
+          newest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "mycelium $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false \
+            --latest="$([ "$GITHUB_REF_NAME" = "$newest" ] && echo true || echo false)"

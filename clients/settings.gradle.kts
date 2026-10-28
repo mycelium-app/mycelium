@@ -10,14 +10,15 @@ plugins {
     id("com.github.burrunan.s3-build-cache") version "1.9.10"
 }
 
-val buildCacheKeys: Pair<String, String>? = run {
-    val fromCi = System.getenv("BUILD_CACHE_ACCESS_KEY")?.let { key -> System.getenv("BUILD_CACHE_SECRET_KEY")?.let { secret -> key to secret } }
-    val file = File(System.getenv("BUILD_CACHE_CREDENTIALS") ?: "${System.getProperty("user.home")}/.config/build-cache/credentials")
-    val fromFile = file.takeIf { it.isFile }?.readLines()?.mapNotNull { line -> line.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0].trim() to it[1].trim() } }?.toMap()?.let { fields ->
-        fields["aws_access_key_id"]?.let { key -> fields["aws_secret_access_key"]?.let { secret -> key to secret } }
-    }
+data class RemoteBuildCache(val endpoint: String, val accessKey: String, val secretKey: String)
 
-    fromCi ?: fromFile
+val remoteBuildCache: RemoteBuildCache? = run {
+    val file = File(System.getenv("BUILD_CACHE_CREDENTIALS") ?: "${System.getProperty("user.home")}/.config/build-cache/credentials")
+    val fields = file.takeIf { it.isFile }?.readLines()?.mapNotNull { line -> line.split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0].trim() to it[1].trim() } }?.toMap().orEmpty()
+    val endpoint = System.getenv("BUILD_CACHE_ENDPOINT") ?: fields["endpoint"]
+    val accessKey = System.getenv("BUILD_CACHE_ACCESS_KEY") ?: fields["aws_access_key_id"]
+    val secretKey = System.getenv("BUILD_CACHE_SECRET_KEY") ?: fields["aws_secret_access_key"]
+    if (endpoint != null && accessKey != null && secretKey != null) RemoteBuildCache(endpoint, accessKey, secretKey) else null
 }
 
 buildCache {
@@ -25,15 +26,15 @@ buildCache {
         isEnabled = true
     }
 
-    if (buildCacheKeys != null) {
+    if (remoteBuildCache != null) {
         remote<com.github.burrunan.s3cache.AwsS3BuildCache> {
-            endpoint = "https://s3.example.com"
+            endpoint = remoteBuildCache.endpoint
             region = "garage"
             bucket = "build-cache"
             prefix = "mycelium/gradle/"
             forcePathStyle = true
-            awsAccessKeyId = buildCacheKeys.first
-            awsSecretKey = buildCacheKeys.second
+            awsAccessKeyId = remoteBuildCache.accessKey
+            awsSecretKey = remoteBuildCache.secretKey
             isPush = true
         }
     }

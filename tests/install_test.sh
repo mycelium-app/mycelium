@@ -106,7 +106,7 @@ stop_release() {
 download_verifies_and_installs_latest_release() {
   reset_home
   serve_release v9.9.9
-  MYCELIUM_S3="http://127.0.0.1:18931" run_install https://control.example >/dev/null
+  MYCELIUM_RELEASES="http://127.0.0.1:18931" MYCELIUM_LATEST="http://127.0.0.1:18931/latest" run_install https://control.example >/dev/null
   status=$?
   stop_release
   test "$status" -eq 0 && test -x "$work/home/.local/bin/mycelium"
@@ -115,7 +115,7 @@ download_verifies_and_installs_latest_release() {
 checksum_mismatch_installs_nothing() {
   reset_home
   serve_release v9.9.9 corrupt
-  if MYCELIUM_S3="http://127.0.0.1:18931" run_install https://control.example 2>"$work/err"; then
+  if MYCELIUM_RELEASES="http://127.0.0.1:18931" MYCELIUM_LATEST="http://127.0.0.1:18931/latest" run_install https://control.example 2>"$work/err"; then
     stop_release
     return 1
   fi
@@ -161,7 +161,7 @@ case "$1" in
 esac
 EOF2
   chmod +x "$work/arm/bin/uname"
-  output="$(HOME="$work/home" PATH="$work/arm/bin:$work/bin:$PATH" MYCELIUM_S3="http://127.0.0.1:9/none" sh "$root/install.sh" 2>&1)" && return 1
+  output="$(HOME="$work/home" PATH="$work/arm/bin:$work/bin:$PATH" MYCELIUM_RELEASES="http://127.0.0.1:9/none" MYCELIUM_LATEST="http://127.0.0.1:9/none/latest" sh "$root/install.sh" 2>&1)" && return 1
   echo "$output" | grep -q "Published builds are for Linux x86_64 only"
 }
 

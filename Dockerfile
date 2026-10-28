@@ -4,25 +4,12 @@ ARG ALPINE_VERSION=3.23
 FROM rust:1.96.0-alpine${ALPINE_VERSION} AS binary
 ARG MYCELIUM_VERSION=
 ENV MYCELIUM_VERSION=${MYCELIUM_VERSION}
-ARG SCCACHE_VERSION=0.18.0
-RUN apk add --no-cache build-base curl \
- && curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-  | tar -xz -C /usr/local/bin --strip-components=1 "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"
-ENV SCCACHE_BUCKET=build-cache \
-    SCCACHE_ENDPOINT=https://s3.example.com \
-    SCCACHE_REGION=garage \
-    SCCACHE_S3_KEY_PREFIX=mycelium/sccache/image/ \
-    SCCACHE_S3_USE_SSL=true
+RUN apk add --no-cache build-base
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN --mount=type=secret,id=build_cache_key --mount=type=secret,id=build_cache_secret \
-    if [ -s /run/secrets/build_cache_key ]; then \
-      export RUSTC_WRAPPER=sccache AWS_ACCESS_KEY_ID="$(cat /run/secrets/build_cache_key)" AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/build_cache_secret)"; \
-    fi \
- && cargo build --release --package mycelium-cli \
- && cp target/release/mycelium /mycelium \
- && if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
+RUN cargo build --release --package mycelium-cli \
+ && cp target/release/mycelium /mycelium
 
 FROM gradle:9.8.2-jdk21 AS web
 RUN apt-get update \

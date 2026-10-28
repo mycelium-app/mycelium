@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-S3="${MYCELIUM_S3:-https://github.com/mycelium-app/mycelium/releases/download}"
+RELEASES="${MYCELIUM_RELEASES:-https://github.com/mycelium-app/mycelium/releases/download}"
+LATEST="${MYCELIUM_LATEST:-https://github.com/mycelium-app/mycelium/releases/latest/download/latest}"
 CONTROL_PLANE="${1:-${MYCELIUM_CONTROL_PLANE:-}}"
 
 fail() {
@@ -52,12 +53,12 @@ install_binary() {
     [ "$os-$arch" = "linux-x86_64" ] || fail "Published builds are for Linux x86_64 only. On $os $arch, build Mycelium from source or use the Nix package, then run this again with MYCELIUM_BINARY set to the binary."
     command -v curl >/dev/null 2>&1 || fail "curl is required. Install curl and run this again."
     command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail "sha256sum or shasum is required."
-    tag="$(curl -fsSL "$S3/latest")" || fail "could not read $S3/latest. Check your network connection."
+    tag="$(curl -fsSL "$LATEST")" || fail "could not read $LATEST. Check your network connection."
     asset="mycelium-$os-$arch"
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    curl -fsSL -o "$tmp/$asset" "$S3/$tag/$asset" || fail "could not download $S3/$tag/$asset. There may be no build for $os $arch."
-    curl -fsSL -o "$tmp/$asset.sha256" "$S3/$tag/$asset.sha256" || fail "could not download the checksum for $asset."
+    curl -fsSL -o "$tmp/$asset" "$RELEASES/$tag/$asset" || fail "could not download $RELEASES/$tag/$asset. There may be no build for $os $arch."
+    curl -fsSL -o "$tmp/$asset.sha256" "$RELEASES/$tag/$asset.sha256" || fail "could not download the checksum for $asset."
     expected="$(cut -d' ' -f1 "$tmp/$asset.sha256")"
     [ "$expected" = "$(sha256_of "$tmp/$asset")" ] || fail "checksum mismatch for $asset. Nothing was installed."
     source_binary="$tmp/$asset"
