@@ -39,6 +39,10 @@ async fn mcp(State(remote): State<Arc<Remote>>, Json(body): Json<Value>) -> Resp
 }
 
 async fn call_with_file(tool: &str, arguments: Value, file: Vec<u8>, reported_size: usize) -> (Value, Vec<(String, Value)>, Vec<Value>) {
+    call_with_file_sent(tool, arguments, file, reported_size, false).await
+}
+
+async fn call_with_file_sent(tool: &str, arguments: Value, file: Vec<u8>, reported_size: usize, in_chunks: bool) -> (Value, Vec<(String, Value)>, Vec<Value>) {
     let server = Server::start().await;
     let remote = Arc::new(Remote::default());
     let base = serve(Router::new().route("/mcp", post(mcp)).layer(DefaultBodyLimit::max(64 * 1024 * 1024)).with_state(remote.clone())).await;
@@ -62,7 +66,18 @@ async fn call_with_file(tool: &str, arguments: Value, file: Vec<u8>, reported_si
 
             assert!(matches!(command, GitCommand::ReadFile { .. }));
             let data = base64::engine::general_purpose::STANDARD.encode(&file);
-            link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"data": data, "size": reported_size}), error: None }).await;
+
+            if in_chunks {
+                let pieces: Vec<&[u8]> = data.as_bytes().chunks(1024 * 1024).collect();
+
+                for (seq, piece) in pieces.iter().enumerate() {
+                    link.send(NodeToControl::GitChunk { request_id, seq: seq as u32, data: String::from_utf8(piece.to_vec()).unwrap() }).await;
+                }
+
+                link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"size": reported_size, "chunks": pieces.len()}), error: None }).await;
+            } else {
+                link.send(NodeToControl::GitResult { request_id, ok: true, output: json!({"data": data, "size": reported_size}), error: None }).await;
+            }
         }
     );
     let events = server.events(conversation.id).await;
@@ -87,6 +102,15 @@ async fn a_large_text_file_reaches_a_create_tool_exactly_and_never_enters_the_tr
 async fn an_attachment_tool_receives_the_files_bytes_as_base64() {
     let bytes: Vec<u8> = (0..=255u8).collect();
     let (reply, calls, _) = call_with_file("create_attachment", json!({"name": "all-bytes.bin", "content": {"file": "out/all-bytes.bin"}}), bytes.clone(), bytes.len()).await;
+
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    assert_eq!(calls[0].1["content"].as_str().unwrap(), base64::engine::general_purpose::STANDARD.encode(&bytes));
+}
+
+#[tokio::test]
+async fn a_file_bigger_than_one_websocket_frame_arrives_in_chunks_byte_for_byte_without_dropping_the_link() {
+    let bytes: Vec<u8> = (0..13_400_000u32).map(|index| (index.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+    let (reply, calls, _) = call_with_file_sent("create_attachment", json!({"name": "big.bin", "content": {"file": "out/big.bin"}}), bytes.clone(), bytes.len(), true).await;
 
     assert_eq!(reply["result"]["isError"], false, "{reply}");
     assert_eq!(calls[0].1["content"].as_str().unwrap(), base64::engine::general_purpose::STANDARD.encode(&bytes));

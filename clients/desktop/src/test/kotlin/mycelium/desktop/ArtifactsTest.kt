@@ -160,6 +160,7 @@ class ArtifactsScreenTest {
     fun theKindFilterKeepsOnlyThatKind() {
         showArtifacts()
 
+        rule.onNodeWithContentDescription("Kind: All kinds").performClick()
         rule.onNode(hasText("Page") and isSelectable()).performClick()
 
         assertTrue(shown("Planning board"))

@@ -22,6 +22,7 @@ pub struct ToolCall<'a> {
 
 pub enum ToolReply {
     Text { text: String, is_error: bool },
+    Image { png: String },
     Invalid(String),
 }
 

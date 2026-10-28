@@ -226,7 +226,8 @@ pub async fn approve_for(state: &AppState, owner: Uuid, id: Uuid, request: Appro
         return Err(ApiError::conflict("proposal_not_proposed", "This proposal has already been decided."));
     }
 
-    let created = crate::workflows::create_owned(state, owner, None, found.conversation_id, plan).await;
+    let started_by = crate::workflows::actor_of(state, owner).await?;
+    let created = crate::workflows::create_owned(state, owner, None, found.conversation_id, plan, started_by, None).await;
 
     match created {
         Ok(workflow) => {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::api::{EnvironmentCapability, EnvironmentState};
 use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 use crate::usage_history::OrchestratorReading;
 
@@ -82,6 +83,36 @@ pub enum NodeToControl {
     TerminalExited {
         terminal_id: Uuid,
     },
+    EnvironmentCapability {
+        capability: EnvironmentCapability,
+    },
+    EnvironmentChanged {
+        conversation_id: Uuid,
+        state: EnvironmentState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        browser: Option<String>,
+    },
+    EnvironmentInputDone {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    EnvironmentScreenshotTaken {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        png: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    EnvironmentStreamData {
+        stream_id: Uuid,
+        data: String,
+    },
+    EnvironmentStreamClosed {
+        stream_id: Uuid,
+    },
     Transcript {
         path: String,
         offset: i64,
@@ -112,6 +143,11 @@ pub enum NodeToControl {
         output: Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+    GitChunk {
+        request_id: Uuid,
+        seq: u32,
+        data: String,
     },
     Steered {
         request_id: Uuid,
@@ -463,6 +499,35 @@ pub enum ControlToNode {
     StopTerminal {
         terminal_id: Uuid,
     },
+    StartEnvironment {
+        conversation_id: Uuid,
+        width: u32,
+        height: u32,
+    },
+    StopEnvironment {
+        conversation_id: Uuid,
+    },
+    CheckEnvironment,
+    EnvironmentInput {
+        request_id: Uuid,
+        conversation_id: Uuid,
+        action: EnvironmentInputAction,
+    },
+    EnvironmentScreenshot {
+        request_id: Uuid,
+        conversation_id: Uuid,
+    },
+    OpenEnvironmentStream {
+        stream_id: Uuid,
+        conversation_id: Uuid,
+    },
+    EnvironmentStreamInput {
+        stream_id: Uuid,
+        data: String,
+    },
+    CloseEnvironmentStream {
+        stream_id: Uuid,
+    },
     TranscriptAck {
         path: String,
         bytes: i64,
@@ -536,4 +601,29 @@ pub enum ControlToNode {
     },
     Ping,
     Revoked,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EnvironmentInputAction {
+    Click {
+        x: u32,
+        y: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        button: Option<String>,
+    },
+    Type {
+        text: String,
+    },
+    Scroll {
+        direction: String,
+        amount: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<u32>,
+    },
+    Key {
+        keys: String,
+    },
 }

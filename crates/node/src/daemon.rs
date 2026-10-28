@@ -8,6 +8,7 @@ use crate::link::{Backoff, Liveness, run_link};
 use crate::login::LoginManager;
 use crate::resources::Watcher;
 use crate::ssh::SshServer;
+use crate::environment::EnvironmentManager;
 use crate::terminal::{TerminalManager, find_on_path, user_shell};
 use crate::session::{Launch, SessionHandle, SessionSpec, next_failure_seq, spawn_session};
 use crate::transcripts::TranscriptFollower;
@@ -28,6 +29,7 @@ pub const VERSION: &str = match option_env!("MYCELIUM_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+const FILE_CHUNK_CHARS: usize = 1024 * 1024;
 const UPDATE_EXIT_DELAY: Duration = Duration::from_millis(500);
 const RESOURCE_INTERVAL: Duration = Duration::from_secs(3);
 const USAGE_INTERVAL: Duration = Duration::from_secs(310);
@@ -90,6 +92,7 @@ pub struct Daemon {
     logins: LoginManager,
     usage: Arc<UsageCache>,
     terminals: TerminalManager,
+    environments: EnvironmentManager,
     ssh: SshServer,
     watcher: Watcher,
     transcripts: Mutex<TranscriptFollower>,
@@ -112,6 +115,7 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
         logins: LoginManager::new(out.clone(), login_report),
         usage,
         terminals: TerminalManager::new(out.clone(), find_on_path("tmux"), user_shell()),
+        environments: EnvironmentManager::new(out.clone(), std::env::var_os("PATH").unwrap_or_default()),
         ssh: SshServer::new(out.clone(), config.ssh_host_key_path(), options.home.clone(), user_shell()),
         watcher: Watcher::new(out.clone(), PathBuf::from("/proc"), watched_disks(&config.projects_root), RESOURCE_INTERVAL),
         transcripts: Mutex::new(transcripts),
@@ -251,6 +255,7 @@ impl Daemon {
     pub fn on_connected(&self) {
         self.connected.store(true, Ordering::SeqCst);
         self.write_status();
+        self.environments.report();
 
         if let Ok(mut transcripts) = self.transcripts.lock() {
             transcripts.on_connect();
@@ -295,6 +300,14 @@ impl Daemon {
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
             ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),
+            ControlToNode::StartEnvironment { conversation_id, width, height } => self.environments.start(conversation_id, width, height),
+            ControlToNode::StopEnvironment { conversation_id } => self.environments.stop(conversation_id),
+            ControlToNode::CheckEnvironment => self.environments.report(),
+            ControlToNode::EnvironmentInput { request_id, conversation_id, action } => self.environments.input(request_id, conversation_id, action),
+            ControlToNode::EnvironmentScreenshot { request_id, conversation_id } => self.environments.screenshot(request_id, conversation_id),
+            ControlToNode::OpenEnvironmentStream { stream_id, conversation_id } => self.environments.open_stream(stream_id, conversation_id),
+            ControlToNode::EnvironmentStreamInput { stream_id, data } => self.environments.stream_input(stream_id, &data),
+            ControlToNode::CloseEnvironmentStream { stream_id } => self.environments.close_stream(stream_id),
             ControlToNode::TranscriptAck { path, bytes } => {
                 if let Ok(mut transcripts) = self.transcripts.lock() {
                     transcripts.ack(&path, bytes);
@@ -344,8 +357,19 @@ impl Daemon {
                         mycelium_proto::link::GitCommand::Snapshot { session_id } => session_id.clone(),
                         _ => None,
                     };
+                    let reads_file = matches!(command, mycelium_proto::link::GitCommand::ReadFile { .. });
                     let message = match crate::git::run_in(&root, &cwd, command) {
                         Ok(mut output) => {
+                            if reads_file && let Some(serde_json::Value::String(data)) = output.as_object_mut().and_then(|fields| fields.remove("data")) {
+                                let pieces: Vec<&str> = data.as_bytes().chunks(FILE_CHUNK_CHARS).map(|piece| std::str::from_utf8(piece).unwrap_or_default()).collect();
+
+                                for (seq, piece) in pieces.iter().enumerate() {
+                                    let _ = out.send(NodeToControl::GitChunk { request_id, seq: seq as u32, data: (*piece).to_string() });
+                                }
+
+                                output["chunks"] = serde_json::json!(pieces.len());
+                            }
+
                             if let Some((path, bytes)) = session_id.and_then(|session_id| crate::transcripts::locate(&home, &transcript_roots, &session_id)) {
                                 output["transcript"] = serde_json::json!({"path": path, "bytes": bytes});
                             }

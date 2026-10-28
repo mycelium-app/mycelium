@@ -233,3 +233,144 @@ async fn schedule_due_while_mycelium_is_closed_is_held_until_it_opens() {
     })
     .await;
 }
+
+async fn beat(server: &Server, at: chrono::DateTime<chrono::Utc>, extra: Value) -> u16 {
+    let mut body = json!({"seconds": 60, "at": at.to_rfc3339()});
+
+    for (key, value) in extra.as_object().unwrap() {
+        body[key] = value.clone();
+    }
+
+    server.user.json(server.user.post("/api/v1/wellness/heartbeat").json(&body)).await.0
+}
+
+fn earlier_this_hour() -> chrono::DateTime<chrono::Utc> {
+    use chrono::{DurationRound, Duration};
+
+    (chrono::Utc::now() - Duration::hours(3)).duration_trunc(Duration::hours(1)).unwrap()
+}
+
+async fn activity_day(server: &Server, date: &str) -> Value {
+    server.user.json(server.user.get(&format!("/api/v1/wellness/activity/day?date={date}"))).await.1
+}
+
+#[tokio::test]
+async fn heartbeats_on_the_same_target_extend_one_span_and_a_change_or_a_gap_opens_another() {
+    use chrono::Duration;
+
+    let server = Server::start().await;
+    let base = earlier_this_hour();
+    let date = base.date_naive().to_string();
+
+    for (offset, route) in [(60, "history"), (120, "history"), (180, "wellness"), (440, "wellness")] {
+        assert_eq!(beat(&server, base + Duration::seconds(offset), json!({"kind": "elsewhere", "route": route, "title": route})).await, 204);
+    }
+
+    let day = activity_day(&server, &date).await;
+    let spans: Vec<(String, i64)> = day["spans"].as_array().unwrap().iter().map(|span| (span["title"].as_str().unwrap().to_string(), (span["end"].as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap() - span["start"].as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap()).num_seconds())).collect();
+
+    assert_eq!(spans, vec![("history".to_string(), 120), ("wellness".to_string(), 60), ("wellness".to_string(), 60)]);
+    assert_eq!(day["on_screen_minutes"], json!(4));
+    assert_eq!(day["recorded_since"], json!(date));
+}
+
+#[tokio::test]
+async fn the_old_heartbeat_body_counts_viewing_time_and_records_no_span() {
+    let server = Server::start().await;
+
+    let (status, _) = server.user.json(server.user.post("/api/v1/wellness/heartbeat").json(&json!({"seconds": 60}))).await;
+    assert_eq!(status, 204);
+
+    let today = chrono::Utc::now().date_naive().to_string();
+    let day = activity_day(&server, &today).await;
+
+    assert_eq!((day["spans"].clone(), day["recorded_since"].clone()), (json!([]), Value::Null));
+    assert_eq!(overview(&server).await["days"][6]["viewing_minutes"], json!(1));
+}
+
+#[tokio::test]
+async fn time_elsewhere_in_the_app_is_not_counted_as_looking_at_sessions() {
+    let server = Server::start().await;
+
+    assert_eq!(beat(&server, chrono::Utc::now(), json!({"kind": "elsewhere", "route": "history"})).await, 204);
+    assert_eq!(overview(&server).await["days"][6]["viewing_minutes"], json!(0));
+}
+
+#[tokio::test]
+async fn an_unknown_kind_is_refused_with_a_reason() {
+    let server = Server::start().await;
+
+    let (status, body) = server.user.json(server.user.post("/api/v1/wellness/heartbeat").json(&json!({"seconds": 60, "kind": "dreaming"}))).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("activity_kind_invalid")));
+}
+
+#[tokio::test]
+async fn a_span_across_local_midnight_is_split_between_the_two_days() {
+    use chrono::{Duration, TimeZone};
+
+    let server = Server::start().await;
+    let zone: chrono_tz::Tz = "Pacific/Kiritimati".parse().unwrap();
+
+    save(&server, |body| body["time_zone"] = json!("Pacific/Kiritimati")).await;
+
+    let yesterday = chrono::Utc::now().with_timezone(&zone).date_naive() - Duration::days(1);
+    let midnight = zone.from_local_datetime(&yesterday.and_hms_opt(0, 0, 0).unwrap()).unwrap().with_timezone(&chrono::Utc);
+
+    assert_eq!(beat(&server, midnight + Duration::seconds(30), json!({"kind": "elsewhere", "route": "history"})).await, 204);
+
+    let before = activity_day(&server, &(yesterday - Duration::days(1)).to_string()).await;
+    let after = activity_day(&server, &yesterday.to_string()).await;
+
+    assert_eq!(before["spans"][0]["end"].as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap(), midnight);
+    assert_eq!(after["spans"][0]["start"].as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap(), midnight);
+    assert_eq!(after["recorded_since"], json!((yesterday - Duration::days(1)).to_string()));
+}
+
+#[tokio::test]
+async fn the_day_names_the_conversation_and_lists_breaks() {
+    let server = Server::start().await;
+    let link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Tidy the changelog")).await;
+
+    assert_eq!(beat(&server, chrono::Utc::now(), json!({"kind": "conversation", "route": "conversation", "conversation_id": conversation.id})).await, 204);
+    server.user.json(server.user.post("/api/v1/wellness/breaks").json(&json!({"minutes": 5}))).await;
+
+    let day = activity_day(&server, &chrono::Utc::now().date_naive().to_string()).await;
+
+    assert_eq!((day["spans"][0]["kind"].clone(), day["spans"][0]["conversation_id"].clone()), (json!("conversation"), json!(conversation.id)));
+    assert_eq!(day["spans"][0]["title"], json!(conversation.title));
+    assert_eq!(day["breaks"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_date_that_is_not_a_date_is_refused_with_a_reason() {
+    let server = Server::start().await;
+
+    let (status, body) = server.user.json(server.user.get("/api/v1/wellness/activity/day?date=yesterday")).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("date_invalid")));
+}
+
+#[tokio::test]
+async fn the_hours_add_up_minutes_per_local_hour_and_name_the_main_target() {
+    use chrono::{Duration, Timelike};
+
+    let server = Server::start().await;
+    let base = earlier_this_hour();
+
+    for offset in [10, 11, 12] {
+        beat(&server, base + Duration::minutes(offset), json!({"kind": "elsewhere", "route": "history", "title": "History"})).await;
+    }
+
+    beat(&server, base + Duration::seconds(59 * 60 + 30), json!({"kind": "elsewhere", "route": "wellness", "title": "Wellness"})).await;
+
+    let (status, hours) = server.user.json(server.user.get("/api/v1/wellness/activity/hours?days=7")).await;
+    let days = hours["days"].as_array().unwrap();
+    let day = days.iter().find(|day| day["date"] == json!(base.date_naive().to_string())).unwrap();
+    let hour = base.hour() as usize;
+
+    assert_eq!((status, days.len()), (200, 7));
+    assert_eq!((day["minutes"][hour].clone(), day["top"][hour].clone()), (json!(4), json!("History")));
+    assert_eq!((day["minutes"][(hour + 1) % 24].clone(), day["top"][(hour + 1) % 24].clone()), (json!(0), Value::Null));
+}

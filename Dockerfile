@@ -51,7 +51,7 @@ RUN apk add --no-cache curl unzip \
  && rm -f /pdfjs/web/compressed.tracemonkey-pldi-09.pdf /pdfjs/web/debugger.*
 
 FROM alpine:${ALPINE_VERSION}
-RUN apk add --no-cache dumb-init ca-certificates \
+RUN apk add --no-cache dumb-init ca-certificates typst \
  && addgroup -g 1000 mycelium && adduser -u 1000 -G mycelium -s /bin/sh -D mycelium \
  && mkdir -p /var/lib/mycelium /usr/share/mycelium/web /usr/share/mycelium/editor /usr/share/mycelium/pdfjs \
  && chown mycelium:mycelium /var/lib/mycelium

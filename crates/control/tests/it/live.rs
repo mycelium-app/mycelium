@@ -11,6 +11,7 @@ use uuid::Uuid;
 const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/workflows",
     "POST /api/v1/workflows/{id}/control",
+    "POST /api/v1/workflows/{id}/rerun",
     "POST /api/v1/device",
     "POST /api/v1/device/token",
     "POST /api/v1/device/{user_code}/approve",
@@ -28,10 +29,17 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/continue",
     "POST /api/v1/conversations/{id}/move",
     "DELETE /api/v1/conversations/{id}/move",
+    "POST /api/v1/conversations/{id}/environment",
+    "DELETE /api/v1/conversations/{id}/environment",
+    "POST /api/v1/conversations/{id}/environment/take-over",
+    "POST /api/v1/conversations/{id}/environment/hand-back",
+    "POST /api/v1/nodes/{id}/environment/check",
     "PUT /api/v1/conversations/{id}/goal",
     "PATCH /api/v1/conversations/{id}/goal",
     "DELETE /api/v1/conversations/{id}/goal",
     "POST /api/v1/conversations/{id}/goal/send",
+    "POST /api/v1/conversations/{id}/goal/nudge",
+    "POST /api/v1/conversations/{id}/goal/continue",
     "POST /api/v1/tasks/{id}/start",
     "POST /api/v1/schedules/{id}/run",
     "POST /api/v1/schedules/{id}/confirm",
@@ -114,6 +122,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/conversations/{id}/terminal",
     "POST /api/v1/conversations/{id}/attachments",
     "POST /api/v1/transcriptions",
+    "POST /api/v1/speech",
+    "PUT /api/v1/privacy",
     "POST /api/v1/conversations/{id}/git/hunk",
     "POST /api/v1/conversations/{id}/git/file",
     "POST /api/v1/conversations/{id}/git/stage",
@@ -171,6 +181,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/assistants/{id}/action-proposals/{proposal_id}/approve",
     "POST /api/v1/assistants/{id}/action-proposals/{proposal_id}/decline",
     "POST /api/v1/assistants/{id}/prompt",
+    "POST /api/v1/assistants/{id}/instructions/reset",
     "POST /api/v1/assistants/{id}/clear",
     "PUT /api/v1/assistants/{id}/files/{*path}",
     "DELETE /api/v1/assistants/{id}/files/{*path}",
@@ -217,10 +228,20 @@ const SILENT_ROUTES: &[&str] = &[
     "DELETE /api/v1/instruction-source",
     "PUT /api/v1/walkthroughs/{id}/reads/{step}",
     "PUT /api/v1/artifacts/{id}/data/{key}",
+    "POST /api/v1/typst/compile",
     "PUT /internal/artifacts/by-slug/{slug}/data/{key}",
     "POST /api/v1/chat-tool-servers/probe",
     "POST /api/v1/chat-tool-servers/test",
     "POST /api/v1/chat-tool-servers/caldav-test",
+    "POST /api/v1/chat-tool-servers/coolify-test",
+    "POST /api/v1/chat-tool-servers/tandoor-test",
+    "PUT /api/v1/chat-tool-servers/{id}/coolify-target",
+    "DELETE /api/v1/apps/{uuid}",
+    "PUT /api/v1/apps/{uuid}/envs/{key}",
+    "DELETE /api/v1/apps/{uuid}/envs/{key}",
+    "POST /api/v1/apps/{uuid}/redeploy",
+    "POST /api/v1/apps/{uuid}/start",
+    "POST /api/v1/apps/{uuid}/stop",
     "POST /api/v1/decision-providers",
     "POST /api/v1/decision-providers/test",
     "PATCH /api/v1/decision-providers/{id}",
@@ -229,6 +250,8 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/groups/{id}/open",
     "DELETE /api/v1/groups/{id}/open",
     "POST /api/v1/nodes/{id}/ssh-tokens",
+    "POST /api/v1/forges/{id}/mcp",
+    "POST /api/v1/conversations/{id}/environment/stream-ticket",
 ];
 
 fn routes_that_change_state() -> BTreeSet<String> {
@@ -1176,6 +1199,47 @@ async fn sending_a_failed_goal_again_is_streamed_as_pending() {
 }
 
 #[tokio::test]
+async fn continuing_a_blocked_goal_is_streamed_as_active() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Build it")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    let url = format!("/api/v1/conversations/{}/goal", conversation.id);
+    server.user.json(server.user.put(&url).json(&json!({"text": "Tests pass"}))).await;
+    sqlx::query("update goals set state = 'stuck', reason = 'The CI secret is missing.' where conversation_id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
+    let mut stream = server.user.stream().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("{url}/continue")).json(&json!({"note": "It is in place."}))).await;
+    let continued = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.state == mycelium_proto::api::GoalState::Active => Some(goal), _ => None }).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(continued.conversation_id, conversation.id);
+}
+
+#[tokio::test]
+async fn nudging_a_waiting_goal_now_is_streamed_with_the_wait_cleared() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let conversation = server.create_conversation(link.id, Some("Build it")).await;
+    link.expect_start_session().await;
+    link.start_session(conversation.id, "acp-1").await;
+    link.send(NodeToControl::TurnEnd { conversation_id: conversation.id, seq: 2, stop_reason: "end_turn".into(), usage: None }).await;
+    link.barrier(conversation.id, 3).await;
+    let url = format!("/api/v1/conversations/{}/goal", conversation.id);
+    server.user.json(server.user.put(&url).json(&json!({"text": "Tests pass"}))).await;
+    sqlx::query("update goals set delivery_state = 'sent', wait_reason = 'repeated_outcome', next_nudge_at = now() + interval '2 minutes', repeats = 2 where conversation_id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
+    sqlx::query("update conversations set status = 'review' where id = $1").bind(conversation.id).execute(&server.pool).await.unwrap();
+    let mut stream = server.user.stream().await;
+
+    let (status, body) = server.user.json(server.user.post(&format!("{url}/nudge"))).await;
+    let nudged = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.nudges == 1 && goal.wait_reason.is_none() => Some(goal), _ => None }).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(nudged.conversation_id, conversation.id);
+}
+
+#[tokio::test]
 async fn a_stored_walkthrough_is_streamed() {
     let server = Server::start().await;
     let link = server.online_node("laptop").await;
@@ -1405,4 +1469,84 @@ async fn an_artifact_and_its_comments_are_streamed_to_its_owner_as_they_change()
     assert!(renamed.public);
     assert_eq!((commented.body.as_str(), commented.id.to_string()), ("Looks good", comment["id"].as_str().unwrap().to_string()));
     assert_eq!(removed.id.to_string(), id);
+}
+
+#[tokio::test]
+async fn resetting_voice_instructions_and_opening_a_screen_reach_the_stream() {
+    let server = Server::start().await;
+    let (_, token) = server.join("node", "laptop").await;
+    let (_, voice) = server.user.json(server.user.get("/api/v1/assistants/builtin/voice")).await;
+    let id = voice["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.put(&format!("/api/v1/assistants/{id}/files/AGENTS.md")).header("content-type", "text/plain").body("Only talk about tea.")).await;
+    let mut stream = server.user.stream().await;
+    let (status, reset) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/instructions/reset"))).await;
+    assert_eq!(status, 200, "{reset}");
+
+    let published = stream.until(|message| match message {
+        StreamMessage::Assistant(assistant) if assistant.builtin_key.as_deref() == Some("voice") => Some(assistant),
+        _ => None,
+    })
+    .await;
+    assert_eq!(published.id.to_string(), id);
+
+    let anonymous = server.anonymous();
+    let request = anonymous
+        .post("/api/v1/mcp")
+        .header("authorization", format!("Bearer {token}"))
+        .json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "open_screen", "arguments": {"route": "/settings/privacy"}}}));
+    anonymous.json(request).await;
+
+    let route = stream.until(|message| match message {
+        StreamMessage::OpenScreen { route } => Some(route),
+        _ => None,
+    })
+    .await;
+    assert_eq!(route, "/settings/privacy");
+}
+
+#[tokio::test]
+async fn an_environment_is_streamed_as_it_starts_changes_hands_and_stops() {
+    let server = Server::start().await;
+    let mut link = server.online_node("laptop").await;
+    let mut stream = server.user.stream().await;
+    link.send(NodeToControl::EnvironmentCapability { capability: mycelium_proto::api::EnvironmentCapability { available: true, missing: vec![], versions: Default::default(), note: None, running: vec![] } }).await;
+    let conversation = server.create_conversation(link.id, None).await;
+    link.expect_start_session().await;
+    let url = format!("/api/v1/conversations/{}/environment", conversation.id);
+    let node_with_environment = stream.until(|message| match message { StreamMessage::Node(node) if node.environment.is_some() => Some(node), _ => None }).await;
+
+    let (status, started) = server.user.json(server.user.post(&url).json(&json!({}))).await;
+    let starting = stream.until(|message| match message { StreamMessage::Environment(environment) => Some(environment), _ => None }).await;
+    link.send(NodeToControl::EnvironmentChanged { conversation_id: conversation.id, state: mycelium_proto::api::EnvironmentState::Running, failure: None, browser: None }).await;
+    stream.until(|message| match message { StreamMessage::Environment(environment) if environment.state == mycelium_proto::api::EnvironmentState::Running => Some(()), _ => None }).await;
+    server.user.json(server.user.post(&format!("{url}/take-over"))).await;
+    let taken = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.controller == mycelium_proto::api::EnvironmentController::Person => Some(environment), _ => None }).await;
+    server.user.json(server.user.post(&format!("{url}/hand-back"))).await;
+    let handed = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.controller == mycelium_proto::api::EnvironmentController::Agent && environment.state == mycelium_proto::api::EnvironmentState::Running => Some(environment), _ => None }).await;
+    server.user.json(server.user.delete(&url)).await;
+    let stopped = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.state == mycelium_proto::api::EnvironmentState::Stopped => Some(environment), _ => None }).await;
+
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(node_with_environment.id, link.id);
+    assert_eq!(starting.state, mycelium_proto::api::EnvironmentState::Starting);
+    assert_eq!((taken.conversation_id, handed.conversation_id), (conversation.id, conversation.id));
+    assert!(stopped.stopped_at.is_some());
+}
+
+#[tokio::test]
+async fn re_running_a_workflow_streams_the_new_workflow() {
+    let server = Server::start().await;
+    let (_, created) = server.user.json(server.user.post("/api/v1/workflows").json(&json!({"title": "Review", "steps": [{"key": "a", "title": "A", "gate": true}]}))).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    server.user.json(server.user.post(&format!("/api/v1/workflows/{id}/control")).json(&json!({"action": "stop"}))).await;
+    let mut stream = server.user.stream().await;
+
+    let (status, rerun) = server.user.json(server.user.post(&format!("/api/v1/workflows/{id}/rerun"))).await;
+    let streamed = stream.until(|message| match message {
+        StreamMessage::Workflow { workflow } if workflow.rerun_of.map(|origin| origin.to_string()) == Some(id.clone()) => Some(workflow),
+        _ => None,
+    })
+    .await;
+
+    assert_eq!((status, streamed.id.to_string()), (200, rerun["id"].as_str().unwrap().to_string()), "{rerun}");
 }

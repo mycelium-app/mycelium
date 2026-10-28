@@ -56,6 +56,7 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
     val title = accountTitle(account)
     val reauthenticates = account.oauth || account.kind == "lastfm" || account.kind == "freeagent"
     val calendar = account.kind == "caldav"
+    val coolify = account.kind == "coolify"
     var calendars by remember(account.id) { mutableStateOf<List<CalendarAccess>?>(null) }
     var calendarsFailure by remember(account.id) { mutableStateOf<String?>(null) }
 
@@ -101,6 +102,10 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
                     Fact("Expires", expiryFact(account))
                     Fact("Address", account.url)
 
+                    if (coolify) {
+                        Fact("Permissions", "read, write, deploy")
+                    }
+
                     val home = account.settings?.get("calendar_home")?.jsonPrimitive?.content
 
                     if (calendar && home != null) {
@@ -145,6 +150,10 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
 
                 if (calendar) {
                     CalendarList(integration, calendars, calendarsFailure)
+                }
+
+                if (coolify) {
+                    WhereAppsGo(account) { changing = "target" }
                 }
 
                 if (grants.isNotEmpty()) {
@@ -201,6 +210,11 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
             patch(request)
         }
 
+        "target" -> ChangeWhereAppsGoDialog(store, account, { changing = null }) { updated ->
+            changing = null
+            actions.onReplace(updated)
+        }
+
         "approvals" -> ApprovalsDialog(account, { changing = null }) { policy ->
             changing = null
             patch(PatchChatToolServerRequest(policy = policy))
@@ -222,7 +236,7 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
     }
 
     if (removing) {
-        ConfirmDialog("Remove $title?", "Removes this ${integration.name} account and its credentials. Other accounts stay.", "Remove", { removing = false }) {
+        ConfirmDialog("Remove $title?", if (coolify) "Removes this Coolify account and its credentials. Apps keep running in Coolify, and Apps leaves the sidebar." else "Removes this ${integration.name} account and its credentials. Other accounts stay.", "Remove", { removing = false }) {
             removing = false
             store.act {
                 store.api.deleteChatToolServer(account.id)
@@ -233,7 +247,7 @@ fun AccountPage(store: Store, integration: Integration, account: ChatToolServer,
 }
 
 @Composable
-private fun Fact(name: String, value: String) {
+internal fun Fact(name: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         Label(name, Modifier.width(120.dp), Tokens.Type.Meta, MyTheme.colors.textMuted)
         Label(value, Modifier.weight(1f))

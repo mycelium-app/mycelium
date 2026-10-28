@@ -111,6 +111,15 @@ pub struct ResetAnswer {
     pub error: Option<String>,
 }
 
+pub struct EnvironmentInputAnswer {
+    pub error: Option<String>,
+}
+
+pub struct EnvironmentScreenshotAnswer {
+    pub png: Option<String>,
+    pub error: Option<String>,
+}
+
 pub struct PendingResponse {
     pub held: crate::response_editor::Held,
     pub answer: oneshot::Sender<Option<serde_json::Value>>,
@@ -179,6 +188,8 @@ node_answers! {
     ProcessAnswer => stop_requests,
     FolderAnswer => folder_requests,
     ResetAnswer => reset_requests,
+    EnvironmentInputAnswer => environment_input_requests,
+    EnvironmentScreenshotAnswer => environment_screenshot_requests,
 }
 
 #[derive(Default)]
@@ -191,6 +202,7 @@ pub struct Hub {
     unacknowledged: Mutex<Vec<UnacknowledgedPrompt>>,
     file_requests: PendingRequests<Vec<String>>,
     git_requests: PendingRequests<GitAnswer>,
+    git_chunks: Mutex<HashMap<Uuid, (Uuid, Vec<(u32, String)>)>>,
     steer_requests: PendingRequests<SteerAnswer>,
     stop_requests: PendingRequests<ProcessAnswer>,
     folder_requests: PendingRequests<FolderAnswer>,
@@ -200,6 +212,9 @@ pub struct Hub {
     lastfm_sign_ins: Mutex<HashMap<String, PendingLastFm>>,
     freeagent_sign_ins: Mutex<HashMap<String, PendingFreeAgent>>,
     reset_requests: PendingRequests<ResetAnswer>,
+    environment_input_requests: PendingRequests<EnvironmentInputAnswer>,
+    environment_screenshot_requests: PendingRequests<EnvironmentScreenshotAnswer>,
+    pub(crate) environments: crate::environments::EnvironmentRegistry,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,
     chat_turns: Mutex<HashMap<Uuid, tokio::task::AbortHandle>>,
@@ -317,6 +332,7 @@ impl Hub {
             drop(nodes);
             self.forget_send_now_on(node_id);
             self.forget_resources_of(node_id);
+            self.forget_git_chunks_of(node_id);
 
             return true;
         }
@@ -331,6 +347,7 @@ impl Hub {
 
         self.forget_send_now_on(node_id);
         self.forget_resources_of(node_id);
+        self.forget_git_chunks_of(node_id);
     }
 
     pub fn begin_request<A: NodeAnswer>(&self, node_id: Uuid, message: impl FnOnce(Uuid) -> ControlToNode) -> Option<(Uuid, oneshot::Receiver<A>)> {
@@ -351,6 +368,31 @@ impl Hub {
 
     pub fn answer<A: NodeAnswer>(&self, node_id: Uuid, request_id: Uuid, answer: A) {
         A::pending(self).answer(node_id, request_id, answer);
+    }
+
+    pub fn hold_git_chunk(&self, node_id: Uuid, request_id: Uuid, seq: u32, data: String) {
+        if let Ok(mut held) = self.git_chunks.lock() {
+            let (owner, pieces) = held.entry(request_id).or_insert_with(|| (node_id, Vec::new()));
+
+            if *owner == node_id {
+                pieces.push((seq, data));
+            }
+        }
+    }
+
+    pub fn take_git_chunks(&self, node_id: Uuid, request_id: Uuid) -> Vec<(u32, String)> {
+        let taken = self.git_chunks.lock().ok().and_then(|mut held| match held.get(&request_id) {
+            Some((owner, _)) if *owner != node_id => None,
+            _ => held.remove(&request_id),
+        });
+
+        taken.map(|(_, pieces)| pieces).unwrap_or_default()
+    }
+
+    fn forget_git_chunks_of(&self, node_id: Uuid) {
+        if let Ok(mut held) = self.git_chunks.lock() {
+            held.retain(|_, (owner, _)| *owner != node_id);
+        }
     }
 
     pub fn begin_backup(&self, assistant_id: Uuid) -> bool {
@@ -690,6 +732,8 @@ impl AppState {
         for (terminal_id, owner) in self.hub.finish_terminals_of(node_id) {
             self.publish(Some(owner.user_id), StreamMessage::TerminalExited { terminal_id });
         }
+
+        crate::environments::finish_environments_of_node(self, node_id);
     }
 }
 

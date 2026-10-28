@@ -81,6 +81,14 @@ pub enum StreamMessage {
     TerminalExited {
         terminal_id: Uuid,
     },
+    Environment(crate::api::Environment),
+    EnvironmentAction {
+        conversation_id: Uuid,
+        action: crate::api::EnvironmentAction,
+    },
+    OpenScreen {
+        route: String,
+    },
     IntegrationsChanged,
     WellnessChanged,
     Device {

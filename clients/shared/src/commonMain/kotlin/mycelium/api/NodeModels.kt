@@ -61,6 +61,7 @@ data class NodeSummary(
     @SerialName("instructions_unmanaged") val instructionsUnmanaged: List<String> = emptyList(),
     @SerialName("sessions_on_older_instructions") val sessionsOnOlderInstructions: Int = 0,
     @SerialName("harness_models") val harnessModels: List<HarnessModels> = emptyList(),
+    val environment: EnvironmentCapability? = null,
 )
 
 @Serializable

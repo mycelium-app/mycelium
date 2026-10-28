@@ -49,8 +49,25 @@ internal const val WellnessPuzzlesJson = """[
 {"puzzle":"catfishing","day":"2026-10-27","today":{"score":7,"source":"read"},"history":[],"stats":{"played":3,"solved":0,"average":7.0,"streak":3,"best_streak":3,"distribution":[]}},
 {"puzzle":"enclose-horse","day":"2026-10-27","today":{"score":87,"source":"read"},"history":[],"stats":{"played":1,"solved":0,"average":87.0,"streak":1,"best_streak":1,"distribution":[]}}]"""
 
+private fun activityHoursDay(date: String, busy: Map<Int, Long> = emptyMap(), top: Map<Int, String> = emptyMap()) =
+    """{"date":"$date","minutes":[${(0 until 24).joinToString(",") { (busy[it] ?: 0).toString() }}],"top":[${(0 until 24).joinToString(",") { top[it]?.let { title -> "\"$title\"" } ?: "null" }}]}"""
+
+internal val ActivityHoursJson = """{"days":[${(22..27).joinToString(",") { activityHoursDay("2026-10-$it") }},${activityHoursDay("2026-10-28", mapOf(10 to 42L, 11 to 5L), mapOf(10 to "harbour Bump the UI kit to 0.31.2", 11 to "Archivist"))}]}"""
+
+internal const val ActivityTodayJson = """{"date":"2026-10-28","on_screen_minutes":225,"recorded_since":"2026-10-24","spans":[
+{"start":"2026-10-28T08:14:00Z","end":"2026-10-28T08:52:00Z","kind":"conversation","title":"Release v0.3.7 checklist","project":"atlas","group":"work","conversation_id":"c-atlas"},
+{"start":"2026-10-28T08:52:00Z","end":"2026-10-28T09:05:00Z","kind":"elsewhere","title":"History"},
+{"start":"2026-10-28T09:40:00Z","end":"2026-10-28T10:05:00Z","kind":"chat","title":"Weekend ferry times","group":"personal","conversation_id":"c-ferry"},
+{"start":"2026-10-28T10:05:00Z","end":"2026-10-28T11:30:00Z","kind":"conversation","title":"Bump the UI kit to 0.31.2","project":"harbour","group":"homelab","conversation_id":"c-harbour"},
+{"start":"2026-10-28T11:36:00Z","end":"2026-10-28T12:01:00Z","kind":"assistant","title":"Archivist","group":"homelab","assistant_id":"a-archivist"},
+{"start":"2026-10-28T13:10:00Z","end":"2026-10-28T13:20:00Z","kind":"elsewhere","title":"Wellness & Learning"}],
+"breaks":[{"start":"2026-10-28T11:30:00Z","end":"2026-10-28T11:34:00Z"}]}"""
+
+internal fun activityEmptyDayJson(date: String) = """{"date":"$date","on_screen_minutes":0,"spans":[],"breaks":[],"recorded_since":"2026-10-24"}"""
+
 internal class WellnessRequests {
     val seen = java.util.Collections.synchronizedList(mutableListOf<Triple<String, String, String>>())
+    val queries = java.util.Collections.synchronizedList(mutableListOf<String>())
 
     fun sent(method: String, suffix: String) = seen.toList().firstOrNull { it.first == method && it.second.endsWith(suffix) }
 
@@ -59,6 +76,7 @@ internal class WellnessRequests {
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             seen += Triple(request.method.value, path, String(request.body.toByteArray()))
+            queries += request.url.encodedPathAndQuery
 
             when {
                 request.method == HttpMethod.Put && path.endsWith("/wellness/settings") -> respond(String(request.body.toByteArray()), HttpStatusCode.OK, json)
@@ -67,6 +85,8 @@ internal class WellnessRequests {
                 path.endsWith("/groups") -> respond(WellnessGroupsJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/settings") -> respond(WellnessSettingsJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/puzzles") -> respond(WellnessPuzzlesJson, HttpStatusCode.OK, json)
+                path.endsWith("/wellness/activity/day") -> respond(request.url.parameters["date"]?.let { date -> activityEmptyDayJson(date) } ?: ActivityTodayJson, HttpStatusCode.OK, json)
+                path.endsWith("/wellness/activity/hours") -> respond(ActivityHoursJson, HttpStatusCode.OK, json)
                 path.endsWith("/wellness/overview") -> respond(WellnessOverviewJson, HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
             }

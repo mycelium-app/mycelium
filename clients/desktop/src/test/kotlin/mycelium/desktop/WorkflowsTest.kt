@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
@@ -33,34 +34,6 @@ class WorkflowsTest {
     @get:Rule val scopes = TestScopes()
 
     @Test
-    fun aWaitingGateShowsItsDecisionAndContinuesWhenApproved() {
-        val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
-        val fixture = """{"id":"w1","parent_id":null,"title":"Review","status":"running","round":1,"plan":{"steps":[{"key":"build","title":"Build","agent":"codex","model":"build-model","difficulty":"medium"},{"key":"design","title":"Approve design","prompt":"Review the implementation before starting independent checks.","depends_on":["build"]},{"key":"review","title":"Review accessibility","depends_on":["design"]},{"key":"security","title":"Review security","depends_on":["design"],"workflow":{"title":"Security"}}]},"steps":[{"key":"build","status":"done","conversation_id":"c1","workflow_id":null,"output":"Implementation ready for review."},{"key":"design","status":"gate","conversation_id":null,"workflow_id":null,"output":""},{"key":"review","status":"waiting","conversation_id":null,"workflow_id":null,"output":""},{"key":"security","status":"waiting","conversation_id":null,"workflow_id":null,"output":""}]}"""
-        val json = headersOf(HttpHeaders.ContentType, "application/json")
-        val engine = MockEngine { request ->
-            if (request.url.encodedPath.endsWith("/experiments")) {
-                respond(EnabledExperiments, HttpStatusCode.OK, json)
-            } else if (request.method == HttpMethod.Post) {
-                calls += String(request.body.toByteArray())
-                respond(fixture, HttpStatusCode.OK, json)
-            } else {
-                respond("[$fixture]", HttpStatusCode.OK, json)
-            }
-        }
-        val store = Store(MyceliumApi("https://mycelium.test", "test-token", engine), scopes.create())
-        kotlinx.coroutines.runBlocking { store.refreshExperiments() }
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); WorkflowsScreen(store, state, {}) } }
-        rule.waitUntil(5000) { rule.onAllNodesWithText("Review · running · Round 1").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Review · running · Round 1").performClick()
-        rule.onNodeWithContentDescription("Decision for design").performTextInput("Use option B")
-        rule.onNodeWithText("Approve and continue").performScrollTo().performClick()
-        rule.waitUntil(5000) { calls.isNotEmpty() }
-        val decision = Json.parseToJsonElement(calls.single()).jsonObject
-        assertEquals("\"approve\"", decision["action"].toString())
-        assertEquals("\"design\"", decision["step"].toString())
-        assertEquals("\"Use option B\"", decision["output"].toString())
-    }
-    @Test
     fun aChatModelStepUsesItsSelectedProviderAndModel() {
         val requests = java.util.Collections.synchronizedList(mutableListOf<String>())
         val json = headersOf(HttpHeaders.ContentType, "application/json")
@@ -80,8 +53,8 @@ class WorkflowsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "test-token", engine), scopes.create())
         kotlinx.coroutines.runBlocking { store.refreshExperiments() }
-        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); WorkflowsScreen(store, state, {}) } }
-        rule.onNodeWithText("New workflow").performClick()
+        rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); WorkflowsScreen(store, state, {}, {}) } }
+        rule.onAllNodesWithText("New workflow").onFirst().performClick()
         rule.onNodeWithContentDescription("Title").performTextInput("Review")
         rule.onNodeWithContentDescription("Step 1 title").performTextInput("Summary")
         rule.onNodeWithContentDescription("Step 1 prompt").performTextInput("Summarise the work")

@@ -315,6 +315,8 @@ impl Server {
             editor_dir: directory.path().join("editor"),
             artifact_domain: None,
             artifact_host_token: None,
+            typst_binary: "typst".into(),
+            prometheus_url: None,
             browser_url: None,
             skip_migrations: false,
             trusted_proxies: Vec::new(),

@@ -82,6 +82,7 @@ class IntegrationsTest {
     private val bodies = CopyOnWriteArrayList<String>()
     private var servers = listOf(DocsServer, MailA, MailB, ZulipLocked, TrackerOff)
     private var calls = emptyList<String>()
+    private var forges = "[]"
     private val opened = CopyOnWriteArrayList<String>()
 
     private fun store(): Store {
@@ -94,7 +95,8 @@ class IntegrationsTest {
             when {
                 path.endsWith("/integration-calls") -> respond("[${calls.filter { call -> request.url.parameters["server"]?.let { call.contains("\"server_id\":\"$it\"") } ?: true }.joinToString(",")}]", HttpStatusCode.OK, json)
                 path.endsWith("/groups") && request.method == HttpMethod.Get -> respond("[$AcmeGroup]", HttpStatusCode.OK, json)
-                path.endsWith("/forges") -> respond("[]", HttpStatusCode.OK, json)
+                path.endsWith("/forges") -> respond(forges, HttpStatusCode.OK, json)
+                path.endsWith("/forges/f1/mcp") -> respond(GithubForge.replace("\"mcp_error\":null", "\"mcp_error\":\"GitHub's MCP server refused this token. It needs a fine-grained token with the MCP permission.\""), HttpStatusCode.OK, json)
                 request.method == HttpMethod.Patch || request.method == HttpMethod.Put -> respond(servers.first { path.contains("/${Regex("\"id\":\"([^\"]+)\"").find(it)!!.groupValues[1]}") }, HttpStatusCode.OK, json)
                 path.endsWith("/chat-tool-servers") -> respond("[${servers.joinToString(",")}]", HttpStatusCode.OK, json)
                 else -> respond("{}", HttpStatusCode.OK, json)
@@ -102,6 +104,21 @@ class IntegrationsTest {
         }
 
         return Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
+    }
+
+    @Test
+    fun addingGithubsMcpServerUsesTheForgeTokenAndSaysWhenGithubRefusesIt() {
+        forges = "[$GithubForge]"
+        val store = show()
+
+        rule.onNodeWithText("Add integration").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("GitHub").fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodesWithText("GitHub").onLast().performScrollTo().performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.method == HttpMethod.Post && it.url.encodedPath.endsWith("/forges/f1/mcp") } }
+        rule.waitUntil(5_000) { store.problem.value != null }
+        assertEquals("GitHub's MCP server refused this token. It needs a fine-grained token with the MCP permission.", store.problem.value)
+        assertTrue(requests.none { it.url.encodedPath.endsWith("/chat-tool-servers/oauth") })
     }
 
     private fun show(store: Store = store(), ready: String = "Docs"): Store {
@@ -342,3 +359,5 @@ class IntegrationsTest {
         assertEquals(listOf("k1"), opened.toList())
     }
 }
+
+private const val GithubForge = """{"id":"f1","kind":"github","base_url":"https://github.com","account":"samexample","token_hint":"••••wxyz","organisations":[],"created_at":"2026-10-20T10:00:00Z","mcp_server_id":null,"mcp_error":null}"""

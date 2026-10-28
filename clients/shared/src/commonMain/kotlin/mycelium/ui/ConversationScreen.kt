@@ -44,6 +44,7 @@ import mycelium.api.Conversation
 import mycelium.api.CreateProjectRequest
 import mycelium.api.Project
 import mycelium.api.ConversationStatus
+import mycelium.api.EnvironmentState
 import mycelium.api.ConfigRequest
 import mycelium.api.LoginInfo
 import mycelium.api.NodeSummary
@@ -89,7 +90,7 @@ import mycelium.state.loginMethodName
 import mycelium.state.statusSectionName
 
 @Composable
-fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
+fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: () -> Unit, onOpenNodes: () -> Unit = {}, onOpenNode: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}, onOpenArtefact: (String) -> Unit = {}, onOpenWorkflow: ((String) -> Unit)? = null, panels: Boolean = true, header: HeaderSlots? = null, onManageActions: () -> Unit = {}) {
     val api = store.api
     var fetched by remember(id) { mutableStateOf<Conversation?>(null) }
     val platform = LocalPlatform.current
@@ -139,7 +140,10 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val demand = LocalPanelDemand.current
     val sidePanels = !compact && panels && conversation?.isChat != true
     val narrow = sidePanels && areaWidth != Dp.Unspecified && panelTakesOver(areaWidth)
-    val takeover = narrow && panel != null && !chatForced
+    var environmentExpanded by remember(id) { mutableStateOf(false) }
+    val environmentRunning = state.environments[id]?.state == EnvironmentState.Running
+    val environmentFillsArea = sidePanels && panel == SidePanel.Environment && environmentExpanded && environmentRunning
+    val takeover = (narrow && panel != null && !chatForced) || environmentFillsArea
     val browserPanel = panel == SidePanel.Outline
 
     SideEffect {
@@ -153,6 +157,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     LaunchedEffect(narrow) {
         if (!narrow) {
             chatForced = false
+        }
+    }
+
+    LaunchedEffect(panel, environmentRunning) {
+        if (panel != SidePanel.Environment || !environmentRunning) {
+            environmentExpanded = false
         }
     }
 
@@ -301,9 +311,19 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
         }
     }
 
+    val conversationWorkflows = ConversationWorkflows(
+        workflows = state.workflows.values.filter { it.conversationId == id }.sortedBy { it.createdAt },
+        onOpen = onOpenWorkflow,
+        onControl = { workflowId, request -> store.act { store.controlWorkflow(workflowId, request) } },
+    )
+
+    LaunchedEffect(id) {
+        runCatching { store.refreshWorkflows() }
+    }
+
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current
@@ -316,6 +336,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxSize(), onOpenDiff = { store.openDiffTab(conversation.id, it) }) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, onOpenArtefact, Modifier.fillMaxSize()) }
                 SidePanel.Outline -> outlinePage?.let { page -> platform?.let { BrowserPanel(it, page.url, page.title, onClose = { openPanel(null) }) } }
+                SidePanel.Environment -> key(conversation.id) { EnvironmentPanel(store, state, conversation, environmentFillsArea, { environmentExpanded = it }, { openPanel(null) }, onOpenNode, onOpenConversation) }
                 null -> Unit
             }
         }
@@ -487,6 +508,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         dictation = dictation,
                         initialText = TextFieldValue(draft.text, TextRange(draft.cursor)),
                         onTextChange = { typed -> store.composerDrafts.update(id) { copy(text = typed.text, cursor = typed.selection.end) } },
+                        initialImages = draft.images,
+                        onImagesChange = { held -> store.composerDrafts.update(id) { copy(images = held) } },
                         modelPicker = if (chat) ModelPickerControls(
                             providers,
                             conversation.providerId,
@@ -535,6 +558,8 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             onResume = { store.act { store.pauseGoal(id, false) } },
                             onClear = { store.act { store.clearGoal(id) } },
                             onSendAgain = { store.act { store.sendGoalAgain(id) } },
+                            onNudge = { store.act { store.nudgeGoal(id) } },
+                            onContinue = { note -> store.act { store.continueGoal(id, note) } },
                             agent = conversation.agent,
                         ),
                     )
@@ -542,7 +567,11 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
             }
 
             if (!compact && !chat && panels) {
-                if (takeover) {
+                if (environmentFillsArea) {
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        panelContent()
+                    }
+                } else if (takeover) {
                     Column(Modifier.weight(1f).fillMaxHeight().background(MyTheme.colors.bgPanel)) {
                         Bar {
                             OpenListButton()
@@ -584,7 +613,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                 SidePanel.Terminal -> key(conversation.id) { TerminalPanel(store, state, conversation, Modifier.fillMaxWidth().height(Tokens.Size.TerminalSheet), onExited = { openPanel(null) }) }
                 SidePanel.Git -> key(conversation.id) { GitPanel(store, conversation, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
                 SidePanel.Artefacts -> platform?.let { ArtefactsPanel(store, state, it, id, viewedArtefact, { viewedArtefact = it }, { openPanel(null); onOpenArtefact(it) }, Modifier.fillMaxWidth().height(Tokens.Size.GitSheet)) }
-                SidePanel.Outline, null -> Unit
+                SidePanel.Outline, SidePanel.Environment, null -> Unit
             }
         }
     }
@@ -793,7 +822,7 @@ fun iconOf(status: ConversationStatus): MyIcon = when (status) {
 private const val ConversationTab = "Conversation"
 private const val WalkthroughTab = "Walkthrough"
 
-private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline }
+private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
 
 @Composable
 private fun Rail(open: SidePanel?, outlineOpen: Boolean, onToggle: (SidePanel) -> Unit) {
@@ -812,6 +841,7 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, onToggle: (SidePanel) -
             MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
             MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
             MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
+            MyButton({ onToggle(SidePanel.Environment) }, icon = MyIcon.Desktop, description = if (open == SidePanel.Environment) "Close the environment panel" else "Open environment", muted = true, selected = open == SidePanel.Environment)
 
             if (outlineOpen) {
                 MyButton({ onToggle(SidePanel.Outline) }, icon = MyIcon.Globe, description = if (open == SidePanel.Outline) "Close Outline page" else "Open Outline page", muted = true, selected = open == SidePanel.Outline)

@@ -94,6 +94,8 @@ pub struct NodeSummary {
     pub sessions_on_older_instructions: u32,
     #[serde(default)]
     pub harness_models: Vec<HarnessModels>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<EnvironmentCapability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -302,6 +304,8 @@ pub struct PromptRequest {
     pub text: String,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spoken: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1290,13 +1294,76 @@ pub struct WorkflowStep {
     pub difficulty: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowRunStep {
     pub key: String,
     pub status: String,
     pub conversation_id: Option<Uuid>,
     pub workflow_id: Option<Uuid>,
     pub output: String,
+    #[serde(default)]
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub tokens: Option<i64>,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub turns: Option<i32>,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowActor {
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowEndReason {
+    pub reason: String,
+    #[serde(default)]
+    pub step: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub by: Option<WorkflowActor>,
+    #[serde(default)]
+    pub round: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowDecision {
+    pub round: i32,
+    pub step: String,
+    pub decision: String,
+    pub by: WorkflowActor,
+    pub at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowRound {
+    pub round: i32,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub decided_by: Option<WorkflowActor>,
+    pub steps: Vec<WorkflowRunStep>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1310,6 +1377,34 @@ pub struct Workflow {
     pub steps: Vec<WorkflowRunStep>,
     pub round: i32,
     pub output: String,
+    #[serde(default = "default_workflow_kind")]
+    pub kind: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub started_by: Option<WorkflowActor>,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[serde(default)]
+    pub end_reason: Option<WorkflowEndReason>,
+    #[serde(default)]
+    pub stop_rule: Option<String>,
+    #[serde(default)]
+    pub rerun_of: Option<Uuid>,
+    #[serde(default)]
+    pub rounds: Vec<WorkflowRound>,
+    #[serde(default)]
+    pub decisions: Vec<WorkflowDecision>,
+    #[serde(default)]
+    pub phases: Vec<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
+fn default_workflow_kind() -> String {
+    "mycelium".into()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1317,6 +1412,8 @@ pub struct WorkflowControlRequest {
     pub action: String,
     pub step: Option<String>,
     pub output: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1740,6 +1837,15 @@ pub enum GoalState {
     Stuck,
     OverBudget,
     LimitReached,
+    Stalled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalWait {
+    RepeatedOutcome,
+    QuestionWaiting,
+    BackgroundWork,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1789,6 +1895,18 @@ pub struct Goal {
     pub held_seconds: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumes_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub nudges: i64,
+    #[serde(default)]
+    pub repeats: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_nudge_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_reason: Option<GoalWait>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1802,11 +1920,19 @@ pub struct SetGoalRequest {
     pub five_hour_limit: Option<i64>,
     #[serde(default)]
     pub weekly_limit: Option<i64>,
+    #[serde(default)]
+    pub repeat_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PatchGoalRequest {
     pub paused: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContinueGoalRequest {
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1925,6 +2051,13 @@ pub enum ArtifactKind {
     Page,
     Markdown,
     File,
+    Drawing,
+    Typst,
+    Doc,
+    Slides,
+    Dashboard,
+    Motion,
+    DesignSystem,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1970,6 +2103,8 @@ pub struct Artifact {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<ArtifactOrigin>,
     pub kind: ArtifactKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_system_id: Option<Uuid>,
     pub title: String,
     pub slug: String,
     pub public: bool,
@@ -2060,6 +2195,10 @@ pub struct CreateArtifactRequest {
     pub media_type: Option<String>,
     #[serde(default)]
     pub conversation_id: Option<Uuid>,
+    #[serde(default)]
+    pub project_id: Option<Uuid>,
+    #[serde(default)]
+    pub design_system_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2078,6 +2217,8 @@ pub struct PatchArtifactRequest {
     pub title: Option<String>,
     #[serde(default)]
     pub public: Option<bool>,
+    #[serde(default)]
+    pub design_system_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2134,11 +2275,15 @@ pub struct AssistantPreferences {
     pub chat_first: bool,
     #[serde(default = "fall_back_by_default")]
     pub fall_back_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_speed: Option<String>,
 }
 
 impl Default for AssistantPreferences {
     fn default() -> Self {
-        AssistantPreferences { models: Vec::new(), nodes: Vec::new(), chat_first: true, fall_back_on: fall_back_by_default() }
+        AssistantPreferences { models: Vec::new(), nodes: Vec::new(), chat_first: true, fall_back_on: fall_back_by_default(), voice_name: None, speech_speed: None }
     }
 }
 
@@ -2417,6 +2562,63 @@ pub struct WellnessSettings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WellnessHeartbeat {
     pub seconds: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivitySpan {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
+    pub kind: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityBreak {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityDay {
+    pub date: String,
+    pub on_screen_minutes: i64,
+    pub spans: Vec<ActivitySpan>,
+    pub breaks: Vec<ActivityBreak>,
+    pub recorded_since: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityHoursDay {
+    pub date: String,
+    pub minutes: Vec<i64>,
+    pub top: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityHours {
+    pub days: Vec<ActivityHoursDay>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2654,4 +2856,133 @@ pub struct ProposeExercisesRequest {
 pub struct SolutionFile {
     pub path: String,
     pub diff: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentVersions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compositor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wayvnc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentController {
+    Agent,
+    Person,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentState {
+    Starting,
+    Running,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunningEnvironment {
+    pub conversation_id: Uuid,
+    pub controller: EnvironmentController,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentCapability {
+    pub available: bool,
+    #[serde(default)]
+    pub missing: Vec<String>,
+    #[serde(default)]
+    pub versions: EnvironmentVersions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub running: Vec<RunningEnvironment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Environment {
+    pub conversation_id: Uuid,
+    pub state: EnvironmentState,
+    pub controller: EnvironmentController,
+    pub node_id: Uuid,
+    pub node_name: String,
+    pub size: EnvironmentSize,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<EnvironmentTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentTarget {
+    pub x: u32,
+    pub y: u32,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvironmentAction {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartEnvironmentRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeechProvider {
+    pub provider_id: Uuid,
+    pub name: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrivacySettings {
+    pub voice_enabled: bool,
+    #[serde(default)]
+    pub speech_to_text_provider: Option<SpeechProvider>,
+    #[serde(default)]
+    pub text_to_speech_provider: Option<SpeechProvider>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavePrivacyRequest {
+    pub voice_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeechRequest {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeechVoices {
+    pub voices: Vec<String>,
 }

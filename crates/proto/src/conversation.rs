@@ -74,6 +74,7 @@ pub enum EventKind {
     Continued,
     TeachMode,
     OpenOutline,
+    GoalReport,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -326,4 +326,30 @@ class ArtifactPreviewFetchTest {
 
         assertNull(store.artifactThumbnail(artifactWith("page", 1)))
     }
+
+    @Test
+    fun everyNewKindIsFilterableAndOpensInTheEditor() {
+        val kinds = listOf("drawing", "typst", "doc", "slides", "dashboard", "motion", "design_system")
+        val artifacts = kinds.map { kind -> MyceliumJson.decodeFromString(Artifact.serializer(), artifactJson("id-$kind", kind = kind, title = kind)) }
+
+        for (kind in kinds) {
+            assertEquals(listOf("id-$kind"), visibleArtifacts(artifacts, AllArtifacts, "u1", kind, "").map { it.id })
+            assertEquals("https://x.test/design/id-$kind?theme=dark&accent=neutral", artifactOpenUrl("https://x.test", "id-$kind", kind, 3))
+        }
+
+        assertEquals("https://x.test/api/v1/artifacts/a/versions/3/content", artifactOpenUrl("https://x.test", "a", "markdown", 3))
+        assertEquals("Design system", mycelium.state.artifactKindName("design_system"))
+        assertEquals("Enter a name for the design system", mycelium.state.newArtifactNameProblem("design_system", " "))
+        assertNull(mycelium.state.newArtifactNameProblem("doc", "Guide"))
+    }
+
+    @Test
+    fun theDesignsUsingADesignSystemAreListedByTitle() {
+        val system = MyceliumJson.decodeFromString(Artifact.serializer(), artifactJson("ds", kind = "design_system", title = "Harbour UI"))
+        val design = MyceliumJson.decodeFromString(Artifact.serializer(), artifactJson("d1", title = "Settings")).copy(designSystemId = "ds")
+        val other = MyceliumJson.decodeFromString(Artifact.serializer(), artifactJson("d2", title = "Other"))
+
+        assertEquals(listOf("d1"), mycelium.state.designsUsing(listOf(system, design, other), "ds").map { it.id })
+        assertEquals(listOf("ds"), mycelium.state.designSystemsOf(listOf(system, design, other)).map { it.id })
+    }
 }

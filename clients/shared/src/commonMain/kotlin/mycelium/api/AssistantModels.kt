@@ -18,6 +18,8 @@ data class AssistantPreferences(
     val nodes: List<String> = emptyList(),
     @SerialName("chat_first") val chatFirst: Boolean = true,
     @SerialName("fall_back_on") val fallBackOn: List<String> = listOf("usage_limit", "signed_out", "offline"),
+    @SerialName("voice_name") val voiceName: String? = null,
+    @SerialName("speech_speed") val speechSpeed: String? = null,
 )
 
 @Serializable

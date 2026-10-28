@@ -73,6 +73,8 @@ sealed interface StreamMessage {
 
     data object WellnessChanged : StreamMessage
 
+    data class ScreenOpened(val route: String) : StreamMessage
+
     data class NodeResourcesSampled(val nodeId: String, val sample: ResourceSample) : StreamMessage
 
     data class LoginOutput(val loginId: String, val data: String) : StreamMessage
@@ -82,6 +84,10 @@ sealed interface StreamMessage {
     data class TerminalOutput(val terminalId: String, val data: String) : StreamMessage
 
     data class TerminalExited(val terminalId: String) : StreamMessage
+
+    data class EnvironmentChanged(val environment: Environment) : StreamMessage
+
+    data class EnvironmentActed(val conversationId: String, val action: EnvironmentAction) : StreamMessage
 }
 
 fun parseStreamMessage(text: String): StreamMessage? {
@@ -138,6 +144,7 @@ fun parseStreamMessage(text: String): StreamMessage? {
         "node_removed" -> StreamMessage.NodeRemoved(element.requireString("node_id"))
         "integrations_changed" -> StreamMessage.IntegrationsChanged
         "wellness_changed" -> StreamMessage.WellnessChanged
+        "open_screen" -> StreamMessage.ScreenOpened(element.requireString("route"))
         "node_resources" -> StreamMessage.NodeResourcesSampled(
             element.requireString("node_id"),
             MyceliumJson.decodeFromJsonElement(ResourceSample.serializer(), element.getValue("sample")),
@@ -149,6 +156,11 @@ fun parseStreamMessage(text: String): StreamMessage? {
         )
         "terminal_output" -> StreamMessage.TerminalOutput(element.requireString("terminal_id"), element.requireString("data"))
         "terminal_exited" -> StreamMessage.TerminalExited(element.requireString("terminal_id"))
+        "environment" -> StreamMessage.EnvironmentChanged(MyceliumJson.decodeFromJsonElement(Environment.serializer(), element))
+        "environment_action" -> StreamMessage.EnvironmentActed(
+            element.requireString("conversation_id"),
+            MyceliumJson.decodeFromJsonElement(EnvironmentAction.serializer(), element.getValue("action")),
+        )
         else -> null
     }
 }

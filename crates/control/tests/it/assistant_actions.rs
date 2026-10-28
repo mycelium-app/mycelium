@@ -240,7 +240,7 @@ async fn an_agent_lists_assistants_and_a_creation_waits_for_approval() {
     let proposed = tool(&server, &link, conversation.id, "assistant_create", json!({"name": "Jellyfin", "description": "Looks after the media library", "instructions": "Manage the library."})).await;
     assert_ne!(proposed["isError"], true, "{proposed}");
     let (_, assistants) = server.user.json(server.user.get("/api/v1/assistants")).await;
-    assert_eq!(assistants.as_array().unwrap().len(), 1);
+    assert_eq!(assistants.as_array().unwrap().iter().filter(|assistant| assistant["builtin_key"].is_null()).count(), 1);
 
     let (_, changes) = server.user.json(server.user.get("/api/v1/assistant-changes")).await;
     let change = changes[0]["id"].as_str().unwrap().to_string();
@@ -248,7 +248,7 @@ async fn an_agent_lists_assistants_and_a_creation_waits_for_approval() {
     let (status, approved) = server.user.json(server.user.post(&format!("/api/v1/assistant-changes/{change}/approve"))).await;
     assert_eq!((status, approved["state"].clone()), (200, json!("approved")), "{approved}");
     let (_, assistants) = server.user.json(server.user.get("/api/v1/assistants")).await;
-    let names: Vec<&str> = assistants.as_array().unwrap().iter().map(|assistant| assistant["name"].as_str().unwrap()).collect();
+    let names: Vec<&str> = assistants.as_array().unwrap().iter().filter(|assistant| assistant["builtin_key"].is_null()).map(|assistant| assistant["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["Jellyfin", "Stand-up"]);
 }
 
@@ -271,7 +271,7 @@ async fn a_declined_creation_makes_no_assistant_and_a_taken_name_is_refused_up_f
 
     assert_eq!((status, declined["state"].clone()), (200, json!("declined")));
     let (_, assistants) = server.user.json(server.user.get("/api/v1/assistants")).await;
-    assert_eq!(assistants.as_array().unwrap().len(), 1);
+    assert_eq!(assistants.as_array().unwrap().iter().filter(|assistant| assistant["builtin_key"].is_null()).count(), 1);
 }
 
 #[tokio::test]

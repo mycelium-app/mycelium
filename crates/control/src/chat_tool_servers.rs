@@ -174,7 +174,10 @@ const REFRESH_MARGIN: chrono::Duration = chrono::Duration::seconds(60);
 
 pub async fn bearer(state: &AppState, row: &ServerRow) -> ApiResult<Option<String>> {
     if row.oauth.is_none() {
-        return Ok(row.bearer_token.clone());
+        return match (&row.bearer_token, row.forge_id) {
+            (None, Some(forge_id)) => Ok(sqlx::query_scalar::<_, String>("select token from forges where id = $1").bind(forge_id).fetch_optional(&state.pool).await?),
+            _ => Ok(row.bearer_token.clone()),
+        };
     }
 
     let current = reload(state, row).await?;
@@ -404,7 +407,7 @@ pub async fn set_groups(State(state): State<AppState>, user: AuthUser, Path(id):
     Ok(Json(reloaded(&state, user.id, id).await?))
 }
 
-async fn reloaded(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ChatToolServer> {
+pub async fn reloaded(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<ChatToolServer> {
     let rows = list_owned(state, owner).await?;
 
     rows.iter().find(|row| row.id == id).map(ServerRow::to_proto).ok_or_else(|| ApiError::not_found("That tool server"))

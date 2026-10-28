@@ -255,7 +255,7 @@ impl Toolbox {
                 let Some(integration) = server.integration() else {
                     return Ok((format!("{} is not a built-in integration Mycelium knows. Remove it and add it again.", tool.server), true));
                 };
-                let output = integration.call(state, owner, server, &tool.original, input).await;
+                let output = integration.call(state, owner, server, Some(conversation_id), &tool.original, input).await;
 
                 Ok((output.text, output.is_error))
             }
@@ -454,7 +454,7 @@ pub async fn request_approval(state: &AppState, owner: Uuid, id: Uuid, request_i
     ]);
     let request = json!({
         "request_id": request_id,
-        "toolCall": {"toolCallId": request_id, "title": approval.title, "rawInput": approval.input, "server": approval.server, "account": approval.account, "filter": approval.filter, "edit": approval.edits_by_setting},
+        "toolCall": {"toolCallId": request_id, "title": approval.title, "rawInput": crate::coolify::approval_input(approval.title, approval.input), "server": approval.server, "account": approval.account, "filter": approval.filter, "edit": approval.edits_by_setting},
         "options": options,
     });
     let mut tx = state.pool.begin().await?;

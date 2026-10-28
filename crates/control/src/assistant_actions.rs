@@ -28,7 +28,7 @@ const INPUT_LIMIT: usize = 8;
 const INPUT_NAME_LIMIT: usize = 40;
 const INPUT_VALUE_LIMIT: usize = 60_000;
 const TODAY: &str = "today";
-const WELLNESS_INSTRUCTIONS: &str = "You are the Wellness assistant. You look after the person's weekly reflections, end-of-day wrap-ups and exercise reviews. Be brief, specific and kind. Write drafts in the first person, in British English. Only change files in your own storage.";
+pub(crate) const WELLNESS_INSTRUCTIONS: &str = "You are the Wellness assistant. You look after the person's weekly reflections, end-of-day wrap-ups and exercise reviews. Be brief, specific and kind. Write drafts in the first person, in British English. Only change files in your own storage.";
 const ACTION_COLUMNS: &str = "id, assistant_id, name, prompt, inputs, model, node_id, pinned, position, builtin_key, created_at, updated_at";
 const PROPOSAL_COLUMNS: &str = "id, assistant_id, conversation_id, name, prompt, inputs, reason, state, created_at, decided_at";
 

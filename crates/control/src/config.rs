@@ -65,6 +65,8 @@ pub struct Config {
     pub editor_dir: PathBuf,
     pub artifact_domain: Option<String>,
     pub artifact_host_token: Option<String>,
+    pub typst_binary: String,
+    pub prometheus_url: Option<String>,
     pub browser_url: Option<String>,
     pub skip_migrations: bool,
     pub trusted_proxies: Vec<Cidr>,
@@ -135,6 +137,8 @@ impl Config {
             editor_dir: optional(lookup, "MYCELIUM_EDITOR_DIR").unwrap_or_else(|| "/usr/share/mycelium/editor".into()).into(),
             artifact_domain: optional(lookup, "MYCELIUM_ARTIFACT_DOMAIN").map(|domain| domain.trim().trim_matches('.').to_lowercase()).filter(|domain| !domain.is_empty()),
             artifact_host_token: optional(lookup, "MYCELIUM_ARTIFACT_HOST_TOKEN"),
+            typst_binary: optional(lookup, "MYCELIUM_TYPST").unwrap_or_else(|| "typst".into()),
+            prometheus_url: optional(lookup, "MYCELIUM_PROMETHEUS_URL"),
             browser_url: optional(lookup, "MYCELIUM_BROWSER_URL"),
             skip_migrations: optional(lookup, "MYCELIUM_SKIP_MIGRATIONS").is_some_and(|value| value == "true" || value == "1"),
             trusted_proxies: optional(lookup, "MYCELIUM_TRUSTED_PROXIES")

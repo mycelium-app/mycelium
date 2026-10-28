@@ -44,6 +44,8 @@ fun IntegrationMark(integration: Integration, size: androidx.compose.ui.unit.Dp 
                 "outline" -> MyIcon.File
                 "litellm" -> MyIcon.Cloud
                 "freeagent" -> MyIcon.Receipt
+                "coolify" -> MyIcon.AppWindow
+                "tandoor" -> MyIcon.ChefHat
                 else -> MyIcon.Server
             }
 

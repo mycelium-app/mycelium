@@ -305,6 +305,10 @@ pub async fn list_for(state: &AppState, owner: Uuid, archived: bool) -> ApiResul
 }
 
 pub async fn list(State(state): State<AppState>, user: AuthUser, Query(query): Query<ListQuery>) -> ApiResult<Json<Vec<Assistant>>> {
+    if !query.archived {
+        crate::voice::ensure_voice(&state, user.id).await?;
+    }
+
     Ok(Json(list_for(&state, user.id, query.archived).await?))
 }
 
@@ -404,6 +408,7 @@ pub struct StartOverrides {
 pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptRequest, overrides: &StartOverrides) -> ApiResult<Conversation> {
     let assistant = find_owned(state, id, owner).await?;
     let text = request.text.trim();
+    let spoken = request.spoken;
 
     if assistant.archived_at.is_some() {
         return Err(ApiError::conflict("assistant_archived", "This assistant is archived. Restore it, then send your message again."));
@@ -476,6 +481,16 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
             }
         }
     };
+
+    if spoken {
+        sqlx::query(
+            "update events set payload = payload || jsonb_build_object('spoken', true, 'spoken_at', to_jsonb(created_at))
+             where id = (select id from events where conversation_id = $1 and kind = 'user_message' order by seq desc limit 1)",
+        )
+        .bind(conversation.id)
+        .execute(&state.pool)
+        .await?;
+    }
 
     publish(state, owner, id).await?;
 

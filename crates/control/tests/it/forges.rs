@@ -195,6 +195,54 @@ async fn github_enterprise_is_not_offered_an_mcp_server() {
     assert_eq!(forge.get("mcp_error"), None);
 }
 
+#[tokio::test]
+async fn a_github_forge_never_starts_the_mcp_oauth_flow_that_github_cannot_register_for() {
+    let registrations = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = registrations.clone();
+    let rejecting = Router::new().route("/register", post(move || async move {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        StatusCode::BAD_REQUEST
+    }));
+    let _mcp = serve(rejecting).await;
+    let server = Server::start().await;
+    let github = serve(fake_github()).await;
+    let (_, forge) = connect(&server, "github", &github, GITHUB_TOKEN).await;
+
+    let (status, refused) = server.user.json(server.user.post("/api/v1/chat-tool-servers/oauth").json(&json!({"name": "GitHub", "url": "https://api.githubcopilot.com/mcp/", "forge_id": forge["id"]}))).await;
+
+    assert_eq!((status, refused["error"].as_str()), (400, Some("oauth_unsupported")));
+    assert!(refused["message"].as_str().unwrap().contains("fine-grained token"), "{refused}");
+    assert_eq!(registrations.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_forge_connected_without_its_mcp_server_adds_it_later_with_its_token() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+    let (_, forge) = connect_without_mcp(&server, &gitlab).await;
+    assert!(mcp_servers(&server).await.is_empty());
+
+    let (status, linked) = server.user.json(server.user.post(&format!("/api/v1/forges/{}/mcp", forge["id"].as_str().unwrap()))).await;
+
+    assert_eq!(status, 200, "{linked}");
+    assert!(linked["mcp_error"].is_null(), "{linked}");
+    assert_eq!(mcp_servers(&server).await[0]["tools"][0]["name"], "get_issue");
+}
+
+#[tokio::test]
+async fn a_forge_linked_server_with_no_token_of_its_own_uses_the_forge_token() {
+    let server = Server::start().await;
+    let gitlab = serve(fake_gitlab_mcp(true)).await;
+    connect(&server, "gitlab", &gitlab, GITLAB_TOKEN).await;
+    let linked = mcp_servers(&server).await[0]["id"].as_str().unwrap().to_string();
+    sqlx::query("update chat_tool_servers set bearer_token = null where id = $1::uuid").bind(&linked).execute(&server.pool).await.unwrap();
+
+    let (status, refreshed) = server.user.json(server.user.post(&format!("/api/v1/chat-tool-servers/{linked}/refresh"))).await;
+
+    assert_eq!(status, 200, "{refreshed}");
+    assert_eq!(refreshed["tools"][0]["name"], "get_issue");
+}
+
 async fn connect(server: &Server, kind: &str, base_url: &str, token: &str) -> (u16, Value) {
     server.user.json(server.user.post("/api/v1/forges").json(&json!({"kind": kind, "base_url": base_url, "token": token}))).await
 }

@@ -1,3 +1,4 @@
+use crate::artifact_kinds;
 use crate::attachments::{self, MAX_ATTACHMENT_BYTES};
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
@@ -35,7 +36,7 @@ const MOST_READ_CHARACTERS: usize = 100_000;
 const ARTBOARD_GAP: i64 = 80;
 const ARTBOARD_WIDTH: i64 = 1440;
 const ARTBOARD_HEIGHT: i64 = 900;
-const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from artifact_links where artifact_id = artifacts.id and project_id is not null) as project_ids, array(select conversation_id from artifact_links where artifact_id = artifacts.id and conversation_id is not null) as conversation_ids, kind, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type, (select title from conversations where id = artifacts.conversation_id) as origin_title, (select project_id from conversations where id = artifacts.conversation_id) as origin_project_id, (select name from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_name, (select icon from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_icon";
+const COLUMNS: &str = "id, owner, conversation_id, array(select project_id from artifact_links where artifact_id = artifacts.id and project_id is not null) as project_ids, array(select conversation_id from artifact_links where artifact_id = artifacts.id and conversation_id is not null) as conversation_ids, kind, design_system_id, title, slug, public, latest_version, created_at, updated_at, (select max(version) from artifact_versions where artifact_id = artifacts.id and thumbnail_sha256 is not null) as thumbnail_version, (select media_type from artifact_versions where artifact_id = artifacts.id and version = artifacts.latest_version) as media_type, (select title from conversations where id = artifacts.conversation_id) as origin_title, (select project_id from conversations where id = artifacts.conversation_id) as origin_project_id, (select name from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_name, (select icon from projects where id = (select project_id from conversations where id = artifacts.conversation_id)) as origin_project_icon";
 const COMMENT_COLUMNS: &str = "id, artifact_id, author_name, body, anchor, resolved, created_at";
 
 #[derive(sqlx::FromRow)]
@@ -46,6 +47,7 @@ pub(crate) struct ArtifactRow {
     project_ids: Vec<Uuid>,
     conversation_ids: Vec<Uuid>,
     kind: String,
+    design_system_id: Option<Uuid>,
     title: String,
     slug: String,
     public: bool,
@@ -96,6 +98,8 @@ pub struct NewArtifact<'a> {
     pub title: &'a str,
     pub content: Option<Vec<u8>>,
     pub media_type: Option<&'a str>,
+    pub project_id: Option<Uuid>,
+    pub design_system_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -129,6 +133,13 @@ fn kind_text(kind: ArtifactKind) -> &'static str {
         ArtifactKind::Page => "page",
         ArtifactKind::Markdown => "markdown",
         ArtifactKind::File => "file",
+        ArtifactKind::Drawing => "drawing",
+        ArtifactKind::Typst => "typst",
+        ArtifactKind::Doc => "doc",
+        ArtifactKind::Slides => "slides",
+        ArtifactKind::Dashboard => "dashboard",
+        ArtifactKind::Motion => "motion",
+        ArtifactKind::DesignSystem => "design_system",
     }
 }
 
@@ -138,7 +149,14 @@ fn parse_kind(text: &str) -> ApiResult<ArtifactKind> {
         "page" => Ok(ArtifactKind::Page),
         "markdown" => Ok(ArtifactKind::Markdown),
         "file" => Ok(ArtifactKind::File),
-        _ => Err(ApiError::bad_request("kind_invalid", "Kind must be design, page, markdown or file.")),
+        "drawing" => Ok(ArtifactKind::Drawing),
+        "typst" => Ok(ArtifactKind::Typst),
+        "doc" => Ok(ArtifactKind::Doc),
+        "slides" => Ok(ArtifactKind::Slides),
+        "dashboard" => Ok(ArtifactKind::Dashboard),
+        "motion" => Ok(ArtifactKind::Motion),
+        "design_system" => Ok(ArtifactKind::DesignSystem),
+        _ => Err(ApiError::bad_request("kind_invalid", "Kind must be design, page, markdown, file, drawing, typst, doc, slides, dashboard, motion or design_system.")),
     }
 }
 
@@ -167,6 +185,7 @@ impl ArtifactRow {
             conversation_ids: self.conversation_ids,
             origin: self.conversation_id.zip(self.origin_title).map(|(conversation_id, conversation_title)| ArtifactOrigin { conversation_id, conversation_title, project_id: self.origin_project_id, project_name: self.origin_project_name, project_icon: self.origin_project_icon }),
             kind: parse_kind(&self.kind).map_err(|_| ApiError::internal(format!("unknown artefact kind {}", self.kind)))?,
+            design_system_id: self.design_system_id,
             url: domain.map(|domain| format!("https://{}.{domain}", self.slug)),
             title: self.title,
             slug: self.slug,
@@ -226,6 +245,57 @@ async fn with_slug(state: &AppState, slug: &str) -> ApiResult<ArtifactRow> {
     let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("select {COLUMNS} from artifacts where slug = $1"))).bind(slug).fetch_optional(&state.pool).await?;
 
     row.ok_or_else(|| ApiError::not_found("That artefact"))
+}
+
+async fn find_design_system(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<ArtifactRow> {
+    let row = find_owned(state, id, owner).await?;
+
+    if row.kind != "design_system" {
+        return Err(ApiError::bad_request("design_system_invalid", "Choose a design system from the list."));
+    }
+
+    Ok(row)
+}
+
+pub(crate) struct TypstDocument {
+    pub latest_version: i32,
+    pub title: String,
+}
+
+pub(crate) async fn find_typst(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<TypstDocument> {
+    let row = find_owned(state, id, owner).await?;
+
+    if row.kind != "typst" {
+        return Err(ApiError::bad_request("not_typst", "That artefact is not a Typst document."));
+    }
+
+    Ok(TypstDocument { latest_version: row.latest_version, title: row.title })
+}
+
+pub(crate) async fn text_of_version(state: &AppState, id: Uuid, version: i32) -> ApiResult<Option<(String, chrono::DateTime<chrono::Utc>)>> {
+    let stored = sqlx::query_as::<_, (String, chrono::DateTime<chrono::Utc>)>("select sha256, created_at from artifact_versions where artifact_id = $1 and version = $2").bind(id).bind(version).fetch_optional(&state.pool).await?;
+    let Some((sha256, created_at)) = stored else {
+        return Ok(None);
+    };
+    let bytes = tokio::fs::read(attachments::path_of(state, &sha256)).await.map_err(|_| ApiError::not_found("That content"))?;
+
+    Ok(Some((String::from_utf8_lossy(&bytes).into_owned(), created_at)))
+}
+
+pub(crate) async fn dashboard_of(state: &AppState, id: Uuid, owner: Uuid) -> ApiResult<Value> {
+    let row = find_owned(state, id, owner).await?;
+
+    if row.kind != "dashboard" {
+        return Err(ApiError::bad_request("not_a_dashboard", "That artefact is not a dashboard."));
+    }
+
+    let (_, bytes) = latest_content(state, &row).await?;
+
+    serde_json::from_slice(&bytes).map_err(ApiError::internal)
+}
+
+pub(crate) fn file_stem(title: &str) -> String {
+    slug_of(title)
 }
 
 async fn versions_of(state: &AppState, id: Uuid) -> ApiResult<Vec<ArtifactVersion>> {
@@ -295,11 +365,15 @@ fn check_content(kind: ArtifactKind, bytes: &[u8]) -> ApiResult<()> {
 }
 
 fn media_type_of(kind: ArtifactKind, requested: Option<&str>) -> ApiResult<String> {
+    if let Some(fixed) = artifact_kinds::media_type(kind) {
+        return Ok(fixed.to_string());
+    }
+
     match kind {
         ArtifactKind::Design => Ok(DESIGN_MEDIA_TYPE.to_string()),
         ArtifactKind::Page => Ok("text/html".to_string()),
         ArtifactKind::Markdown => Ok("text/markdown".to_string()),
-        ArtifactKind::File => {
+        _ => {
             let text = requested.map(|value| value.split(';').next().unwrap_or_default().trim().to_ascii_lowercase()).filter(|value| !value.is_empty());
 
             match text {
@@ -362,10 +436,19 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
     let bytes = match (new.content, new.kind) {
         (Some(bytes), _) => bytes,
         (None, ArtifactKind::Design) => json!({"pages": [{"id": "p1", "name": "Page 1", "items": []}]}).to_string().into_bytes(),
-        (None, _) => return Err(ApiError::bad_request("content_required", "Give the content of the artefact.")),
+        (None, kind) => artifact_kinds::default_content(kind, title).ok_or_else(|| ApiError::bad_request("content_required", "Give the content of the artefact."))?,
     };
+    let bytes = artifact_kinds::normalise(new.kind, bytes)?;
 
     check_content(new.kind, &bytes)?;
+
+    if let Some(design_system_id) = new.design_system_id {
+        if new.kind != ArtifactKind::Design {
+            return Err(ApiError::bad_request("design_system_not_for_kind", "Only a design can use a design system."));
+        }
+
+        find_design_system(state, design_system_id, new.owner).await?;
+    }
 
     let media_type = media_type_of(new.kind, new.media_type)?;
 
@@ -389,6 +472,12 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
     if let Some(conversation_id) = new.conversation_id {
         sqlx::query("insert into artifact_links (artifact_id, project_id, conversation_id, permission) select $1, project_id, case when project_id is null then id end, 'edit' from conversations where id = $2").bind(row.id).bind(conversation_id).execute(&mut *tx).await?;
     }
+    if let Some(project_id) = new.project_id {
+        sqlx::query("insert into artifact_links (artifact_id, project_id, permission) select $1, id, 'edit' from projects where id = $2 and owner = $3 on conflict do nothing").bind(row.id).bind(project_id).bind(new.owner).execute(&mut *tx).await?;
+    }
+    if let Some(design_system_id) = new.design_system_id {
+        sqlx::query("update artifacts set design_system_id = $2 where id = $1").bind(row.id).bind(design_system_id).execute(&mut *tx).await?;
+    }
 
     tx.commit().await?;
 
@@ -403,13 +492,14 @@ pub async fn create_one(state: &AppState, new: NewArtifact<'_>) -> ApiResult<Art
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateArtifactRequest>) -> ApiResult<(StatusCode, Json<Artifact>)> {
     let kind = parse_kind(&request.kind)?;
     let content = decode(request.content, request.content_base64)?;
-    let artifact = create_one(&state, NewArtifact { owner: user.id, conversation_id: request.conversation_id, author: ArtifactAuthor::Person, kind, title: &request.title, content, media_type: request.media_type.as_deref() }).await?;
+    let artifact = create_one(&state, NewArtifact { owner: user.id, conversation_id: request.conversation_id, author: ArtifactAuthor::Person, kind, title: &request.title, content, media_type: request.media_type.as_deref(), project_id: request.project_id, design_system_id: request.design_system_id }).await?;
 
     Ok((StatusCode::CREATED, Json(artifact)))
 }
 
 async fn add_version(state: &AppState, row: &ArtifactRow, author: ArtifactAuthor, bytes: &[u8], note: Option<&str>) -> ApiResult<Artifact> {
     let kind = parse_kind(&row.kind)?;
+    let bytes = &artifact_kinds::normalise(kind, bytes.to_vec())?;
 
     check_content(kind, bytes)?;
 
@@ -537,12 +627,31 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     find_owned(&state, id, user.id).await?;
 
     let title = request.title.as_deref().map(clean_title).transpose()?;
-    let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!("update artifacts set title = coalesce($2, title), public = coalesce($3, public), updated_at = now() where id = $1 returning {COLUMNS}")))
-        .bind(id)
-        .bind(title)
-        .bind(request.public)
-        .fetch_one(&state.pool)
-        .await?;
+    let design_system = match request.design_system_id.as_deref() {
+        None => None,
+        Some("") => Some(None),
+        Some(text) => {
+            let design_system_id = Uuid::parse_str(text).map_err(|_| ApiError::bad_request("design_system_invalid", "Choose a design system from the list."))?;
+
+            if find_owned(&state, id, user.id).await?.kind != "design" {
+                return Err(ApiError::bad_request("design_system_not_for_kind", "Only a design can use a design system."));
+            }
+
+            find_design_system(&state, design_system_id, user.id).await?;
+
+            Some(Some(design_system_id))
+        }
+    };
+    let row = sqlx::query_as::<_, ArtifactRow>(sqlx::AssertSqlSafe(format!(
+        "update artifacts set title = coalesce($2, title), public = coalesce($3, public), design_system_id = case when $4 then $5 else design_system_id end, updated_at = now() where id = $1 returning {COLUMNS}"
+    )))
+    .bind(id)
+    .bind(title)
+    .bind(request.public)
+    .bind(design_system.is_some())
+    .bind(design_system.flatten())
+    .fetch_one(&state.pool)
+    .await?;
     let artifact = full(&state, row).await?;
 
     announce(&state, &artifact);
@@ -738,7 +847,11 @@ fn number_argument(arguments: &Value, name: &str) -> Option<i64> {
 }
 
 async fn resolve(state: &AppState, owner: Uuid, arguments: &Value) -> ApiResult<ArtifactRow> {
-    let Some(reference) = argument(arguments, "artifact") else {
+    resolve_named(state, owner, arguments, "artifact").await
+}
+
+async fn resolve_named(state: &AppState, owner: Uuid, arguments: &Value, name: &str) -> ApiResult<ArtifactRow> {
+    let Some(reference) = argument(arguments, name) else {
         return Err(ApiError::bad_request("artifact_required", "Give the artefact, its id or its slug."));
     };
 
@@ -790,6 +903,17 @@ fn media_type_of_path(path: &str) -> &'static str {
     }
 }
 
+async fn design_system_of(state: &AppState, row: &ArtifactRow) -> ApiResult<Option<(String, Value)>> {
+    let Some(design_system_id) = row.design_system_id else {
+        return Ok(None);
+    };
+    let system = find_owned(state, design_system_id, row.owner).await?;
+    let (_, bytes) = latest_content(state, &system).await?;
+    let value = serde_json::from_slice(&bytes).map_err(ApiError::internal)?;
+
+    Ok(Some((system.title, value)))
+}
+
 async fn edit_design(state: &AppState, owner: Uuid, arguments: &Value, edit: impl FnOnce(&mut Value) -> ApiResult<String>) -> ApiResult<String> {
     let row = resolve(state, owner, arguments).await?;
 
@@ -836,7 +960,11 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
             let kind = parse_kind(argument(arguments, "kind").unwrap_or_default())?;
             let content = content_from(state, owner, conversation_id, arguments).await?;
             let requested = argument(arguments, "media_type").or_else(|| argument(arguments, "path").map(media_type_of_path));
-            let artifact = create_one(state, NewArtifact { owner, conversation_id: Some(conversation_id), author: ArtifactAuthor::Agent, kind, title: argument(arguments, "title").unwrap_or_default(), content, media_type: requested }).await?;
+            let design_system_id = match argument(arguments, "design_system") {
+                Some(_) => Some(resolve_named(state, owner, arguments, "design_system").await?.id),
+                None => None,
+            };
+            let artifact = create_one(state, NewArtifact { owner, conversation_id: Some(conversation_id), author: ArtifactAuthor::Agent, kind, title: argument(arguments, "title").unwrap_or_default(), content, media_type: requested, project_id: None, design_system_id }).await?;
 
             Ok(format!("Created {} \"{}\" (artifact {}, version 1).", kind_text(artifact.kind), artifact.title, artifact.id))
         }
@@ -851,6 +979,13 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
             let Some(html) = arguments.get("html").and_then(Value::as_str).filter(|html| !html.trim().is_empty()) else {
                 return Err(ApiError::bad_request("html_required", "Give the artboard's html."));
             };
+
+            let design_row = resolve(state, owner, arguments).await?;
+            let html = match design_system_of(state, &design_row).await? {
+                Some((_, system)) => artifact_kinds::with_design_system_style(html, &artifact_kinds::design_system_style(&system)),
+                None => html.to_string(),
+            };
+            let html = html.as_str();
 
             edit_design(state, owner, arguments, |design| {
                 let pages = design["pages"].as_array_mut().ok_or_else(|| ApiError::bad_request("design_invalid", "The design has no pages."))?;
@@ -962,6 +1097,12 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
 
                     let mut lines = vec![format!("Design \"{}\" (artifact {}), version {}.", row.title, row.id, row.latest_version)];
 
+                    if let Some((name, system)) = design_system_of(state, &row).await? {
+                        lines.push(format!("Design system \"{name}\": use its tokens as CSS variables, for example var(--{}). They are added to every artboard you save.", artifact_kinds::tokens_of(&system).first().map(|(token, _)| token.as_str()).unwrap_or("brand")));
+                        lines.extend(artifact_kinds::tokens_of(&system).iter().map(|(token, value)| format!("  --{token}: {value}")));
+                        lines.extend(system["components"].as_array().into_iter().flatten().map(|component| format!("  component {}: {}", component["name"].as_str().unwrap_or_default(), component["html"].as_str().unwrap_or_default())));
+                    }
+
                     for page in &pages {
                         lines.push(format!("Page \"{}\" ({}):", page["name"].as_str().unwrap_or_default(), page["id"].as_str().unwrap_or_default()));
                         lines.extend(page["items"].as_array().into_iter().flatten().map(describe_item));
@@ -969,7 +1110,7 @@ pub async fn tool(state: &AppState, owner: Uuid, conversation_id: Uuid, name: &s
 
                     Ok(lines.join("\n"))
                 }
-                "page" | "markdown" => {
+                "page" | "markdown" | "drawing" | "typst" | "doc" | "slides" | "dashboard" | "motion" | "design_system" => {
                     let text = String::from_utf8_lossy(&bytes);
 
                     if text.chars().count() > MOST_READ_CHARACTERS {

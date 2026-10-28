@@ -64,7 +64,7 @@ class WorkflowEndedCardTest {
         val agents = listOf(WorkflowAgent("a", "Activity all time", "Implement", finished = true), WorkflowAgent("b", "Sidebar row menus", "Implement", finished = false))
         show(WorkflowProgress("run", agents, lastLineAt = Clock.System.now() - 25.minutes))
 
-        rule.onNodeWithText("No progress for 25 minutes").assertIsDisplayed()
+        rule.onNodeWithText("No progress for 25 minutes.").assertIsDisplayed()
         rule.onNodeWithContentDescription("Stop the workflow").assertIsDisplayed()
     }
 }

@@ -17,6 +17,7 @@ import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.encodeURLPathPart
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 private const val OlderUnknownRouteMessage = "That address was not found. Check the address and try again."
 private const val UnknownRouteMessage = "This control plane does not offer that yet. Update it to the latest version of Mycelium, then try again."
@@ -104,7 +106,11 @@ class MyceliumApi(
 
     suspend fun workflows(): List<Workflow> = call("/workflows") { client.get(it) { authorise() } }.body()
 
+    suspend fun workflow(id: String): Workflow = call("/workflows/$id") { client.get(it) { authorise() } }.body()
+
     suspend fun createWorkflow(plan: WorkflowPlan): Workflow = call("/workflows") { client.post(it) { authorise(); json(plan) } }.body()
+
+    suspend fun rerunWorkflow(id: String): Workflow = call("/workflows/$id/rerun") { client.post(it) { authorise() } }.body()
 
     suspend fun controlWorkflow(id: String, request: WorkflowControlRequest): Workflow = call("/workflows/$id/control") { client.post(it) { authorise(); json(request) } }.body()
 
@@ -224,6 +230,38 @@ class MyceliumApi(
         call("/terminals/$terminalId") { client.delete(it) { authorise() } }
     }
 
+    suspend fun startEnvironment(conversationId: String, request: StartEnvironmentRequest = StartEnvironmentRequest()): Environment =
+        call("/conversations/$conversationId/environment") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun environmentStreamTicket(conversationId: String): String =
+        call("/conversations/$conversationId/environment/stream-ticket") { client.post(it) { authorise() } }.body<JsonObject>()["ticket"]!!.jsonPrimitive.content
+
+    suspend fun environment(conversationId: String): Environment? =
+        try {
+            call("/conversations/$conversationId/environment") { client.get(it) { authorise() } }.body<Environment>()
+        } catch (gone: ApiException) {
+            if (gone.status == 404) null else throw gone
+        }
+
+    suspend fun stopEnvironment(conversationId: String) {
+        call("/conversations/$conversationId/environment") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun takeOverEnvironment(conversationId: String): Environment =
+        call("/conversations/$conversationId/environment/take-over") { client.post(it) { authorise() } }.body()
+
+    suspend fun handBackEnvironment(conversationId: String): Environment =
+        call("/conversations/$conversationId/environment/hand-back") { client.post(it) { authorise() } }.body()
+
+    suspend fun environmentActions(conversationId: String): List<EnvironmentAction> =
+        call("/conversations/$conversationId/environment/actions") { client.get(it) { authorise() } }.body()
+
+    suspend fun checkEnvironment(nodeId: String): EnvironmentCapability? {
+        val answer = call("/nodes/$nodeId/environment/check") { client.post(it) { authorise() } }.bodyAsText()
+
+        return if (answer.isBlank()) null else MyceliumJson.decodeFromString(EnvironmentCapability.serializer(), answer)
+    }
+
     suspend fun memories(query: String = ""): List<Memory> =
         call("/memories") { client.get(it) { authorise(); if (query.isNotBlank()) parameter("query", query.trim()) } }.body()
 
@@ -253,6 +291,8 @@ class MyceliumApi(
 
     suspend fun connectForge(request: ConnectForgeRequest): Forge =
         call("/forges") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun linkForgeMcp(id: String): Forge = call("/forges/$id/mcp") { client.post(it) { authorise() } }.body()
 
     suspend fun disconnectForge(id: String) {
         call("/forges/$id") { client.delete(it) { authorise() } }
@@ -336,12 +376,64 @@ class MyceliumApi(
     suspend fun testCalendars(request: TestCalendarsRequest): TestedCalendars =
         call("/chat-tool-servers/caldav-test") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun testCoolify(request: AppsCredentialRequest): CoolifyTested =
+        call("/chat-tool-servers/coolify-test") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun testTandoor(request: AppsCredentialRequest): TandoorTested =
+        call("/chat-tool-servers/tandoor-test") { client.post(it) { authorise(); json(request) } }.body()
+
+    suspend fun coolifyOptions(id: String): CoolifyOptions = call("/chat-tool-servers/$id/coolify-options") { client.get(it) { authorise() } }.body()
+
+    suspend fun setCoolifyTarget(id: String, request: CoolifyTargetRequest): ChatToolServer =
+        call("/chat-tool-servers/$id/coolify-target") { client.put(it) { authorise(); json(request) } }.body()
+
     suspend fun integrationCalendars(id: String): List<CalendarAccess> = call("/integrations/$id/calendars") { client.get(it) { authorise() } }.body()
 
     suspend fun integrationApiGrants(id: String): List<IntegrationApiGrant> = call("/chat-tool-servers/$id/api-access") { client.get(it) { authorise() } }.body()
 
     suspend fun deleteChatToolServer(id: String) {
         call("/chat-tool-servers/$id") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun apps(): List<AppSummary> = call("/apps") { client.get(it) { authorise() } }.body<AppList>().apps
+
+    suspend fun app(uuid: String): AppDetail = call("/apps/$uuid") { client.get(it) { authorise() } }.body()
+
+    suspend fun appDeployments(uuid: String): List<AppDeployment> = call("/apps/$uuid/deployments") { client.get(it) { authorise() } }.body()
+
+    suspend fun appDeployment(uuid: String): DeploymentProgress = call("/app-deployments/$uuid") { client.get(it) { authorise() } }.body()
+
+    suspend fun appLogs(uuid: String, kind: String, deployment: String? = null, lines: Int = 200): AppLogs =
+        call("/apps/$uuid/logs") {
+            client.get(it) {
+                authorise()
+                parameter("kind", kind)
+                parameter("lines", lines)
+                deployment?.let { value -> parameter("deployment", value) }
+            }
+        }.body()
+
+    suspend fun appEnvs(uuid: String): List<AppEnv> = call("/apps/$uuid/envs") { client.get(it) { authorise() } }.body()
+
+    suspend fun putAppEnv(uuid: String, key: String, request: PutAppEnvRequest): AppEnv =
+        call("/apps/$uuid/envs/${key.encodeURLPathPart()}") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun deleteAppEnv(uuid: String, key: String) {
+        call("/apps/$uuid/envs/${key.encodeURLPathPart()}") { client.delete(it) { authorise() } }
+    }
+
+    suspend fun redeployApp(uuid: String): AppRedeployed = call("/apps/$uuid/redeploy") { client.post(it) { authorise() } }.body()
+
+    suspend fun startApp(uuid: String) {
+        call("/apps/$uuid/start") { client.post(it) { authorise() } }
+    }
+
+    suspend fun stopApp(uuid: String) {
+        call("/apps/$uuid/stop") { client.post(it) { authorise() } }
+    }
+
+    suspend fun deleteApp(uuid: String) {
+        call("/apps/$uuid") { client.delete(it) { authorise() } }
     }
 
     suspend fun repositories(forge: String? = null, organisation: String? = null, query: String = ""): Repositories =
@@ -396,10 +488,14 @@ class MyceliumApi(
 
     private fun filePath(path: String): String = path.split('/').joinToString("/") { it.encodeURLPathPart() }
 
-    suspend fun promptAssistant(id: String, text: String): Conversation =
-        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text)) } }.body()
+    suspend fun promptAssistant(id: String, text: String, spoken: Boolean = false): Conversation =
+        call("/assistants/$id/prompt") { client.post(it) { authorise(); json(PromptRequest(text, spoken = spoken)) } }.body()
+
+    suspend fun voiceAssistant(): Assistant = call("/assistants/builtin/voice") { client.get(it) { authorise() } }.body()
 
     suspend fun wellnessAssistant(): Assistant = call("/assistants/builtin/wellness") { client.get(it) { authorise() } }.body()
+
+    suspend fun resetAssistantInstructions(id: String): Assistant = call("/assistants/$id/instructions/reset") { client.post(it) { authorise() } }.body()
 
     suspend fun assistantActions(id: String): List<AssistantAction> = call("/assistants/$id/actions") { client.get(it) { authorise() } }.body()
 
@@ -524,8 +620,12 @@ class MyceliumApi(
 
     suspend fun wellnessOverview(days: Int = 7): WellnessOverview = call("/wellness/overview?days=$days") { client.get(it) { authorise() } }.body()
 
-    suspend fun wellnessHeartbeat(seconds: Int) {
-        call("/wellness/heartbeat") { client.post(it) { authorise(); json(WellnessHeartbeat(seconds)) } }
+    suspend fun activityDay(date: String? = null): ActivityDay = call("/wellness/activity/day" + (date?.let { "?date=$it" } ?: "")) { client.get(it) { authorise() } }.body()
+
+    suspend fun activityHours(days: Int = 7): ActivityHours = call("/wellness/activity/hours?days=$days") { client.get(it) { authorise() } }.body()
+
+    suspend fun wellnessHeartbeat(beat: WellnessHeartbeat) {
+        call("/wellness/heartbeat") { client.post(it) { authorise(); json(beat) } }
     }
 
     suspend fun startWellnessBreak(minutes: Int): WellnessBreak =
@@ -724,6 +824,9 @@ class MyceliumApi(
 
     suspend fun artifactContent(id: String, version: Int): ByteArray = call("/artifacts/$id/versions/$version/content") { client.get(it) { authorise() } }.body()
 
+    suspend fun createArtifact(request: CreateArtifactRequest): Artifact =
+        call("/artifacts") { client.post(it) { authorise(); json(request) } }.body()
+
     suspend fun editArtifact(id: String, request: PatchArtifactRequest): Artifact =
         call("/artifacts/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
@@ -840,6 +943,10 @@ class MyceliumApi(
     suspend fun pauseGoal(id: String, paused: Boolean): Goal = call("/conversations/$id/goal") { client.patch(it) { authorise(); json(PatchGoalRequest(paused)) } }.body()
 
     suspend fun sendGoalAgain(id: String): Goal = call("/conversations/$id/goal/send") { client.post(it) { authorise() } }.body()
+
+    suspend fun nudgeGoal(id: String): Goal = call("/conversations/$id/goal/nudge") { client.post(it) { authorise() } }.body()
+
+    suspend fun continueGoal(id: String, note: String?): Goal = call("/conversations/$id/goal/continue") { client.post(it) { authorise(); json(ContinueGoalRequest(note)) } }.body()
 
     suspend fun clearGoal(id: String) {
         call("/conversations/$id/goal") { client.delete(it) { authorise() } }
@@ -1005,6 +1112,18 @@ class MyceliumApi(
                 setBody(audio)
             }
         }.body<Transcription>().text
+
+    suspend fun privacy(): PrivacySettings = call("/privacy") { client.get(it) { authorise() } }.body()
+
+    suspend fun savePrivacy(request: SavePrivacyRequest): PrivacySettings = call("/privacy") { client.put(it) { authorise(); json(request) } }.body()
+
+    suspend fun speech(request: SpeechRequest): SpokenAudio {
+        val response = call("/speech") { client.post(it) { authorise(); json(request) } }
+
+        return SpokenAudio(response.body(), response.contentType()?.let { "${it.contentType}/${it.contentSubtype}" } ?: "audio/mpeg")
+    }
+
+    suspend fun speechVoices(): List<String> = call("/speech/voices") { client.get(it) { authorise() } }.body<SpeechVoices>().voices
 
     suspend fun attachmentBytes(sha256: String): ByteArray =
         call("/attachments/$sha256") { client.get(it) { authorise() } }.body()

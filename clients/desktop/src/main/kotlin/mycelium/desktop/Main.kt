@@ -23,6 +23,7 @@ import androidx.compose.ui.window.rememberWindowState
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import mycelium.App
+import mycelium.AudioPlayer
 import mycelium.AudioRecorder
 import mycelium.CommandOutcome
 import mycelium.Connection
@@ -166,6 +167,8 @@ private object DesktopPlatform : Platform {
 
     override fun audioRecorder(): AudioRecorder = JavaSoundRecorder()
 
+    override fun audioPlayer(): AudioPlayer = JavaSoundPlayer()
+
     override fun timeZone(): String? = java.time.ZoneId.systemDefault().id
 
     override fun localDateTime(epochMillis: Long): String? = java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(epochMillis), java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
@@ -248,6 +251,13 @@ private object DesktopPlatform : Platform {
         } else {
             super.WebContent(url, token, modifier, reading)
         }
+    }
+
+    override val showsLiveView: Boolean get() = jcefAvailable
+
+    @Composable
+    override fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit) {
+        JcefWebContent(url, null, modifier, viewOnly = viewOnly, onPointer = onPointer)
     }
 
     override fun chime() {

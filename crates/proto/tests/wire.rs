@@ -108,6 +108,7 @@ fn every_node_message_round_trips_under_its_tag() {
         (NodeToControl::TerminalOutput { terminal_id: id(), data: "aGk=".into() }, "terminal_output"),
         (NodeToControl::TerminalExited { terminal_id: id() }, "terminal_exited"),
         (NodeToControl::GitResult { request_id: id(), ok: false, output: Value::Null, error: Some("fatal".into()) }, "git_result"),
+        (NodeToControl::GitChunk { request_id: id(), seq: 0, data: "aGk=".into() }, "git_chunk"),
         (NodeToControl::Transcript { path: "p".into(), offset: 0, data: "AA==".into(), size: None }, "transcript"),
         (NodeToControl::Workflow { conversation_id: id(), run_id: "run".into(), line: json!({}) }, "workflow"),
         (NodeToControl::InstructionsHeld { revision: "afad776".into(), unmanaged: vec!["Claude Code: /h/.claude/CLAUDE.md".into()] }, "instructions_held"),
@@ -382,6 +383,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         instructions_unmanaged: vec![],
         sessions_on_older_instructions: 0,
         harness_models: vec![],
+        environment: None,
     });
 
     assert_eq!(json["online"], true);
@@ -400,7 +402,10 @@ fn permission_answer_and_login_bodies_round_trip() {
     round_trip(&StartLoginResponse { login_id: id() });
     round_trip(&LoginInputRequest { text: "x".into() });
     round_trip(&DrainRequest { draining: true });
-    round_trip(&PromptRequest { text: "go".into(), attachments: vec![] });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: false });
+    round_trip(&PromptRequest { text: "go".into(), attachments: vec![], spoken: true });
+    round_trip(&SavePrivacyRequest { voice_enabled: true });
+    round_trip(&SpeechRequest { text: "hi".into(), voice: Some("alloy".into()), speed: None });
     round_trip(&PatchQueueRequest { text: "edit".into() });
     round_trip(&Me { id: id(), email: "a@b".into(), name: "n".into() });
 }
@@ -437,7 +442,7 @@ fn a_fork_start_session_names_the_session_to_fork_and_a_plain_one_omits_the_flag
 #[test]
 fn a_workflow_is_sent_with_every_step_field_and_a_plan_without_rounds_runs_once() {
     let plan: WorkflowPlan = serde_json::from_value(json!({"title": "Review", "steps": [{"key": "a", "title": "A", "gate": true}]})).unwrap();
-    let workflow = Workflow { id: id(), parent_id: None, conversation_id: None, title: "Review".into(), status: "running".into(), plan, steps: vec![WorkflowRunStep { key: "a".into(), status: "gate".into(), conversation_id: None, workflow_id: None, output: String::new() }], round: 1, output: String::new() };
+    let workflow = Workflow { id: id(), parent_id: None, conversation_id: None, title: "Review".into(), status: "running".into(), plan, steps: vec![WorkflowRunStep { key: "a".into(), status: "gate".into(), conversation_id: None, workflow_id: None, output: String::new(), ..Default::default() }], round: 1, output: String::new(), kind: "mycelium".into(), created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(), ended_at: None, started_by: None, project_id: None, end_reason: None, stop_rule: None, rerun_of: None, rounds: Vec::new(), decisions: Vec::new(), phases: Vec::new(), run_id: None };
     let wire = round_trip(&workflow);
 
     assert_eq!(wire["plan"]["max_rounds"], 1);

@@ -10,6 +10,7 @@ export type Artifact = {
   public: boolean;
   latest_version: number;
   url: string | null;
+  design_system_id?: string;
   versions?: ArtifactVersion[];
 };
 export type CommentAnchor = { page: string; item: string | null; x: number; y: number };

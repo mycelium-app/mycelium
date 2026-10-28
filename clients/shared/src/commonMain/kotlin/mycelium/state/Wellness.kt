@@ -17,6 +17,7 @@ import mycelium.api.PuzzleSummary
 import mycelium.api.AlwaysOpenHours
 import mycelium.api.Hours
 import mycelium.api.WellnessOverview
+import mycelium.api.WellnessHeartbeat
 import mycelium.api.WellnessSettings
 
 
@@ -156,13 +157,17 @@ data class WellnessState(
     val held: List<HeldNotification> = emptyList(),
     val puzzles: List<PuzzleSummary> = emptyList(),
     val unreadable: Set<String> = emptySet(),
+    val activity: ActivityView = ActivityView(),
     val loaded: Boolean = false,
 )
 
 class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineScope, private val platform: Platform?) {
     private val mutableState = MutableStateFlow(WellnessState())
+    private var lastInputAt = Clock.System.now()
 
     val state: StateFlow<WellnessState> = mutableState.asStateFlow()
+
+    var presence: ActivityTarget = ElsewhereTarget
 
     suspend fun load() {
         val settings = catching { api.wellnessSettings() }.getOrNull() ?: return
@@ -182,6 +187,10 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
                 breakEndsAt = if (phase == BreakPhase.OnBreak) endsAt ?: it.breakEndsAt else null,
                 loaded = true,
             )
+        }
+
+        if (mutableState.value.activity.loaded) {
+            loadActivity()
         }
     }
 
@@ -230,8 +239,43 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         mutableState.update { it.copy(clock = it.clock.tick(it.settings, closed)) }
     }
 
-    fun heartbeat(seconds: Int) {
-        scope.launch { catching { api.wellnessHeartbeat(seconds) } }
+    fun noteInput() {
+        lastInputAt = Clock.System.now()
+    }
+
+    fun personActive(now: Instant): Boolean = now - lastInputAt <= ActivityIdleLimit
+
+    fun heartbeat(seconds: Int, now: Instant) {
+        val target = presence
+        val beat = WellnessHeartbeat(seconds, now.toString(), target.kind.wire, target.route, target.groupId, target.conversationId, target.assistantId, target.title)
+
+        scope.launch { catching { api.wellnessHeartbeat(beat) } }
+    }
+
+    suspend fun loadActivity() {
+        val shown = mutableState.value.activity.shown
+        val hours = catching { api.activityHours() }.getOrNull()
+        val day = catching { api.activityDay(shown) }.getOrNull()
+
+        mutableState.update {
+            val activity = it.activity
+
+            it.copy(activity = activity.copy(hours = hours ?: activity.hours, day = if (shown == activity.shown) day ?: activity.day else activity.day, loaded = true, failed = hours == null && day == null))
+        }
+    }
+
+    fun showActivityDay(date: String) {
+        val today = mutableState.value.activity.today
+        val shown = date.takeUnless { it == today }
+
+        mutableState.update { it.copy(activity = it.activity.copy(shown = shown, day = null, failed = false)) }
+        scope.launch { loadActivity() }
+    }
+
+    fun stepActivityDay(days: Int) {
+        val date = mutableState.value.activity.date ?: return
+
+        showActivityDay(addDays(date, days))
     }
 
     fun update(change: (WellnessSettings) -> WellnessSettings) {

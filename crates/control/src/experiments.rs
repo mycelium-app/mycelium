@@ -110,8 +110,10 @@ pub async fn gate(State(state): State<AppState>, request: Request, next: Next) -
         return next.run(Request::from_parts(parts, body)).await;
     };
 
+    let talking = crate::voice::enabled(&state, user.id).await.unwrap_or(false);
+
     match of(&state, user.id).await {
-        Ok(enabled) if enabled.allows(experiment) => next.run(Request::from_parts(parts, body)).await,
+        Ok(enabled) if enabled.allows(experiment) || talking => next.run(Request::from_parts(parts, body)).await,
         Ok(_) => refusal(experiment).into_response(),
         Err(error) => error.into_response(),
     }

@@ -108,6 +108,9 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
     if from_goal {
         message["origin"] = json!(crate::goals::GOAL_ORIGIN);
         message["sent_at"] = json!(chrono::Utc::now());
+        let (nudge, why) = crate::goals::sending(state, conversation_id).await?;
+        message["nudge"] = json!(nudge);
+        message["why"] = json!(why);
     }
 
     let event = append_event(&mut tx, conversation_id, EventKind::UserMessage, &message, None).await?;

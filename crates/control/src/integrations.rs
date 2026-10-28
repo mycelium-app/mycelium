@@ -1,7 +1,7 @@
 use crate::chat_tool_servers::{ServerRow, StoredTool};
 use crate::integration_policy::{self, Effective};
 use mycelium_proto::api::{ApprovalPreset, IntegrationStatus, ToolKind};
-use crate::{actual, caldav, discord, email, freeagent, lastfm, paperless, stoat, zulip};
+use crate::{actual, caldav, coolify, discord, email, freeagent, lastfm, paperless, stoat, tandoor, zulip};
 use crate::state::AppState;
 use uuid::Uuid;
 use serde_json::Value;
@@ -17,6 +17,8 @@ pub enum Integration {
     FreeAgent,
     Actual,
     Paperless,
+    Coolify,
+    Tandoor,
 }
 
 pub struct Credentials {
@@ -60,6 +62,8 @@ impl Integration {
             "freeagent" => Some(Integration::FreeAgent),
             "actual" => Some(Integration::Actual),
             "paperless" => Some(Integration::Paperless),
+            "coolify" => Some(Integration::Coolify),
+            "tandoor" => Some(Integration::Tandoor),
             _ => None,
         }
     }
@@ -86,7 +90,7 @@ impl Integration {
             Integration::CalDav => Some("Enter your calendar username."),
             Integration::Discord => Some("Enter the name people know you by on Discord."),
             Integration::FreeAgent => Some("Enter your FreeAgent OAuth identifier."),
-            Integration::Actual | Integration::Paperless => None,
+            Integration::Actual | Integration::Paperless | Integration::Coolify | Integration::Tandoor => None,
         }
     }
 
@@ -101,6 +105,8 @@ impl Integration {
             Integration::FreeAgent => "Enter your FreeAgent OAuth secret.",
             Integration::Actual => "Enter the API key your Actual HTTP API is set up with.",
             Integration::Paperless => "Enter your Paperless-ngx API token.",
+            Integration::Coolify => "Enter your Coolify API token.",
+            Integration::Tandoor => "Enter your Tandoor API token.",
         }
     }
 
@@ -112,7 +118,8 @@ impl Integration {
             Integration::LastFm => lastfm::normalise_settings(settings),
             Integration::CalDav => caldav::normalise_settings(settings),
             Integration::Actual => actual::normalise_settings(settings),
-            Integration::Discord | Integration::FreeAgent | Integration::Paperless => Ok(Value::Null),
+            Integration::Coolify => coolify::normalise_settings(settings),
+            Integration::Discord | Integration::FreeAgent | Integration::Paperless | Integration::Tandoor => Ok(Value::Null),
         }
     }
 
@@ -127,6 +134,8 @@ impl Integration {
             Integration::FreeAgent => freeagent::tools(),
             Integration::Actual => actual::tools(),
             Integration::Paperless => paperless::tools(),
+            Integration::Coolify => coolify::tools(),
+            Integration::Tandoor => tandoor::tools(),
         }
     }
 
@@ -141,6 +150,8 @@ impl Integration {
             Integration::FreeAgent => freeagent::always_asks(tool),
             Integration::Actual => actual::always_asks(tool),
             Integration::Paperless => paperless::always_asks(tool),
+            Integration::Coolify => coolify::always_asks(tool),
+            Integration::Tandoor => tandoor::always_asks(tool),
         }
     }
 
@@ -155,10 +166,12 @@ impl Integration {
             Integration::FreeAgent => freeagent::verify(http, credentials).await.map(|_| Value::Null),
             Integration::Actual => actual::verify(http, credentials).await.map(|_| Value::Null),
             Integration::Paperless => paperless::verify(http, credentials).await.map(|_| Value::Null),
+            Integration::Coolify => coolify::verify(http, credentials).await,
+            Integration::Tandoor => tandoor::verify(http, credentials).await.map(|_| Value::Null),
         }
     }
 
-    pub async fn call(self, state: &AppState, owner: Uuid, server: &ServerRow, tool: &str, arguments: &Value) -> CallOutput {
+    pub async fn call(self, state: &AppState, owner: Uuid, server: &ServerRow, conversation: Option<Uuid>, tool: &str, arguments: &Value) -> CallOutput {
         let credentials = server.credentials();
 
         match self {
@@ -171,6 +184,8 @@ impl Integration {
             Integration::FreeAgent => freeagent::call(state, owner, server, &credentials, tool, arguments).await,
             Integration::Actual => actual::call(&state.http, &credentials, tool, arguments).await,
             Integration::Paperless => paperless::call(&state.http, &credentials, tool, arguments).await,
+            Integration::Coolify => coolify::call(state, owner, server, &credentials, conversation, tool, arguments).await,
+            Integration::Tandoor => tandoor::call(&state.http, &credentials, tool, arguments).await,
         }
     }
 }

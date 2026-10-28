@@ -78,7 +78,7 @@ fun pasteInsertion(before: String, after: String): IntRange? {
 }
 
 fun expandedPastes(text: String, pastes: Map<Char, String>): String =
-    text.map { char -> if (isPasteMarker(char)) pastes[char].orEmpty() else char.toString() }.joinToString("")
+    text.map { char -> if (isPasteMarker(char)) pastes[char] ?: char.toString() else char.toString() }.joinToString("")
 
 fun serialisedPastes(text: String, pastes: Map<Char, String>): String =
     text.map { char -> if (isPasteMarker(char)) pastes[char]?.let(::pastedBlock).orEmpty() else char.toString() }.joinToString("")
@@ -96,11 +96,13 @@ class PasteDisplay(private val original: String, pastes: Map<Char, String>, imag
         var shownAt = 0
 
         for ((index, char) in original.withIndex()) {
-            if (offset <= shownAt) {
+            val width = shownWidth(char)
+
+            if (offset <= shownAt || (offset < shownAt + width && 2 * (offset - shownAt) < width)) {
                 return index
             }
 
-            shownAt += shownWidth(char)
+            shownAt += width
         }
 
         return original.length

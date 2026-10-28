@@ -3,6 +3,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+import mycelium.AudioPlayer
 import mycelium.PageReading
 import mycelium.App
 import mycelium.Connection
@@ -148,6 +151,39 @@ private external fun startSpeechRecognition(onHeard: (JsString) -> Unit, onEnded
 @JsFun("(recognition) => { recognition.stop(); }")
 private external fun stopSpeechRecognition(recognition: JsAny)
 
+@JsFun("""(base64, type, onEnded) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) { bytes[index] = binary.charCodeAt(index); }
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    const audio = new Audio(url);
+    audio.onended = () => { URL.revokeObjectURL(url); onEnded('ok'); };
+    audio.onerror = () => { URL.revokeObjectURL(url); onEnded('failed'); };
+    audio.play().catch(() => { URL.revokeObjectURL(url); onEnded('failed'); });
+    return audio;
+}""")
+private external fun playAudio(base64: String, type: String, onEnded: (JsString) -> Unit): JsAny
+
+@JsFun("(audio) => { audio.onended = null; audio.onerror = null; audio.pause(); }")
+private external fun stopAudio(audio: JsAny)
+
+@OptIn(ExperimentalEncodingApi::class)
+private class WebAudioPlayer : AudioPlayer {
+    private var playing: JsAny? = null
+
+    override fun play(audio: ByteArray, mediaType: String, onDone: (Boolean) -> Unit) {
+        playing = playAudio(Base64.encode(audio), mediaType) { outcome ->
+            playing = null
+            onDone(outcome.toString() == "ok")
+        }
+    }
+
+    override fun stop() {
+        playing?.let { stopAudio(it) }
+        playing = null
+    }
+}
+
 private class WebDictation : Dictation {
     private var recognition: JsAny? = null
 
@@ -187,6 +223,8 @@ private object WebPlatform : Platform {
     }
 
     override fun dictation(): Dictation? = if (speechRecognitionExists()) WebDictation() else null
+
+    override fun audioPlayer(): AudioPlayer = WebAudioPlayer()
 
     override fun pickFiles(onPicked: (List<PickedFile>) -> Unit) {
         chooseFiles { name, type, data -> received(name, type, data, onPicked) }

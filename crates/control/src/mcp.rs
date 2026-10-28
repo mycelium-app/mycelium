@@ -5,6 +5,7 @@ mod call;
 mod conversations;
 mod decide;
 mod earlier_turns;
+mod environment;
 mod goal_and_usage;
 mod instructions;
 mod integration_tools;
@@ -12,6 +13,7 @@ mod learning;
 mod memory;
 mod outline;
 mod project_icon;
+mod screens;
 mod server_tools;
 mod ssh_access;
 mod tasks;
@@ -53,11 +55,13 @@ enum Area {
     GoalAndUsage,
     ProjectIcon,
     Outline,
+    Screens,
     Conversations,
     ApiAccess,
     Decide,
     SshAccess,
     Artifacts,
+    Environment,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -70,14 +74,16 @@ fn area_of(tool: &str) -> Option<Area> {
         "assistant_list_files" | "assistant_read_file" | "assistant_write_file" | "assistant_delete_file" | "assistant_set_secret" | "assistant_request_secret" | "assistant_propose_action" | "assistant_list" | "assistant_create" | "assistant_update" | "assistant_use_workspace" => Some(Area::Assistants),
         "walkthrough" | "save_reflection" | "propose_exercise" | "note_learned" | "save_exercise_review" => Some(Area::Learning),
         "get_instructions" | "propose_instructions_edit" => Some(Area::Instructions),
-        "get_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
+        "get_goal" | "report_goal" | "get_account_usage" => Some(Area::GoalAndUsage),
         "set_project_icon" => Some(Area::ProjectIcon),
         "open_outline" => Some(Area::Outline),
+        "open_screen" => Some(Area::Screens),
         "find_conversations" | "start_conversation" | "send_to_conversation" => Some(Area::Conversations),
         "request_api_access" => Some(Area::ApiAccess),
         "decide" => Some(Area::Decide),
         "request_ssh_access" => Some(Area::SshAccess),
         "find_artifacts" | "request_artifact_access" | "create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback" => Some(Area::Artifacts),
+        "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" => Some(Area::Environment),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -97,11 +103,13 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::GoalAndUsage => goal_and_usage::call(call).await,
         Area::ProjectIcon => project_icon::call(call).await,
         Area::Outline => outline::call(call).await,
+        Area::Screens => screens::call(call).await,
         Area::Conversations => conversations::call(call).await,
         Area::ApiAccess => api_access::call(call).await,
         Area::Decide => decide::call(call).await,
         Area::SshAccess => ssh_access::call(call).await,
         Area::Artifacts => artifacts::call(call).await,
+        Area::Environment => environment::call(call).await,
     }
 }
 
@@ -130,11 +138,13 @@ pub fn tool_definitions() -> Value {
         goal_and_usage::definitions(),
         project_icon::definitions(),
         outline::definitions(),
+        screens::definitions(),
         conversations::definitions(),
         api_access::definitions(),
         decide::definitions(),
         ssh_access::definitions(),
         artifacts::definitions(),
+        environment::definitions(),
     ];
 
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())
@@ -212,6 +222,7 @@ pub async fn respond(state: &AppState, node_id: Uuid, headers: &HeaderMap, reque
 
                     match outcome {
                         ToolReply::Text { text, is_error } => reply(&id, tool_text(&text, is_error)),
+                        ToolReply::Image { png } => reply(&id, json!({"content": [{"type": "image", "data": png, "mimeType": "image/png"}], "isError": false})),
                         ToolReply::Invalid(message) => failure(&id, INVALID_PARAMS, &message),
                     }
                 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +40,9 @@ import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
 import mycelium.state.Choice
 import mycelium.state.NoGroup
+import mycelium.state.SpeechSpeedNormal
 import mycelium.state.Store
+import mycelium.state.VoiceAssistantKey
 import mycelium.state.ago
 import mycelium.state.formatSize
 import mycelium.state.addModelChoices
@@ -72,7 +75,7 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
     Column(Modifier.fillMaxSize()) {
         Bar {
             BackButton(current?.name ?: "the assistant", onBack)
-            current?.let { AssistantAvatar(it.name, builtIn = it.builtinKey != null) }
+            current?.let { AssistantAvatar(it.name, builtIn = it.builtinKey != null, voice = it.builtinKey == VoiceAssistantKey) }
             BarTitle("${current?.name ?: "Assistant"} settings")
 
             if (current?.builtinKey != null) {
@@ -132,6 +135,8 @@ fun AssistantSettingsScreen(store: Store, state: AppState, assistantId: String, 
     }
 }
 
+private val SpeechSpeeds = listOf("slower" to "Slower", SpeechSpeedNormal to "Normal", "faster" to "Faster")
+
 @Composable
 private fun SectionActions(onSave: () -> Unit, onCancel: () -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -150,6 +155,10 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
     var confirmingArchive by remember(assistant.id) { mutableStateOf(false) }
     val runner = rememberAction(assistant.id)
     val builtIn = assistant.builtinKey != null
+    val isVoice = assistant.builtinKey == VoiceAssistantKey
+    val voices by store.voice.state.collectAsState()
+    var voiceName by remember(assistant.id, assistant.preferences) { mutableStateOf(assistant.preferences.voiceName) }
+    var speechSpeed by remember(assistant.id, assistant.preferences) { mutableStateOf(assistant.preferences.speechSpeed ?: SpeechSpeedNormal) }
     val groupName = state.groups[group]?.name
     val groupChoices = state.groups.values.sortedBy { it.name.lowercase() }.map { Choice(it.id, it.name) } + Choice(NoGroup, "No group")
 
@@ -157,13 +166,23 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
         name = assistant.name
         description = assistant.description.orEmpty()
         group = assistant.groupId ?: NoGroup
+        voiceName = assistant.preferences.voiceName
+        speechSpeed = assistant.preferences.speechSpeed ?: SpeechSpeedNormal
         nameError = null
+    }
+
+    if (isVoice) {
+        LaunchedEffect(Unit) {
+            store.voice.loadVoices()
+        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }
 
-        if (builtIn) {
+        if (isVoice) {
+            Label("${assistant.name} is built in. It cannot be renamed or archived.", color = colors.textMuted)
+        } else if (builtIn) {
             Label("${assistant.name} is built in. It cannot be renamed or archived. Pause its schedules instead.", color = colors.textMuted)
         } else {
             TextInput(name, { name = it; nameError = null }, label = "Name", placeholder = "Stand-up", error = nameError, modifier = Modifier.widthIn(max = Tokens.Size.FormColumn))
@@ -180,6 +199,18 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
             }
         }
 
+        if (isVoice) {
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Speaking voice", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                OptionMenu("Speaking voice", voices.voices.map { Choice(it, it) }, voiceName, { voiceName = it }, title = "Speaking voice", label = "Provider default", icon = MyIcon.Speaker)
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                Label("Speaking speed", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Segmented(SpeechSpeeds.map { it.second }, SpeechSpeeds.first { it.first == speechSpeed }.second, { picked -> speechSpeed = SpeechSpeeds.first { it.second == picked }.first }, groupLabel = "Speaking speed")
+            }
+        }
+
         SectionActions(
             onSave = {
                 if (name.isBlank()) {
@@ -191,11 +222,26 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
                 runner {
                     val chosen = group.takeUnless { it == NoGroup }
 
-                    onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null)))
+                    val preferences = assistant.preferences.copy(voiceName = voiceName, speechSpeed = speechSpeed).takeIf { isVoice }
+
+                    onChanged(store.patchAssistant(assistant, PatchAssistantRequest(name = name.takeUnless { builtIn }, description = description, groupId = chosen, clearGroup = chosen == null, preferences = preferences)))
                 }
             },
             onCancel = ::reset,
         )
+
+        if (isVoice) {
+            Hairline()
+
+            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+                Label("Turn voice off", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+                Label("Hides the microphone. The Voice thread and its row stay. Change it any time in Privacy.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                Row {
+                    MyButton({ store.openScreen("settings/privacy") }, text = "Turn voice off", icon = MyIcon.Mode, variant = ButtonVariant.Outline)
+                }
+            }
+        }
 
         if (!builtIn) {
             Hairline()
@@ -226,6 +272,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (Assistant) -> Unit) {
     val colors = MyTheme.colors
     var editorKey by remember(assistant.id) { mutableStateOf(0) }
+    var confirmingReset by remember(assistant.id) { mutableStateOf(false) }
     val runner = rememberAction(assistant.id)
 
     LaunchedEffect(assistant.id) {
@@ -243,8 +290,21 @@ private fun InstructionsSection(store: Store, assistant: Assistant, onChanged: (
                 file = "AGENTS.md",
                 saveLabel = "Save",
                 onSave = { text -> runner { onChanged(store.patchAssistant(assistant, PatchAssistantRequest(instructions = text))) } },
-                actions = { MyButton({ editorKey += 1 }, text = "Cancel", muted = true) },
+                actions = {
+                    MyButton({ editorKey += 1 }, text = "Cancel", muted = true)
+
+                    if (assistant.builtinKey == VoiceAssistantKey) {
+                        MyButton({ confirmingReset = true }, text = "Reset to default", icon = MyIcon.Refresh, muted = true)
+                    }
+                },
             )
+        }
+
+        if (confirmingReset) {
+            ConfirmDialog("Reset ${assistant.name} to its default instructions?", "Your edited version stays in History, so you can bring it back.", "Reset to default", onDismiss = { confirmingReset = false }, onConfirm = {
+                confirmingReset = false
+                runner { onChanged(store.resetAssistantInstructions(assistant)) }
+            })
         }
 
         Label("Proposed edits", Modifier.semantics { heading() }, Tokens.Type.UiStrong)

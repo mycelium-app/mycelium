@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -99,6 +100,8 @@ import mycelium.state.workflowTokens
 import mycelium.state.suggestedReplies
 import mycelium.state.WorkflowProgress
 import mycelium.api.Attachment
+import mycelium.api.WorkflowKinds
+import mycelium.api.WorkflowStatuses
 import mycelium.state.ThreadImage
 
 private const val ShortOutputLimit = 40
@@ -163,6 +166,7 @@ fun ThreadView(
         }.filter { it.sameAs == null }
     }
     val lastFailure = remember(items) { items.indexOfLast { it is ThreadItem.Failure } }
+    val workflowCards = LocalConversationWorkflows.current?.workflows?.filter { it.kind == WorkflowKinds.Mycelium }.orEmpty()
 
 
     suspend fun showTopOf(target: Int) {
@@ -199,6 +203,16 @@ fun ThreadView(
                     ),
                     verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4),
                 ) {
+                    if (workflowCards.isNotEmpty()) {
+                        item(key = "mycelium-workflows") {
+                            Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S4)) {
+                                for (workflow in workflowCards) {
+                                    MyceliumWorkflowCard(workflow)
+                                }
+                            }
+                        }
+                    }
+
                     itemsIndexed(items.asReversed(), key = { _, item -> item.key }, contentType = { _, item -> item::class }) { reversedIndex, item ->
                         val index = items.lastIndex - reversedIndex
 
@@ -256,10 +270,13 @@ fun ThreadView(
     }
 }
 
+val LocalReadAloud = compositionLocalOf<((String) -> Unit)?> { null }
+
 @Composable
 private fun ThreadRow(item: ThreadItem, onAnswer: (String, String) -> Unit, onStopWorkflow: () -> Unit, onRetry: (() -> Unit)?, limitActions: LimitActions?, agent: String) {
     when (item) {
-        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, agent)
+        is ThreadItem.UserMessage -> UserMessage(item.text, item.files, item.images, item.goalSentAt, item.goalNudge, item.goalWhy, item.spoken, item.spokenAt, agent)
+        is ThreadItem.GoalReport -> GoalReportBlock(item, agent)
         is ThreadItem.AgentMessage -> AgentMessage(item.text)
         is ThreadItem.Thought -> Thought(item)
         is ThreadItem.ToolCall -> Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
@@ -318,7 +335,7 @@ private fun SwitchLine(text: String, why: String) {
 }
 
 @Composable
-private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, agent: String) {
+private fun UserMessage(text: String, files: List<Attachment>, images: List<ThreadImage>, goalSentAt: String?, goalNudge: Int?, goalWhy: String?, spoken: Boolean, spokenAt: String?, agent: String) {
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
 
@@ -331,7 +348,17 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
                 .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2),
         ) {
             if (goalSentAt != null) {
-                Label("Sent to ${agentName(agent)} by Mycelium at ${clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }}", style = Tokens.Type.Meta, color = colors.textMuted)
+                val sentAt = clockTime(goalSentAt) { millis -> platform?.localDateTime(millis) }
+                val sender = if (goalNudge == null) "Goal" else "Nudge $goalNudge"
+
+                Label("$sender from Mycelium to ${agentName(agent)} at $sentAt", style = Tokens.Type.Meta, color = colors.textMuted)
+            }
+
+            if (spoken) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(MyIcon.Microphone, colors.textMuted, Tokens.Size.IconSm)
+                    Label(if (spokenAt != null) "Spoken at ${clockTime(spokenAt) { millis -> platform?.localDateTime(millis) }}" else "Spoken", style = Tokens.Type.Meta, color = colors.textMuted)
+                }
             }
 
             for (segment in remember(text) { parsePasted(text) }) {
@@ -346,7 +373,41 @@ private fun UserMessage(text: String, files: List<Attachment>, images: List<Thre
             if (files.isNotEmpty() || images.isNotEmpty()) {
                 MessageAttachments(files, images)
             }
+
+            if (goalSentAt != null && !goalWhy.isNullOrBlank()) {
+                Label("Why now: $goalWhy", style = Tokens.Type.Meta, color = colors.textMuted)
+            }
         }
+    }
+}
+
+@Composable
+private fun GoalReportBlock(report: ThreadItem.GoalReport, agent: String) {
+    val colors = MyTheme.colors
+    val platform = LocalPlatform.current
+    val at = clockTime(report.at) { millis -> platform?.localDateTime(millis) }
+
+    if (report.outcome == "stopped") {
+        Label("You stopped the turn at $at. Mycelium did not nudge.", style = Tokens.Type.Meta, color = colors.textMuted)
+
+        return
+    }
+
+    val done = report.outcome == "done"
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.bgPanel, BlockShape)
+            .border(Tokens.Size.Hairline, colors.border, BlockShape)
+            .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2)
+            .semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+    ) {
+        Label(if (done) "Reported the goal done" else "Reported the goal blocked", Modifier.semantics { heading() }, Tokens.Type.Title)
+        StatusMark(if (done) "Goal met" else "Needs you", if (done) Tone.Working else Tone.Attention, if (done) MyIcon.Check else MyIcon.Alert)
+        Label(report.reason, style = Tokens.Type.Prose)
+        Label("${agentName(agent)} at $at", style = Tokens.Type.Meta, color = colors.textMuted)
     }
 }
 
@@ -394,8 +455,20 @@ private fun Thought(item: ThreadItem.Thought) {
 
 @Composable
 private fun AgentMessage(text: String) {
+    val readAloud = LocalReadAloud.current
+    val platform = LocalPlatform.current
+
     Annotatable {
-        MarkdownBlocks(parsedMarkdown(text))
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            MarkdownBlocks(parsedMarkdown(text))
+
+            if (readAloud != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                    MyButton({ readAloud(text) }, text = "Read aloud", icon = MyIcon.Speaker, description = "Read this reply aloud", size = ButtonSize.Sm, muted = true)
+                    MyButton({ platform?.copyToClipboard(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy this reply", size = ButtonSize.Sm, muted = true)
+                }
+            }
+        }
     }
 }
 
@@ -1067,6 +1140,19 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
     val pausedAtLimit = LocalPausedWorkflow.current.takeIf { progress.paused }
     val quietMinutes = progress.quietFor(now)?.inWholeMinutes ?: 0
     val beforeAnyStep = progress.stopped && progress.agents.isEmpty()
+    val pages = LocalConversationWorkflows.current
+    val page = pages?.workflows?.firstOrNull { it.kind == WorkflowKinds.AgentRun && it.runId == progress.runId }
+    val openPage = pages?.onOpen
+    val title = page?.title ?: "Workflow"
+    var confirmingStop by remember { mutableStateOf(false) }
+    val inRail = pin != null && pin.onToggle == null
+    val statusKey = when {
+        progress.complete -> WorkflowStatuses.Done
+        progress.stopped -> WorkflowStatuses.Stopped
+        progress.failed -> WorkflowStatuses.Failed
+        else -> if (progress.paused) WorkflowStatuses.Paused else WorkflowStatuses.Running
+    }
+    val look = workflowStatusLook(statusKey, stalled)
     val outcome = when {
         beforeAnyStep -> "Stopped before any step ran"
         progress.stopped -> "Stopped"
@@ -1076,44 +1162,44 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
     }
     val endedAt = progress.end?.endedAt?.let { clockTime(it.toString()) { millis -> platform?.localDateTime(millis) } }
     val explanation = when {
-        beforeAnyStep -> if (endedAt != null) "Stopped at $endedAt, before the first agent started." else "Stopped before the first agent started."
+        beforeAnyStep -> outcome
         progress.stopped -> if (endedAt != null) "Stopped at $endedAt." else "Stopped."
         progress.failed -> progress.end?.reason
+        stalled -> "$outcome."
         else -> null
+    }
+
+    if (confirmingStop) {
+        StopWorkflowDialog(title, { confirmingStop = false }) {
+            confirmingStop = false
+            onStop()
+        }
     }
 
     Card(Modifier.semantics { if (outcome != null) contentDescription = "Workflow ${outcome.replaceFirstChar { it.lowercase() }}" }) {
         CardHead {
-            if (progress.complete) {
-                Icon(MyIcon.Check, colors.textMuted, Tokens.Size.IconSm)
-            } else if (progress.stopped) {
-                Icon(MyIcon.Stop, colors.textMuted, Tokens.Size.IconSm)
-            } else if (progress.failed) {
-                Icon(MyIcon.Failed, colors.statusFailed, Tokens.Size.IconSm)
-            } else if (progress.paused) {
-                Icon(MyIcon.Clock, colors.statusAttention, Tokens.Size.IconSm)
-            } else if (stalled) {
-                Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
+            Icon(MyIcon.Workflow, colors.textMuted, Tokens.Size.IconSm)
+
+            if (page != null && openPage != null) {
+                MyButton({ openPage(page.id) }, text = title, description = "Open $title", size = ButtonSize.Sm, muted = true)
             } else {
-                Icon(MyIcon.Working, colors.statusWorking, Tokens.Size.IconSm)
+                Label(title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
             }
 
-            Label("Workflow", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
-                if (progress.agents.isNotEmpty()) {
+                if (progress.agents.isNotEmpty() && !inRail) {
                     Label("${progress.finishedCount} of ${progress.agents.size}", style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
                 }
 
-                if (outcome != null) {
-                    Label(outcome, Modifier.weight(1f, fill = false), Tokens.Type.Meta, if (progress.failed) colors.statusFailed else colors.textMuted, maxLines = 1)
-                } else if (totals != null) {
+                if (totals != null) {
                     Label(totals, Modifier.weight(1f, fill = false), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
                 }
             }
 
+            WorkflowStatusMark(look)
+
             if (!progress.over) {
-                MyButton(onStop, text = "Stop", icon = MyIcon.Stop, description = "Stop the workflow", size = ButtonSize.Sm, muted = true)
+                MyButton({ confirmingStop = true }, text = if (inRail) null else "Stop", icon = MyIcon.Stop, description = "Stop the workflow", size = ButtonSize.Sm, muted = true)
             }
 
             if (pin != null) {
@@ -1157,6 +1243,10 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
             Label(explanation, Modifier.padding(start = Tokens.Space.S3, top = Tokens.Space.S2, end = Tokens.Space.S3))
         }
 
+        if (beforeAnyStep && endedAt != null) {
+            Label("Stopped at $endedAt.", Modifier.padding(start = Tokens.Space.S3, end = Tokens.Space.S3), style = Tokens.Type.Meta, color = colors.textMuted)
+        }
+
         for (phase in progress.phases) {
             val inPhase = progress.agents.filter { it.phase == phase }
 
@@ -1174,7 +1264,7 @@ internal fun WorkflowCard(progress: WorkflowProgress, onStop: () -> Unit, pin: P
                             .fillMaxWidth()
                             .then(if (open != null) Modifier.pressable(open, shape = BlockShape, description = "Open ${agent.label}") else Modifier)
                             .padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S0_5)
-                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.paused) "Paused" else if (agent.failed) "Stopped" else if (agent.finished) "Done" else if (progress.ended) "Stopped" else if (stalled) "Stalled" else "Running"}: ${agent.label}" },
+                            .semantics(mergeDescendants = true) { contentDescription = "${if (agent.paused) "Paused" else if (agent.failed) "Stopped" else if (agent.finished) "Finished" else if (progress.ended) "Stopped" else if (stalled) "Stalled" else "Running"}: ${agent.label}" },
                         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

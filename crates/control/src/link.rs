@@ -2,11 +2,12 @@ use crate::activity::record_turn;
 use crate::api_access;
 use crate::auth::AuthNode;
 use crate::device::client_address;
+use crate::environments;
 use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
+use crate::state::{AppState, EnvironmentInputAnswer, EnvironmentScreenshotAnswer, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -218,7 +219,14 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
                 payload["usage_limit"] = limit;
             }
 
+            let usage_limited = payload.get("usage_limit").is_some();
             record(state, node_id, conversation_id, None, EventKind::Workflow, payload, None).await?;
+
+            let indexed = crate::workflows::index_agent_run(state, conversation_id, &run_id, &line, usage_limited).await;
+
+            if let Err(error) = indexed {
+                tracing::warn!(%conversation_id, error = error.message(), "indexing a workflow run failed");
+            }
 
             if !matches!(line["type"].as_str(), Some("result" | "failed" | "ended")) {
                 return Ok(());
@@ -271,6 +279,40 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::EnvironmentCapability { capability } => {
+            for record in state.hub.record_environment_capability(node_id, capability) {
+                environments::publish_environment(state, &record);
+            }
+
+            publish_node(state, node_id).await
+        }
+        NodeToControl::EnvironmentChanged { conversation_id, state: reported, failure, browser } => {
+            if let Some(record) = state.hub.report_environment(node_id, conversation_id, reported, failure, browser) {
+                environments::publish_environment(state, &record);
+            }
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentInputDone { request_id, error } => {
+            state.hub.answer(node_id, request_id, EnvironmentInputAnswer { error });
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentScreenshotTaken { request_id, png, error } => {
+            state.hub.answer(node_id, request_id, EnvironmentScreenshotAnswer { png, error });
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentStreamData { stream_id, data } => {
+            state.hub.environment_stream_data(node_id, stream_id, data);
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentStreamClosed { stream_id } => {
+            state.hub.finish_environment_stream(node_id, stream_id);
+
+            Ok(())
+        }
         NodeToControl::Transcript { path, offset, data, size } => store_transcript(state, node_id, path, offset, data, size).await,
         NodeToControl::Resources { sample } => {
             state.hub.record_resources(node_id, sample.clone());
@@ -288,7 +330,33 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
-        NodeToControl::GitResult { request_id, ok, output, error } => {
+        NodeToControl::GitChunk { request_id, seq, data } => {
+            state.hub.hold_git_chunk(node_id, request_id, seq, data);
+
+            Ok(())
+        }
+        NodeToControl::GitResult { request_id, ok, mut output, mut error } => {
+            let expected = output.get("chunks").and_then(serde_json::Value::as_u64);
+            let pieces = state.hub.take_git_chunks(node_id, request_id);
+
+            if ok && let Some(expected) = expected {
+                let in_order = pieces.len() as u64 == expected && pieces.iter().enumerate().all(|(index, (seq, _))| *seq as usize == index);
+
+                if in_order {
+                    output["data"] = pieces.into_iter().map(|(_, data)| data).collect::<String>().into();
+
+                    if let Some(fields) = output.as_object_mut() {
+                        fields.remove("chunks");
+                    }
+                } else {
+                    error = Some("The file arrived from the node incomplete. Try again.".into());
+                    output = serde_json::Value::Null;
+                    state.hub.answer(node_id, request_id, GitAnswer { ok: false, output, error });
+
+                    return Ok(());
+                }
+            }
+
             state.hub.answer(node_id, request_id, GitAnswer { ok, output, error });
 
             Ok(())
@@ -820,7 +888,7 @@ async fn after_update(state: &AppState, node_id: Uuid, conversation_id: Uuid, up
     Ok(())
 }
 
-async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
+pub(crate) async fn has_agents_out(state: &AppState, conversation_id: Uuid) -> ApiResult<bool> {
     let out = sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(format!("select {}", has_live_workflow_agent("$1")))).bind(conversation_id).fetch_one(&state.pool).await?;
 
     Ok(out)

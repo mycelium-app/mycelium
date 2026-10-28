@@ -42,6 +42,7 @@ import mycelium.api.Me
 enum class SettingsSection(val label: String, val icon: MyIcon, val summary: String? = null) {
     Appearance("Appearance", MyIcon.Sun),
     TimeAndFocus("Time and focus", MyIcon.Clock),
+    Privacy("Privacy", MyIcon.Mode, "Voice, wake phrase and where speech is processed"),
     Experiments("Experiments", MyIcon.Sliders),
     Ides("IDEs", MyIcon.Code, "Where Open in IDE opens a folder"),
     Accounts("Providers", MyIcon.Person, "Agent harness accounts, usage and chat models"),
@@ -59,7 +60,7 @@ enum class SettingsSection(val label: String, val icon: MyIcon, val summary: Str
 }
 
 internal val SettingsGroups = listOf(
-    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Experiments, SettingsSection.Ides),
+    "General" to listOf(SettingsSection.Appearance, SettingsSection.TimeAndFocus, SettingsSection.Privacy, SettingsSection.Experiments, SettingsSection.Ides),
     "Agents and models" to listOf(SettingsSection.Accounts, SettingsSection.Agents, SettingsSection.Connections),
     "Knowledge" to listOf(SettingsSection.Groups, SettingsSection.Instructions, SettingsSection.Memories, SettingsSection.Import, SettingsSection.Indexing),
     "Services" to listOf(SettingsSection.ChatTools, SettingsSection.Forges),
@@ -183,6 +184,7 @@ private fun SettingsContent(section: SettingsSection, store: Store, me: Me, cont
         when (section) {
             SettingsSection.Appearance -> AppearanceSettings()
             SettingsSection.TimeAndFocus -> TimeAndFocusSettings(store, links.openHours)
+            SettingsSection.Privacy -> PrivacySettings(store, LocalPlatform.current)
             SettingsSection.Experiments -> ExperimentsSettings(store)
             SettingsSection.Ides -> LocalPlatform.current?.let { IdesSettings(it) }
             SettingsSection.Accounts -> {

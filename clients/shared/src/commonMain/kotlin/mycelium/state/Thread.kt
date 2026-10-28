@@ -117,7 +117,13 @@ sealed interface ThreadItem {
         val files: List<Attachment> = emptyList(),
         val images: List<ThreadImage> = emptyList(),
         val goalSentAt: String? = null,
+        val goalNudge: Int? = null,
+        val goalWhy: String? = null,
+        val spoken: Boolean = false,
+        val spokenAt: String? = null,
     ) : ThreadItem
+
+    data class GoalReport(override val key: String, val outcome: String, val reason: String, val at: String) : ThreadItem
 
     data class AgentMessage(override val key: String, val text: String) : ThreadItem
 
@@ -279,6 +285,7 @@ class ThreadBuilder {
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
+            EventKinds.GoalReport -> items += ThreadItem.GoalReport(key, payload.string("outcome").orEmpty(), payload.string("reason").orEmpty(), payload.string("at").orEmpty())
         }
     }
 }
@@ -298,7 +305,9 @@ private fun userMessageFrom(key: String, payload: JsonObject): ThreadItem.UserMe
 
     val goalSentAt = payload.string("sent_at").takeIf { payload.string("origin") == "goal" }
 
-    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) }, goalSentAt)
+    val fromGoal = payload.string("origin") == "goal"
+
+    return ThreadItem.UserMessage(key, payload.string("text") ?: "", files, pictures.map { ThreadImage(it.sha256, it.name, it.mediaType) }, goalSentAt, payload.int("nudge")?.takeIf { fromGoal && it > 0 }, payload.string("why").takeIf { fromGoal }, payload.boolean("spoken") == true, payload.string("spoken_at"))
 }
 
 private fun withSameImagesMarked(items: List<ThreadItem>): List<ThreadItem> {

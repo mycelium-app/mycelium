@@ -15,6 +15,7 @@ import mycelium.state.ChatToolName
 import mycelium.state.ThreadItem
 import mycelium.state.ToolSearchName
 import mycelium.state.ToolStatus
+import mycelium.state.deployCallOf
 import mycelium.state.readableArguments
 import mycelium.state.myceliumTool
 
@@ -35,6 +36,15 @@ internal fun ArgumentLines(input: JsonObject?) {
 @Composable
 internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
     val colors = MyTheme.colors
+    val deployments = LocalAppDeployments.current
+    val deploy = if (deployments != null) deployCallOf(name?.tool, call.output) else null
+
+    if (deploy != null && deployments != null) {
+        AppDeployCard(deploy, name, deployments)
+
+        return
+    }
+
     val searching = call.title == ToolSearchName
     val heading = if (searching) "Searched for tools" else myceliumTool(call.title)?.label ?: name?.heading ?: call.title
     val status = if (call.awaitingApproval) ToolStatus.Pending else call.status

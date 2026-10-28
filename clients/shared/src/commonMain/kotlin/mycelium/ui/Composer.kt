@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
@@ -155,6 +156,8 @@ fun Composer(
     dictation: Dictation? = null,
     initialText: TextFieldValue = TextFieldValue(""),
     onTextChange: (TextFieldValue) -> Unit = {},
+    initialImages: Map<Char, Int> = emptyMap(),
+    onImagesChange: (Map<Char, Int>) -> Unit = {},
     onSendAllQueuedNow: () -> Unit = {},
     onTeachMe: ((Boolean) -> Unit)? = null,
     assistantActions: AssistantActionControls? = null,
@@ -164,9 +167,10 @@ fun Composer(
     val platform = LocalPlatform.current
     var text by remember(conversation.id) { mutableStateOf(initialText) }
     var pastes by remember(conversation.id) { mutableStateOf(emptyMap<Char, String>()) }
-    var images by remember(conversation.id) { mutableStateOf(emptyMap<Char, Int>()) }
+    var images by remember(conversation.id) { mutableStateOf(initialImages) }
     var history by remember(conversation.id) { mutableStateOf(EditHistory<ComposerEdit>()) }
     val reportText by rememberUpdatedState(onTextChange)
+    val reportImages by rememberUpdatedState(onImagesChange)
     val drafts = attachments?.drafts.orEmpty()
     val removeDraft by rememberUpdatedState(attachments?.onRemove)
     val currentDrafts by rememberUpdatedState(drafts)
@@ -193,6 +197,10 @@ fun Composer(
                 currentDrafts.filter { it.id in orphaned }.forEach { removeDraft?.invoke(it) }
             }
         }
+    }
+
+    LaunchedEffect(conversation.id) {
+        snapshotFlow { images }.collect { reportImages(it) }
     }
 
     LaunchedEffect(conversation.id) {
@@ -468,7 +476,7 @@ fun Composer(
                     .border(Tokens.Size.Hairline, colors.border, shape)
                     .padding(horizontal = Tokens.Space.S1_5, vertical = Tokens.Space.S1),
             ) {
-                goal?.goal?.let { GoalBar(it, goal.onPause, goal.onResume, goal.onClear, goal.onSendAgain, goal.agent) }
+                goal?.goal?.let { GoalBar(it, goal) }
 
                 if (queue.isNotEmpty() || sending.isNotEmpty()) {
                     QueuedMessages(queue, sending, onSendQueuedNow, onSendAllQueuedNow, onEditQueued, onRemoveQueued)
@@ -506,7 +514,7 @@ fun Composer(
 
         goal?.goal?.let { held ->
             Box(measured) {
-                GoalBar(held, goal.onPause, goal.onResume, goal.onClear, goal.onSendAgain, goal.agent)
+                GoalBar(held, goal)
             }
         }
 
@@ -574,8 +582,10 @@ private fun dictationProblemText(problem: DictationProblem) = when (problem) {
     is DictationProblem.Failed -> problem.message
 }
 
+val LocalComposerPlaceholder = compositionLocalOf { "Ask, plan or build" }
+
 @Composable
-fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onToggleTeachMe: (() -> Unit)? = null, onOpenActions: (() -> Unit)? = null, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = "Ask, plan or build", visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
+fun MessageField(text: TextFieldValue, onTextChange: (TextFieldValue) -> Unit, source: MutableInteractionSource, onSubmit: () -> Unit, onPaste: () -> Boolean, onKey: (Key) -> Boolean, modifier: Modifier = Modifier, onToggleTeachMe: (() -> Unit)? = null, onOpenActions: (() -> Unit)? = null, onUndo: (() -> Unit)? = null, onRedo: (() -> Unit)? = null, placeholder: String = LocalComposerPlaceholder.current, visualTransformation: VisualTransformation = VisualTransformation.None, alignment: Alignment = Alignment.CenterStart, badges: List<IntRange> = emptyList(), previews: Map<IntRange, ByteArray> = emptyMap()) {
     val colors = MyTheme.colors
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 

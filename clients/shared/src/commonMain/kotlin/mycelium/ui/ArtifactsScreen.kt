@@ -86,6 +86,13 @@ internal fun artifactIcon(kind: String): MyIcon = when (kind) {
     ArtifactKinds.Design -> MyIcon.Layers
     ArtifactKinds.Page -> MyIcon.Globe
     ArtifactKinds.Markdown -> MyIcon.File
+    ArtifactKinds.Drawing -> MyIcon.PenTool
+    ArtifactKinds.Typst -> MyIcon.TypeText
+    ArtifactKinds.Doc -> MyIcon.FileText
+    ArtifactKinds.Slides -> MyIcon.Presentation
+    ArtifactKinds.Dashboard -> MyIcon.Chart
+    ArtifactKinds.Motion -> MyIcon.Film
+    ArtifactKinds.DesignSystem -> MyIcon.Palette
     else -> MyIcon.Paperclip
 }
 
@@ -96,6 +103,7 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
     var kindName by remember { mutableStateOf(AnyKind) }
     var query by remember { mutableStateOf("") }
     var projectId by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
     val loadFailures by store.loadFailures.collectAsState()
     val load = { store.load(ArtifactsList) { store.refreshArtifacts(); store.refreshArtifactAccessRequests() } }
 
@@ -110,6 +118,8 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
     Column(Modifier.fillMaxSize()) {
         Bar {
             BarTitle("Artefacts")
+            Box(Modifier.weight(1f))
+            MyButton({ creating = true }, text = "New artefact", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
         }
 
         FlowRow(
@@ -120,11 +130,15 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
         ) {
             ListSearch(query, { query = it }, "artefacts")
             Segmented(ArtifactTabs, tab, { tab = it }, groupLabel = "Whose artefacts")
-            Segmented(listOf(AnyKind) + ArtifactKindFilters.map { it.second }, kindName, { kindName = it }, groupLabel = "Kind")
+            KindFilter(kindName) { kindName = it }
             ProjectFilter(artifactProjects(state.artifacts.values), projectId) { projectId = it }
         }
 
         Hairline()
+
+        if (creating) {
+            NewArtifactDialog(store, state.projects.values, state.artifacts.values, onCreated = { onOpen(it.id) }, onDismiss = { creating = false })
+        }
 
         for (request in state.artifactAccessRequests.values.filter { it.state == "requested" }) {
             ArtifactAccessRequestCard(request, store, state)
@@ -144,6 +158,26 @@ fun ArtifactsScreen(store: Store, state: AppState, me: Me, platform: Platform, o
             ) {
                 items(shown, key = { it.id }) { artifact ->
                     ArtifactCard(artifact, store, state, platform, mine = artifact.owner == me.id, onOpen = { onOpen(artifact.id) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KindFilter(kindName: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+
+    Box {
+        MyButton({ open = true }, text = kindName, description = "Kind: $kindName", variant = ButtonVariant.Outline, size = ButtonSize.Sm, muted = kindName == AnyKind, trailingIcon = MyIcon.ChevronDown, selected = open)
+
+        if (open) {
+            MenuPopup(onDismiss = { open = false }) {
+                MenuLabel("Kind")
+                MenuItem(AnyKind, onClick = { open = false; onSelect(AnyKind) }, checked = kindName == AnyKind)
+
+                for ((kind, name) in ArtifactKindFilters) {
+                    MenuItem(name, onClick = { open = false; onSelect(name) }, checked = kindName == name, leading = artifactIcon(kind))
                 }
             }
         }

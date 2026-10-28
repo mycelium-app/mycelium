@@ -397,7 +397,7 @@ async fn agent_diff_events_count_lines_per_language_and_area() {
     agent_writes(&mut link, id, 1, "/work/app/crates/control/src/a.rs", "fn a() {}\nfn b() {}\nfn c() {}\n").await;
     agent_writes(&mut link, id, 2, "/work/app/web/src/App.svelte", "<p>hi</p>\n").await;
 
-    let all = common::eventually("agent lines counted", || async { Some(skills(&server).await).filter(|all| skill(all, "language", "Svelte").is_some() && skill(all, "language", "Rust").is_some()) }).await;
+    let all = common::eventually("agent lines counted", || async { Some(skills(&server).await).filter(|all| skill(all, "area", "web/src").is_some() && skill(all, "area", "crates/control").is_some()) }).await;
 
     assert_eq!(skill(&all, "language", "Rust").unwrap()["agent_lines"], 3);
     assert_eq!(skill(&all, "area", "crates/control").unwrap()["agent_lines"], 3);

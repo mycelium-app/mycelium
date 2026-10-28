@@ -13,7 +13,37 @@ val ArtifactKindFilters = listOf(
     ArtifactKinds.Page to "Page",
     ArtifactKinds.Markdown to "Markdown",
     ArtifactKinds.File to "File",
+    ArtifactKinds.Drawing to "Drawing",
+    ArtifactKinds.Typst to "Typst",
+    ArtifactKinds.Doc to "Doc",
+    ArtifactKinds.Slides to "Slides",
+    ArtifactKinds.Dashboard to "Dashboard",
+    ArtifactKinds.Motion to "Motion",
+    ArtifactKinds.DesignSystem to "Design system",
 )
+
+val NewArtifactKinds = listOf(
+    Triple(ArtifactKinds.Doc, "Doc", "Rich text with headings and lists"),
+    Triple(ArtifactKinds.Slides, "Slides", "A deck to present"),
+    Triple(ArtifactKinds.Drawing, "Drawing", "An Excalidraw canvas"),
+    Triple(ArtifactKinds.Typst, "Typst", "Typeset, downloads as PDF"),
+    Triple(ArtifactKinds.Dashboard, "Dashboard", "Grafana-compatible panels"),
+    Triple(ArtifactKinds.Motion, "Motion", "An animated scene"),
+    Triple(ArtifactKinds.Design, "Design", "Artboards for a screen"),
+    Triple(ArtifactKinds.DesignSystem, "Design system", "Tokens, type and components"),
+    Triple(ArtifactKinds.Markdown, "Markdown", "Plain text with formatting"),
+)
+
+private val EditorKinds = setOf(ArtifactKinds.Design, ArtifactKinds.Drawing, ArtifactKinds.Typst, ArtifactKinds.Doc, ArtifactKinds.Slides, ArtifactKinds.Dashboard, ArtifactKinds.Motion, ArtifactKinds.DesignSystem)
+
+fun newArtifactNameProblem(kind: String, name: String): String? =
+    if (name.isBlank()) "Enter a name for the ${artifactKindName(kind).lowercase()}" else null
+
+fun designSystemsOf(artifacts: Collection<Artifact>): List<Artifact> =
+    artifacts.filter { it.kind == ArtifactKinds.DesignSystem }.sortedBy { it.title.lowercase() }
+
+fun designsUsing(artifacts: Collection<Artifact>, designSystemId: String): List<Artifact> =
+    artifacts.filter { it.kind == ArtifactKinds.Design && it.designSystemId == designSystemId }.sortedBy { it.title.lowercase() }
 
 enum class ArtifactPreview { Snapshot, Text, Picture, Icon }
 
@@ -32,7 +62,7 @@ fun artifactOpenUrl(baseUrl: String, id: String, kind: String, version: Int, dar
     val root = baseUrl.trimEnd('/')
     val theme = if (dark) "dark" else "light"
 
-    return if (kind == ArtifactKinds.Design) "$root/design/$id?theme=$theme&accent=$accent" else "$root/api/v1/artifacts/$id/versions/$version/content"
+    return if (kind in EditorKinds) "$root/design/$id?theme=$theme&accent=$accent" else "$root/api/v1/artifacts/$id/versions/$version/content"
 }
 
 fun artifactOpenUrl(baseUrl: String, artifact: Artifact, dark: Boolean = true, accent: String = "neutral"): String =

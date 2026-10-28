@@ -168,6 +168,11 @@ async fn push(state: &AppState, owner: Uuid, id: Uuid, backup: &AssistantBackup)
         }
 
         let existing = remote.iter().find(|entry| entry.path == *path).map(|entry| entry.blob.as_str());
+
+        if existing.is_some() && !owned.contains(path) {
+            continue;
+        }
+
         let commit = api.commit_blob(&state.http, &backup.repository, &branch, path, content, &format!("chore: update {path}"), existing).await.map_err(failed)?;
 
         sqlx::query("update assistant_files set backed_up_sha256 = $3 where assistant_id = $1 and path = $2").bind(id).bind(path).bind(digest).execute(&state.pool).await.map_err(database)?;

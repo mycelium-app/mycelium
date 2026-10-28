@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import mycelium.AudioPlayer
 import mycelium.PageReading
 import mycelium.Connection
 import mycelium.DeviceInfo
@@ -80,6 +81,14 @@ class AndroidPlatform(private val context: Context, private val launchPicker: ()
     override fun windowFocused(): Boolean = foreground
 
     override fun dictation(): Dictation? = if (SpeechRecognizer.isRecognitionAvailable(context)) AndroidDictation(context, launchMicrophonePermission) else null
+
+    override fun audioPlayer(): AudioPlayer = AndroidAudioPlayer()
+
+    override val opensMicrophoneSettings = true
+
+    override fun openMicrophoneSettings() {
+        context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 
     override fun listenForNotificationOpens(listener: ((String) -> Unit)?) {
         notificationOpener = listener

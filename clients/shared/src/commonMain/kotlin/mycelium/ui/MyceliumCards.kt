@@ -31,6 +31,7 @@ import mycelium.state.AppState
 import mycelium.state.MyceliumCall
 import mycelium.state.MyceliumTool
 import mycelium.state.Store
+import mycelium.state.artifactKindName
 import mycelium.state.apiAccessDuration
 import mycelium.state.apiScopeLabel
 import mycelium.state.sshAccessDuration
@@ -161,7 +162,8 @@ internal fun MyceliumCard(call: ThreadItem.ToolCall, parsed: MyceliumCall) {
         is MyceliumCall.StartProposed -> MyIcon.Layers
         is MyceliumCall.RequestApiAccess, is MyceliumCall.RequestArtifactAccess -> MyIcon.Key
         is MyceliumCall.RequestSshAccess -> MyIcon.Terminal
-        is MyceliumCall.CreateArtifact, is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
+        is MyceliumCall.CreateArtifact -> if (parsed.kind.isEmpty()) MyIcon.Layers else artifactIcon(parsed.kind)
+        is MyceliumCall.UpdateArtifact, is MyceliumCall.DesignSetArtboard, is MyceliumCall.ReadArtifact -> MyIcon.Layers
     }
     val proposal = proposedMessage(parsed)
     val start = proposedStart(parsed)
@@ -240,7 +242,7 @@ private fun doneHeading(parsed: MyceliumCall, artifacts: Map<String, Artifact>):
     is MyceliumCall.RequestApiAccess -> "Asked for API access"
     is MyceliumCall.RequestSshAccess -> "Asked for SSH access to ${parsed.node}"
     is MyceliumCall.Walkthrough -> "Wrote a walkthrough: ${parsed.steps.size} ${if (parsed.steps.size == 1) "step" else "steps"}"
-    is MyceliumCall.CreateArtifact -> "Created ${parsed.kind.ifEmpty { "artefact" }} “${parsed.title}”"
+    is MyceliumCall.CreateArtifact -> "Created ${if (parsed.kind.isEmpty()) "artefact" else artifactKindName(parsed.kind).lowercase()} “${parsed.title}”"
     is MyceliumCall.UpdateArtifact -> (parsed.title ?: artifacts[parsed.artifactId]?.title)?.let { "Updated “$it”" } ?: "Updated an artefact"
     is MyceliumCall.DesignSetArtboard -> (artifacts[parsed.artifactId]?.title)?.let { "Set an artboard in “$it”" } ?: "Set an artboard"
     is MyceliumCall.ReadArtifact -> (artifacts[parsed.artifactId]?.title)?.let { "Read “$it”" } ?: "Read an artefact"

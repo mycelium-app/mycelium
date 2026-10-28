@@ -18,15 +18,16 @@ pub fn definitions() -> Value {
         },
         {
             "name": "create_artifact",
-            "description": "Save something the person should look at and come back to as an artifact: a design (artboards on a canvas), a page (one HTML file, which may keep state in the artifact's data store), a markdown document, or any other file such as a PDF. Give the content as text, or the path of a file in this conversation's folder. A design without content starts with one empty page. The person opens it in Mycelium, comments on it and edits it.",
+            "description": "Save something the person should look at and come back to as an artifact: a design (artboards on a canvas), a page (one HTML file, which may keep state in the artifact's data store), a markdown document, a drawing (Excalidraw JSON), a typst document (Typst source, shown beside its rendered pages), a doc (basic rich text as JSON {\"blocks\": [{\"type\": \"paragraph|heading1|heading2|heading3|bullet|numbered\", \"spans\": [{\"text\", \"bold\"?, \"italic\"?, \"link\"?}]}]}), slides (JSON {\"slides\": [{\"id\", \"title\", \"body\": [lines], \"notes\"}]} with a presenter view), a dashboard (Grafana dashboard JSON with stat, timeseries and table panels, importable into Grafana as it is), a motion scene (JSON {\"duration\": ms, \"width\", \"height\", \"background\", \"layers\": [{\"id\", \"name\", \"shape\": \"rect|ellipse|text\", \"text\"?, \"fill\", \"keyframes\": [{\"t\": ms, \"x\", \"y\", \"w\", \"h\", \"opacity\", \"rotation\"}]}]}), a design_system (JSON {\"colors\": [{\"name\", \"token\", \"value\"}], \"spacing\": [{\"token\", \"value\"}], \"radius\": [...], \"type\": [{\"token\", \"size\", \"name\"}], \"components\": [{\"name\", \"html\"}]} that designs use), or any other file such as a PDF. A kind other than design or file without content starts empty. Give the content as text, or the path of a file in this conversation's folder. A design without content starts with one empty page. The person opens it in Mycelium, comments on it and edits it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "kind": {"type": "string", "enum": ["design", "page", "markdown", "file"], "description": "design, page (HTML), markdown, or file (anything else)."},
+                    "kind": {"type": "string", "enum": ["design", "page", "markdown", "file", "drawing", "typst", "doc", "slides", "dashboard", "motion", "design_system"], "description": "design, page (HTML), markdown, file (anything else), drawing, typst, doc, slides, dashboard, motion or design_system."},
                     "title": {"type": "string", "description": "A short title."},
                     "content": {"type": "string", "description": "The content as text. A design is JSON, {\"pages\": [{\"id\", \"name\", \"items\": [...]}]}."},
                     "path": {"type": "string", "description": "A file in this conversation's folder to store instead of content. Use it for binary files."},
                     "media_type": {"type": "string", "description": "The media type of a file. Defaults to one guessed from the path."},
+                    "design_system": {"type": "string", "description": "For a design: the id or slug of a design_system artifact whose tokens its artboards use."},
                 },
                 "required": ["kind", "title"],
             },

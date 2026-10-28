@@ -22,6 +22,21 @@ enum class GoalState {
 
     @SerialName("limit_reached")
     LimitReached,
+
+    @SerialName("stalled")
+    Stalled,
+}
+
+@Serializable
+enum class GoalWait {
+    @SerialName("repeated_outcome")
+    RepeatedOutcome,
+
+    @SerialName("question_waiting")
+    QuestionWaiting,
+
+    @SerialName("background_work")
+    BackgroundWork,
 }
 
 @Serializable
@@ -59,6 +74,12 @@ data class Goal(
     @SerialName("held_since") val heldSince: String? = null,
     @SerialName("held_seconds") val heldSeconds: Long = 0,
     @SerialName("resumes_at") val resumesAt: String? = null,
+    val nudges: Long = 0,
+    val repeats: Long = 0,
+    @SerialName("repeat_limit") val repeatLimit: Long? = null,
+    @SerialName("next_nudge_at") val nextNudgeAt: String? = null,
+    @SerialName("wait_reason") val waitReason: GoalWait? = null,
+    @SerialName("reported_at") val reportedAt: String? = null,
 )
 
 @Serializable
@@ -68,7 +89,11 @@ data class SetGoalRequest(
     @SerialName("time_limit_seconds") val timeLimitSeconds: Long? = null,
     @SerialName("five_hour_limit") val fiveHourLimit: Int? = null,
     @SerialName("weekly_limit") val weeklyLimit: Int? = null,
+    @SerialName("repeat_limit") val repeatLimit: Int? = null,
 )
 
 @Serializable
 data class PatchGoalRequest(val paused: Boolean)
+
+@Serializable
+data class ContinueGoalRequest(val note: String? = null)

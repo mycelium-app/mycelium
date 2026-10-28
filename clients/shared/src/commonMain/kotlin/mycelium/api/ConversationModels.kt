@@ -38,6 +38,7 @@ object EventKinds {
     const val Continued = "continued"
     const val TeachMode = "teach_mode"
     const val OpenOutline = "open_outline"
+    const val GoalReport = "goal_report"
 }
 
 @Serializable
@@ -111,7 +112,7 @@ data class Attachment(
 )
 
 @Serializable
-data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList())
+data class PromptRequest(val text: String, val attachments: List<Attachment> = emptyList(), val spoken: Boolean = false)
 
 @Serializable
 data class PromptAccepted(val queued: Boolean, val message: String)

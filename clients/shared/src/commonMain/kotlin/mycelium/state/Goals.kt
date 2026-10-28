@@ -3,13 +3,14 @@ package mycelium.state
 import mycelium.api.Goal
 import mycelium.api.GoalDelivery
 import mycelium.api.GoalState
+import mycelium.api.GoalWait
 import kotlin.math.roundToInt
 import kotlin.time.Clock
 import kotlin.time.Instant
 
 const val GoalCheckKind = "check"
 
-data class GoalLimits(val tokenBudget: Long? = null, val timeLimitSeconds: Long? = null, val fiveHourPercent: Int? = null, val weeklyPercent: Int? = null)
+data class GoalLimits(val tokenBudget: Long? = null, val timeLimitSeconds: Long? = null, val fiveHourPercent: Int? = null, val weeklyPercent: Int? = null, val repeatLimit: Int? = null)
 
 fun goalProgress(goal: Goal, now: Instant = Clock.System.now()): String {
     val tokens = if (!goal.tokensKnown) "Token usage pending" else goal.tokenBudget?.let { "${formatTokens(goal.tokensUsed)} of ${formatTokens(it)} tokens" } ?: "${formatTokens(goal.tokensUsed)} tokens"
@@ -44,20 +45,32 @@ fun formatTimeLeft(seconds: Long): String {
 
 fun goalIsHeld(goal: Goal): Boolean = goal.state == GoalState.Active && goal.heldSince != null
 
-fun goalMessage(goal: Goal, agent: String = ""): String? = when (goal.state) {
+fun goalIsWaiting(goal: Goal): Boolean = goal.state == GoalState.Active && goal.waitReason != null
+
+fun goalCanNudgeNow(goal: Goal): Boolean = goal.state == GoalState.Active && (goal.waitReason == GoalWait.RepeatedOutcome || goal.waitReason == GoalWait.BackgroundWork)
+
+fun goalIsBlocked(goal: Goal): Boolean = goal.state == GoalState.Stuck
+
+fun goalMessage(goal: Goal, agent: String = "", at: (String) -> String = { it }): String? = when (goal.state) {
     GoalState.Active -> when {
+        goal.waitReason == GoalWait.QuestionWaiting -> "Held for your answer to ${agentName(agent)}'s question. Mycelium nudges once you answer. Time on hold does not count towards the time limit."
         goal.heldSince != null -> "The goal carries on when the limit resets. Time on hold does not count towards the time limit."
+        goal.waitReason == GoalWait.RepeatedOutcome -> "The last ${turnCount(goal.repeats)} turns ended the same way, so Mycelium is waiting before it nudges again${goal.nextNudgeAt?.let { " at ${at(it)}" }.orEmpty()}. If the next turn ends the same way too, the goal stops."
+        goal.waitReason == GoalWait.BackgroundWork -> "${agentName(agent)} is waiting for background work. Mycelium nudges when it reports back${goal.nextNudgeAt?.let { ", or at ${at(it)} if it has not" }.orEmpty()}."
         goal.delivery == GoalDelivery.Pending && goal.turnActive -> "Sends to ${agentName(agent)} when its current turn ends."
         goal.delivery == GoalDelivery.Pending -> "Sending the goal to ${agentName(agent)}."
         goal.delivery == GoalDelivery.Failed -> goal.deliveryReason
         else -> null
     }
     GoalState.Paused -> goal.reason ?: "Paused"
-    GoalState.Met -> "Goal met. ${goal.reason.orEmpty()}".trim()
-    GoalState.Stuck -> "Goal stuck. ${goal.reason.orEmpty()}".trim()
+    GoalState.Met -> goal.reportedAt?.let { "Goal met. ${agentName(agent)} reported it done at ${at(it)}." } ?: "Goal met. ${goal.reason.orEmpty()}".trim()
+    GoalState.Stuck -> goal.reportedAt?.let { "Blocked. ${agentName(agent)} needs you: ${goal.reason.orEmpty().trimEnd('.')}. Continue once it is in place, or clear the goal." } ?: "Blocked. ${goal.reason.orEmpty()}".trim()
+    GoalState.Stalled -> "${goal.reason.orEmpty()}. Resume to let ${agentName(agent)} try again, or send it a message first."
     GoalState.OverBudget -> goal.reason ?: "Over budget"
     GoalState.LimitReached -> goal.reason ?: "Limit reached"
 }
+
+private fun turnCount(count: Long): String = if (count == 2L) "two" else count.toString()
 
 fun parseTokenBudget(text: String): Long? {
     val cleaned = text.trim().lowercase().replace(",", "").replace(" ", "")
@@ -95,3 +108,5 @@ fun parseTimeLimit(text: String): Long? {
 }
 
 fun parseWindowLimit(text: String): Int? = text.trim().removeSuffix("%").trim().toIntOrNull()?.takeIf { it in 1..100 }
+
+fun parseRepeatLimit(text: String): Int? = text.trim().toIntOrNull()?.takeIf { it >= 2 }

@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
-use mycelium_proto::api::{Break, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
+use mycelium_proto::api::{ActivityBreak, ActivityDay, ActivityHours, ActivityHoursDay, ActivitySpan, Break, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -17,6 +17,11 @@ use uuid::Uuid;
 pub const PUZZLES: [&str; 5] = ["wordle", "connections", "daily-orbs", "catfishing", "enclose-horse"];
 const PUZZLE_STATS_DAYS: i64 = 30;
 const HEARTBEAT_CAP_SECONDS: i32 = 90;
+const HEARTBEAT_FUTURE_MINUTES: i64 = 5;
+const HEARTBEAT_PAST_HOURS: i64 = 48;
+const SPAN_JOIN_SECONDS: i64 = 90;
+const ACTIVITY_KINDS: [&str; 4] = ["conversation", "chat", "assistant", "elsewhere"];
+const ACTIVITY_HOURS_DAYS_LIMIT: i64 = 31;
 const OVERVIEW_DAYS_LIMIT: i64 = 31;
 
 type SettingsRow = (bool, i32, i32, i32, bool, bool, bool, bool, Option<String>);
@@ -303,17 +308,71 @@ pub async fn schedule_closure(state: &AppState, owner: Uuid, schedule_id: Uuid) 
 pub async fn heartbeat(State(state): State<AppState>, user: AuthUser, Json(request): Json<WellnessHeartbeat>) -> ApiResult<StatusCode> {
     user.require_full_access()?;
 
+    if let Some(kind) = request.kind.as_deref() {
+        if !ACTIVITY_KINDS.contains(&kind) {
+            return Err(ApiError::bad_request("activity_kind_invalid", "Choose conversation, chat, assistant or elsewhere."));
+        }
+    }
+
     let seconds = request.seconds.clamp(0, HEARTBEAT_CAP_SECONDS);
     let settings = load_settings(&state, user.id).await?;
     let zone = zone_of(&state, user.id, settings.time_zone.as_deref()).await?;
-    let day = Utc::now().with_timezone(&zone).date_naive();
+    let now = Utc::now();
+    let ended = request.at.filter(|at| *at <= now + Duration::minutes(HEARTBEAT_FUTURE_MINUTES) && *at >= now - Duration::hours(HEARTBEAT_PAST_HOURS)).unwrap_or(now);
+    let day = ended.with_timezone(&zone).date_naive();
+    let is_session = request.kind.as_deref().is_none_or(|kind| kind != "elsewhere");
 
-    sqlx::query("insert into viewing_time (owner, day, seconds) values ($1, $2, $3) on conflict (owner, day) do update set seconds = viewing_time.seconds + excluded.seconds")
+    if is_session {
+        sqlx::query("insert into viewing_time (owner, day, seconds) values ($1, $2, $3) on conflict (owner, day) do update set seconds = viewing_time.seconds + excluded.seconds")
+            .bind(user.id)
+            .bind(day)
+            .bind(seconds)
+            .execute(&state.pool)
+            .await?;
+    }
+
+    let Some(kind) = request.kind.as_deref().filter(|_| seconds > 0) else { return Ok(StatusCode::NO_CONTENT) };
+    let started = ended - Duration::seconds(seconds as i64);
+    let route = request.route.clone().unwrap_or_default();
+    let conversation_id = match request.conversation_id {
+        Some(id) => sqlx::query_scalar::<_, Uuid>("select id from conversations where id = $1 and owner = $2").bind(id).bind(user.id).fetch_optional(&state.pool).await?,
+        None => None,
+    };
+    let assistant_id = match request.assistant_id {
+        Some(id) => sqlx::query_scalar::<_, Uuid>("select id from assistants where id = $1 and owner = $2").bind(id).bind(user.id).fetch_optional(&state.pool).await?,
+        None => None,
+    };
+    let group_id = match request.group_id {
+        Some(id) => sqlx::query_scalar::<_, Uuid>("select id from groups where id = $1 and owner = $2").bind(id).bind(user.id).fetch_optional(&state.pool).await?,
+        None => None,
+    };
+    let last = sqlx::query_as::<_, (Uuid, String, String, Option<Uuid>, Option<Uuid>, DateTime<Utc>)>("select id, kind, route, conversation_id, assistant_id, ended_at from activity_spans where owner = $1 order by ended_at desc limit 1")
         .bind(user.id)
-        .bind(day)
-        .bind(seconds)
-        .execute(&state.pool)
+        .fetch_optional(&state.pool)
         .await?;
+    let continues = last.filter(|(_, last_kind, last_route, last_conversation, last_assistant, last_ended)| {
+        last_kind == kind && *last_route == route && *last_conversation == conversation_id && *last_assistant == assistant_id && started - *last_ended <= Duration::seconds(SPAN_JOIN_SECONDS)
+    });
+
+    match continues {
+        Some((id, ..)) => {
+            sqlx::query("update activity_spans set ended_at = greatest(ended_at, $2), started_at = least(started_at, $3), title = coalesce($4, title) where id = $1").bind(id).bind(ended).bind(started).bind(&request.title).execute(&state.pool).await?;
+        }
+        None => {
+            sqlx::query("insert into activity_spans (owner, started_at, ended_at, kind, route, title, group_id, conversation_id, assistant_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+                .bind(user.id)
+                .bind(started)
+                .bind(ended)
+                .bind(kind)
+                .bind(&route)
+                .bind(&request.title)
+                .bind(group_id)
+                .bind(conversation_id)
+                .bind(assistant_id)
+                .execute(&state.pool)
+                .await?;
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -679,6 +738,158 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
     .collect();
 
     Ok(Json(WellnessOverview { days, last_break_at, current_break, quiet_now: quiet, held, held_week, opened_out_of_hours }))
+}
+
+#[derive(Deserialize)]
+pub struct ActivityDayQuery {
+    date: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ActivityHoursQuery {
+    days: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ActivitySpanRow {
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    kind: String,
+    route: String,
+    title: Option<String>,
+    conversation_title: Option<String>,
+    assistant_name: Option<String>,
+    project: Option<String>,
+    group_name: Option<String>,
+    conversation_id: Option<Uuid>,
+    assistant_id: Option<Uuid>,
+}
+
+impl ActivitySpanRow {
+    fn title(&self) -> String {
+        let title = match self.kind.as_str() {
+            "assistant" => self.assistant_name.clone().or_else(|| self.title.clone()),
+            "elsewhere" => self.title.clone().or_else(|| Some(self.route.clone())),
+            _ => self.conversation_title.clone().or_else(|| self.title.clone()),
+        };
+
+        title.filter(|title| !title.is_empty()).unwrap_or_else(|| "Untitled".to_string())
+    }
+
+    fn headline(&self) -> String {
+        match (&self.project, self.kind.as_str()) {
+            (Some(project), "conversation") => format!("{project} {}", self.title()),
+            _ => self.title(),
+        }
+    }
+}
+
+fn local_midnight(zone: Tz, date: NaiveDate) -> DateTime<Utc> {
+    date.and_hms_opt(0, 0, 0).and_then(|midnight| midnight.and_local_timezone(zone).earliest()).map(|midnight| midnight.with_timezone(&Utc)).unwrap_or_else(Utc::now)
+}
+
+async fn spans_between(state: &AppState, owner: Uuid, from: DateTime<Utc>, to: DateTime<Utc>) -> ApiResult<Vec<ActivitySpanRow>> {
+    let spans = sqlx::query_as::<_, ActivitySpanRow>(
+        "select s.started_at, s.ended_at, s.kind, s.route, s.title, c.title as conversation_title, a.name as assistant_name, p.name as project, g.name as group_name, s.conversation_id, s.assistant_id \
+         from activity_spans s \
+         left join conversations c on c.id = s.conversation_id \
+         left join projects p on p.id = c.project_id \
+         left join assistants a on a.id = s.assistant_id \
+         left join groups g on g.id = coalesce(s.group_id, p.group_id, a.group_id) \
+         where s.owner = $1 and s.ended_at > $2 and s.started_at < $3 order by s.started_at",
+    )
+    .bind(owner)
+    .bind(from)
+    .bind(to)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(spans)
+}
+
+pub async fn activity_day(State(state): State<AppState>, user: AuthUser, Query(query): Query<ActivityDayQuery>) -> ApiResult<Json<ActivityDay>> {
+    let settings = load_settings(&state, user.id).await?;
+    let zone = zone_of(&state, user.id, settings.time_zone.as_deref()).await?;
+    let date = match query.date.as_deref() {
+        Some(text) => text.parse::<NaiveDate>().map_err(|_| ApiError::bad_request("date_invalid", "Enter a date like 2026-10-28."))?,
+        None => Utc::now().with_timezone(&zone).date_naive(),
+    };
+    let from = local_midnight(zone, date);
+    let to = local_midnight(zone, date + Duration::days(1));
+    let rows = spans_between(&state, user.id, from, to).await?;
+    let spans: Vec<ActivitySpan> = rows
+        .iter()
+        .map(|row| ActivitySpan {
+            start: row.started_at.max(from),
+            end: row.ended_at.min(to),
+            kind: row.kind.clone(),
+            title: row.title(),
+            project: row.project.clone().filter(|_| row.kind == "conversation"),
+            group: row.group_name.clone(),
+            conversation_id: row.conversation_id,
+            assistant_id: row.assistant_id,
+        })
+        .collect();
+    let on_screen_seconds: i64 = spans.iter().map(|span| (span.end - span.start).num_seconds()).sum();
+    let breaks = sqlx::query_as::<_, (DateTime<Utc>, DateTime<Utc>)>("select started_at, least(coalesce(ended_early_at, ends_at), now()) from breaks where owner = $1 and started_at < $3 and coalesce(ended_early_at, ends_at) > $2 order by started_at")
+        .bind(user.id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .filter(|(started, ended)| ended > started)
+        .map(|(started, ended)| ActivityBreak { start: started.max(from), end: ended.min(to) })
+        .collect();
+    let recorded_since = sqlx::query_scalar::<_, Option<DateTime<Utc>>>("select min(started_at) from activity_spans where owner = $1").bind(user.id).fetch_one(&state.pool).await?.map(|first| first.with_timezone(&zone).date_naive().to_string());
+
+    Ok(Json(ActivityDay { date: date.to_string(), on_screen_minutes: (on_screen_seconds + 30) / 60, spans, breaks, recorded_since }))
+}
+
+pub async fn activity_hours(State(state): State<AppState>, user: AuthUser, Query(query): Query<ActivityHoursQuery>) -> ApiResult<Json<ActivityHours>> {
+    let count = query.days.unwrap_or(7).clamp(1, ACTIVITY_HOURS_DAYS_LIMIT);
+    let settings = load_settings(&state, user.id).await?;
+    let zone = zone_of(&state, user.id, settings.time_zone.as_deref()).await?;
+    let today = Utc::now().with_timezone(&zone).date_naive();
+    let first = today - Duration::days(count - 1);
+    let from = local_midnight(zone, first);
+    let to = local_midnight(zone, today + Duration::days(1));
+    let rows = spans_between(&state, user.id, from, to).await?;
+    let mut seconds: BTreeMap<(NaiveDate, usize), HashMap<String, i64>> = BTreeMap::new();
+
+    for row in &rows {
+        let headline = row.headline();
+        let end = row.ended_at.min(to);
+        let mut cursor = row.started_at.max(from);
+
+        while cursor < end {
+            let local = cursor.with_timezone(&zone);
+            let into_hour = (local.minute() * 60 + local.second()) as i64;
+            let slice_end = end.min(cursor - Duration::seconds(into_hour) + Duration::hours(1)).max(cursor + Duration::seconds(1));
+
+            *seconds.entry((local.date_naive(), local.hour() as usize)).or_default().entry(headline.clone()).or_default() += (slice_end - cursor).num_seconds();
+            cursor = slice_end;
+        }
+    }
+
+    let days = (0..count)
+        .map(|offset| {
+            let date = first + Duration::days(offset);
+            let mut minutes = vec![0; 24];
+            let mut top = vec![None; 24];
+
+            for hour in 0..24 {
+                let Some(titles) = seconds.get(&(date, hour)) else { continue };
+
+                minutes[hour] = (titles.values().sum::<i64>() + 30) / 60;
+                top[hour] = titles.iter().max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))).map(|(title, _)| title.clone());
+            }
+
+            ActivityHoursDay { date: date.to_string(), minutes, top }
+        })
+        .collect();
+
+    Ok(Json(ActivityHours { days }))
 }
 
 #[cfg(test)]

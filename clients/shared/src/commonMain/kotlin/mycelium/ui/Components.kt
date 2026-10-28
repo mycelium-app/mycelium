@@ -555,7 +555,7 @@ fun TextArea(
         Label(label, style = Tokens.Type.MetaStrong, color = colors.textMuted)
 
         if (error != null && errorAbove) {
-            Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)
+            Label(error, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, colors.statusFailed)
         }
 
         BasicTextField(
@@ -578,7 +578,7 @@ fun TextArea(
         )
 
         if (error != null && !errorAbove) {
-            Label(error, style = Tokens.Type.MetaStrong, color = colors.statusFailed)
+            Label(error, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, colors.statusFailed)
         }
     }
 }

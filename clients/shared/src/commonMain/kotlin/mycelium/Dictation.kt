@@ -17,12 +17,22 @@ interface Dictation {
     fun start(onHeard: (String) -> Unit, onStopped: (DictationProblem?) -> Unit)
 
     fun stop()
+
+    fun level(): Float = 0f
 }
 
 interface AudioRecorder {
     fun start(onStopped: (DictationProblem?) -> Unit)
 
     suspend fun stop(): ByteArray
+
+    fun level(): Float = 0f
+}
+
+interface AudioPlayer {
+    fun play(audio: ByteArray, mediaType: String, onDone: (Boolean) -> Unit)
+
+    fun stop()
 }
 
 class ProviderDictation(private val recorder: AudioRecorder, private val transcribe: suspend (ByteArray) -> String, private val scope: CoroutineScope) : Dictation {
@@ -34,6 +44,8 @@ class ProviderDictation(private val recorder: AudioRecorder, private val transcr
         this.onStopped = onStopped
         recorder.start { problem -> onStopped(problem) }
     }
+
+    override fun level(): Float = recorder.level()
 
     override fun stop() {
         val heard = onHeard

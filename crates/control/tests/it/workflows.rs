@@ -309,3 +309,162 @@ async fn a_workflow_started_by_an_agent_returns_its_result_to_the_calling_conver
     .await;
     assert_eq!(delivered, 1);
 }
+
+async fn control(server: &Server, id: &str, body: Value) -> (u16, Value) {
+    server
+        .user
+        .json(server.user.post(&format!("/api/v1/workflows/{id}/control")).json(&body))
+        .await
+}
+
+async fn start_gated(server: &Server, max_rounds: u32) -> String {
+    let (status, workflow) = server
+        .user
+        .json(server.user.post("/api/v1/workflows").json(&json!({"title":"Review","max_rounds":max_rounds,"steps":[{"key":"check","title":"Check","gate":true}]})))
+        .await;
+    assert_eq!(status, 200, "{workflow}");
+    let id = workflow["id"].as_str().unwrap().to_string();
+    wait_status(server, &id, "waiting").await;
+
+    id
+}
+
+#[tokio::test]
+async fn an_open_gate_makes_the_workflow_wait_for_you() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 1).await;
+    let workflow = get(&server, &id).await;
+
+    assert_eq!((workflow["status"].clone(), workflow["steps"][0]["status"].clone()), (json!("waiting"), json!("gate")));
+    assert!(workflow["steps"][0]["started_at"].is_string());
+}
+
+#[tokio::test]
+async fn approving_a_gate_records_who_decided_and_the_note() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 1).await;
+
+    control(&server, &id, json!({"action":"approve","step":"check","reason":"Looks right"})).await;
+    let finished = wait_status(&server, &id, "done").await;
+
+    assert_eq!((finished["decisions"][0]["decision"].clone(), finished["decisions"][0]["reason"].clone(), finished["steps"][0]["status"].clone()), (json!("approve"), json!("Looks right"), json!("approved")));
+    assert_eq!(finished["decisions"][0]["by"]["kind"], "person");
+    assert_eq!(finished["end_reason"]["reason"], "finished");
+}
+
+#[tokio::test]
+async fn sending_back_needs_a_reason() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 3).await;
+
+    let (status, body) = control(&server, &id, json!({"action":"send_back","step":"check","reason":"  "})).await;
+
+    assert_eq!((status, body["error"].clone()), (400, json!("reason_required")), "{body}");
+    assert_eq!(get(&server, &id).await["round"], 1);
+}
+
+#[tokio::test]
+async fn sending_back_starts_the_next_round_and_keeps_the_earlier_one() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 3).await;
+
+    let (status, body) = control(&server, &id, json!({"action":"send_back","step":"check","reason":"Cover the empty case"})).await;
+    assert_eq!(status, 200, "{body}");
+    let second = eventually("second round gate", || async {
+        let workflow = get(&server, &id).await;
+        (workflow["round"] == 2 && workflow["steps"][0]["status"] == "gate").then_some(workflow)
+    })
+    .await;
+
+    assert_eq!(second["rounds"].as_array().unwrap().len(), 2);
+    assert_eq!(second["rounds"][0]["steps"][0]["status"], "sent_back");
+    assert_eq!((second["rounds"][1]["reason"].clone(), second["rounds"][1]["decided_by"]["kind"].clone()), (json!("Cover the empty case"), json!("person")));
+    assert_eq!(second["decisions"][0]["decision"], "send_back");
+}
+
+#[tokio::test]
+async fn sending_back_on_the_last_round_ends_the_workflow() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 1).await;
+
+    control(&server, &id, json!({"action":"send_back","step":"check","reason":"Not good enough"})).await;
+    let ended = wait_status(&server, &id, "done").await;
+
+    assert_eq!((ended["end_reason"]["reason"].clone(), ended["round"].clone()), (json!("round_limit"), json!(1)));
+}
+
+#[tokio::test]
+async fn stopping_an_ended_workflow_is_refused() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 1).await;
+    control(&server, &id, json!({"action":"stop"})).await;
+
+    let (status, body) = control(&server, &id, json!({"action":"stop"})).await;
+    let stopped = get(&server, &id).await;
+
+    assert_eq!((status, body["error"].clone()), (409, json!("workflow_ended")), "{body}");
+    assert_eq!((stopped["status"].clone(), stopped["end_reason"]["reason"].clone(), stopped["end_reason"]["by"]["kind"].clone()), (json!("stopped"), json!("stopped"), json!("person")));
+    assert_eq!(stopped["steps"][0]["status"], "not_run");
+}
+
+#[tokio::test]
+async fn re_running_copies_the_plan_into_a_new_workflow_linked_to_the_original() {
+    let server = Server::start().await;
+    let id = start_gated(&server, 2).await;
+
+    let (active, refused) = server.user.json(server.user.post(&format!("/api/v1/workflows/{id}/rerun"))).await;
+    control(&server, &id, json!({"action":"stop"})).await;
+    let (status, rerun) = server.user.json(server.user.post(&format!("/api/v1/workflows/{id}/rerun"))).await;
+
+    assert_eq!((active, refused["error"].clone()), (409, json!("workflow_active")));
+    assert_eq!(status, 200, "{rerun}");
+    assert_ne!(rerun["id"], json!(id));
+    assert_eq!((rerun["rerun_of"].clone(), rerun["plan"].clone()), (json!(id), get(&server, &id).await["plan"].clone()));
+}
+
+#[tokio::test]
+async fn a_failed_step_is_recorded_with_its_error_and_later_steps_did_not_run() {
+    let server = Server::start().await;
+    let mut link = server.online_node("worker").await;
+    let (_, w) = server.user.json(server.user.post("/api/v1/workflows").json(&json!({"title":"Build","steps":[
+        {"key":"work","title":"Build","prompt":"Build","node_id":link.id,"agent":"codex","cwd":"/work/app"},
+        {"key":"after","title":"After","gate":true,"depends_on":["work"]}]}))).await;
+    let id = w["id"].as_str().unwrap();
+    let conversation = match link.next().await {
+        mycelium_proto::link::ControlToNode::StartSession { conversation_id, .. } => conversation_id,
+        other => panic!("expected start, got {other:?}"),
+    };
+    sqlx::query("update conversations set status='failed' where id=$1").bind(conversation).execute(&server.pool).await.unwrap();
+
+    let failed = wait_status(&server, id, "failed").await;
+
+    assert_eq!((failed["end_reason"]["reason"].clone(), failed["end_reason"]["step"].clone()), (json!("failed"), json!("work")));
+    assert!(!failed["end_reason"]["error"].as_str().unwrap_or_default().is_empty(), "{failed}");
+    assert_eq!((failed["steps"][0]["status"].clone(), failed["steps"][1]["status"].clone()), (json!("failed"), json!("not_run")));
+}
+
+#[tokio::test]
+async fn a_claude_code_workflow_run_appears_in_the_list_and_ends_with_its_journal() {
+    use mycelium_proto::link::NodeToControl;
+    let server = Server::start().await;
+    let mut link = server.online_node("worker").await;
+    let conversation = server.create_conversation(link.id, Some("Plan")).await;
+    let lines = [
+        json!({"type":"plan","phases":["Implement","Verify"]}),
+        json!({"type":"started","key":"a","label":"Write code","phase":"Implement","agentId":"a1b2c3d4e5f60718"}),
+        json!({"type":"result","key":"a","tokens":1200,"turns":3,"elapsed_ms":65000,"summary":"Wrote it"}),
+        json!({"type":"ended","state":"completed"}),
+    ];
+
+    for line in lines {
+        link.send(NodeToControl::Workflow { conversation_id: conversation.id, run_id: "run-1".into(), line }).await;
+    }
+    let run = eventually("agent run indexed", || async {
+        let (_, list) = server.user.json(server.user.get("/api/v1/workflows")).await;
+        list.as_array().unwrap().iter().find(|w| w["kind"] == "agent_run" && w["status"] == "done").cloned()
+    })
+    .await;
+
+    assert_eq!((run["run_id"].clone(), run["conversation_id"].clone(), run["phases"].clone()), (json!("run-1"), json!(conversation.id), json!(["Implement", "Verify"])));
+    assert_eq!((run["steps"][0]["label"].clone(), run["steps"][0]["tokens"].clone(), run["steps"][0]["turns"].clone(), run["steps"][0]["summary"].clone()), (json!("Write code"), json!(1200), json!(3), json!("Wrote it")));
+}

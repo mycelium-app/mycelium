@@ -21,6 +21,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -96,7 +97,7 @@ val jcefAvailable: Boolean by lazy {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null) {
+fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: PageReading? = null, viewOnly: Boolean? = null, onPointer: (() -> Unit)? = null) {
     var ready by remember { mutableStateOf(CefApp.getState() == CefApp.CefAppState.INITIALIZED) }
 
     LaunchedEffect(Unit) {
@@ -113,6 +114,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
 
     val host = remember { OffscreenBrowser() }
     val currentReading by rememberUpdatedState(reading)
+    val currentOnPointer by rememberUpdatedState(onPointer)
     val reader = remember { PageReader { currentReading } }
     var browserCreated by remember { mutableStateOf(false) }
     val client = remember {
@@ -131,6 +133,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
     var laidOut by remember { mutableStateOf(false) }
     val density = LocalDensity.current.density.toDouble()
     val focus = remember { FocusRequester() }
+    val bounds = rememberBrowserBounds(host, density) { laidOut = it }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -175,18 +178,22 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
         }
     }
 
+    LaunchedEffect(browser, browserCreated, viewOnly) {
+        val created = browser ?: return@LaunchedEffect
+
+        if (viewOnly == null || !browserCreated) {
+            return@LaunchedEffect
+        }
+
+        for (wait in ControlResendMillis) {
+            delay(wait)
+            created.executeJavaScript("window.postMessage({type: 'control', viewOnly: $viewOnly}, '*')", created.url, 0)
+        }
+    }
+
     Canvas(
         modifier
-            .onGloballyPositioned { coordinates ->
-                val inWindow = coordinates.positionInWindow()
-                val window = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
-                val windowOrigin = if (window?.isShowing == true) window.locationOnScreen else java.awt.Point(0, 0)
-                val screenScale = window?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
-
-                host.resize(coordinates.size.width, coordinates.size.height, density)
-                laidOut = coordinates.size.width > 0 && coordinates.size.height > 0
-                host.place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()), window, screenScale)
-            }
+            .then(bounds)
             .onKeyEvent { event ->
                 val native = event.awtEventOrNull ?: return@onKeyEvent false
 
@@ -205,6 +212,7 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
                         if (event.type == PointerEventType.Press) {
                             focus.requestFocus()
                             browser?.setFocus(true)
+                            currentOnPointer?.invoke()
                         }
 
                         host.mouse(native, change.position)
@@ -222,7 +230,40 @@ fun JcefWebContent(url: String, token: String?, modifier: Modifier, reading: Pag
     }
 }
 
+@Composable
+internal fun rememberBrowserBounds(host: OffscreenBrowser, density: Double, onLaidOut: (Boolean) -> Unit): Modifier {
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val currentOnLaidOut by rememberUpdatedState(onLaidOut)
+
+    LaunchedEffect(host, density) {
+        while (true) {
+            val attached = coordinates?.takeIf { it.isAttached }
+
+            if (attached != null) {
+                host.follow(attached, density)
+                currentOnLaidOut(attached.size.width > 0 && attached.size.height > 0)
+            }
+
+            delay(BoundsPollMillis)
+        }
+    }
+
+    return Modifier.onGloballyPositioned { coordinates = it }
+}
+
+private fun OffscreenBrowser.follow(coordinates: LayoutCoordinates, density: Double) {
+    val inWindow = coordinates.positionInWindow()
+    val window = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
+    val windowOrigin = if (window?.isShowing == true) window.locationOnScreen else java.awt.Point(0, 0)
+    val screenScale = window?.graphicsConfiguration?.defaultTransform?.scaleX ?: 1.0
+
+    resize(coordinates.size.width, coordinates.size.height, density)
+    place(java.awt.Point(windowOrigin.x + (inWindow.x / screenScale).toInt(), windowOrigin.y + (inWindow.y / screenScale).toInt()), window, screenScale)
+}
+
 private const val ReadIntervalMillis = 3000L
+private const val BoundsPollMillis = 50L
+private val ControlResendMillis = listOf(300L, 700L, 1500L, 3000L)
 
 private class PageReader(private val reading: () -> PageReading?) {
     val router: CefMessageRouter = CefMessageRouter.create().also { router ->

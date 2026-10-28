@@ -381,6 +381,7 @@ class AllScreensRenderTest {
         shell("artefact-viewer", Route.Artefact("a1"), open = null)
         shell("tasks", Route.Tasks, open = null)
         shell("workflows", Route.Workflows, open = null)
+        shell("workflow-page", Route.Workflow("wf1"), open = null)
         shell("schedules", Route.Schedules, open = null)
         shell("assistants", Route.Assistants, open = null)
         shell("assistant-thread", Route.Assistant("as1"), open = null)

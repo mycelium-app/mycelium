@@ -18,6 +18,7 @@ use std::time::Duration as StdDuration;
 
 const DISCOVERY_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const UNSUPPORTED: &str = "This app does not let Mycelium sign in. Use an API key instead.";
+const GITHUB_USES_TOKEN: &str = "GitHub's MCP server uses the token you connected the forge with. Reconnect the forge with a fine-grained token that has the MCP permission.";
 
 pub struct Tokens {
     pub access_token: String,
@@ -122,7 +123,7 @@ async fn authorisation_of(state: &AppState, mcp_url: &url::Url) -> Option<Author
 }
 
 pub(crate) async fn offers_sign_in(state: &AppState, mcp_url: &url::Url) -> bool {
-    authorisation_of(state, mcp_url).await.is_some()
+    authorisation_of(state, mcp_url).await.is_some_and(|authorisation| !authorisation.registration_endpoint.is_empty())
 }
 
 fn redirect_uri(state: &AppState) -> String {
@@ -134,6 +135,14 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Json(request):
     let kind = request.kind.as_deref().map(str::trim).filter(|kind| !kind.is_empty()).unwrap_or("mcp");
 
     check_name(&state, user.id, name, None).await?;
+
+    if let Some(forge_id) = request.forge_id {
+        let forge = crate::forges::find_owned(&state, forge_id, user.id).await?;
+
+        if forge.kind == "github" {
+            return Err(ApiError::bad_request("oauth_unsupported", GITHUB_USES_TOKEN));
+        }
+    }
 
     let app = known_app(kind).filter(|app| app.stored_kind == "mcp");
 

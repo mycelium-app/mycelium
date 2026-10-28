@@ -28,14 +28,14 @@ import mycelium.state.goesWithText
 import mycelium.state.staysHereText
 
 @Composable
-fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismiss: () -> Unit, onOpenConversation: (String) -> Unit) {
+fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismiss: () -> Unit, onOpenConversation: (String) -> Unit, preferredNodeId: String? = null) {
     val colors = MyTheme.colors
     val scope = rememberCoroutineScope()
     val targets = state.nodes.values.filter { it.id != conversation.nodeId && it.online && !it.draining }.sortedBy { it.name }
     var chosenId by remember { mutableStateOf<String?>(null) }
     var requested by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
-    val target = targets.firstOrNull { it.id == chosenId } ?: targets.firstOrNull()
+    val target = targets.firstOrNull { it.id == chosenId } ?: targets.firstOrNull { it.id == preferredNodeId } ?: targets.firstOrNull()
     var plan by remember(target?.id) { mutableStateOf<MovePlan?>(null) }
     val progress = state.moves[conversation.id]?.takeIf { it.state == MoveState.Waiting || it.state == MoveState.Moving || requested }
     val busy = progress?.state == MoveState.Waiting || progress?.state == MoveState.Moving

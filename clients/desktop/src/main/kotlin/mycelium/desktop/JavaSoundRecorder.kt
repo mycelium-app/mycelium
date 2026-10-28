@@ -24,6 +24,11 @@ class JavaSoundRecorder : AudioRecorder {
     private var line: TargetDataLine? = null
     private var reader: Thread? = null
 
+    @Volatile
+    private var heard = 0f
+
+    override fun level(): Float = heard
+
     override fun start(onStopped: (DictationProblem?) -> Unit) {
         captured.reset()
 
@@ -54,6 +59,7 @@ class JavaSoundRecorder : AudioRecorder {
 
                 if (read > 0) {
                     captured.write(chunk, 0, read)
+                    heard = loudness(chunk, read)
                 }
             }
         }.apply {
@@ -70,9 +76,33 @@ class JavaSoundRecorder : AudioRecorder {
         reader = null
 
         val pcm = captured.toByteArray()
+        captured.reset()
+        heard = 0f
         val wav = ByteArrayOutputStream()
         AudioSystem.write(AudioInputStream(ByteArrayInputStream(pcm), format, (pcm.size / format.frameSize).toLong()), AudioFileFormat.Type.WAVE, wav)
 
         wav.toByteArray()
     }
 }
+
+private fun loudness(chunk: ByteArray, length: Int): Float {
+    var sum = 0.0
+    var samples = 0
+    var index = 0
+
+    while (index + 1 < length) {
+        val sample = ((chunk[index + 1].toInt() shl 8) or (chunk[index].toInt() and 0xFF)).toShort().toInt()
+
+        sum += sample.toDouble() * sample
+        samples += 1
+        index += 2
+    }
+
+    if (samples == 0) {
+        return 0f
+    }
+
+    return (kotlin.math.sqrt(sum / samples) / Short.MAX_VALUE * LoudnessGain).toFloat().coerceIn(0f, 1f)
+}
+
+private const val LoudnessGain = 6.0

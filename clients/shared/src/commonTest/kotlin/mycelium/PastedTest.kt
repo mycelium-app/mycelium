@@ -116,6 +116,26 @@ class PastedTest {
     }
 
     @Test
+    fun theCursorLandsOnTheNearerEdgeOfAMarkerSoMovingUpOrDownNeverSticksAfterIt() {
+        val marker = '\uE000'
+        val display = PasteDisplay("a${marker}b", mapOf(marker to long))
+        val width = pastedLabel(20).length + 2 * BadgeGap.length
+
+        assertEquals(1, display.toOriginal(2))
+        assertEquals(1, display.toOriginal(1 + width / 2 - 1))
+        assertEquals(2, display.toOriginal(1 + width / 2))
+        assertEquals(2, display.toOriginal(width))
+    }
+
+    @Test
+    fun anImageMarkerSurvivesExpandingPastesForTheDraft() {
+        val image = '\uE001'
+        val paste = '\uE000'
+
+        assertEquals("a${image}b$long", expandedPastes("a${image}b$paste", mapOf(paste to long)))
+    }
+
+    @Test
     fun aMarkerWithoutAHeldPasteIsLeftAsItIs() {
         val display = PasteDisplay("\uE000", emptyMap())
 

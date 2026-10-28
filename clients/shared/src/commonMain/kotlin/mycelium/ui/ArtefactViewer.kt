@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -23,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.flow.map
 import mycelium.Platform
 import mycelium.api.Artifact
 import mycelium.api.ArtifactKinds
@@ -31,6 +33,7 @@ import mycelium.state.MarkdownBlock
 import mycelium.state.Store
 import mycelium.state.ago
 import mycelium.state.artifactKindName
+import mycelium.state.designSystemsOf
 import mycelium.state.artifactOpenUrl
 import mycelium.state.parsedMarkdown
 
@@ -52,6 +55,12 @@ fun ArtefactViewer(
     val accent = if (appearance.accent == Accent.System) "neutral" else appearance.accent.name.lowercase()
     val url = artifactOpenUrl(store.api.baseUrl, artifact, dark = appearance.dark, accent = accent)
     val token = platform.loadConnection()?.token
+    val allArtifacts by store.state.map { it.artifacts }.collectAsState(emptyMap())
+    var choosingDesignSystem by remember(artifact.id) { mutableStateOf(false) }
+
+    if (choosingDesignSystem) {
+        DesignSystemDialog(store, artifact, designSystemsOf(allArtifacts.values), onDismiss = { choosingDesignSystem = false })
+    }
 
     Column(modifier) {
         Bar {
@@ -80,6 +89,13 @@ fun ArtefactViewer(
             }
 
             Label(artifactKindName(artifact.kind), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+
+            if (artifact.kind == ArtifactKinds.Design) {
+                val systemName = allArtifacts.values.firstOrNull { it.id == artifact.designSystemId }?.title ?: "None"
+
+                MyButton({ choosingDesignSystem = true }, text = systemName, icon = MyIcon.Palette, description = "Design system: $systemName", size = ButtonSize.Sm, muted = true)
+            }
+
             trailing()
             MyButton({ platform.openUrl(url) }, icon = MyIcon.Globe, description = "Open in browser", muted = true)
 

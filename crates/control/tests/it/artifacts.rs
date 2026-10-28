@@ -150,7 +150,7 @@ async fn content_that_cannot_be_kept_is_refused_with_what_to_do() {
     let (huge, huge_error) = create(user, json!({"kind": "file", "title": "x", "content": "a".repeat(20 * 1024 * 1024 + 1)})).await;
     let (stranger, _) = create(user, json!({"kind": "page", "title": "x", "content": "x", "conversation_id": Uuid::new_v4()})).await;
 
-    assert_eq!((no_kind, kind_error["message"].as_str()), (400, Some("Kind must be design, page, markdown or file.")));
+    assert_eq!((no_kind, kind_error["message"].as_str()), (400, Some("Kind must be design, page, markdown, file, drawing, typst, doc, slides, dashboard, motion or design_system.")));
     assert_eq!((no_title, title_error["error"].as_str()), (400, Some("title_required")));
     assert_eq!((no_content, empty, both, bad_base64, bad_type, stranger), (400, 400, 400, 400, 400, 404));
     assert_eq!((bad_design, design_error["error"].as_str()), (400, Some("design_invalid")));
@@ -653,4 +653,217 @@ async fn an_artefact_whose_conversation_was_deleted_has_no_origin() {
 
     assert_eq!(status, 200, "{artifact}");
     assert!(artifact.get("origin").is_none());
+}
+
+const NEW_KINDS: [(&str, &str, &str); 7] = [
+    ("drawing", "application/vnd.excalidraw+json", r#"{"type":"excalidraw","version":2,"elements":[{"id":"r1","type":"rectangle"}]}"#),
+    ("typst", "text/vnd.typst", "= Report\n"),
+    ("doc", "application/vnd.mycelium.doc+json", r#"{"blocks":[{"type":"heading1","spans":[{"text":"Guide"}]}]}"#),
+    ("slides", "application/vnd.mycelium.slides+json", r#"{"slides":[{"id":"s1","title":"One","body":["a"],"notes":"n"}]}"#),
+    ("dashboard", "application/vnd.grafana.dashboard+json", r#"{"title":"Backups","panels":[{"type":"stat","title":"Last"}]}"#),
+    ("motion", "application/vnd.mycelium.motion+json", r#"{"duration":4000,"layers":[{"id":"l1","name":"Ring","shape":"ellipse"}]}"#),
+    ("design_system", "application/vnd.mycelium.design-system+json", r##"{"colors":[{"name":"Harbour blue","token":"brand","value":"#11305A"}],"spacing":[],"radius":[],"type":[],"components":[]}"##),
+];
+
+fn fake_typst(directory: &std::path::Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = directory.join("typst");
+
+    std::fs::write(&path, "#!/bin/sh\nif grep -q BROKEN main.typ; then echo 'main.typ:16:24: error: unclosed delimiter' >&2; exit 1; fi\nprintf '<svg>page</svg>' > out-1.svg\nprintf '%%PDF-fake' > out.pdf\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    path.to_string_lossy().into_owned()
+}
+
+#[tokio::test]
+async fn each_new_kind_is_created_versioned_filtered_and_served_with_its_media_type() {
+    let server = Server::start().await;
+    let user = &server.user;
+
+    for (kind, media_type, content) in NEW_KINDS {
+        let artifact = created(user, kind, &format!("A {kind}"), content).await;
+        let id = artifact["id"].as_str().unwrap();
+        let (status, versioned) = user.json(user.post(&format!("/api/v1/artifacts/{id}/versions")).json(&json!({"content": content, "note": "Again"}))).await;
+        let (headers, _) = content_of(user, id, 2).await;
+        let (_, filtered) = user.json(user.get(&format!("/api/v1/artifacts?kind={kind}"))).await;
+
+        assert_eq!((artifact["kind"].as_str(), artifact["media_type"].as_str()), (Some(kind), Some(media_type)), "{artifact}");
+        assert_eq!((status, versioned["latest_version"].as_i64()), (201, Some(2)), "{versioned}");
+        assert_eq!(headers[reqwest::header::CONTENT_TYPE], media_type);
+        assert_eq!(filtered.as_array().unwrap().len(), 1, "{kind}");
+    }
+}
+
+#[tokio::test]
+async fn a_new_kind_made_without_content_starts_empty_and_valid() {
+    let server = Server::start().await;
+    let user = &server.user;
+
+    for (kind, _, _) in NEW_KINDS {
+        let (status, artifact) = create(user, json!({"kind": kind, "title": format!("Empty {kind}")})).await;
+
+        assert_eq!(status, 201, "{kind}: {artifact}");
+    }
+
+    let (_, slides) = user.json(user.get("/api/v1/artifacts?kind=slides")).await;
+    let (_, bytes) = content_of(user, slides[0]["id"].as_str().unwrap(), 1).await;
+    let deck: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(deck["slides"][0]["title"], "Empty slides");
+}
+
+#[tokio::test]
+async fn content_that_does_not_fit_its_kind_is_refused_with_what_to_fix() {
+    let server = Server::start().await;
+    let user = &server.user;
+    let cases = [("drawing", "{}", "drawing_invalid"), ("doc", r##"{"blocks":[{"type":"table","spans":[]}]}"##, "doc_invalid"), ("slides", r##"{"slides":[]}"##, "slides_invalid"), ("dashboard", r##"{"title":"x"}"##, "dashboard_invalid"), ("motion", r##"{"duration":0,"layers":[]}"##, "motion_invalid"), ("design_system", r##"{"colors":[{"token":"has space","value":"#fff"}]}"##, "design_system_invalid")];
+
+    for (kind, content, code) in cases {
+        let (status, body) = create(user, json!({"kind": kind, "title": "Bad", "content": content})).await;
+
+        assert_eq!((status, body["error"].as_str()), (400, Some(code)), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn a_new_artefact_can_be_linked_to_a_project_when_it_is_created() {
+    let server = Server::start().await;
+    let (_, conversation) = started(&server).await;
+    let project: Uuid = sqlx::query_scalar("insert into projects (owner, node_id, name, path) select owner, node_id, 'Harbour', '/harbour' from conversations where id = $1 returning id").bind(conversation).fetch_one(&server.pool).await.unwrap();
+    let (status, artifact) = create(&server.user, json!({"kind": "doc", "title": "Onboarding guide", "project_id": project})).await;
+    let linked = sqlx::query_scalar::<_, i64>("select count(*) from artifact_links where artifact_id = $1 and project_id = $2 and permission = 'edit'").bind(Uuid::parse_str(artifact["id"].as_str().unwrap()).unwrap()).bind(project).fetch_one(&server.pool).await.unwrap();
+
+    assert_eq!((status, linked), (201, 1), "{artifact}");
+}
+
+#[tokio::test]
+async fn an_agent_creates_updates_and_reads_every_new_kind() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+
+    for (kind, _, content) in NEW_KINDS {
+        let title = format!("Agent {kind}");
+        let (failed, text) = tool(&server, &link, conversation, "create_artifact", json!({"kind": kind, "title": title, "content": content})).await;
+        let id = artifact_id(&text);
+        let (update_failed, updated) = tool(&server, &link, conversation, "update_artifact", json!({"artifact": id, "content": content})).await;
+        let (read_failed, read) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id})).await;
+
+        assert!(!failed && !update_failed && !read_failed, "{kind}: {text} {updated} {read}");
+        assert_eq!(updated, format!("Updated \"{title}\" to version 2."));
+        assert!(if kind == "dashboard" { read.contains("\"schemaVersion\":39") } else { read == content }, "{kind}: {read}");
+    }
+
+    let (failed, refusal) = tool(&server, &link, conversation, "create_artifact", json!({"kind": "slides", "title": "Broken", "content": "{}"})).await;
+
+    assert_eq!((failed, refusal.starts_with("The deck must be JSON")), (true, true), "{refusal}");
+}
+
+#[tokio::test]
+async fn a_grafana_export_is_imported_and_exported_unchanged_the_second_time() {
+    let server = Server::start().await;
+    let user = &server.user;
+    let export = json!({
+        "__inputs": [{"name": "DS_PROMETHEUS", "type": "datasource"}],
+        "title": "Backup health",
+        "uid": "backup-health",
+        "templating": {"list": []},
+        "panels": [
+            {"type": "stat", "title": "Last backup", "datasource": {"type": "prometheus", "uid": "atlas-box"}, "targets": [{"expr": "time() - restic_last_backup_timestamp"}]},
+            {"type": "timeseries", "title": "Duration", "gridPos": {"x": 8, "y": 0, "w": 16, "h": 8}, "targets": [{"expr": "restic_duration_seconds"}]},
+            {"type": "table", "title": "Runs"}
+        ]
+    });
+    let imported = created(user, "dashboard", "Backup health", &export.to_string()).await;
+    let (_, bytes) = content_of(user, imported["id"].as_str().unwrap(), 1).await;
+    let exported: Value = serde_json::from_slice(&bytes).unwrap();
+    let again = created(user, "dashboard", "Backup health again", &exported.to_string()).await;
+    let (_, again_bytes) = content_of(user, again["id"].as_str().unwrap(), 1).await;
+    let exported_again: Value = serde_json::from_slice(&again_bytes).unwrap();
+
+    assert!(exported.get("__inputs").is_none());
+    assert_eq!((exported["uid"].as_str(), exported["templating"].clone(), exported["schemaVersion"].as_i64()), (Some("backup-health"), json!({"list": []}), Some(39)));
+    assert_eq!(exported["panels"].as_array().unwrap().iter().map(|panel| panel["type"].as_str().unwrap()).collect::<Vec<_>>(), ["stat", "timeseries", "table"]);
+    assert_eq!(exported["panels"][1]["gridPos"], json!({"x": 8, "y": 0, "w": 16, "h": 8}));
+    assert_eq!(exported, exported_again);
+}
+
+#[tokio::test]
+async fn a_dashboard_panel_says_so_when_no_data_source_is_configured() {
+    let server = Server::start().await;
+    let dashboard = created(&server.user, "dashboard", "Backups", r#"{"title":"Backups","panels":[{"type":"stat","id":1,"datasource":{"type":"prometheus","uid":"x"},"targets":[{"expr":"up"}]}]}"#).await;
+    let id = dashboard["id"].as_str().unwrap();
+    let (status, body) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{id}/panels/1/data?range=7d"))).await;
+    let (bad_range, _) = server.user.json(server.user.get(&format!("/api/v1/artifacts/{id}/panels/1/data?range=1y"))).await;
+
+    assert_eq!((status, body["error"].as_str()), (503, Some("datasource_unavailable")), "{body}");
+    assert_eq!(bad_range, 400);
+}
+
+#[tokio::test]
+async fn a_design_made_with_a_design_system_gets_its_tokens_in_every_artboard_an_agent_saves() {
+    let server = Server::start().await;
+    let (link, conversation) = started(&server).await;
+    let system = created(&server.user, "design_system", "Harbour UI", NEW_KINDS[6].2).await;
+    let (status, design) = create(&server.user, json!({"kind": "design", "title": "Settings", "design_system_id": system["id"]})).await;
+    let id = design["id"].as_str().unwrap();
+
+    grant(&server.user, &design, conversation).await;
+
+    let (_, saved) = tool(&server, &link, conversation, "design_set_artboard", json!({"artifact": id, "name": "General", "html": "<html><head></head><body style=\"color:var(--brand)\">Hi</body></html>"})).await;
+    let (_, outline) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id})).await;
+    let (_, artboard) = tool(&server, &link, conversation, "read_artifact", json!({"artifact": id, "artboard": "a1"})).await;
+    let (cleared_status, cleared) = server.user.json(server.user.patch(&format!("/api/v1/artifacts/{id}")).json(&json!({"design_system_id": ""}))).await;
+    let (wrong_status, wrong) = server.user.json(server.user.patch(&format!("/api/v1/artifacts/{id}")).json(&json!({"design_system_id": id}))).await;
+    let (_, set_again) = server.user.json(server.user.patch(&format!("/api/v1/artifacts/{id}")).json(&json!({"design_system_id": system["id"]}))).await;
+
+    assert_eq!((status, design["design_system_id"].clone()), (201, system["id"].clone()), "{design}");
+    assert!(saved.starts_with("Saved artboard"), "{saved}");
+    assert!(outline.contains("Design system \"Harbour UI\"") && outline.contains("--brand: #11305A"), "{outline}");
+    assert!(artboard.contains("<style data-design-system>:root{--brand:#11305A;}</style>"), "{artboard}");
+    assert_eq!((cleared_status, cleared.get("design_system_id")), (200, None));
+    assert_eq!((wrong_status, wrong["error"].as_str()), (400, Some("design_system_invalid")), "{wrong}");
+    assert_eq!(set_again["design_system_id"], system["id"]);
+}
+
+#[tokio::test]
+async fn only_a_design_can_use_a_design_system() {
+    let server = Server::start().await;
+    let system = created(&server.user, "design_system", "Harbour UI", NEW_KINDS[6].2).await;
+    let (status, body) = create(&server.user, json!({"kind": "doc", "title": "Guide", "design_system_id": system["id"]})).await;
+
+    assert_eq!((status, body["error"].as_str()), (400, Some("design_system_not_for_kind")), "{body}");
+}
+
+#[tokio::test]
+async fn a_typst_document_compiles_to_pages_and_falls_back_to_the_last_version_that_compiled() {
+    let directory = tempfile::tempdir().unwrap();
+    let binary = fake_typst(directory.path());
+    let server = Server::start_with(|config| config.typst_binary = binary.clone()).await;
+    let user = &server.user;
+    let artifact = created(user, "typst", "Restore drill report", "= Report\n").await;
+    let id = artifact["id"].as_str().unwrap();
+
+    let (_, good) = user.json(user.post("/api/v1/typst/compile").json(&json!({"source": "= Report"}))).await;
+    let (_, bad) = user.json(user.post("/api/v1/typst/compile").json(&json!({"source": "BROKEN [24 min,"}))).await;
+    user.json(user.post(&format!("/api/v1/artifacts/{id}/versions")).json(&json!({"content": "BROKEN [24 min,"}))).await;
+    let (_, latest) = user.json(user.get(&format!("/api/v1/artifacts/{id}/typst"))).await;
+    let pdf = user.get(&format!("/api/v1/artifacts/{id}/pdf")).send().await.unwrap();
+    let disposition = pdf.headers()[reqwest::header::CONTENT_DISPOSITION].to_str().unwrap().to_string();
+    let pdf_bytes = pdf.bytes().await.unwrap();
+
+    assert_eq!((good["compiled"].as_bool(), good["pages"][0].as_str()), (Some(true), Some("<svg>page</svg>")));
+    assert_eq!((bad["compiled"].as_bool(), bad["diagnostics"][0].clone()), (Some(false), json!({"line": 16, "column": 24, "message": "unclosed delimiter"})));
+    assert_eq!((latest["latest_version"].as_i64(), latest["latest_compiled"].as_bool(), latest["compiled_version"].as_i64()), (Some(2), Some(false), Some(1)), "{latest}");
+    assert_eq!(latest["diagnostics"][0]["line"], 16);
+    assert_eq!(latest["pages"][0], "<svg>page</svg>");
+    assert_eq!((disposition.as_str(), pdf_bytes.as_ref()), ("attachment; filename=\"restore-drill-report.pdf\"", b"%PDF-fake".as_ref()));
+}
+
+#[tokio::test]
+async fn compiling_typst_without_the_compiler_says_how_to_install_it() {
+    let server = Server::start_with(|config| config.typst_binary = "/nonexistent/typst".into()).await;
+    let (status, body) = server.user.json(server.user.post("/api/v1/typst/compile").json(&json!({"source": "= Report"}))).await;
+
+    assert_eq!((status, body["error"].as_str()), (503, Some("typst_unavailable")), "{body}");
 }

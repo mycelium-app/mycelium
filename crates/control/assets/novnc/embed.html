@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Environment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+#screen { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="screen"></div>
+<script type="module">
+import RFB from './core/rfb.js';
+
+const query = new URLSearchParams(location.search);
+const path = query.get('path') || '';
+const ticket = query.get('ticket') || '';
+const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+const separator = path.includes('?') ? '&' : '?';
+const address = `${scheme}://${location.host}${path}${ticket ? `${separator}ticket=${encodeURIComponent(ticket)}` : ''}`;
+const screen = document.getElementById('screen');
+const rfb = new RFB(screen, address, { shared: true });
+
+rfb.scaleViewport = true;
+rfb.clipViewport = false;
+rfb.viewOnly = query.get('view') !== '0';
+
+function tell(message) {
+    window.parent.postMessage(message, location.origin);
+}
+
+window.addEventListener('message', (event) => {
+    if (event.origin !== location.origin || !event.data || event.data.type !== 'control') {
+        return;
+    }
+
+    rfb.viewOnly = Boolean(event.data.viewOnly);
+
+    if (!rfb.viewOnly) {
+        rfb.focus();
+    }
+});
+
+screen.addEventListener('pointerdown', () => {
+    if (rfb.viewOnly) {
+        tell({ type: 'pointer' });
+    }
+}, true);
+
+rfb.addEventListener('connect', () => tell({ type: 'status', state: 'connected' }));
+rfb.addEventListener('disconnect', (event) => tell({ type: 'status', state: 'disconnected', clean: Boolean(event.detail && event.detail.clean) }));
+</script>
+</body>
+</html>

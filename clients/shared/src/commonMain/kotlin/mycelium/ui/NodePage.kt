@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
+import kotlin.time.Clock
 import mycelium.Platform
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
@@ -38,6 +39,10 @@ import mycelium.state.agentName
 import mycelium.state.agentVersion
 import mycelium.state.conversationTitle
 import mycelium.state.compareVersions
+import mycelium.state.environmentCannotRunText
+import mycelium.state.environmentControl
+import mycelium.state.environmentRunningFor
+import mycelium.state.environmentVersionsText
 import mycelium.state.cpuSummary
 import mycelium.state.formatBytes
 import mycelium.state.isLocalToNode
@@ -116,7 +121,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             when (tab) {
                 "Agents" -> AgentsTab(node, state, onOpenConversation)
-                "Resources" -> ResourcesTab(store, node, state)
+                "Resources" -> ResourcesTab(store, node, state, onOpenConversation)
                 else -> PortsTab(node, state, platform)
             }
         }
@@ -162,12 +167,18 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
+private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
     var stopping by remember { mutableStateOf<ProcessUsage?>(null) }
     var stopped by remember { mutableStateOf<String?>(null) }
     val resources = state.resources[node.id]
-    val sample = readableSample(node, resources?.latest) ?: return
+    val sample = readableSample(node, resources?.latest)
+
+    if (sample == null) {
+        EnvironmentsSection(store, node, state, onOpenConversation)
+
+        return
+    }
 
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
         val cpu = sample.cpuPercent.roundToInt()
@@ -194,6 +205,8 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
             else -> Kpi("Docker", "${docker.containers.size} ${if (docker.containers.size == 1) "container" else "containers"}", kpiSlot(), caption = docker.reclaimableBytes?.let { "${formatBytes(it)} reclaimable" } ?: "${docker.running} running")
         }
     }
+
+    EnvironmentsSection(store, node, state, onOpenConversation)
 
     val history = resources?.history.orEmpty()
 
@@ -258,6 +271,47 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState) {
                     text = "Stop $name",
                     variant = ButtonVariant.Danger,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvironmentsSection(store: Store, node: NodeSummary, state: AppState, onOpenConversation: (String) -> Unit) {
+    val colors = MyTheme.colors
+    val capability = node.environment ?: return
+
+    if (capability.available) {
+        val now = Clock.System.now()
+        val running = capability.running.filter { state.conversations[it.conversationId] != null }
+        val titles = running.map { state.conversations.getValue(it.conversationId).title }
+
+        DataTable(
+            "Environments",
+            listOf(TableColumn("Conversation", 2.4f), TableColumn("Control", 1.2f), TableColumn("Running", numeric = true), TableColumn("Memory", numeric = true)),
+            running.mapIndexed { index, environment -> listOf(titles[index], environmentControl(environment.controller, null), environmentRunningFor(environment.startedAt, now), environment.memoryBytes?.let(::formatBytes).orEmpty()) },
+            "No environment is running on this node.",
+            onRow = { onOpenConversation(running[it].conversationId) },
+            rowDescription = { "Open ${titles[it]}" },
+            trailing = { index ->
+                MyButton({ store.stopEnvironment(running[index].conversationId) }, text = "Stop", size = ButtonSize.Sm, muted = true, description = "Stop the environment of ${titles[index]}")
+            },
+            status = "Can run environments  ·  ${environmentVersionsText(capability.versions)}",
+        )
+
+        return
+    }
+
+    Column(Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.border, BlockShape).background(colors.bgPanel, BlockShape)) {
+        Label("Environments", Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
+        Hairline()
+
+        Column(Modifier.padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            StatusMark(environmentCannotRunText(capability), Tone.Attention, MyIcon.TriangleAlert)
+
+            if (capability.missing.isNotEmpty()) {
+                Label("Install them with the package manager on ${node.name}, then check again.", color = colors.textMuted)
+                MyButton({ store.checkEnvironment(node.id) }, text = "Check again", variant = ButtonVariant.Outline)
             }
         }
     }

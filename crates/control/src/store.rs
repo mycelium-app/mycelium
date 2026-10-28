@@ -488,6 +488,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             instructions_unmanaged: node.instructions_unmanaged,
             sessions_on_older_instructions: older as u32,
             harness_models,
+            environment: state.hub.environment_capability_of(node.id),
         });
     }
 

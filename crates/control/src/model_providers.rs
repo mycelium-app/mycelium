@@ -17,6 +17,7 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(600);
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MAX_TOKENS: u32 = 8192;
+const SPEECH_VOICES: [&str; 9] = ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"];
 const ANTHROPIC_PREFERRED: [&str; 3] = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"];
 const PROVIDER_COLUMNS: &str = "id, kind, name, base_url, api_key, models, default_model, created_at, favourite_models, model_class";
 
@@ -263,6 +264,21 @@ impl ProviderRow {
 
             lowered.contains("whisper") || lowered.contains("transcribe")
         }).cloned()
+    }
+
+    pub fn tts_model(&self) -> Option<String> {
+        if self.parsed_kind().ok()? != ModelProviderKind::OpenaiCompatible {
+            return None;
+        }
+
+        self.models.iter().find(|model| model.to_lowercase().contains("tts")).cloned()
+    }
+
+    pub fn voices(&self) -> Vec<String> {
+        match self.tts_model() {
+            Some(_) => SPEECH_VOICES.iter().map(|voice| voice.to_string()).collect(),
+            None => Vec::new(),
+        }
     }
 
     pub(crate) fn authorised(&self, request: reqwest::RequestBuilder) -> ApiResult<reqwest::RequestBuilder> {

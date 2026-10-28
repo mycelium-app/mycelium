@@ -125,11 +125,17 @@ fun DataTable(
     rowDescription: (Int) -> String = { rows[it].joinToString(", ") },
     trailing: (@Composable (Int) -> Unit)? = null,
     monospaceColumns: Set<Int> = emptySet(),
+    status: String? = null,
 ) {
     val colors = MyTheme.colors
 
     Column(modifier.border(Tokens.Size.Hairline, colors.border, BlockShape).background(colors.bgPanel, BlockShape)) {
-        Label(title, Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
+        Row(Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Label(title, Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+            status?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
+        }
+
         Hairline()
 
         if (rows.isEmpty()) {

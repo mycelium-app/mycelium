@@ -10,11 +10,15 @@ mod activity;
 mod activity_sweep;
 mod api_access;
 mod artifacts;
+mod artifact_kinds;
+mod dashboards;
+mod typst;
 mod artifact_access;
 mod attachments;
 mod auth;
 mod boot;
 mod caldav;
+mod coolify;
 mod chat_import;
 mod chat_tool_servers;
 mod chat_tool_setup;
@@ -42,6 +46,7 @@ mod learned;
 mod instruction_proposals;
 mod instructions;
 mod email;
+mod environments;
 mod exercises;
 mod integration_policy;
 mod integration_proxy;
@@ -62,6 +67,7 @@ mod puzzles;
 mod moves;
 mod node_updates;
 mod nodes;
+mod novnc;
 mod projects;
 mod pricing;
 mod prompts;
@@ -90,6 +96,7 @@ mod usage_limits;
 mod versions;
 mod walkthrough_diff;
 mod walkthroughs;
+mod voice;
 mod wellness;
 mod web;
 mod worktrees;
@@ -100,6 +107,7 @@ mod discord;
 mod actual;
 mod paperless;
 mod stoat;
+mod tandoor;
 mod zulip;
 
 pub use forge_cache::FORGE_CACHE_TTL;
@@ -137,6 +145,7 @@ pub async fn run(config: Config, listener: TcpListener) -> Result<()> {
     tokio::spawn(workflows::run_regularly(state.clone()));
     tokio::spawn(usage_limits::resume_regularly(state.clone()));
     tokio::spawn(activity_sweep::sweep_regularly(state.clone()));
+    tokio::spawn(goals::nudge_regularly(state.clone()));
     tokio::spawn(wellness::announce_boundaries(state.clone()));
     axum::serve(listener, router(state).into_make_service_with_connect_info::<SocketAddr>()).await?;
 
@@ -155,11 +164,13 @@ fn router(state: AppState) -> Router {
         .route("/integrations/oauth/callback", get(mcp_oauth::callback))
         .route("/integrations/lastfm/callback", get(lastfm::callback))
         .route("/integrations/freeagent/callback", get(freeagent::callback))
+        .route("/novnc/{*path}", get(novnc::serve))
         .route("/auth/logout", post(auth::logout))
         .route("/api/v1/me", get(auth::me))
         .route("/api/v1/workflows", get(workflows::list).post(workflows::create))
         .route("/api/v1/workflows/{id}", get(workflows::get))
         .route("/api/v1/workflows/{id}/control", post(workflows::control))
+        .route("/api/v1/workflows/{id}/rerun", post(workflows::rerun))
         .route("/api/v1/activity", get(activity::get))
         .route("/api/v1/activity/conversations", get(activity::per_conversation))
         .route("/api/v1/sessions", get(sessions::list))
@@ -189,6 +200,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/usage", get(activity::for_conversation))
         .route("/api/v1/conversations/{id}/goal", get(goals::get).put(goals::set).patch(goals::patch).delete(goals::clear))
         .route("/api/v1/conversations/{id}/goal/send", post(goals::send_again))
+        .route("/api/v1/conversations/{id}/goal/nudge", post(goals::nudge_now))
+        .route("/api/v1/conversations/{id}/goal/continue", post(goals::continue_goal))
         .route("/api/v1/conversations/{id}/walkthrough", get(walkthroughs::get))
         .route("/api/v1/walkthroughs/{id}/uncovered", get(walkthroughs::uncovered))
         .route("/api/v1/walkthroughs/{id}/notes", get(walkthroughs::notes).post(walkthroughs::add_note))
@@ -231,6 +244,13 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/terminals/{terminal_id}/input", post(terminals::input))
         .route("/api/v1/terminals/{terminal_id}/resize", post(terminals::resize))
         .route("/api/v1/terminals/{terminal_id}", delete(terminals::stop))
+        .route("/api/v1/conversations/{id}/environment", post(environments::start).get(environments::get).delete(environments::stop))
+        .route("/api/v1/conversations/{id}/environment/take-over", post(environments::take_over))
+        .route("/api/v1/conversations/{id}/environment/hand-back", post(environments::hand_back))
+        .route("/api/v1/conversations/{id}/environment/actions", get(environments::actions))
+        .route("/api/v1/conversations/{id}/environment/stream", get(environments::stream))
+        .route("/api/v1/conversations/{id}/environment/stream-ticket", post(environments::stream_ticket))
+        .route("/api/v1/nodes/{id}/environment/check", post(environments::check))
         .route("/api/v1/conversations/{id}/attachments", post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_ATTACHMENT_BYTES + 1024)))
         .route("/api/v1/attachments/{sha256}", get(attachments::get))
         .route("/api/v1/artifacts", get(artifacts::list).post(artifacts::create).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
@@ -243,6 +263,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/artifacts/{id}/versions", post(artifacts::create_version).layer(DefaultBodyLimit::max(artifacts::MAX_REQUEST_BYTES)))
         .route("/api/v1/artifacts/{id}/versions/{version}/content", get(artifacts::content))
         .route("/api/v1/artifacts/{id}/thumbnail", get(artifacts::thumbnail))
+        .route("/api/v1/typst/compile", post(typst::preview))
+        .route("/api/v1/artifacts/{id}/typst", get(typst::latest))
+        .route("/api/v1/artifacts/{id}/pdf", get(typst::pdf))
+        .route("/api/v1/artifacts/{id}/panels/{panel}/data", get(dashboards::panel_data))
         .route("/api/v1/artifacts/{id}/comments", get(artifacts::comments).post(artifacts::create_comment))
         .route("/api/v1/artifacts/{id}/comments/{comment_id}", patch(artifacts::patch_comment))
         .route("/api/v1/artifacts/{id}/data", get(artifacts::data))
@@ -276,11 +300,15 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/mcp", get(mcp::stream).post(mcp::handle))
         .route("/api/v1/forges", get(forges::list).post(forges::connect))
         .route("/api/v1/forges/{id}", delete(forges::disconnect))
+        .route("/api/v1/forges/{id}/mcp", post(forges::link_mcp))
         .route("/api/v1/repositories", get(forges::repositories))
         .route("/api/v1/projects", get(projects::list).post(projects::create))
         .route("/api/v1/projects/{id}", patch(projects::patch))
         .route("/api/v1/projects/{id}/find-icon", post(projects::find_icon))
         .route("/api/v1/projects/{id}/avatar", post(projects::upload_avatar).layer(DefaultBodyLimit::max(projects::MAX_AVATAR_BYTES + 1024)))
+        .route("/api/v1/privacy", get(voice::get_privacy).put(voice::save_privacy))
+        .route("/api/v1/speech", post(voice::speak))
+        .route("/api/v1/speech/voices", get(voice::voices))
         .route("/api/v1/transcriptions", post(transcriptions::create).layer(DefaultBodyLimit::max(transcriptions::MAX_AUDIO_BYTES + 1024)))
         .route("/api/v1/decision-providers", get(decision_providers::list).post(decision_providers::create))
         .route("/api/v1/decision-providers/test", post(decision_providers::test))
@@ -297,6 +325,20 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/chat-tool-servers/probe", post(chat_tool_setup::probe))
         .route("/api/v1/chat-tool-servers/test", post(chat_tool_setup::test))
         .route("/api/v1/chat-tool-servers/caldav-test", post(caldav::test))
+        .route("/api/v1/chat-tool-servers/coolify-test", post(coolify::test))
+        .route("/api/v1/chat-tool-servers/tandoor-test", post(tandoor::test))
+        .route("/api/v1/chat-tool-servers/{id}/coolify-options", get(coolify::target_options))
+        .route("/api/v1/chat-tool-servers/{id}/coolify-target", put(coolify::set_target))
+        .route("/api/v1/apps", get(coolify::list_apps))
+        .route("/api/v1/apps/{uuid}", get(coolify::get_app).delete(coolify::delete_app))
+        .route("/api/v1/apps/{uuid}/deployments", get(coolify::deployments))
+        .route("/api/v1/apps/{uuid}/logs", get(coolify::logs))
+        .route("/api/v1/apps/{uuid}/envs", get(coolify::envs))
+        .route("/api/v1/apps/{uuid}/envs/{key}", put(coolify::put_env).delete(coolify::delete_env))
+        .route("/api/v1/apps/{uuid}/redeploy", post(coolify::redeploy))
+        .route("/api/v1/apps/{uuid}/start", post(coolify::start))
+        .route("/api/v1/apps/{uuid}/stop", post(coolify::stop))
+        .route("/api/v1/app-deployments/{uuid}", get(coolify::deployment))
         .route("/api/v1/chat-tool-servers/{id}", patch(chat_tool_servers::patch).delete(chat_tool_servers::delete))
         .route("/api/v1/chat-tool-servers/{id}/refresh", post(chat_tool_servers::refresh))
         .route("/api/v1/chat-tool-servers/{id}/groups", put(chat_tool_servers::set_groups))
@@ -314,6 +356,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/assistant-changes/{id}/decline", post(assistant_changes::decline))
         .route("/api/v1/assistant-changes/{id}/undo", post(assistant_changes::undo))
         .route("/api/v1/assistants/builtin/wellness", get(assistant_actions::wellness_assistant))
+        .route("/api/v1/assistants/builtin/voice", get(voice::voice_assistant))
+        .route("/api/v1/assistants/{id}/instructions/reset", post(voice::reset_instructions))
         .route("/api/v1/assistants/{id}", get(assistants::get).patch(assistants::patch))
         .route("/api/v1/assistants/{id}/actions", get(assistant_actions::list).post(assistant_actions::create))
         .route("/api/v1/assistants/{id}/actions/{action_id}", put(assistant_actions::update).delete(assistant_actions::delete))
@@ -386,6 +430,8 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/wellness/breaks", post(wellness::start_break))
         .route("/api/v1/wellness/breaks/current", delete(wellness::end_break))
         .route("/api/v1/wellness/overview", get(wellness::overview))
+        .route("/api/v1/wellness/activity/day", get(wellness::activity_day))
+        .route("/api/v1/wellness/activity/hours", get(wellness::activity_hours))
         .route("/api/v1/wellness/learned", get(learned::list))
         .route("/api/v1/wellness/puzzles", get(wellness::puzzles))
         .route("/api/v1/wellness/holds", post(wellness::hold))

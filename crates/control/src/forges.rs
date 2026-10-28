@@ -796,6 +796,16 @@ pub async fn connect(State(state): State<AppState>, user: AuthUser, Json(request
     Ok((StatusCode::CREATED, Json(forge)))
 }
 
+pub async fn link_mcp(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Forge>> {
+    let row = find_owned(&state, id, user.id).await?;
+    let kind = row.to_proto()?.kind;
+    let mcp_error = link_mcp_server(&state, user.id, &row, kind, true).await?;
+    let mut forge = find_owned(&state, id, user.id).await?.to_proto()?;
+    forge.mcp_error = mcp_error;
+
+    Ok(Json(forge))
+}
+
 fn mcp_address(kind: ForgeKind, base_url: &str) -> Option<(&'static str, String)> {
     match kind {
         ForgeKind::Gitlab => Some(("GitLab", format!("{base_url}/api/v4/mcp"))),
@@ -816,6 +826,7 @@ async fn link_mcp_server(state: &AppState, owner: Uuid, forge: &ForgeRow, kind: 
 
     let tools = match crate::chat_tool_servers::fetch_tools(state, product, &address, Some(&forge.token), crate::chat_tool_servers::DEFAULT_KEY_HEADER, None).await {
         Ok(tools) => tools,
+        Err(_) if kind == ForgeKind::Github => return Ok(Some(format!("{product}'s MCP server refused this token. It needs a fine-grained token with the MCP permission."))),
         Err(_) => return Ok(Some(format!("{product}'s MCP server refused this token. It needs a fine-grained token with the MCP permission, or sign in instead."))),
     };
 

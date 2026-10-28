@@ -131,14 +131,15 @@ async fn an_assistant_is_created_listed_pinned_and_archived_per_person() {
 
     let other = server.second_user("other@example.com").await;
     let (_, theirs) = other.json(other.get("/api/v1/assistants")).await;
-    assert_eq!(theirs, json!([]));
+    let theirs_own: Vec<&Value> = theirs.as_array().unwrap().iter().filter(|assistant| assistant["builtin_key"].is_null()).collect();
+    assert!(theirs_own.is_empty(), "{theirs}");
     let (status, _) = other.json(other.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true}))).await;
     assert_eq!(status, 404);
 
     server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"archived": true, "clear_group": true}))).await;
     let (_, active) = server.user.json(server.user.get("/api/v1/assistants")).await;
     let (_, archived) = server.user.json(server.user.get("/api/v1/assistants?archived=true")).await;
-    assert_eq!(active, json!([]));
+    assert!(active.as_array().unwrap().iter().all(|assistant| !assistant["builtin_key"].is_null()), "{active}");
     assert_eq!(archived[0]["id"], id);
     assert!(archived[0].get("group_id").is_none());
 }
@@ -866,8 +867,9 @@ async fn oversized_instructions_are_refused_without_creating_the_assistant() {
 
     let (status, refused) = server.user.json(server.user.post("/api/v1/assistants").json(&json!({"name": "Stand-up", "instructions": "x".repeat(1024 * 1024 + 1)}))).await;
     let (_, listed) = server.user.json(server.user.get("/api/v1/assistants")).await;
+    let created: Vec<&Value> = listed.as_array().unwrap().iter().filter(|assistant| assistant["builtin_key"].is_null()).collect();
 
-    assert_eq!((status, refused["error"].clone(), listed), (413, json!("file_too_large"), json!([])));
+    assert_eq!((status, refused["error"].clone(), created.len()), (413, json!("file_too_large"), 0));
 }
 
 #[tokio::test]
@@ -881,4 +883,27 @@ async fn an_archived_assistant_cannot_be_prompted_until_restored() {
 
     assert_eq!((status, refused["error"].clone()), (409, json!("assistant_archived")));
     assert!(refused["message"].as_str().unwrap().contains("Restore"));
+}
+
+#[tokio::test]
+async fn a_spoken_prompt_marks_the_message_as_spoken_and_a_typed_one_does_not() {
+    let server = Server::start().await;
+    let (provider, _) = chat_provider(&server).await;
+    let (_, voice) = server.user.json(server.user.get("/api/v1/assistants/builtin/voice")).await;
+    let id = voice["id"].as_str().unwrap();
+    let (status, patched) = server.user.json(server.user.patch(&format!("/api/v1/assistants/{id}")).json(&json!({"preferences": {"models": [{"provider_id": provider["id"], "model": "llama3.2"}], "voice_name": "nova", "speech_speed": "faster"}}))).await;
+    assert_eq!((status, patched["preferences"]["voice_name"].clone(), patched["preferences"]["speech_speed"].clone()), (200, json!("nova"), json!("faster")));
+
+    let (status, spoken) = server.user.json(server.user.post(&format!("/api/v1/assistants/{id}/prompt")).json(&json!({"text": "What is next?", "spoken": true}))).await;
+    assert_eq!(status, 200, "{spoken}");
+    finished_turns(&server, spoken["id"].as_str().unwrap(), 1).await;
+    prompt(&server.user, id, "And after that?").await;
+    finished_turns(&server, spoken["id"].as_str().unwrap(), 2).await;
+
+    let events = server.events(spoken["id"].as_str().unwrap().parse().unwrap()).await;
+    let marks: Vec<Value> = events.iter().filter(|event| event["kind"] == "user_message").map(|event| event["payload"]["spoken"].clone()).collect();
+    assert_eq!(marks, vec![json!(true), Value::Null]);
+
+    let spoken_at = events.iter().find(|event| event["kind"] == "user_message").map(|event| event["payload"]["spoken_at"].clone()).unwrap();
+    assert!(spoken_at.is_string());
 }

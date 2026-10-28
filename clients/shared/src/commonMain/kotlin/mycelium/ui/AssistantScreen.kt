@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,7 @@ import mycelium.api.Conversation
 import mycelium.api.PutAssistantSecretRequest
 import mycelium.state.AppState
 import mycelium.state.Store
+import mycelium.state.VoiceAssistantKey
 import mycelium.state.ThreadBuilder
 import mycelium.state.ThreadItem
 
@@ -54,7 +56,13 @@ fun AssistantScreen(store: Store, state: AppState, id: String, onOpenSettings: (
     val menu: @Composable (() -> Unit) -> Unit = { close -> AssistantMenuItems(store, state, assistant, close, onOpenSettings) }
     val notices: @Composable () -> Unit = { AssistantNotices(store, state, assistant, earlier) }
 
-    if (conversationId != null) {
+    val isVoice = assistant.builtinKey == VoiceAssistantKey
+
+    if (conversationId != null && isVoice) {
+        CompositionLocalProvider(LocalComposerPlaceholder provides "Ask ${assistant.name}", LocalReadAloud provides store.voice::readAloud) {
+            ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
+        }
+    } else if (conversationId != null) {
         ConversationScreen(store, state, conversationId, onArchived = {}, onOpenConversation = onOpenConversation, onOpenArtefact = onOpenArtefact, panels = false, header = HeaderSlots(title, menu, notices), onManageActions = onManageActions)
     } else {
         Column(Modifier.fillMaxSize()) {
@@ -83,7 +91,7 @@ private fun RowScope.AssistantTitle(state: AppState, assistant: Assistant, onBac
         BackButton("Assistants", onBack)
     }
 
-    AssistantAvatar(assistant.name)
+    AssistantAvatar(assistant.name, voice = assistant.builtinKey == VoiceAssistantKey)
     Label(assistant.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
     groupName?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1) }
 }
@@ -211,7 +219,7 @@ private fun ColumnScope.StartSession(store: Store, state: AppState, assistant: A
         ComposerCard(
             value = message,
             onValueChange = { message = it; missing = null },
-            placeholder = "Message ${assistant.name}",
+            placeholder = if (assistant.builtinKey == VoiceAssistantKey) "Ask ${assistant.name}" else "Message ${assistant.name}",
             onSubmit = ::send,
             attachments = AttachmentControls(emptyList(), problem, { problem = "Send your first message, then attach files to the next one." }, {}),
             modifier = Modifier.widthIn(max = readingMeasure()),

@@ -13,7 +13,7 @@ fn origin_of(url: &str) -> Option<String> {
     url::Url::parse(url).ok().map(|url| url.origin().ascii_serialization())
 }
 
-pub async fn connect(State(state): State<AppState>, headers: HeaderMap, user: AuthUser, upgrade: WebSocketUpgrade) -> ApiResult<Response> {
+pub fn check_origin(state: &AppState, headers: &HeaderMap) -> ApiResult<()> {
     if let Some(origin) = headers.get(ORIGIN) {
         let own = origin_of(&state.config.public_url);
 
@@ -21,6 +21,12 @@ pub async fn connect(State(state): State<AppState>, headers: HeaderMap, user: Au
             return Err(ApiError::new(StatusCode::FORBIDDEN, "origin_not_allowed", "This page is not allowed to open the live stream. Use the address of the control plane itself."));
         }
     }
+
+    Ok(())
+}
+
+pub async fn connect(State(state): State<AppState>, headers: HeaderMap, user: AuthUser, upgrade: WebSocketUpgrade) -> ApiResult<Response> {
+    check_origin(&state, &headers)?;
 
     let receiver = state.stream.subscribe();
 

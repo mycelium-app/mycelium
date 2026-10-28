@@ -44,7 +44,46 @@ data class WellnessSettings(
 )
 
 @Serializable
-data class WellnessHeartbeat(val seconds: Int)
+data class WellnessHeartbeat(
+    val seconds: Int,
+    val at: String? = null,
+    val kind: String? = null,
+    val route: String? = null,
+    @SerialName("group_id") val groupId: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
+    val title: String? = null,
+)
+
+@Serializable
+data class ActivitySpan(
+    val start: String,
+    val end: String,
+    val kind: String,
+    val title: String,
+    val project: String? = null,
+    val group: String? = null,
+    @SerialName("conversation_id") val conversationId: String? = null,
+    @SerialName("assistant_id") val assistantId: String? = null,
+)
+
+@Serializable
+data class ActivityBreak(val start: String, val end: String)
+
+@Serializable
+data class ActivityDay(
+    val date: String,
+    @SerialName("on_screen_minutes") val onScreenMinutes: Long = 0,
+    val spans: List<ActivitySpan> = emptyList(),
+    val breaks: List<ActivityBreak> = emptyList(),
+    @SerialName("recorded_since") val recordedSince: String? = null,
+)
+
+@Serializable
+data class ActivityHoursDay(val date: String, val minutes: List<Long>, val top: List<String?> = emptyList())
+
+@Serializable
+data class ActivityHours(val days: List<ActivityHoursDay>)
 
 @Serializable
 data class StartBreakRequest(val minutes: Int? = null)

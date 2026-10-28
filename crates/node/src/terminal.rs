@@ -30,7 +30,11 @@ pub fn tmux_session_name(conversation_id: Uuid) -> String {
 pub fn find_on_path(program: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
 
-    std::env::split_paths(&path).map(|directory| directory.join(program)).find(|candidate| candidate.is_file()).map(|candidate| candidate.to_string_lossy().into_owned())
+    find_in_path(program, &path)
+}
+
+pub fn find_in_path(program: &str, path: &std::ffi::OsStr) -> Option<String> {
+    std::env::split_paths(path).map(|directory| directory.join(program)).find(|candidate| candidate.is_file()).map(|candidate| candidate.to_string_lossy().into_owned())
 }
 
 pub fn user_shell() -> String {

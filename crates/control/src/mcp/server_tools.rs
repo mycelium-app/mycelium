@@ -71,7 +71,7 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     };
     let edits = conversation.is_some() && chat_tools::edits_response(answer.as_deref(), effective.edit);
     let (mut text, is_error) = if let Some(integration) = server.integration() {
-        let output = integration.call(state, owner, server, tool, &arguments).await;
+        let output = integration.call(state, owner, server, conversation, tool, &arguments).await;
 
         (output.text, output.is_error)
     } else {

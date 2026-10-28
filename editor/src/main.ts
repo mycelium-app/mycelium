@@ -1,8 +1,9 @@
 import { mount } from 'svelte';
-import App from './App.svelte';
+import Root from './Root.svelte';
 import { themeFromQuery } from './lib/theme';
 import './tokens.css';
 import './editor.css';
+import './kinds.css';
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 const { theme, variables } = themeFromQuery(window.location.search, systemDark);
@@ -13,4 +14,4 @@ for (const [name, value] of Object.entries(variables)) {
   root.style.setProperty(name, value);
 }
 
-mount(App, { target: document.getElementById('app')! });
+mount(Root, { target: document.getElementById('app')! });

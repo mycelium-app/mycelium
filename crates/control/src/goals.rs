@@ -1,53 +1,43 @@
 use crate::account_usage;
 use crate::auth::AuthUser;
-use crate::conversations;
+use crate::boot::run_while_ready;
 use crate::error::{ApiError, ApiResult};
 use crate::prompts::pump;
 use crate::state::AppState;
-use crate::store::{enum_text, find_owned, parse_enum, publish_queue};
+use crate::store::{append_event, enum_text, find_owned, parse_enum, publish_queue};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use mycelium_proto::api::{Goal, GoalDelivery, GoalState, PatchGoalRequest, SetGoalRequest};
-use mycelium_proto::conversation::SideKind;
+use mycelium_proto::api::{ContinueGoalRequest, Goal, GoalDelivery, GoalState, GoalWait, PatchGoalRequest, SetGoalRequest};
+use mycelium_proto::conversation::EventKind;
 use mycelium_proto::stream::StreamMessage;
-use serde_json::Value;
+use serde_json::json;
+use std::time::Duration;
 use uuid::Uuid;
 
-const LAST_MESSAGE_LIMIT: usize = 4000;
 const PAUSED_BY_STOP: &str = "Paused because you stopped the turn. Resume to let the agent carry on.";
-const CHECK_UNREADABLE: &str = "The check did not answer in the form it was asked to, so the goal was stopped. Resume to check again.";
-const CHECK_COULD_NOT_RUN: &str = "The check could not run, so the goal was stopped. Resume to try again.";
 const AGENT_STOPPED: &str = "The agent stopped before the turn ended, so the goal was stopped.";
 const FIVE_HOUR_WINDOW: &str = "five_hour";
 const WEEKLY_WINDOW: &str = "seven_day";
 pub const GOAL_ORIGIN: &str = "goal";
 const SEND_AGAIN_UNNEEDED: &str = "The goal reached the agent, so there is nothing to send again.";
 const OVER_BUDGET: &str = "The goal is not met and the token budget is used up. Set the goal again with a larger budget to carry on.";
-const CHECK_INSTRUCTIONS: &str = "You are checking whether a goal has been met. Do not change any files or run anything that changes state. Look at the work in this folder if you need to.\n\nAnswer with one JSON object and nothing else, in this form: {\"verdict\": \"met\" | \"continue\" | \"waiting\" | \"stuck\", \"reason\": \"one sentence\"}.\nmet: the goal is fully achieved.\ncontinue: more work remains and the agent can do it now.\nwaiting: the agent has started work that will resume it on its own, such as background commands, subagents, a workflow or a pipeline it is watching, and has nothing to do until that reports back.\nstuck: no further progress is possible without the person's help.";
-
-enum Verdict {
-    Met,
-    Continue,
-    Waiting,
-    Stuck,
-}
-
-fn parse_verdict(answer: &str) -> Option<(Verdict, String)> {
-    let start = answer.find('{')?;
-    let end = answer.rfind('}')?;
-    let parsed: Value = serde_json::from_str(answer.get(start..=end)?).ok()?;
-    let reason = parsed.get("reason").and_then(Value::as_str).unwrap_or_default().trim().to_string();
-
-    match parsed.get("verdict").and_then(Value::as_str)?.trim().to_lowercase().as_str() {
-        "met" => Some((Verdict::Met, reason)),
-        "continue" => Some((Verdict::Continue, reason)),
-        "waiting" => Some((Verdict::Waiting, reason)),
-        "stuck" => Some((Verdict::Stuck, reason)),
-        _ => None,
-    }
-}
+const DEFAULT_REPEAT_LIMIT: i64 = 3;
+const MINIMUM_REPEAT_LIMIT: i64 = 2;
+const BACKOFF_SECONDS: i64 = 120;
+const BACKGROUND_WAIT_SECONDS: i64 = 600;
+const NUDGE_TICK: Duration = Duration::from_secs(10);
+const SUMMARY_LIMIT: usize = 120;
+const WHY_SET: &str = "you set the goal";
+const WHY_SENT_AGAIN: &str = "you chose to send the goal again";
+const WHY_NO_REPORT: &str = "the turn ended without a report, and the budget and time limit have room";
+const WHY_NUDGED_NOW: &str = "you chose to nudge now";
+const WHY_RESUMED: &str = "you resumed the goal";
+const WHY_CONTINUED: &str = "you chose to continue the goal";
+const NOT_WAITING: &str = "Mycelium is not waiting to nudge this goal.";
+const NOT_IDLE: &str = "The agent is still working on a turn. Mycelium nudges when it ends.";
+const NOT_BLOCKED: &str = "The agent has not reported this goal blocked, so there is nothing to continue.";
 
 async fn latest_agent_text(state: &AppState, conversation_id: Uuid) -> ApiResult<String> {
     let text = sqlx::query_scalar::<_, String>(
@@ -60,6 +50,27 @@ async fn latest_agent_text(state: &AppState, conversation_id: Uuid) -> ApiResult
     .await?;
 
     Ok(text)
+}
+
+async fn changed_files(state: &AppState, conversation_id: Uuid) -> ApiResult<String> {
+    let files = sqlx::query_scalar::<_, String>(
+        "select coalesce(string_agg(distinct path, ',' order by path), '') from (
+            select payload->'update'->'locations'->0->>'path' as path from events
+            where conversation_id = $1 and kind = 'acp_update' and payload->'update'->>'kind' in ('edit', 'delete', 'move')
+              and seq > coalesce((select max(seq) from events where conversation_id = $1 and kind = 'user_message'), 0)
+         ) changed where path is not null",
+    )
+    .bind(conversation_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(files)
+}
+
+fn summary_of(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("no reply");
+
+    line.chars().take(SUMMARY_LIMIT).collect()
 }
 
 #[derive(sqlx::FromRow)]
@@ -81,19 +92,26 @@ struct GoalRow {
     node_id: Uuid,
     agent: String,
     account: Option<String>,
+    nudges: i32,
+    repeats: i32,
+    repeat_limit: Option<i32>,
+    next_nudge_at: Option<DateTime<Utc>>,
+    wait_reason: Option<String>,
+    reported_at: Option<DateTime<Utc>>,
 }
 
 async fn read(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>> {
     let row = sqlx::query_as::<_, GoalRow>(
         "select g.text, g.token_budget, g.time_limit_seconds, g.five_hour_limit, g.weekly_limit, g.state, g.reason, g.started_at,
-                g.delivery_state, g.delivered_at, g.delivery_reason, g.held_since, g.held_seconds, c.resume_at, c.node_id, c.agent, c.account
+                g.delivery_state, g.delivered_at, g.delivery_reason, g.held_since, g.held_seconds, c.resume_at, c.node_id, c.agent, c.account,
+                g.nudges, g.repeats, g.repeat_limit, g.next_nudge_at, g.wait_reason, g.reported_at
          from goals g join conversations c on c.id = g.conversation_id where g.conversation_id = $1",
     )
     .bind(conversation_id)
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some(GoalRow { text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, state: goal_state, reason, started_at, delivery_state, delivered_at, delivery_reason, held_since, held_seconds, resume_at, node_id, agent, account }) = row else {
+    let Some(GoalRow { text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, state: goal_state, reason, started_at, delivery_state, delivered_at, delivery_reason, held_since, held_seconds, resume_at, node_id, agent, account, nudges, repeats, repeat_limit, next_nudge_at, wait_reason, reported_at }) = row else {
         return Ok(None);
     };
 
@@ -149,6 +167,12 @@ async fn read(state: &AppState, conversation_id: Uuid) -> ApiResult<Option<Goal>
         held_since,
         held_seconds,
         resumes_at: resume_at.filter(|_| held_since.is_some()),
+        nudges: i64::from(nudges),
+        repeats: i64::from(repeats),
+        repeat_limit: repeat_limit.map(i64::from),
+        next_nudge_at,
+        wait_reason: wait_reason.as_deref().map(parse_enum::<GoalWait>).transpose()?,
+        reported_at,
     }))
 }
 
@@ -199,7 +223,7 @@ async fn announce(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiRe
 }
 
 async fn end(state: &AppState, owner: Uuid, conversation_id: Uuid, goal_state: GoalState, reason: &str) -> ApiResult<()> {
-    sqlx::query("update goals set state = $2, reason = $3, check_id = null where conversation_id = $1").bind(conversation_id).bind(enum_text(&goal_state)).bind(reason).execute(&state.pool).await?;
+    sqlx::query("update goals set state = $2, reason = $3, wait_reason = null, next_nudge_at = null where conversation_id = $1").bind(conversation_id).bind(enum_text(&goal_state)).bind(reason).execute(&state.pool).await?;
 
     announce(state, owner, conversation_id).await
 }
@@ -221,7 +245,9 @@ fn agent_name(agent: &str) -> &str {
 
 async fn deliver(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &str) -> ApiResult<()> {
     sqlx::query("delete from queued_prompts where conversation_id = $1 and origin = $2").bind(conversation_id).bind(GOAL_ORIGIN).execute(&state.pool).await?;
-    enqueue(state, owner, conversation_id, &format!("Work towards this goal: {text}")).await?;
+    let person = sqlx::query_scalar::<_, String>("select u.name from users u join conversations c on c.owner = u.id where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    let person = if person.trim().is_empty() { "the person".to_string() } else { person };
+    enqueue(state, owner, conversation_id, &format!("Work towards this goal: {text}. When the goal is done, or you cannot go on without {person}, call report_goal and say why.")).await?;
 
     let (node_id, node_name, agent) = sqlx::query_as::<_, (Uuid, String, String)>("select c.node_id, n.name, c.agent from conversations c join nodes n on n.id = c.node_id where c.id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
 
@@ -236,6 +262,12 @@ async fn deliver(state: &AppState, owner: Uuid, conversation_id: Uuid, text: &st
     sqlx::query("update goals set delivery_state = 'failed', delivery_reason = $2 where conversation_id = $1").bind(conversation_id).bind(reason).execute(&state.pool).await?;
 
     announce(state, owner, conversation_id).await
+}
+
+pub async fn sending(state: &AppState, conversation_id: Uuid) -> ApiResult<(i32, Option<String>)> {
+    let sending = sqlx::query_as::<_, (i32, Option<String>)>("select nudges, why from goals where conversation_id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    Ok(sending.unwrap_or((0, None)))
 }
 
 pub async fn delivered(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
@@ -254,12 +286,6 @@ pub async fn delivered(state: &AppState, conversation_id: Uuid) -> ApiResult<()>
 }
 
 pub async fn hold(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
-    let is_check = sqlx::query_scalar::<_, bool>("select coalesce(side_kind = 'check', false) from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?.unwrap_or(false);
-
-    if is_check {
-        return session_failed(state, conversation_id).await;
-    }
-
     let owner = sqlx::query_scalar::<_, Uuid>("update goals set held_since = coalesce(held_since, now()) where conversation_id = $1 and state = 'active' returning (select owner from conversations where id = $1)")
         .bind(conversation_id)
         .fetch_optional(&state.pool)
@@ -281,7 +307,7 @@ async fn release_hold(state: &AppState, conversation_id: Uuid) -> ApiResult<Opti
 }
 
 pub async fn resumed(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<bool> {
-    let Some((text, goal_state)) = release_hold(state, conversation_id).await? else {
+    let Some((_, goal_state)) = release_hold(state, conversation_id).await? else {
         return Ok(false);
     };
 
@@ -294,82 +320,55 @@ pub async fn resumed(state: &AppState, owner: Uuid, conversation_id: Uuid) -> Ap
     let goal_waiting = sqlx::query_scalar::<_, bool>("select exists (select 1 from queued_prompts where conversation_id = $1 and origin = $2)").bind(conversation_id).bind(GOAL_ORIGIN).fetch_one(&state.pool).await?;
 
     if !goal_waiting {
-        enqueue(state, owner, conversation_id, &format!("Continue towards the goal: {text}")).await?;
+        let agent = sqlx::query_scalar::<_, String>("select agent from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+        nudge(state, owner, conversation_id, &format!("{}'s 5-hour limit reset", agent_name(&agent))).await?;
     }
 
     Ok(true)
 }
 
-async fn start_check(state: &AppState, owner: Uuid, conversation_id: Uuid) -> ApiResult<()> {
-    let row = find_owned(&state.pool, conversation_id, owner).await?;
-    let text = sqlx::query_scalar::<_, String>("select text from goals where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-    let last: String = latest_agent_text(state, conversation_id).await?.chars().take(LAST_MESSAGE_LIMIT).collect();
-    let prompt = format!("{CHECK_INSTRUCTIONS}\n\nGoal: {text}\n\nThe agent's latest message:\n{last}");
-    let request = mycelium_proto::api::CreateConversationRequest {
-        node_id: row.node_id,
-        agent: parse_enum(&row.agent)?,
-        account: row.account.clone(),
-        cwd: row.cwd.clone(),
-        project_id: None,
-        branch: None,
-        title: Some("Goal check".to_string()),
-        prompt: Some(prompt),
-        parent_id: Some(conversation_id),
-        side_kind: Some(SideKind::Check),
-    model: None,
-    routing: None,
+async fn nudge(state: &AppState, owner: Uuid, conversation_id: Uuid, why: &str) -> ApiResult<()> {
+    let (text, note) = sqlx::query_as::<_, (String, Option<String>)>("select text, note from goals where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+    sqlx::query("update goals set nudges = nudges + 1, why = $2, note = null, wait_reason = null, next_nudge_at = null where conversation_id = $1").bind(conversation_id).bind(why).execute(&state.pool).await?;
+    sqlx::query("delete from queued_prompts where conversation_id = $1 and origin = $2").bind(conversation_id).bind(GOAL_ORIGIN).execute(&state.pool).await?;
+
+    let body = match note {
+        Some(note) => format!("Continue towards the goal: {text}\n\n{note}"),
+        None => format!("Continue towards the goal: {text}"),
     };
+    announce(state, owner, conversation_id).await?;
 
-    match conversations::start(state, owner, request).await {
-        Ok(check) => {
-            sqlx::query("update goals set check_id = $2 where conversation_id = $1").bind(conversation_id).bind(check.id).execute(&state.pool).await?;
-
-            Ok(())
-        }
-        Err(_) => end(state, owner, conversation_id, GoalState::Stuck, CHECK_COULD_NOT_RUN).await,
-    }
+    enqueue(state, owner, conversation_id, &body).await
 }
 
-async fn finish_check(state: &AppState, owner: Uuid, goal_conversation_id: Uuid, check_id: Uuid) -> ApiResult<()> {
-    let answer = latest_agent_text(state, check_id).await?;
-    sqlx::query("update conversations set archived_at = coalesce(archived_at, now()) where id = $1").bind(check_id).execute(&state.pool).await?;
+async fn record_report(state: &AppState, owner: Uuid, conversation_id: Uuid, outcome: &str, reason: &str) -> ApiResult<()> {
+    let mut tx = state.pool.begin().await?;
+    let event = append_event(&mut tx, conversation_id, EventKind::GoalReport, &json!({"outcome": outcome, "reason": reason, "at": Utc::now()}), None).await?;
+    tx.commit().await?;
 
-    let pending = sqlx::query_scalar::<_, Uuid>("update goals set check_id = null where conversation_id = $1 and check_id = $2 and state = 'active' returning conversation_id").bind(goal_conversation_id).bind(check_id).fetch_optional(&state.pool).await?;
-
-    if pending.is_none() {
-        return Ok(());
+    if let Some(event) = event {
+        state.publish(Some(owner), StreamMessage::Event(event));
     }
 
-    let row = find_owned(&state.pool, goal_conversation_id, owner).await?;
+    Ok(())
+}
 
-    if !row.is_idle() {
-        return Ok(());
+pub async fn report(state: &AppState, owner: Uuid, conversation_id: Uuid, outcome: &str, reason: &str) -> ApiResult<bool> {
+    let goal_state = if outcome == "done" { GoalState::Met } else { GoalState::Stuck };
+    let active = sqlx::query_scalar::<_, Uuid>("select conversation_id from goals where conversation_id = $1 and state = 'active'").bind(conversation_id).fetch_optional(&state.pool).await?;
+
+    if active.is_none() {
+        return Ok(false);
     }
 
-    match parse_verdict(&answer) {
-        Some((Verdict::Met, reason)) => end(state, owner, goal_conversation_id, GoalState::Met, &reason).await,
-        Some((Verdict::Stuck, reason)) => end(state, owner, goal_conversation_id, GoalState::Stuck, &reason).await,
-        None => end(state, owner, goal_conversation_id, GoalState::Stuck, CHECK_UNREADABLE).await,
-        Some((Verdict::Waiting, reason)) => {
-            sqlx::query("update goals set reason = $2 where conversation_id = $1").bind(goal_conversation_id).bind(&reason).execute(&state.pool).await?;
-            announce(state, owner, goal_conversation_id).await
-        }
-        Some((Verdict::Continue, reason)) => {
-            let goal = read(state, goal_conversation_id).await?;
+    release_hold(state, conversation_id).await?;
+    sqlx::query("delete from queued_prompts where conversation_id = $1 and origin = $2").bind(conversation_id).bind(GOAL_ORIGIN).execute(&state.pool).await?;
+    publish_queue(state, owner, conversation_id).await?;
+    record_report(state, owner, conversation_id, outcome, reason).await?;
+    sqlx::query("update goals set reported_at = now() where conversation_id = $1").bind(conversation_id).execute(&state.pool).await?;
+    end(state, owner, conversation_id, goal_state, reason).await?;
 
-            let Some(goal) = goal else {
-                return Ok(());
-            };
-
-            if let Some((limit_state, limit_reason)) = reached_limit(&goal) {
-                return end(state, owner, goal_conversation_id, limit_state, &limit_reason).await;
-            }
-
-            sqlx::query("update goals set reason = $2 where conversation_id = $1").bind(goal_conversation_id).bind(&reason).execute(&state.pool).await?;
-            announce(state, owner, goal_conversation_id).await?;
-            enqueue(state, owner, goal_conversation_id, &format!("Continue towards the goal: {}\n\n{}", goal.text, reason)).await
-        }
-    }
+    Ok(true)
 }
 
 pub async fn refresh(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
@@ -383,14 +382,22 @@ pub async fn refresh(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
     Ok(())
 }
 
-pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &str) -> ApiResult<()> {
-    let (owner, parent_id, side_kind) = sqlx::query_as::<_, (Uuid, Option<Uuid>, Option<String>)>("select owner, parent_id, side_kind from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
+async fn wait_for(state: &AppState, owner: Uuid, conversation_id: Uuid, reason: &str, seconds: Option<i64>) -> ApiResult<()> {
+    sqlx::query("update goals set wait_reason = $2, next_nudge_at = case when $3::bigint is null then null else now() + make_interval(secs => $3::bigint) end, held_since = case when $2 = 'question_waiting' then coalesce(held_since, now()) else held_since end where conversation_id = $1")
+        .bind(conversation_id)
+        .bind(reason)
+        .bind(seconds)
+        .execute(&state.pool)
+        .await?;
 
-    if let (Some(parent_id), Some("check")) = (parent_id, side_kind.as_deref()) {
-        return finish_check(state, owner, parent_id, conversation_id).await;
-    }
+    announce(state, owner, conversation_id).await
+}
+
+pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &str) -> ApiResult<()> {
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
 
     release_hold(state, conversation_id).await?;
+    sqlx::query("update goals set wait_reason = null, next_nudge_at = null where conversation_id = $1").bind(conversation_id).execute(&state.pool).await?;
 
     let Some(goal) = read(state, conversation_id).await? else {
         return Ok(());
@@ -403,35 +410,81 @@ pub async fn turn_ended(state: &AppState, conversation_id: Uuid, stop_reason: &s
     }
 
     if stop_reason == "cancelled" {
+        record_report(state, owner, conversation_id, "stopped", PAUSED_BY_STOP).await?;
+
         return end(state, owner, conversation_id, GoalState::Paused, PAUSED_BY_STOP).await;
     }
 
-    let waiting_on_check = sqlx::query_scalar::<_, bool>("select check_id is not null from goals where conversation_id = $1").bind(conversation_id).fetch_one(&state.pool).await?;
-
-    if waiting_on_check {
-        return Ok(());
+    if let Some((limit_state, limit_reason)) = reached_limit(&goal) {
+        return end(state, owner, conversation_id, limit_state, &limit_reason).await;
     }
 
-    start_check(state, owner, conversation_id).await
+    let question_open = sqlx::query_scalar::<_, bool>("select exists (select 1 from tasks where source_id = $1 and status = 'question')").bind(conversation_id).fetch_one(&state.pool).await?;
+
+    if question_open {
+        return wait_for(state, owner, conversation_id, "question_waiting", None).await;
+    }
+
+    if crate::link::has_agents_out(state, conversation_id).await? {
+        return wait_for(state, owner, conversation_id, "background_work", Some(BACKGROUND_WAIT_SECONDS)).await;
+    }
+
+    let text = latest_agent_text(state, conversation_id).await?;
+    let files = changed_files(state, conversation_id).await?;
+    let outcome = sqlx::query_scalar::<_, String>("select md5($1)").bind(format!("{}\n{files}", text.trim())).fetch_one(&state.pool).await?;
+    let repeats = sqlx::query_scalar::<_, i32>("update goals set repeats = case when last_outcome = $2 then repeats + 1 else 1 end, last_outcome = $2 where conversation_id = $1 returning repeats").bind(conversation_id).bind(&outcome).fetch_one(&state.pool).await?;
+    let repeats = i64::from(repeats);
+    let limit = goal.repeat_limit.unwrap_or(DEFAULT_REPEAT_LIMIT);
+
+    if repeats >= limit {
+        let reason = format!("Stopped after {repeats} turns ended the same way: {}", summary_of(&text).trim_end_matches('.'));
+
+        return end(state, owner, conversation_id, GoalState::Stalled, &reason).await;
+    }
+
+    if repeats >= MINIMUM_REPEAT_LIMIT {
+        return wait_for(state, owner, conversation_id, "repeated_outcome", Some(backoff_seconds(repeats))).await;
+    }
+
+    nudge(state, owner, conversation_id, WHY_NO_REPORT).await
+}
+
+fn backoff_seconds(repeats: i64) -> i64 {
+    BACKOFF_SECONDS << (repeats - MINIMUM_REPEAT_LIMIT).clamp(0, 10)
+}
+
+pub async fn nudge_regularly(state: AppState) {
+    run_while_ready(&state, "nudge the goals whose wait is over", NUDGE_TICK, || nudge_due(&state)).await;
+}
+
+async fn nudge_due(state: &AppState) -> ApiResult<()> {
+    let due = sqlx::query_as::<_, (Uuid, Uuid, String, i32)>(
+        "select g.conversation_id, c.owner, g.wait_reason, g.repeats from goals g join conversations c on c.id = g.conversation_id
+         where g.state = 'active' and g.next_nudge_at <= now() and g.wait_reason in ('repeated_outcome', 'background_work')",
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    for (conversation_id, owner, wait_reason, repeats) in due {
+        let row = find_owned(&state.pool, conversation_id, owner).await?;
+
+        if !row.is_idle() {
+            continue;
+        }
+
+        let why = if wait_reason == "repeated_outcome" { format!("the {}-minute wait after a repeated outcome ended", backoff_seconds(i64::from(repeats)) / 60) } else { "the wait for background work ended".to_string() };
+        nudge(state, owner, conversation_id, &why).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn session_failed(state: &AppState, conversation_id: Uuid) -> ApiResult<()> {
-    let row = sqlx::query_as::<_, (Uuid, Option<Uuid>, Option<String>)>("select owner, parent_id, side_kind from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
+    let owner = sqlx::query_scalar::<_, Uuid>("select owner from conversations where id = $1").bind(conversation_id).fetch_optional(&state.pool).await?;
 
-    let Some((owner, parent_id, side_kind)) = row else {
+    let Some(owner) = owner else {
         return Ok(());
     };
-
-    if let (Some(parent_id), Some("check")) = (parent_id, side_kind.as_deref()) {
-        sqlx::query("update conversations set archived_at = coalesce(archived_at, now()) where id = $1").bind(conversation_id).execute(&state.pool).await?;
-        let pending = sqlx::query_scalar::<_, Uuid>("select conversation_id from goals where conversation_id = $1 and check_id = $2 and state = 'active'").bind(parent_id).bind(conversation_id).fetch_optional(&state.pool).await?;
-
-        if pending.is_some() {
-            end(state, owner, parent_id, GoalState::Stuck, CHECK_COULD_NOT_RUN).await?;
-        }
-
-        return Ok(());
-    }
 
     let active = sqlx::query_scalar::<_, Uuid>("select conversation_id from goals where conversation_id = $1 and state = 'active'").bind(conversation_id).fetch_optional(&state.pool).await?;
 
@@ -476,14 +529,19 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
         return Err(ApiError::bad_request("weekly_limit_invalid", "Enter a weekly window limit between 1 and 100 percent."));
     }
 
+    if request.repeat_limit.is_some_and(|turns| turns < MINIMUM_REPEAT_LIMIT) {
+        return Err(ApiError::bad_request("repeat_limit_invalid", "Enter how many turns, as a whole number like 3, or leave it empty."));
+    }
+
     if row.side_kind.is_some() {
         return Err(ApiError::bad_request("goal_not_allowed", "Set a goal on the conversation itself, not on a side chat."));
     }
 
     sqlx::query(
-        "insert into goals (conversation_id, text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, delivery_state) values ($1, $2, $3, $4, $5, $6, 'pending')
-         on conflict (conversation_id) do update set text = $2, token_budget = $3, time_limit_seconds = $4, five_hour_limit = $5, weekly_limit = $6, state = 'active', reason = null, check_id = null, started_at = now(),
-             delivery_state = 'pending', delivered_at = null, delivery_reason = null, held_since = null, held_seconds = 0",
+        "insert into goals (conversation_id, text, token_budget, time_limit_seconds, five_hour_limit, weekly_limit, repeat_limit, why, delivery_state) values ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+         on conflict (conversation_id) do update set text = $2, token_budget = $3, time_limit_seconds = $4, five_hour_limit = $5, weekly_limit = $6, repeat_limit = $7, why = $8, state = 'active', reason = null, started_at = now(),
+             delivery_state = 'pending', delivered_at = null, delivery_reason = null, held_since = null, held_seconds = 0,
+             nudges = 0, repeats = 0, last_outcome = null, next_nudge_at = null, wait_reason = null, note = null, reported_at = null",
     )
     .bind(id)
     .bind(text)
@@ -491,6 +549,8 @@ pub async fn set(State(state): State<AppState>, user: AuthUser, Path(id): Path<U
     .bind(request.time_limit_seconds)
     .bind(request.five_hour_limit.map(|percent| percent as i16))
     .bind(request.weekly_limit.map(|percent| percent as i16))
+    .bind(request.repeat_limit.map(|turns| turns as i32))
+    .bind(WHY_SET)
     .execute(&state.pool)
     .await?;
 
@@ -506,24 +566,63 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     let row = find_owned(&state.pool, id, user.id).await?;
     let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
 
-    if !matches!(goal.state, GoalState::Active | GoalState::Paused) {
+    if !matches!(goal.state, GoalState::Active | GoalState::Paused | GoalState::Stalled) {
         return Err(ApiError::conflict("goal_ended", "This goal has ended. Clear it and set a new one."));
     }
 
     if request.paused && goal.state == GoalState::Active {
-        sqlx::query("update goals set state = 'paused', reason = null where conversation_id = $1").bind(id).execute(&state.pool).await?;
+        sqlx::query("update goals set state = 'paused', reason = null, wait_reason = null, next_nudge_at = null where conversation_id = $1").bind(id).execute(&state.pool).await?;
     }
 
-    if !request.paused && goal.state == GoalState::Paused {
-        sqlx::query("update goals set state = 'active', reason = null where conversation_id = $1").bind(id).execute(&state.pool).await?;
+    if !request.paused && matches!(goal.state, GoalState::Paused | GoalState::Stalled) {
+        sqlx::query("update goals set state = 'active', reason = null, repeats = 0, last_outcome = null where conversation_id = $1").bind(id).execute(&state.pool).await?;
         announce(&state, user.id, id).await?;
 
         if row.is_idle() {
-            start_check(&state, user.id, id).await?;
+            nudge(&state, user.id, id, WHY_RESUMED).await?;
         }
     }
 
     announce(&state, user.id, id).await?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+
+    Ok(Json(goal))
+}
+
+pub async fn nudge_now(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Goal>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+
+    if goal.state != GoalState::Active || !matches!(goal.wait_reason, Some(GoalWait::RepeatedOutcome | GoalWait::BackgroundWork)) {
+        return Err(ApiError::conflict("goal_not_waiting", NOT_WAITING));
+    }
+
+    if !row.is_idle() {
+        return Err(ApiError::conflict("turn_running", NOT_IDLE));
+    }
+
+    nudge(&state, user.id, id, WHY_NUDGED_NOW).await?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+
+    Ok(Json(goal))
+}
+
+pub async fn continue_goal(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<ContinueGoalRequest>) -> ApiResult<Json<Goal>> {
+    let row = find_owned(&state.pool, id, user.id).await?;
+    let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
+
+    if goal.state != GoalState::Stuck {
+        return Err(ApiError::conflict("goal_not_blocked", NOT_BLOCKED));
+    }
+
+    let note = request.note.as_deref().map(str::trim).filter(|note| !note.is_empty());
+    sqlx::query("update goals set state = 'active', reason = null, repeats = 0, last_outcome = null, reported_at = null, note = $2 where conversation_id = $1").bind(id).bind(note).execute(&state.pool).await?;
+    announce(&state, user.id, id).await?;
+
+    if row.is_idle() {
+        nudge(&state, user.id, id, WHY_CONTINUED).await?;
+    }
+
     let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;
 
     Ok(Json(goal))
@@ -537,7 +636,7 @@ pub async fn send_again(State(state): State<AppState>, user: AuthUser, Path(id):
         return Err(ApiError::conflict("goal_delivered", SEND_AGAIN_UNNEEDED));
     }
 
-    sqlx::query("update goals set delivery_state = 'pending', delivery_reason = null where conversation_id = $1").bind(id).execute(&state.pool).await?;
+    sqlx::query("update goals set delivery_state = 'pending', delivery_reason = null, why = $2 where conversation_id = $1").bind(id).bind(WHY_SENT_AGAIN).execute(&state.pool).await?;
     deliver(&state, user.id, id, &goal.text).await?;
     announce(&state, user.id, id).await?;
     let goal = read(&state, id).await?.ok_or_else(|| ApiError::not_found("That goal"))?;

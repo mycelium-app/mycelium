@@ -23,6 +23,7 @@ import mycelium.api.ApiException
 import mycelium.api.ControlPlaneUnreachable
 import mycelium.api.Artifact
 import mycelium.api.ArtifactAccessRequest
+import mycelium.api.CreateArtifactRequest
 import mycelium.api.PatchArtifactRequest
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
@@ -78,6 +79,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     private val experimentsLock = Mutex()
 
     val wellness = WellnessStore(api, scope, platform)
+    val voice = VoiceStore(api, scope, platform)
     val learning = LearningStore(api, scope)
     val composerDrafts = ComposerDrafts()
     val pinDismissals = PinDismissals()
@@ -86,6 +88,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     private val mutableOpenRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val openRequests: SharedFlow<String> = mutableOpenRequests.asSharedFlow()
+    private val mutableScreenRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val screenRequests: SharedFlow<String> = mutableScreenRequests.asSharedFlow()
 
     val state: StateFlow<AppState> = mutableState.asStateFlow()
     val problem: StateFlow<String?> = mutableProblem.asStateFlow()
@@ -104,6 +108,26 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     val walkthroughNotes: StateFlow<Map<String, List<WalkthroughNote>>> = mutableWalkthroughNotes.asStateFlow()
 
     init {
+        scope.launch {
+            state.collect { app ->
+                voice.observe(app)
+                app.assistants.values.firstOrNull { it.builtinKey == VoiceAssistantKey }?.let { voice.useVoice(it.preferences.voiceName, it.preferences.speechSpeed) }
+            }
+        }
+
+        scope.launch {
+            var voiceConversation: String? = null
+
+            voice.state.collect { held ->
+                val id = held.turn.conversationId
+
+                if (id != null && id != voiceConversation) {
+                    voiceConversation = id
+                    act { open(id) }
+                }
+            }
+        }
+
         scope.launch {
             var carried: Pair<String, String>? = null
 
@@ -168,6 +192,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
             act { refreshAssistantActions(message.assistantId) }
         }
 
+        if (message is StreamMessage.ScreenOpened) {
+            mutableScreenRequests.tryEmit(message.route)
+        }
+
         if (message is StreamMessage.WellnessChanged) {
             act { refreshGroups() }
             wellness.reload()
@@ -175,6 +203,10 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
 
         announceFinished(before, message)
+    }
+
+    fun openScreen(route: String) {
+        mutableScreenRequests.tryEmit(route)
     }
 
     fun openFromNotification(conversationId: String) {
@@ -241,6 +273,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     suspend fun refresh() {
         refreshExperiments()
         wellness.load()
+        voice.load()
         val conversations = api.conversations(archived = false)
         val nodes = api.nodes()
 
@@ -390,14 +423,22 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         return changed
     }
 
-    fun promptAssistant(assistant: mycelium.api.Assistant, text: String) {
+    suspend fun resetAssistantInstructions(assistant: mycelium.api.Assistant): mycelium.api.Assistant {
+        val reset = api.resetAssistantInstructions(assistant.id)
+
+        mutableState.update { it.copy(assistants = it.assistants + (reset.id to reset)) }
+
+        return reset
+    }
+
+    fun promptAssistant(assistant: mycelium.api.Assistant, text: String, spoken: Boolean = false) {
         val prompt = text.trim()
 
         mutableState.update { it.copy(sending = it.sending + (assistant.id to it.sending[assistant.id].orEmpty() + prompt)) }
 
         act {
             try {
-                api.promptAssistant(assistant.id, prompt)
+                api.promptAssistant(assistant.id, prompt, spoken)
                 refreshAssistants()
             } finally {
                 mutableState.update { it.copy(sending = it.sending.withoutFirst(assistant.id, prompt)) }
@@ -438,7 +479,7 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     }
 
     suspend fun setGoal(conversationId: String, text: String, limits: GoalLimits) {
-        val goal = api.setGoal(conversationId, SetGoalRequest(text, limits.tokenBudget, limits.timeLimitSeconds, limits.fiveHourPercent, limits.weeklyPercent))
+        val goal = api.setGoal(conversationId, SetGoalRequest(text, limits.tokenBudget, limits.timeLimitSeconds, limits.fiveHourPercent, limits.weeklyPercent, limits.repeatLimit))
 
         mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
     }
@@ -451,6 +492,18 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
     suspend fun sendGoalAgain(conversationId: String) {
         val goal = api.sendGoalAgain(conversationId)
+
+        mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
+    }
+
+    suspend fun nudgeGoal(conversationId: String) {
+        val goal = api.nudgeGoal(conversationId)
+
+        mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
+    }
+
+    suspend fun continueGoal(conversationId: String, note: String?) {
+        val goal = api.continueGoal(conversationId, note)
 
         mutableState.update { it.copy(goals = it.goals + (conversationId to goal)) }
     }
@@ -676,8 +729,38 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         mutableState.update { it.copy(artifacts = artifacts.associateBy { artifact -> artifact.id }) }
     }
 
+    fun shareChatToolServers(servers: List<mycelium.api.ChatToolServer>) {
+        mutableState.update { it.copy(chatToolServers = servers) }
+    }
+
+    suspend fun refreshChatToolServers() {
+        val servers = api.chatToolServers()
+
+        shareChatToolServers(servers)
+    }
+
+    suspend fun refreshApps() {
+        val apps = api.apps()
+
+        mutableState.update { it.copy(apps = apps) }
+    }
+
+    suspend fun createArtifact(request: CreateArtifactRequest): Artifact {
+        val created = api.createArtifact(request)
+
+        mutableState.update { it.copy(artifacts = it.artifacts + (created.id to created)) }
+
+        return created
+    }
+
     suspend fun renameArtifact(artifact: Artifact, title: String) {
         val changed = api.editArtifact(artifact.id, PatchArtifactRequest(title = title))
+
+        mutableState.update { it.copy(artifacts = it.artifacts + (changed.id to changed)) }
+    }
+
+    suspend fun setArtifactDesignSystem(artifact: Artifact, designSystemId: String?) {
+        val changed = api.editArtifact(artifact.id, PatchArtifactRequest(designSystemId = designSystemId.orEmpty()))
 
         mutableState.update { it.copy(artifacts = it.artifacts + (changed.id to changed)) }
     }
@@ -697,6 +780,26 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     suspend fun refreshWorkflows() {
         val workflows = api.workflows()
         mutableState.update { it.copy(workflows = workflows.associateBy { workflow -> workflow.id }) }
+    }
+
+    suspend fun refreshWorkflow(id: String) {
+        val workflow = api.workflow(id)
+
+        mutableState.update { it.copy(workflows = it.workflows + (workflow.id to workflow)) }
+    }
+
+    suspend fun controlWorkflow(id: String, request: mycelium.api.WorkflowControlRequest) {
+        val workflow = api.controlWorkflow(id, request)
+
+        mutableState.update { it.copy(workflows = it.workflows + (workflow.id to workflow)) }
+    }
+
+    suspend fun rerunWorkflow(id: String): String {
+        val workflow = api.rerunWorkflow(id)
+
+        mutableState.update { it.copy(workflows = it.workflows + (workflow.id to workflow)) }
+
+        return workflow.id
     }
 
     suspend fun refreshSchedules() {
@@ -821,6 +924,8 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         val goal = orNull { api.goal(conversationId) }
         mutableState.update { it.copy(goals = if (goal == null) it.goals - conversationId else it.goals + (conversationId to goal)) }
+
+        loadEnvironment(conversationId)
 
         val walkthrough = orNull { api.walkthrough(conversationId) }
         mutableState.update { it.copy(walkthroughs = if (walkthrough == null) it.walkthroughs - conversationId else it.walkthroughs + (conversationId to walkthrough)) }
@@ -971,6 +1076,59 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
 
         if (!exited) {
             act { api.stopTerminal(terminalId) }
+        }
+    }
+
+    suspend fun loadEnvironment(conversationId: String) {
+        val environment = orNull { api.environment(conversationId) }
+        val actions = if (environment == null) emptyList() else orNull { api.environmentActions(conversationId) }.orEmpty()
+
+        mutableState.update {
+            it.copy(
+                environments = if (environment == null) it.environments - conversationId else it.environments + (conversationId to environment),
+                environmentActions = it.environmentActions + (conversationId to actions),
+            )
+        }
+    }
+
+    fun startEnvironment(conversationId: String) {
+        act {
+            val environment = api.startEnvironment(conversationId)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment), environmentActions = it.environmentActions - conversationId) }
+        }
+    }
+
+    fun stopEnvironment(conversationId: String) {
+        act {
+            api.stopEnvironment(conversationId)
+            loadEnvironment(conversationId)
+        }
+    }
+
+    fun takeOverEnvironment(conversationId: String) {
+        act {
+            val environment = api.takeOverEnvironment(conversationId)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+        }
+    }
+
+    fun handBackEnvironment(conversationId: String) {
+        act {
+            val environment = api.handBackEnvironment(conversationId)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+        }
+    }
+
+    fun checkEnvironment(nodeId: String) {
+        act {
+            val capability = api.checkEnvironment(nodeId)
+
+            if (capability != null) {
+                mutableState.update { held -> held.nodes[nodeId]?.let { node -> held.copy(nodes = held.nodes + (nodeId to node.copy(environment = capability))) } ?: held }
+            }
         }
     }
 

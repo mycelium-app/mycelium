@@ -38,6 +38,10 @@ private class DraftFilePlatform : Platform by QuietPlatform {
     override fun pickFiles(onPicked: (List<PickedFile>) -> Unit) = onPicked(listOf(PickedFile("report.pdf", "application/pdf", ByteArray(2048) { 1 })))
 }
 
+private class DraftImagePlatform : Platform by QuietPlatform {
+    override fun clipboardFiles(): List<PickedFile> = listOf(PickedFile("pasted-image.png", "image/png", ByteArray(64) { 2 }))
+}
+
 class ComposerDraftsTest {
     @get:Rule
     val rule = createComposeRule()
@@ -47,7 +51,7 @@ class ComposerDraftsTest {
 
     private val prompts = CopyOnWriteArrayList<String>()
 
-    private fun open() {
+    private fun open(platform: Platform = DraftFilePlatform()) {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val alpha = draftsConversation("c1", "Alpha chat")
         val bravo = draftsConversation("c2", "Bravo chat")
@@ -55,7 +59,7 @@ class ComposerDraftsTest {
             val path = request.url.encodedPath
 
             when {
-                path.endsWith("/attachments") -> respond("""{"sha256":"${"a".repeat(64)}","name":"report.pdf","media_type":"application/pdf","size":2048}""", HttpStatusCode.Created, json)
+                path.endsWith("/attachments") -> respond("""{"sha256":"${"a".repeat(64)}","name":"${request.url.parameters["name"]}","media_type":"${if (request.url.parameters["name"] == "pasted-image.png") "image/png" else "application/pdf"}","size":2048}""", HttpStatusCode.Created, json)
                 path.endsWith("/prompt") -> {
                     prompts += path
                     respond("", HttpStatusCode.NoContent)
@@ -69,7 +73,7 @@ class ComposerDraftsTest {
         }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
-        rule.setContent { MyceliumTheme(true) { Shell(store, DraftFilePlatform(), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
+        rule.setContent { MyceliumTheme(true) { Shell(store, platform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.Chat("c1")) } }
     }
 
     private fun switchTo(title: String) {
@@ -106,5 +110,28 @@ class ComposerDraftsTest {
         switchTo("Bravo chat")
 
         assertEquals("other draft", field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+    }
+
+    @Test
+    fun aPastedImageKeepsItsPlaceInTheDraftAfterSwitchingChatsAndBack() {
+        open(DraftImagePlatform())
+        val field = rule.onNode(hasSetTextAction())
+
+        field.performTextInput("before ")
+        field.performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.V)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.waitUntil(5_000) { field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text.contains("Image · pasted-image.png") }
+        field.performTextInput(" after")
+        switchTo("Bravo chat")
+        switchTo("Alpha chat")
+
+        val shown = field.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+
+        assertEquals(1, shown.split("Image · pasted-image.png").size - 1)
+        assert(shown.indexOf("before") < shown.indexOf("Image · pasted-image.png"))
+        assert(shown.indexOf("Image · pasted-image.png") < shown.indexOf("after"))
     }
 }

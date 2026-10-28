@@ -30,7 +30,9 @@ import mycelium.api.StartChatToolServerOAuthRequest
 import mycelium.api.TestCalendarsRequest
 import mycelium.api.TestChatToolServerRequest
 import mycelium.state.Choice
+import mycelium.state.CoolifyKind
 import mycelium.state.Store
+import mycelium.state.TandoorKind
 
 private const val Token = "Token"
 private const val OAuth = "Sign in with OAuth"
@@ -93,6 +95,12 @@ fun SetupFlow(
     onSigningIn: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (kind == CoolifyKind || kind == TandoorKind) {
+        AppsSetupFlow(store, kind, knownAddress, takenNames, onAdded, onFinished, onDismiss)
+
+        return
+    }
+
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val lastFm = kind == "lastfm"

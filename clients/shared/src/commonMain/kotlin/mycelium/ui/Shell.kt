@@ -94,6 +94,9 @@ import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.Me
 import mycelium.api.ModelProviderUsage
+import mycelium.state.VoiceAssistantKey
+import mycelium.state.VoicePhase
+import mycelium.state.wakePhraseName
 import mycelium.api.NodeSummary
 import mycelium.api.PatchConversationRequest
 import mycelium.api.Project
@@ -112,6 +115,7 @@ import mycelium.state.Store
 import mycelium.state.UnnamedAccount
 import mycelium.state.agentAccounts
 import mycelium.state.agentName
+import mycelium.state.appsLinkVisible
 import mycelium.state.chatAccountFirst
 import mycelium.state.chatSections
 import mycelium.state.clockTime
@@ -154,6 +158,9 @@ sealed interface Route {
     data object Tasks : Route
 
     data object Workflows : Route
+
+    data class Workflow(val id: String) : Route
+
     data object Schedules : Route
 
     data object Wellness : Route
@@ -163,6 +170,10 @@ sealed interface Route {
     data object Issues : Route
 
     data object Archive : Route
+
+    data object Apps : Route
+
+    data class App(val uuid: String, val tab: String = AppOverviewTab, val deployment: String? = null) : Route
 
     data object Artifacts : Route
 
@@ -189,7 +200,7 @@ fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initi
     val onBreak = wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null
 
     CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
-        Box(Modifier.focusProperties { onEnter = { if (onBreak) cancelFocusChange() } }.focusGroup().then(if (onBreak) Modifier.clearAndSetSemantics {} else Modifier)) {
+        Box(Modifier.noticingInput(store.wellness).voiceShortcut(store.voice).focusProperties { onEnter = { if (onBreak) cancelFocusChange() } }.focusGroup().then(if (onBreak) Modifier.clearAndSetSemantics {} else Modifier)) {
             ShellFor(store, platform, me, onSignOut, initialRoute)
         }
 
@@ -224,6 +235,7 @@ private fun ShellFor(store: Store, platform: Platform, me: Me, onSignOut: () -> 
 
     SideEffect {
         store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
+        store.wellness.presence = activityTargetOf(route, state)
     }
     val colors = MyTheme.colors
     var sidebarWidth by remember { mutableStateOf(platform.loadPreference(SidebarWidthPreference)?.toFloatOrNull()?.dp ?: Tokens.Size.Sidebar) }
@@ -344,6 +356,7 @@ fun PhoneShell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, 
 
     SideEffect {
         store.viewing = (route as? Route.Chat)?.id ?: (route as? Route.Assistant)?.let { state.assistants[it.id]?.conversationId }
+        store.wellness.presence = activityTargetOf(route, state)
     }
     var drawerOpen by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
@@ -481,6 +494,15 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     var settingsGroup by remember { mutableStateOf<String?>(null) }
     var settingsGroupTab by remember { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(store) {
+        store.screenRequests.collect { path ->
+            val target = screenTarget(path) ?: return@collect
+
+            settingsStart = target.second
+            onRoute(target.first)
+        }
+    }
+
     LaunchedEffect(route) {
         if (route != Route.Settings) {
             settingsStart = null
@@ -500,8 +522,13 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
     }
 
     val ides = if (platform.opensIdes) remember(platform) { IdeLauncher(store, platform) { settingsStart = SettingsSection.Ides; onRoute(Route.Settings) } } else null
+    val appDeployments = remember(store) { store.api::appDeployment }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides) {
+    LaunchedEffect(store, state.integrationsRevision) {
+        attempt { store.refreshChatToolServers() }
+    }
+
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppDeployments provides appDeployments) {
         val selected = routeGroup(route, state, groupFilter)
         val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
         val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)
@@ -525,19 +552,22 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     ClosedScreen(closed, onSelect = onChooseGroup, onOpenOutOfHours = { onOpenOutOfHours(closed.groupId) })
                 } else when (route) {
                     Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
-                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) })
+                    is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
                     Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
-                    Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) })
+                    Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
+                    is Route.Workflow -> WorkflowScreen(store, state, route.id, onBack = { onRoute(Route.Workflows) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenProjects = { onRoute(Route.Projects) })
                     Route.Schedules -> SchedulesScreen(store, state)
-                    Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) })
+                    Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
                     Route.Archive -> ArchiveScreen(store, state, onOpen = { onRoute(Route.Chat(it)) })
+                    Route.Apps -> AppsScreen(store, state, platform, onOpenApp = { onRoute(Route.App(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onNewConversation = { onRoute(Route.New) })
+                    is Route.App -> AppPage(store, state, platform, route.uuid, route.tab, route.deployment, onBack = { onRoute(Route.Apps) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Artifacts -> ArtifactsScreen(store, state, me, platform, onOpen = { onRoute(Route.Artefact(it)) })
                     is Route.Artefact -> ArtefactFullView(store, state, platform, route.id, onBack = { onRoute(Route.Artifacts) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenProjects = { onRoute(Route.Projects) })
                     Route.Assistants, Route.NewAssistant -> AssistantsScreen(store, state, onOpen = { onRoute(Route.Assistant(it.id)) }, onSettings = { onRoute(Route.AssistantSettings(it.id)) }, onNew = { onRoute(Route.NewAssistant) }, creating = route == Route.NewAssistant, onCloseNew = { onRoute(Route.Assistants) })
@@ -553,6 +583,33 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         WellnessPresence(store, platform)
     }
 }
+
+internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
+    val parts = path.trim('/').split('/')
+    val argument = parts.getOrNull(1)
+
+    return when (parts[0]) {
+        "settings" -> Route.Settings to argument?.let { key -> SettingsSection.entries.firstOrNull { settingsKey(it) == key } }
+        "chat" -> argument?.let { Route.Chat(it) to null }
+        "assistant" -> argument?.let { Route.Assistant(it) to null }
+        "assistants" -> Route.Assistants to null
+        "new" -> Route.New to null
+        "nodes" -> Route.Nodes to null
+        "tasks" -> Route.Tasks to null
+        "workflows" -> Route.Workflows to null
+        "schedules" -> Route.Schedules to null
+        "wellness" -> Route.Wellness to null
+        "projects" -> Route.Projects to null
+        "issues" -> Route.Issues to null
+        "archive" -> Route.Archive to null
+        "artifacts" -> Route.Artifacts to null
+        "activity" -> Route.Activity to null
+        "usage" -> Route.UsageHistory to null
+        else -> null
+    }
+}
+
+internal fun settingsKey(section: SettingsSection): String = section.label.lowercase().replace(' ', '-')
 
 private fun Route.opensBehindHours(): Boolean = this !in HoursExemptRoutes && this !is Route.Node
 
@@ -623,6 +680,12 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
     var collapsed by remember { mutableStateOf(emptySet<String>()) }
     var usageOpen by remember { mutableStateOf(platform.loadPreference(UsageOpenPreference) == true.toString()) }
     var providerUsage by remember(store) { mutableStateOf(emptyList<ModelProviderUsage>()) }
+    val voice by store.voice.state.collectAsState()
+    val voiceAssistant = state.assistants.values.firstOrNull { it.builtinKey == VoiceAssistantKey }
+
+    LaunchedEffect(voiceAssistant?.id) {
+        store.voice.onOpenThread { voiceAssistant?.let { onRoute(Route.Assistant(it.id)) } }
+    }
 
     LaunchedEffect(store, usageOpen) {
         if (usageOpen) {
@@ -694,10 +757,14 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
                 SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+                if (appsLinkVisible(state.chatToolServers)) {
+                    SidebarLink("Apps", MyIcon.AppWindow, selected = route == Route.Apps || route is Route.App) { onRoute(Route.Apps) }
+                }
+
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
 
                 SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
-                SidebarLink("Workflows", MyIcon.Layers, selected = route == Route.Workflows) { onRoute(Route.Workflows) }
+                SidebarLink("Workflows", MyIcon.Workflow, selected = route == Route.Workflows || route is Route.Workflow) { onRoute(Route.Workflows) }
 
                 SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
@@ -760,6 +827,26 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
             UsageCard(chatAccountFirst(agentAccounts(state.nodes.values), current?.agent, current?.let { state.nodes[it.nodeId]?.name }, current?.account), Modifier.padding(Tokens.Space.S1_5), providerUsage, current?.providerId, onOpenHistory = { onRoute(Route.UsageHistory) }, onUseReset = { account, key -> store.api.useReset(UseResetRequest(account.agent, account.label.takeUnless { it == UnnamedAccount }, key)).outcome })
         }
 
+        if (voice.open && voice.privacy.voiceEnabled) {
+            VoiceCard(
+                voice,
+                VoiceCardActions(
+                    onStopListening = store.voice::stopListening,
+                    onCancel = store.voice::cancelListening,
+                    onStopTurn = store.voice::stopTurn,
+                    onStopSpeaking = store.voice::stopSpeaking,
+                    onTalkAgain = store.voice::startListening,
+                    onTryAgain = store.voice::startListening,
+                    onTypeInstead = store.voice::typeInstead,
+                    onOpenConversation = store.voice::openThread,
+                    onOpenProviders = { store.voice.close(); store.openScreen("settings/providers") },
+                    onOpenAndroidSettings = platform.takeIf { it.opensMicrophoneSettings }?.let { opener -> { opener.openMicrophoneSettings() } },
+                    onClose = store.voice::close,
+                ),
+                Modifier.padding(Tokens.Space.S1_5),
+            )
+        }
+
         Hairline()
 
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -779,7 +866,37 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 }
 
                 Box(Modifier.weight(1f))
-                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()) }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)
+                if (voice.privacy.voiceEnabled) {
+                    val listening = voice.phase == VoicePhase.Listening
+                    val wakeListening = voice.device.wakePhraseEnabled && platform.hearsWakePhrase
+                    val name = when {
+                        listening -> "Stop listening"
+                        voice.open -> "Close Voice"
+                        wakeListening -> "Talk to Voice, listening for ${wakePhraseName(voice.device.wakePhrase)}"
+                        else -> "Talk to Voice"
+                    }
+
+                    MyButton(
+                        {
+                            when {
+                                listening -> store.voice.stopListening()
+                                voice.open -> store.voice.close()
+                                else -> {
+                                    usageOpen = false
+                                    platform.savePreference(UsageOpenPreference, false.toString())
+                                    store.voice.startListening()
+                                }
+                            }
+                        },
+                        icon = MyIcon.Microphone,
+                        description = name,
+                        muted = !listening,
+                        selected = voice.open,
+                        tooltip = if (voice.open) name else "$name ($VoiceShortcutLabel)",
+                    )
+                }
+
+                MyButton({ usageOpen = !usageOpen; platform.savePreference(UsageOpenPreference, usageOpen.toString()); if (usageOpen) store.voice.close() }, icon = MyIcon.Gauge, description = "Usage", muted = true, selected = usageOpen || route == Route.UsageHistory)
                 MyButton(appearance.onToggleDark, icon = if (appearance.dark) MyIcon.Sun else MyIcon.Moon, description = if (appearance.dark) "Switch to light mode" else "Switch to dark mode", muted = true)
                 MyButton({ onRoute(Route.Activity) }, icon = MyIcon.Activity, description = "Activity", muted = true, selected = route == Route.Activity)
                 MyButton({ onRoute(Route.Settings) }, icon = MyIcon.Settings, description = "Settings", muted = true, selected = route == Route.Settings)

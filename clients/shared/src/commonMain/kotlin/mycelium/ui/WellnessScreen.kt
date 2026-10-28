@@ -42,6 +42,7 @@ import mycelium.state.localTimeOf
 import mycelium.state.WeekdayNames
 
 private const val WellnessTabName = "Overview"
+private const val ActivityTabName = "Activity"
 private const val SkillsTabName = "Skills"
 private const val ReflectionsTabName = "Reflections"
 private const val PuzzlesTabName = "Puzzles"
@@ -68,8 +69,11 @@ fun WellnessPresence(store: Store, platform: Platform) {
 
         focused = platform.windowFocused()
 
+        if (focused && store.wellness.personActive(now)) {
+            store.wellness.heartbeat(60, now)
+        }
+
         if (store.viewing != null && focused) {
-            store.wellness.heartbeat(60)
             store.wellness.tickActiveMinute()
         }
 
@@ -98,9 +102,9 @@ fun WellnessPresence(store: Store, platform: Platform) {
 }
 
 @Composable
-fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview", onOpenAssistant: (String) -> Unit = {}) {
+fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview", onOpenAssistant: (String) -> Unit = {}, onOpenConversation: (String) -> Unit = {}) {
     val wellness by store.wellness.state.collectAsState()
-    var tab by remember { mutableStateOf(when (startOn) { "skills" -> SkillsTabName; "puzzles" -> PuzzlesTabName; else -> WellnessTabName }) }
+    var tab by remember { mutableStateOf(when (startOn) { "activity" -> ActivityTabName; "skills" -> SkillsTabName; "puzzles" -> PuzzlesTabName; else -> WellnessTabName }) }
     var playing by remember { mutableStateOf<Puzzle?>(null) }
 
     LaunchedEffect(Unit) {
@@ -121,7 +125,7 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
             BarTitle("Wellness & Learning")
         }
 
-        TabRow(listOf(WellnessTabName, SkillsTabName, ReflectionsTabName, PuzzlesTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
+        TabRow(listOf(WellnessTabName, ActivityTabName, SkillsTabName, ReflectionsTabName, PuzzlesTabName), tab, { tab = it }, "Wellness and Learning sections", Modifier.padding(horizontal = Tokens.Space.S3))
         Hairline()
 
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S6)) {
@@ -135,6 +139,8 @@ fun WellnessScreen(store: Store, platform: Platform, startOn: String = "overview
                 SuggestedExerciseCard(store, Modifier.widthIn(max = Tokens.Size.Page))
                 RecentlyLearned(store, { tab = ReflectionsTabName }, Modifier.widthIn(max = Tokens.Size.Page))
                 SkillsOverTime(store, { tab = SkillsTabName }, Modifier.widthIn(max = Tokens.Size.Page))
+            } else if (tab == ActivityTabName) {
+                ActivityTab(store, platform, onOpenConversation, onOpenAssistant)
             } else if (tab == SkillsTabName) {
                 SkillsTab(store)
             } else if (tab == PuzzlesTabName) {

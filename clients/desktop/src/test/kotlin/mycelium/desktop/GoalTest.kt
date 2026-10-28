@@ -168,6 +168,75 @@ class GoalTest {
     }
 
     @Test
+    fun aGoalWaitingToNudgeOffersNudgeNowAndPause() {
+        show(goalJson("active", extra = ""","wait_reason":"repeated_outcome","repeats":2,"next_nudge_at":"2026-10-23T14:02:00Z""""), afterChange = goalJson("active"))
+        waitForText("Nudge now")
+
+        rule.onNodeWithText("Pause").assertIsDisplayed()
+        rule.onNodeWithText("Nudge now").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/goal/nudge" } }
+    }
+
+    @Test
+    fun aGoalHeldForAQuestionOffersNoNudgeNow() {
+        show(goalJson("active", extra = ""","wait_reason":"question_waiting","held_since":"2026-10-23T14:02:00Z""""))
+        waitForText("Pause")
+
+        assertEquals(0, rule.onAllNodesWithText("Nudge now").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun aBlockedGoalContinuesWithANoteForTheAgent() {
+        show(goalJson("stuck", "The CI secret is missing.", extra = ""","reported_at":"2026-10-23T14:02:00Z""""), afterChange = goalJson("active"))
+        waitForText("Continue")
+
+        rule.onNodeWithText("Continue").performClick()
+        rule.onNodeWithText("Continue the goal").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Note for Claude Code (optional)").performTextInput("The secret is in place.")
+        rule.onAllNodesWithText("Continue")[1].performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "POST /api/v1/conversations/c1/goal/continue" } }
+        assertEquals("""{"note":"The secret is in place."}""", requests.last { it.first == "POST /api/v1/conversations/c1/goal/continue" }.second)
+    }
+
+    @Test
+    fun aGoalStoppedForRepeatingItselfOffersResume() {
+        show(goalJson("stalled", "Stopped after 3 turns ended the same way: Two tests still fail"), afterChange = goalJson("active"))
+        waitForText("Resume")
+
+        rule.onNodeWithText("Stopped after 3 turns ended the same way: Two tests still fail. Resume to let Claude Code try again, or send it a message first.").assertIsDisplayed()
+    }
+
+    @Test
+    fun aRepeatLimitThatIsNotAWholeNumberSaysHowToFixItAndSendsNothing() {
+        show("null")
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Set a goal").performClick()
+        rule.onNodeWithContentDescription("Goal").performTextInput("Every test passes on main")
+        rule.onNodeWithContentDescription("Stop after this many turns end the same way").performTextInput("often")
+        rule.onNodeWithText("Set goal").performClick()
+
+        rule.onNodeWithText("Enter how many turns, as a whole number like 3, or leave it empty.").assertIsDisplayed()
+        assertEquals(false, requests.any { it.first.startsWith("PUT") })
+    }
+
+    @Test
+    fun theRepeatLimitIsSentWithTheGoal() {
+        show("null", afterChange = goalJson("active"))
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Set a goal").fetchSemanticsNodes().isNotEmpty() }
+
+        rule.onNodeWithContentDescription("Set a goal").performClick()
+        rule.onNodeWithContentDescription("Goal").performTextInput("Every test passes on main")
+        rule.onNodeWithContentDescription("Stop after this many turns end the same way").performTextInput("4")
+        rule.onNodeWithText("Set goal").performClick()
+
+        rule.waitUntil(5_000) { requests.any { it.first == "PUT /api/v1/conversations/c1/goal" } }
+        assertEquals("""{"text":"Every test passes on main","repeat_limit":4}""", requests.last { it.first == "PUT /api/v1/conversations/c1/goal" }.second)
+    }
+
+    @Test
     fun theGoalBarShowsTheLimitsThatAreSetAndSaysWhenAWindowIsUnknown() {
         val started = kotlin.time.Clock.System.now() - kotlin.time.Duration.parse("40m 30s")
         show(goalJson("active", extra = ""","time_limit_seconds":7200,"started_at":"$started","five_hour_limit":80,"five_hour_used":64.2,"weekly_limit":90"""))

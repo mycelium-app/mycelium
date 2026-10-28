@@ -21,6 +21,7 @@ data class Artifact(
     @SerialName("conversation_ids") val conversationIds: List<String>? = null,
     val origin: ArtifactOrigin? = null,
     val kind: String,
+    @SerialName("design_system_id") val designSystemId: String? = null,
     val title: String,
     val slug: String = "",
     @SerialName("public") val isPublic: Boolean = false,
@@ -67,6 +68,15 @@ data class ApproveArtifactAccessRequest(val project: Boolean = false)
 data class PatchArtifactRequest(
     val title: String? = null,
     @SerialName("public") val isPublic: Boolean? = null,
+    @SerialName("design_system_id") val designSystemId: String? = null,
+)
+
+@Serializable
+data class CreateArtifactRequest(
+    val kind: String,
+    val title: String,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("design_system_id") val designSystemId: String? = null,
 )
 
 object ArtifactKinds {
@@ -74,4 +84,11 @@ object ArtifactKinds {
     const val Page = "page"
     const val Markdown = "markdown"
     const val File = "file"
+    const val Drawing = "drawing"
+    const val Typst = "typst"
+    const val Doc = "doc"
+    const val Slides = "slides"
+    const val Dashboard = "dashboard"
+    const val Motion = "motion"
+    const val DesignSystem = "design_system"
 }

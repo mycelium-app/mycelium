@@ -10,6 +10,18 @@ pub fn definitions() -> Value {
             "inputSchema": {"type": "object", "properties": {}},
         },
         {
+            "name": "report_goal",
+            "description": "Report the outcome of this conversation's Mycelium goal and end the loop. Call it with outcome done when the goal is met, or blocked when you cannot go on without the person, and say why. Mycelium nudges you after every turn that ends without a report, so call this instead of stopping silently. Stopping a turn never needs a report.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "outcome": {"type": "string", "enum": ["done", "blocked"], "description": "done: the goal is met. blocked: you cannot go on without the person."},
+                    "reason": {"type": "string", "description": "Why the goal is done, or what you need from the person to go on."},
+                },
+                "required": ["outcome", "reason"],
+            },
+        },
+        {
             "name": "get_account_usage",
             "description": "Read the signed-in agent account's reported usage windows and when they were read. This is account quota usage, separate from goal token consumption. Missing windows mean the node has not reported account usage.",
             "inputSchema": {"type": "object", "properties": {}},
@@ -18,12 +30,34 @@ pub fn definitions() -> Value {
 }
 
 pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
-    let ToolCall { caller, tool, .. } = call;
+    let ToolCall { caller, tool, arguments, .. } = call;
     let state = caller.state;
     let Some((conversation, _)) = caller.conversation().await? else {
         return Ok(ToolReply::text("Read goal and account usage from a conversation.", true));
     };
     let owner = caller.owner().await?;
+
+    if tool == "report_goal" {
+        let outcome = arguments.get("outcome").and_then(Value::as_str).map(str::trim);
+        let reason = arguments.get("reason").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+
+        if !matches!(outcome, Some("done" | "blocked")) {
+            return Ok(ToolReply::invalid("report_goal needs outcome, done or blocked."));
+        }
+
+        if reason.is_empty() {
+            return Ok(ToolReply::text("Nothing was reported. Say why the goal is done, or what you need from the person to go on.", true));
+        }
+
+        let reported = crate::goals::report(state, owner, conversation, outcome.unwrap_or_default(), reason).await?;
+
+        return Ok(if reported {
+            ToolReply::text("Reported. Mycelium will not nudge you again. End your turn.", false)
+        } else {
+            ToolReply::text("Nothing was reported. This conversation has no active goal.", true)
+        });
+    }
+
     let value = if tool == "get_goal" {
         let goal = crate::goals::load(state, owner, conversation).await?;
 

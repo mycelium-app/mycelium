@@ -13,6 +13,7 @@ import mycelium.api.EventKinds
 import mycelium.api.Event
 import mycelium.api.GoalDelivery
 import mycelium.api.GoalState
+import mycelium.api.GoalWait
 import mycelium.state.ThreadItem
 import mycelium.state.buildThread
 import kotlinx.serialization.json.Json
@@ -25,6 +26,8 @@ import mycelium.state.AppState
 import mycelium.state.DiffLine
 import mycelium.state.goalMessage
 import mycelium.state.goalProgress
+import mycelium.state.goalCanNudgeNow
+import mycelium.state.parseRepeatLimit
 import mycelium.state.parseTimeLimit
 import mycelium.state.parseTokenBudget
 import mycelium.state.parseWindowLimit
@@ -37,6 +40,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 private fun goal(state: GoalState, reason: String? = null) = Goal("c1", "Every test passes", 5_000_000, 2_100_000, 7, state, reason)
@@ -145,6 +149,76 @@ class GoalsTest {
     }
 
     @Test
+    fun aNudgeFromMyceliumCarriesItsNumberAndWhyNow() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.UserMessage, Json.parseToJsonElement("""{"text":"Continue towards the goal: ship","origin":"goal","sent_at":"2026-10-23T14:02:00Z","nudge":2,"why":"the turn ended without a report"}"""))))
+        val nudge = thread.single() as ThreadItem.UserMessage
+
+        assertEquals(listOf(2, "the turn ended without a report"), listOf(nudge.goalNudge, nudge.goalWhy))
+    }
+
+    @Test
+    fun theGoalMessageIsNotANudge() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.UserMessage, Json.parseToJsonElement("""{"text":"Work towards this goal: ship","origin":"goal","sent_at":"2026-10-23T14:02:00Z","nudge":0,"why":"you set the goal"}"""))))
+
+        assertNull((thread.single() as ThreadItem.UserMessage).goalNudge)
+    }
+
+    @Test
+    fun aReportFromTheAgentIsATimedCardInTheThread() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.GoalReport, Json.parseToJsonElement("""{"outcome":"blocked","reason":"The CI secret is missing.","at":"2026-10-23T14:02:00Z"}"""))))
+
+        assertEquals(ThreadItem.GoalReport("e1", "blocked", "The CI secret is missing.", "2026-10-23T14:02:00Z"), thread.single())
+    }
+
+    @Test
+    fun aGoalBacksOffAfterTheSameOutcomeAndOffersNudgeNow() {
+        val waiting = goal(GoalState.Active).copy(waitReason = GoalWait.RepeatedOutcome, repeats = 2, nextNudgeAt = "2026-10-23T14:02:00Z")
+
+        assertEquals("The last two turns ended the same way, so Mycelium is waiting before it nudges again at 14:02. If the next turn ends the same way too, the goal stops.", goalMessage(waiting) { "14:02" })
+        assertTrue(goalCanNudgeNow(waiting))
+    }
+
+    @Test
+    fun aGoalHeldForAQuestionCannotBeNudged() {
+        val held = goal(GoalState.Active).copy(waitReason = GoalWait.QuestionWaiting, heldSince = "2026-10-23T13:30:00Z")
+
+        assertEquals("Held for your answer to Claude Code's question. Mycelium nudges once you answer. Time on hold does not count towards the time limit.", goalMessage(held, "claude"))
+        assertFalse(goalCanNudgeNow(held))
+    }
+
+    @Test
+    fun aGoalWaitingForBackgroundWorkSaysWhenItNudgesAnyway() {
+        val waiting = goal(GoalState.Active).copy(waitReason = GoalWait.BackgroundWork, nextNudgeAt = "2026-10-23T14:12:00Z")
+
+        assertEquals("Claude Code is waiting for background work. Mycelium nudges when it reports back, or at 14:12 if it has not.", goalMessage(waiting, "claude") { "14:12" })
+        assertTrue(goalCanNudgeNow(waiting))
+    }
+
+    @Test
+    fun aReportedGoalSaysWhoReportedItAndWhen() {
+        val done = goal(GoalState.Met, "All 214 tests pass.").copy(reportedAt = "2026-10-23T14:02:00Z")
+        val blocked = goal(GoalState.Stuck, "The CI secret is missing.").copy(reportedAt = "2026-10-23T14:02:00Z")
+
+        assertEquals("Goal met. Claude Code reported it done at 14:02.", goalMessage(done, "claude") { "14:02" })
+        assertEquals("Blocked. Claude Code needs you: The CI secret is missing. Continue once it is in place, or clear the goal.", goalMessage(blocked, "claude"))
+    }
+
+    @Test
+    fun aGoalStoppedForRepeatingItselfOffersResume() {
+        val stalled = goal(GoalState.Stalled, "Stopped after 3 turns ended the same way: Two tests still fail")
+
+        assertEquals("Stopped after 3 turns ended the same way: Two tests still fail. Resume to let Codex try again, or send it a message first.", goalMessage(stalled, "codex"))
+    }
+
+    @Test
+    fun theRepeatLimitIsAWholeNumberOfAtLeastTwo() {
+        assertEquals(3, parseRepeatLimit(" 3 "))
+        assertNull(parseRepeatLimit("1"))
+        assertNull(parseRepeatLimit("three"))
+        assertNull(parseRepeatLimit("2.5"))
+    }
+
+    @Test
     fun aTimeLimitIsReadAsHoursMinutesAndSeconds() {
         assertEquals(7_200L, parseTimeLimit("2h"))
         assertEquals(2_700L, parseTimeLimit(" 45m "))
@@ -186,7 +260,7 @@ class GoalsTest {
     fun anActiveGoalSaysNothingAndAnEndedOneSaysHowItEnded() {
         assertNull(goalMessage(goal(GoalState.Active)))
         assertEquals("Goal met. All 214 tests pass.", goalMessage(goal(GoalState.Met, "All 214 tests pass.")))
-        assertEquals("Goal stuck. The CI secret is missing.", goalMessage(goal(GoalState.Stuck, "The CI secret is missing.")))
+        assertEquals("Blocked. The CI secret is missing.", goalMessage(goal(GoalState.Stuck, "The CI secret is missing.")))
         assertEquals("The goal is not met and the budget is used up.", goalMessage(goal(GoalState.OverBudget, "The goal is not met and the budget is used up.")))
         assertEquals("Paused because you stopped the turn.", goalMessage(goal(GoalState.Paused, "Paused because you stopped the turn.")))
         assertEquals("Paused", goalMessage(goal(GoalState.Paused)))

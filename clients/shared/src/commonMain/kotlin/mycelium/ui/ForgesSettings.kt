@@ -95,7 +95,10 @@ fun ForgesSettings(store: Store) {
             refusedMcp?.let { forge ->
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                     ErrorBanner(forge.mcpError.orEmpty(), onDismiss = { refusedMcp = null })
-                    MyButton({ signInToMcp(forge) }, text = "Sign in to ${forgeName(forge)}'s MCP server", variant = ButtonVariant.Outline)
+
+                    if (forge.kind == "gitlab") {
+                        MyButton({ signInToMcp(forge) }, text = "Sign in to ${forgeName(forge)}'s MCP server", variant = ButtonVariant.Outline)
+                    }
                 }
             }
 

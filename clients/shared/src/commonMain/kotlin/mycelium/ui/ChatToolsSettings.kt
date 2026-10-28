@@ -45,6 +45,8 @@ private const val DiscordType = "Discord"
 private const val FreeAgentType = "FreeAgent"
 private const val ActualType = "Actual Budget"
 private const val PaperlessType = "Paperless-ngx"
+private const val CoolifyType = "Coolify"
+private const val TandoorType = "Tandoor"
 
 private sealed interface IntegrationsView {
     data object Home : IntegrationsView
@@ -72,6 +74,8 @@ private fun flowId(kind: String): String = when (kind) {
     FreeAgentType -> "freeagent"
     ActualType -> "actual"
     PaperlessType -> "paperless"
+    CoolifyType -> "coolify"
+    TandoorType -> "tandoor"
     else -> "mcp"
 }
 
@@ -87,6 +91,8 @@ private fun formKind(entry: CatalogueEntry): String = when (entry.kind) {
     "freeagent" -> FreeAgentType
     "actual" -> ActualType
     "paperless" -> PaperlessType
+    "coolify" -> CoolifyType
+    "tandoor" -> TandoorType
     else -> McpType
 }
 
@@ -102,12 +108,20 @@ fun ChatToolsSettings(store: Store) {
     val platform = LocalPlatform.current
     val openConversation = LocalOpenConversation.current
     var signingIn by remember { mutableStateOf(false) }
+    var loaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(servers) {
+        if (loaded) {
+            store.shareChatToolServers(servers)
+        }
+    }
 
     LaunchedEffect(live.integrationsRevision) {
         val known = servers.map { it.id }.toSet()
 
         store.act {
             servers = store.api.chatToolServers()
+            loaded = true
 
             if (signingIn) {
                 signingIn = false
@@ -143,6 +157,12 @@ fun ChatToolsSettings(store: Store) {
 
     fun addForgeServer(forge: Forge) {
         store.act {
+            val refused = store.api.linkForgeMcp(forge.id).mcpError ?: return@act
+
+            if (forge.kind != "gitlab") {
+                throw ApiException(422, "mcp_refused", refused)
+            }
+
             val started = store.api.startChatToolServerOAuth(StartChatToolServerOAuthRequest(forgeProduct(forge), mcpAddress(forge), forgeId = forge.id))
             platform?.openUrl(started.authorizeUrl)
         }

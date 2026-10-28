@@ -33,6 +33,7 @@ import mycelium.api.StreamMessage
 
 const val TerminalChunkLimit = 1024
 const val ResourceHistoryLimit = 200
+const val EnvironmentActionLimit = 50
 
 data class TerminalFeed(val received: Int = 0, val chunks: List<String> = emptyList()) {
     fun unseen(consumed: Int): List<String> = chunks.takeLast((received - consumed).coerceIn(0, chunks.size))
@@ -72,6 +73,8 @@ data class AppState(
     val removedMemories: Set<String> = emptySet(),
     val memoryRevision: Int = 0,
     val integrationsRevision: Int = 0,
+    val chatToolServers: List<mycelium.api.ChatToolServer> = emptyList(),
+    val apps: List<mycelium.api.AppSummary>? = null,
     val events: Map<String, List<Event>> = emptyMap(),
     val outlinePages: Map<String, OutlinePage> = emptyMap(),
     val sessionUpdates: Map<String, List<JsonObject>> = emptyMap(),
@@ -86,6 +89,8 @@ data class AppState(
     val finishedLogins: Map<String, Boolean> = emptyMap(),
     val terminalOutput: Map<String, TerminalFeed> = emptyMap(),
     val exitedTerminals: Set<String> = emptySet(),
+    val environments: Map<String, mycelium.api.Environment> = emptyMap(),
+    val environmentActions: Map<String, List<mycelium.api.EnvironmentAction>> = emptyMap(),
     val sending: Map<String, List<String>> = emptyMap(),
     val connected: Boolean = false,
 )
@@ -211,6 +216,8 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.WellnessChanged -> state
 
+    is StreamMessage.ScreenOpened -> state
+
     is StreamMessage.NodeRemoved -> state.copy(nodes = state.nodes - message.nodeId, resources = state.resources - message.nodeId)
 
     is StreamMessage.NodeResourcesSampled -> {
@@ -232,6 +239,12 @@ fun reduce(state: AppState, message: StreamMessage): AppState = when (message) {
 
     is StreamMessage.TerminalExited ->
         state.copy(exitedTerminals = state.exitedTerminals + message.terminalId)
+
+    is StreamMessage.EnvironmentChanged ->
+        state.copy(environments = state.environments + (message.environment.conversationId to message.environment))
+
+    is StreamMessage.EnvironmentActed ->
+        state.copy(environmentActions = state.environmentActions + (message.conversationId to (listOf(message.action) + state.environmentActions[message.conversationId].orEmpty()).take(EnvironmentActionLimit)))
 }
 
 fun AppState.conversationTitle(id: String?): String? = id?.let { conversations[it]?.title }

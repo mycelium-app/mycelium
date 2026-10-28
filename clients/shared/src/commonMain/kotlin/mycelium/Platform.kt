@@ -69,6 +69,15 @@ interface Platform {
         }
     }
 
+    val showsLiveView: Boolean get() = false
+
+    @Composable
+    fun LiveView(url: String, viewOnly: Boolean, modifier: Modifier, onPointer: () -> Unit) {
+        Column(modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
+            Label("The live view is available in the desktop app.")
+        }
+    }
+
     val opensIdes: Boolean get() = false
 
     fun hostname(): String? = null
@@ -100,6 +109,14 @@ interface Platform {
     fun dictation(): Dictation? = null
 
     fun audioRecorder(): AudioRecorder? = null
+
+    fun audioPlayer(): AudioPlayer? = null
+
+    val hearsWakePhrase: Boolean get() = false
+
+    val opensMicrophoneSettings: Boolean get() = false
+
+    fun openMicrophoneSettings() = Unit
 
     fun notify(title: String, body: String, conversationId: String, sound: Boolean = true) = Unit
 

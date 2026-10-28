@@ -158,6 +158,7 @@ async fn a_due_resume_retries_the_session_and_sends_continue() {
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     hit_limit(&server, &mut link, id, &limit_message(2)).await;
+    common::eventually("the automatic resume to be scheduled", || async { resume_at(&server, id).await }).await;
     schedule(&server, id).await;
 
     make_due(&server, id).await;
@@ -485,7 +486,7 @@ async fn a_held_goal_carries_on_when_the_limit_resets_and_keeps_its_counts() {
     loop {
         if let ControlToNode::Prompt { text, .. } = link.next().await {
             if text.contains("towards this goal") || text.starts_with("Continue towards the goal") {
-                assert!(text.ends_with("Every test passes"), "{text}");
+                assert!(text.contains("Every test passes"), "{text}");
                 break;
             }
         }

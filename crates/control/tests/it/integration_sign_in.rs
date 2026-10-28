@@ -202,6 +202,16 @@ async fn an_app_without_client_registration_is_told_to_use_an_api_key() {
     assert_eq!((status, refused["error"].as_str(), refused["message"].as_str()), (400, Some("oauth_unsupported"), Some("This app does not let Mycelium sign in. Use an API key instead.")));
 }
 
+#[tokio::test]
+async fn probing_an_app_that_refuses_client_registration_does_not_offer_oauth() {
+    let server = Server::start().await;
+    let (base, _) = start_app(true, 3600).await;
+
+    let (status, probed) = server.user.json(server.user.post("/api/v1/chat-tool-servers/probe").json(&json!({"url": format!("{base}/mcp")}))).await;
+
+    assert_eq!((status, probed), (200, json!({"oauth": false})));
+}
+
 async fn listed_tools(server: &Server, node_token: &str) -> Vec<Value> {
     let anonymous = server.anonymous();
     let (_, listed) = anonymous.json(anonymous.post("/api/v1/mcp").header("authorization", format!("Bearer {node_token}")).json(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))).await;
