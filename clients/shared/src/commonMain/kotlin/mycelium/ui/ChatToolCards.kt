@@ -55,13 +55,13 @@ internal fun ChatToolCard(call: ThreadItem.ToolCall, name: ChatToolName?) {
         ToolStatus.Pending -> "Waiting"
     }
 
-    Card(Modifier.semantics { contentDescription = "$heading${name?.let { ", ${it.server}" }.orEmpty()}, ${state.lowercase()}" }) {
+    Card(Modifier.semantics { contentDescription = "$heading${name?.let { ", ${it.source}" }.orEmpty()}, ${state.lowercase()}" }) {
         CardHead {
             Icon(if (searching) MyIcon.Search else MyIcon.Sliders, colors.textMuted, Tokens.Size.IconSm)
             Label(heading, style = Tokens.Type.UiStrong, maxLines = 1)
 
             if (name != null) {
-                Label(name.server, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+                Label(name.source, style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
             }
 
             Box(Modifier.weight(1f))

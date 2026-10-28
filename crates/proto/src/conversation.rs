@@ -75,6 +75,7 @@ pub enum EventKind {
     TeachMode,
     OpenOutline,
     GoalReport,
+    Environment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -154,6 +155,8 @@ pub struct Conversation {
     pub teach_me: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scratch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

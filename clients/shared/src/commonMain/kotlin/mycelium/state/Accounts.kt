@@ -59,6 +59,24 @@ fun splitSignedOut(accounts: List<AgentAccount>): AgentAccountSplit {
     return AgentAccountSplit(real, signedOut.flatMap { it.nodes.map { node -> node.nodeName } }.distinct().sorted())
 }
 
+data class AgentPick(val agent: String, val account: String?, val label: String, val hint: String)
+
+fun agentPicks(nodes: Collection<NodeSummary>): List<AgentPick> =
+    listOf("claude", "codex").flatMap { agent ->
+        val signedIn = nodes.flatMap { node -> node.logins.filter { it.agent == agent && it.state == LoginState.SignedIn && it.account != null }.map { node to it.account.orEmpty() } }
+        val accounts = signedIn.map { it.second }.distinct().sorted()
+
+        if (accounts.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(AgentPick(agent, null, "${agentName(agent)}, any account", "most usage left")) + accounts.map { account ->
+                val online = signedIn.filter { it.second == account && it.first.online }.map { it.first.name }.distinct().sorted()
+
+                AgentPick(agent, account, "${agentName(agent)} · $account", if (online.isEmpty()) "no node online" else "online on ${online.joinToString(", ")}")
+            }
+        }
+    }
+
 fun chatAccountFirst(accounts: List<AgentAccount>, agent: String?, nodeName: String?, account: String?): List<Pair<AgentAccount, Boolean>> {
     val current = accounts.firstOrNull { candidate ->
         candidate.agent == agent && candidate.nodes.any { it.nodeName == nodeName } && (account == null || candidate.label == account)

@@ -158,7 +158,7 @@ class EnvironmentPanelTest {
         show(environmentJson(extra = ""","target":{"x":640,"y":400,"label":"Click, Password"}"""), actions = listOf(EnvironmentAction("2026-10-28T10:00:05Z", "Clicking “Password”")))
 
         rule.onNodeWithText("Agent in control").assertExists()
-        rule.onNodeWithText("Wayland session  ·  1280 × 800  ·  Chromium").assertExists()
+        rule.onNodeWithText("1280 × 800").assertExists()
         rule.onNodeWithText("Clicking “Password”").assertExists()
         rule.onNodeWithContentDescription("Actions, newest first").assertExists()
         rule.onNodeWithText("Take over").performClick()

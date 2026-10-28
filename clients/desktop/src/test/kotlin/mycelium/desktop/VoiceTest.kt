@@ -140,7 +140,7 @@ class VoiceTest {
         val sent = requests.first { it.first.endsWith("/prompt") }.second
 
         assertTrue(sent.contains("\"text\":\"open the usage history\"") && sent.contains("\"spoken\":true"))
-        rule.onNodeWithText("Thinking").assertExists()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Thinking").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

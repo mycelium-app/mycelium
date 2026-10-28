@@ -126,6 +126,8 @@ fun DataTable(
     trailing: (@Composable (Int) -> Unit)? = null,
     monospaceColumns: Set<Int> = emptySet(),
     status: String? = null,
+    header: (@Composable () -> Unit)? = null,
+    footer: String? = null,
 ) {
     val colors = MyTheme.colors
 
@@ -137,6 +139,11 @@ fun DataTable(
         }
 
         Hairline()
+
+        if (header != null) {
+            header()
+            Hairline()
+        }
 
         if (rows.isEmpty()) {
             Label(empty, Modifier.padding(Tokens.Space.S3), color = colors.textMuted)
@@ -163,6 +170,11 @@ fun DataTable(
             onRow = onRow,
             rowDescription = rowDescription,
         )
+
+        if (footer != null) {
+            Hairline()
+            Label(footer, Modifier.padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), Tokens.Type.Meta, colors.textMuted)
+        }
     }
 }
 

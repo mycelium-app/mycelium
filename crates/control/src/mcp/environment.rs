@@ -1,13 +1,17 @@
 use super::call::{ToolCall, ToolReply};
-use crate::environments::record_action;
+use crate::decision_providers::{ask, box_of, provider_for};
+use crate::environments::{EnvironmentRecord, launch_app, record_action};
 use crate::error::ApiResult;
 use crate::nodes::node_offline;
-use crate::state::{EnvironmentInputAnswer, EnvironmentScreenshotAnswer};
+use crate::state::{AppState, EnvironmentInputAnswer, EnvironmentScreenshotAnswer};
 use mycelium_proto::api::{EnvironmentController, EnvironmentState, EnvironmentTarget};
 use mycelium_proto::link::{ControlToNode, EnvironmentInputAction};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
+const MIN_BOX_CONFIDENCE: f64 = 0.3;
+const NO_BROWSER_PROVIDER_FOR_TARGET: &str = "No decisions provider has Browser tasks switched on, so a target cannot be found. Take a screenshot and click with x and y instead.";
 const NODE_TIMEOUT: Duration = Duration::from_secs(15);
 const NO_ENVIRONMENT: &str = "No environment is running. Ask the person to start one from the Environment panel.";
 const DEFAULT_SCROLL_AMOUNT: u64 = 3;
@@ -24,16 +28,16 @@ pub fn definitions() -> Value {
         },
         {
             "name": "environment_click",
-            "description": "Click at a position in the environment. Take a screenshot first to find the position.",
+            "description": "Click in the environment, at a position or on a described control. Give x and y from a screenshot, or give target, a description such as \"the Send button\", and Mycelium finds it on a fresh screenshot and clicks its centre. Target works in any app and is quick, but needs a decisions provider with Browser tasks switched on. If the target is not found, click by position.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "x": {"type": "integer", "description": "Pixels from the left edge of the screenshot."},
                     "y": {"type": "integer", "description": "Pixels from the top edge of the screenshot."},
-                    "label": {"type": "string", "description": "What you are clicking, in the person's words, for example \"Password\". It is shown to the person as you work."},
+                    "target": {"type": "string", "description": "What to click, described, instead of x and y, for example \"the Send button\"."},
+                    "label": {"type": "string", "description": "What you are clicking, in the person's words, for example \"Password\". It is shown to the person as you work. Optional with target."},
                     "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Which mouse button. Defaults to left."},
                 },
-                "required": ["x", "y", "label"],
             },
         },
         {
@@ -72,11 +76,52 @@ pub fn definitions() -> Value {
                 "required": ["keys"],
             },
         },
+        {
+            "name": "environment_launch",
+            "description": "Open an application in the environment, for example a file manager or an editor. The environment's own message lists the apps the node offers if the one you ask for is not among them. The new window is focused and becomes yours to drive.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "app": {"type": "string", "description": "The app id the node offers, for example \"org.gnome.Nautilus\"."},
+                    "file": {"type": "string", "description": "A file or address to open with the app."},
+                },
+                "required": ["app"],
+            },
+        },
     ])
 }
 
 fn text_argument(arguments: &Value, name: &str) -> Option<String> {
     arguments.get(name).and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty()).map(String::from)
+}
+
+async fn take_screenshot(state: &AppState, node_id: Uuid, conversation_id: Uuid) -> Result<String, ToolReply> {
+    let answered = state.ask_node::<EnvironmentScreenshotAnswer>(node_id, NODE_TIMEOUT, |request_id| ControlToNode::EnvironmentScreenshot { request_id, conversation_id }).await;
+    let Some(answer) = answered else {
+        return Err(ToolReply::text(node_offline().message(), true));
+    };
+
+    if let Some(error) = answer.error {
+        return Err(ToolReply::text(&error, true));
+    }
+
+    answer.png.ok_or_else(|| ToolReply::text("The screenshot came back empty. Try again.", true))
+}
+
+pub fn agent_environment(state: &AppState, conversation_id: Uuid) -> Result<EnvironmentRecord, ToolReply> {
+    let Some(record) = state.hub.environment_of(conversation_id).filter(|record| record.is_live()) else {
+        return Err(ToolReply::text(NO_ENVIRONMENT, true));
+    };
+
+    if record.environment.state == EnvironmentState::Starting {
+        return Err(ToolReply::text("The environment is still starting. Try again in a moment.", true));
+    }
+
+    if record.environment.controller == EnvironmentController::Person {
+        return Err(ToolReply::text(&format!("{} has taken over the environment; wait until they hand back", record.person), true));
+    }
+
+    Ok(record)
 }
 
 fn pixel_argument(arguments: &Value, name: &str) -> Option<u32> {
@@ -87,12 +132,25 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let ToolCall { caller, tool, arguments, .. } = call;
     let state = caller.state;
     let mut target = None;
-    let (input, logged, done) = match tool {
-        "environment_click" => {
-            let (Some(x), Some(y)) = (pixel_argument(&arguments, "x"), pixel_argument(&arguments, "y")) else {
-                return Ok(ToolReply::invalid("environment_click needs x and y, in pixels from the top left of the screenshot."));
+    let mut launch = None;
+    let mut find = None;
+    let (input, logged, mut done) = match tool {
+        "environment_launch" => {
+            let Some(app) = text_argument(&arguments, "app") else {
+                return Ok(ToolReply::invalid("environment_launch needs app, the id of an app the node offers."));
             };
-            let Some(label) = text_argument(&arguments, "label") else {
+
+            launch = Some((app, text_argument(&arguments, "file")));
+
+            (None, String::new(), String::new())
+        }
+        "environment_click" => {
+            let point = pixel_argument(&arguments, "x").zip(pixel_argument(&arguments, "y"));
+            let described = text_argument(&arguments, "target");
+            let Some((x, y)) = point.or(described.as_ref().map(|_| (0, 0))) else {
+                return Ok(ToolReply::invalid("environment_click needs x and y, in pixels from the top left of the screenshot, or a target describing what to click."));
+            };
+            let Some(label) = text_argument(&arguments, "label").or_else(|| described.clone()) else {
                 return Ok(ToolReply::invalid("environment_click needs a label saying what you are clicking, for example \"Password\". The person sees it as you work."));
             };
             let button = text_argument(&arguments, "button");
@@ -101,7 +159,11 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(ToolReply::invalid("environment_click button must be left, right or middle."));
             }
 
-            target = Some(EnvironmentTarget { x, y, label: label.clone() });
+            if point.is_some() {
+                target = Some(EnvironmentTarget { x, y, label: label.clone() });
+            } else {
+                find = described;
+            }
 
             (Some(EnvironmentInputAction::Click { x, y, button }), format!("Clicking “{label}”"), format!("Clicked “{label}”."))
         }
@@ -140,25 +202,80 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
     let Some(conversation_id) = caller.conversation_id().await? else {
         return Ok(ToolReply::text("The environment belongs to a conversation, so use this tool from one.", true));
     };
-    let record = state.hub.environment_of(conversation_id).filter(|record| record.is_live());
-    let Some(record) = record else {
-        return Ok(ToolReply::text(NO_ENVIRONMENT, true));
+    let record = match agent_environment(state, conversation_id) {
+        Ok(record) => record,
+        Err(reply) => return Ok(reply),
     };
-
-    if record.environment.state == EnvironmentState::Starting {
-        return Ok(ToolReply::text("The environment is still starting. Try again in a moment.", true));
-    }
-
-    if record.environment.controller == EnvironmentController::Person {
-        return Ok(ToolReply::text(&format!("{} has taken over the environment; wait until they hand back", record.person), true));
-    }
 
     let node_id = record.environment.node_id;
     let unreachable = || ToolReply::text(node_offline().message(), true);
     let mut shot = None;
 
+    if let Some((app, file)) = launch {
+        let launched = launch_app(state, &record, &app, file).await;
+        let (offer, window) = match launched {
+            Ok(launched) => launched,
+            Err(error) => return Ok(ToolReply::text(error.message(), true)),
+        };
+        let mut resumed = false;
+
+        record_action(state, conversation_id, &format!("Opened {}", offer.name), |record| {
+            resumed = std::mem::take(&mut record.handed_back);
+
+            if window.is_some() {
+                record.environment.agent_window = window;
+            }
+        });
+
+        let done = format!("Opened {}. Take a screenshot to see it.", offer.name);
+
+        if resumed {
+            return Ok(ToolReply::text(&format!("{} used the environment while you were paused, so what you saw earlier may be out of date.\n\n{done}", record.person), false));
+        }
+
+        return Ok(ToolReply::text(&done, false));
+    }
+
     match input {
-        Some(action) => {
+        Some(mut action) => {
+            if let Some(description) = find {
+                let owner = caller.owner().await?;
+                let Some(provider) = provider_for(state, owner, "browser").await? else {
+                    return Ok(ToolReply::text(NO_BROWSER_PROVIDER_FOR_TARGET, true));
+                };
+                let png = match take_screenshot(state, node_id, conversation_id).await {
+                    Ok(png) => png,
+                    Err(reply) => return Ok(reply),
+                };
+                let questions = json!({
+                    "present": {"type": "noul", "instructions": format!("Is {description} visible in `screen`?")},
+                    "target": {"type": "box", "instructions": format!("{description} in `screen`")},
+                });
+                let started = Instant::now();
+                let asked = ask(state, &provider.base_url, provider.api_key.as_deref(), &provider.model, &json!("A screenshot of the environment."), &questions, Some(&png)).await;
+                let seconds = started.elapsed().as_secs_f64();
+                let answers = match asked {
+                    Ok(answers) => answers,
+                    Err(message) => return Ok(ToolReply::text(&message, true)),
+                };
+                let confident = answers["present"]["noul"].as_f64().is_some_and(|present| present >= MIN_BOX_CONFIDENCE) && answers["target"]["confidence"].as_f64().is_none_or(|confidence| confidence >= MIN_BOX_CONFIDENCE);
+                let Some((top, bottom, left, right)) = box_of(&answers["target"]).filter(|_| confident) else {
+                    return Ok(ToolReply::text(&format!("Could not find {description} on screen"), true));
+                };
+                let size = record.environment.size;
+                let (scale_x, scale_y) = (f64::from(size.width), f64::from(size.height));
+                let x = (((left + right) / 2.0 * scale_x).round().max(0.0) as u32).min(size.width.saturating_sub(1));
+                let y = (((top + bottom) / 2.0 * scale_y).round().max(0.0) as u32).min(size.height.saturating_sub(1));
+
+                if let EnvironmentInputAction::Click { x: at_x, y: at_y, .. } = &mut action {
+                    *at_x = x;
+                    *at_y = y;
+                }
+
+                done = format!("{} Found at {x}, {y} by {} in {seconds:.1} s.", done.trim_end(), provider.name);
+                target = Some(EnvironmentTarget { x, y, label: description });
+            }
+
             let answered = state.ask_node::<EnvironmentInputAnswer>(node_id, NODE_TIMEOUT, |request_id| ControlToNode::EnvironmentInput { request_id, conversation_id, action }).await;
             let Some(answer) = answered else {
                 return Ok(unreachable());
@@ -168,22 +285,10 @@ pub async fn call(call: ToolCall<'_>) -> ApiResult<ToolReply> {
                 return Ok(ToolReply::text(&error, true));
             }
         }
-        None => {
-            let answered = state.ask_node::<EnvironmentScreenshotAnswer>(node_id, NODE_TIMEOUT, |request_id| ControlToNode::EnvironmentScreenshot { request_id, conversation_id }).await;
-            let Some(answer) = answered else {
-                return Ok(unreachable());
-            };
-
-            if let Some(error) = answer.error {
-                return Ok(ToolReply::text(&error, true));
-            }
-
-            let Some(png) = answer.png else {
-                return Ok(ToolReply::text("The screenshot came back empty. Try again.", true));
-            };
-
-            shot = Some(png);
-        }
+        None => match take_screenshot(state, node_id, conversation_id).await {
+            Ok(png) => shot = Some(png),
+            Err(reply) => return Ok(reply),
+        },
     }
 
     let mut resumed = false;

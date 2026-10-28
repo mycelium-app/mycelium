@@ -34,7 +34,7 @@ internal val WellnessOverviewJson = """{"days":[
 {"day":"2026-10-24","viewing_minutes":30,"agent_minutes":45,"breaks":0},
 {"day":"2026-10-25","viewing_minutes":10,"agent_minutes":20,"breaks":0},
 {"day":"2026-10-26","viewing_minutes":135,"agent_minutes":190,"breaks":2}],
-"last_break_at":"2026-10-26T10:00:00Z","current_break":null,"quiet_now":false,"held":0,"held_week":{"notifications":11,"schedules":2,"pings":3},
+"last_break_at":"2026-10-26T10:00:00Z","current_break":null,"recent_breaks":[{"id":"r1","started_at":"2026-10-26T10:00:00Z","ends_at":"2026-10-26T10:05:00Z","planned_minutes":5,"note":"Made a tea and stood in the garden","noted_at":"2026-10-26T10:05:00Z"}],"quiet_now":false,"held":0,"held_week":{"notifications":11,"schedules":2,"pings":3},
 "opened_out_of_hours":[{"group_id":"g-work","group_name":"work","reason":"Restart the release workflow that stalled","opened_at":"2026-10-26T21:32:00Z","until":"2026-10-26T21:47:00Z","closed_at":null}]}"""
 
 internal const val WellnessPuzzlesJson = """[

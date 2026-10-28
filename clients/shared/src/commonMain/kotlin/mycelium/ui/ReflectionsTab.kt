@@ -56,7 +56,7 @@ fun ReflectionsTab(store: Store, platform: Platform, onOpenAssistant: (String) -
         learning.problem?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, MyTheme.colors.statusFailed) }
 
         Label(
-            wellnessWakes?.let { "The Wellness assistant drafts this. It wakes $it." } ?: "The Wellness assistant drafts this.",
+            wellnessWakes?.let { "$it, the Wellness assistant drafts this from the week's conversations and your break notes." } ?: "The Wellness assistant drafts this from the week's conversations and your break notes.",
             color = MyTheme.colors.textMuted,
         )
         MyButton({ store.act { onOpenAssistant(store.api.wellnessAssistant().id) } }, text = "Open the Wellness assistant", variant = ButtonVariant.Outline)

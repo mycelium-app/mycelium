@@ -1,9 +1,10 @@
 use crate::common;
 use crate::common::{NodeLink, Server};
+use crate::decision_providers::{add as add_decision_provider, fake_jev};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use mycelium_proto::api::{EnvironmentCapability, EnvironmentState, EnvironmentVersions};
-use mycelium_proto::link::{ControlToNode, EnvironmentInputAction, NodeToControl};
+use mycelium_proto::api::{EnvironmentApp, EnvironmentAppKind, EnvironmentCapability, EnvironmentState, EnvironmentVersions, EnvironmentWindow};
+use mycelium_proto::link::{BrowserAction, BrowserControl, ControlToNode, EnvironmentInputAction, NodeToControl};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
@@ -19,12 +20,23 @@ struct Fixture {
     conversation_id: Uuid,
 }
 
+fn apps() -> Vec<EnvironmentApp> {
+    vec![
+        EnvironmentApp { id: "org.gnome.Nautilus".into(), name: "Files".into(), kind: EnvironmentAppKind::FileManager },
+        EnvironmentApp { id: "chromium".into(), name: "Chromium".into(), kind: EnvironmentAppKind::Browser },
+    ]
+}
+
+fn window(id: i64, title: &str, focused: bool) -> EnvironmentWindow {
+    EnvironmentWindow { id, app_id: "chromium".into(), title: title.into(), focused }
+}
+
 fn capable() -> EnvironmentCapability {
-    EnvironmentCapability { available: true, missing: vec![], versions: EnvironmentVersions { compositor: Some("sway 1.10".into()), wayvnc: Some("wayvnc 0.9.1".into()), browser: Some("Chromium 141".into()) }, note: None, running: vec![] }
+    EnvironmentCapability { available: true, missing: vec![], versions: EnvironmentVersions { compositor: Some("sway 1.10".into()), wayvnc: Some("wayvnc 0.9.1".into()), browser: Some("Chromium 141".into()) }, note: None, running: vec![], apps: apps() }
 }
 
 fn incapable() -> EnvironmentCapability {
-    EnvironmentCapability { available: false, missing: vec!["sway".into(), "wayvnc".into()], versions: EnvironmentVersions::default(), note: None, running: vec![] }
+    EnvironmentCapability { available: false, missing: vec!["sway".into(), "wayvnc".into()], versions: EnvironmentVersions::default(), note: None, running: vec![], apps: vec![] }
 }
 
 async fn fixture(capability: Option<EnvironmentCapability>) -> Fixture {
@@ -115,10 +127,10 @@ async fn starting_an_environment_tells_the_node_and_runs_once_the_node_reports_i
     let (status, started) = fixture.start().await;
     assert_eq!((status, started["state"].clone(), started["controller"].clone(), started["node_name"].clone()), (200, json!("starting"), json!("agent"), json!("laptop")), "{started}");
 
-    let ControlToNode::StartEnvironment { conversation_id, width, height } = fixture.link.next().await else {
+    let ControlToNode::StartEnvironment { conversation_id, width, height, apps } = fixture.link.next().await else {
         panic!("expected the node to be told to start an environment");
     };
-    assert_eq!((conversation_id, width, height), (fixture.conversation_id, 1280, 800));
+    assert_eq!((conversation_id, width, height, apps), (fixture.conversation_id, 1280, 800, vec!["chromium".to_string()]));
 
     fixture.link.send(NodeToControl::EnvironmentChanged { conversation_id, state: EnvironmentState::Running, failure: None, browser: Some("Chromium 141".into()) }).await;
     let running = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.state == EnvironmentState::Running => Some(environment), _ => None }).await;
@@ -441,4 +453,504 @@ async fn the_novnc_files_are_served_without_signing_in() {
 
     assert_eq!((page.status().as_u16(), script.status().as_u16(), missing.status().as_u16()), (200, 200, 404));
     assert_eq!(script.headers()["content-type"], "text/javascript");
+}
+
+async fn start_with(fixture: &Fixture, body: Value) -> (u16, Value) {
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("")).json(&body)).await
+}
+
+async fn report_windows(fixture: &mut Fixture, windows: Vec<EnvironmentWindow>) {
+    fixture.link.send(NodeToControl::EnvironmentWindows { conversation_id: fixture.conversation_id, windows }).await;
+}
+
+async fn answer_launch(link: &mut NodeLink, window: Option<i64>, error: Option<String>) -> (String, Option<String>) {
+    let ControlToNode::EnvironmentLaunch { request_id, app, file, .. } = link.next().await else {
+        panic!("expected the node to be asked to open an app");
+    };
+    link.send(NodeToControl::EnvironmentLaunched { request_id, window, error }).await;
+
+    (app, file)
+}
+
+#[tokio::test]
+async fn an_environment_starts_with_the_apps_the_person_ticked() {
+    let mut fixture = fixture(Some(capable())).await;
+
+    let (status, _) = start_with(&fixture, json!({"apps": ["org.gnome.Nautilus", "chromium"]})).await;
+    let ControlToNode::StartEnvironment { apps, .. } = fixture.link.next().await else {
+        panic!("expected the node to be told to start an environment");
+    };
+
+    assert_eq!((status, apps), (200, vec!["org.gnome.Nautilus".to_string(), "chromium".to_string()]));
+}
+
+#[tokio::test]
+async fn ticking_no_apps_starts_an_empty_desktop() {
+    let mut fixture = fixture(Some(capable())).await;
+
+    let (status, _) = start_with(&fixture, json!({"apps": []})).await;
+    let ControlToNode::StartEnvironment { apps, .. } = fixture.link.next().await else {
+        panic!("expected the node to be told to start an environment");
+    };
+
+    assert_eq!((status, apps), (200, Vec::<String>::new()));
+}
+
+#[tokio::test]
+async fn starting_with_an_app_the_node_does_not_offer_says_what_it_offers() {
+    let fixture = fixture(Some(capable())).await;
+
+    let (status, refused) = start_with(&fixture, json!({"apps": ["gimp"]})).await;
+
+    assert_eq!(status, 400, "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("laptop does not offer \"gimp\". It offers: org.gnome.Nautilus, chromium."), "{refused}");
+}
+
+#[tokio::test]
+async fn the_windows_a_node_reports_are_in_the_environment() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    report_windows(&mut fixture, vec![window(7, "Inbox", true), window(9, "Docs", false)]).await;
+
+    let user = fixture.server.user.clone();
+    let url = fixture.url("");
+    let environment = common::eventually("the windows", || async {
+        let (_, environment) = user.json(user.get(&url)).await;
+
+        (environment["windows"].as_array().is_some_and(|windows| windows.len() == 2)).then_some(environment)
+    })
+    .await;
+
+    assert_eq!(environment["windows"][0], json!({"id": 7, "app_id": "chromium", "title": "Inbox", "focused": true}));
+    assert_eq!(environment["agent_window"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_agent_opening_an_app_focuses_its_window_and_owns_it() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let (launched, reply) = tokio::join!(answer_launch(&mut fixture.link, Some(12), None), tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_launch", json!({"app": "org.gnome.Nautilus", "file": "/srv/report.pdf"})));
+    let (_, environment) = fixture.server.user.json(fixture.server.user.get(&fixture.url(""))).await;
+    let (_, actions) = fixture.server.user.json(fixture.server.user.get(&fixture.url("/actions"))).await;
+
+    assert_eq!(launched, ("org.gnome.Nautilus".to_string(), Some("/srv/report.pdf".to_string())));
+    assert!(text_of(&reply).contains("Opened Files."), "{reply}");
+    assert_eq!((environment["agent_window"].clone(), environment["controller"].clone()), (json!(12), json!("agent")));
+    assert_eq!(actions[0]["label"], "Opened Files");
+}
+
+#[tokio::test]
+async fn the_agent_opening_an_unknown_app_is_told_which_apps_are_offered() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_launch", json!({"app": "gimp"})).await;
+
+    assert_eq!(reply["result"]["isError"], true);
+    assert!(text_of(&reply).contains("It offers: org.gnome.Nautilus, chromium."), "{reply}");
+}
+
+#[tokio::test]
+async fn an_agent_window_that_closes_is_no_longer_the_agents() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    tokio::join!(answer_launch(&mut fixture.link, Some(12), None), tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_launch", json!({"app": "chromium"})));
+
+    report_windows(&mut fixture, vec![window(3, "Other", true)]).await;
+
+    let user = fixture.server.user.clone();
+    let url = fixture.url("");
+    common::eventually("the agent window cleared", || async {
+        let (_, environment) = user.json(user.get(&url)).await;
+
+        (environment["agent_window"].is_null() && environment["windows"].as_array().is_some_and(|windows| windows.len() == 1)).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_person_opening_an_app_takes_over_without_owning_its_window() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let user = fixture.server.user.clone();
+    let url = fixture.url("/apps");
+
+    let (opened, (status, environment)) = tokio::join!(answer_launch(&mut fixture.link, Some(5), None), user.json(user.post(&url).json(&json!({"app": "chromium"}))));
+
+    assert_eq!(opened.0, "chromium");
+    assert_eq!((status, environment["controller"].clone(), environment["agent_window"].clone()), (200, json!("person"), Value::Null), "{environment}");
+}
+
+#[tokio::test]
+async fn the_person_opening_an_unknown_app_is_refused() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let (status, refused) = fixture.server.user.json(fixture.server.user.post(&fixture.url("/apps")).json(&json!({"app": "gimp"}))).await;
+
+    assert_eq!(status, 400, "{refused}");
+}
+
+#[tokio::test]
+async fn the_person_switching_window_asks_the_node_and_takes_over() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    report_windows(&mut fixture, vec![window(7, "Inbox", true), window(9, "Docs", false)]).await;
+    let user = fixture.server.user.clone();
+    let url = fixture.url("");
+    common::eventually("the windows", || async {
+        let (_, environment) = user.json(user.get(&url)).await;
+
+        (environment["windows"].as_array().is_some_and(|windows| windows.len() == 2)).then_some(())
+    })
+    .await;
+    let focus = fixture.url("/windows/9/focus");
+
+    let (focused, (status, environment)) = tokio::join!(
+        async {
+            let ControlToNode::EnvironmentFocus { request_id, window, .. } = fixture.link.next().await else {
+                panic!("expected the node to be asked to focus a window");
+            };
+            fixture.link.send(NodeToControl::EnvironmentInputDone { request_id, error: None }).await;
+
+            window
+        },
+        user.json(user.post(&focus))
+    );
+
+    assert_eq!((focused, status, environment["controller"].clone()), (9, 200, json!("person")), "{environment}");
+    assert_eq!(environment["windows"][1]["focused"], true);
+}
+
+#[tokio::test]
+async fn switching_to_a_window_that_is_not_open_is_not_found() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let (status, _) = fixture.server.user.json(fixture.server.user.post(&fixture.url("/windows/404/focus"))).await;
+
+    assert_eq!(status, 404);
+}
+
+async fn environment_lines(fixture: &Fixture) -> Vec<String> {
+    let events = fixture.server.user.clone();
+    let url = format!("/api/v1/conversations/{}/events", fixture.conversation_id);
+    let (_, events) = events.json(events.get(&url)).await;
+
+    events.as_array().unwrap().iter().filter(|event| event["kind"] == "environment").map(|event| event["payload"]["text"].as_str().unwrap().to_string()).collect()
+}
+
+async fn next_prompt(link: &mut NodeLink) -> String {
+    loop {
+        if let ControlToNode::Prompt { text, .. } = link.next().await {
+            return text;
+        }
+    }
+}
+
+#[tokio::test]
+async fn starting_taking_over_and_handing_back_are_lines_in_the_thread() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("/take-over"))).await;
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("/hand-back"))).await;
+
+    assert_eq!(
+        environment_lines(&fixture).await,
+        [
+            "You started the environment on laptop.",
+            "You took over the environment. The agent is paused until you hand back.",
+            "You handed back the environment.",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn taking_over_and_handing_back_are_told_to_the_agent_with_its_next_message() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    fixture.link.start_session(fixture.conversation_id, "acp-1").await;
+    let person = fixture.person().await;
+
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("/take-over"))).await;
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("/hand-back"))).await;
+    fixture.server.user.json(fixture.server.user.post(&format!("/api/v1/conversations/{}/prompt", fixture.conversation_id)).json(&json!({"text": "carry on"}))).await;
+
+    let text = next_prompt(&mut fixture.link).await;
+
+    assert!(text.contains(&format!("{person} took over the environment.")), "{text}");
+    assert!(text.contains(&format!("{person} handed the environment back.")), "{text}");
+    assert!(text.ends_with("carry on"), "{text}");
+}
+
+#[tokio::test]
+async fn closing_the_conversation_stops_its_environment() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let (status, _) = fixture.server.user.json(fixture.server.user.post(&format!("/api/v1/conversations/{}/close", fixture.conversation_id))).await;
+    assert_eq!(status, 204);
+
+    loop {
+        if fixture.link.next().await == (ControlToNode::StopEnvironment { conversation_id: fixture.conversation_id }) {
+            break;
+        }
+    }
+
+    let (_, environment) = fixture.server.user.json(fixture.server.user.get(&fixture.url(""))).await;
+
+    assert_eq!((environment["state"].clone(), environment["closed_with_conversation"].clone()), (json!("stopped"), json!(true)), "{environment}");
+    assert_eq!(environment_lines(&fixture).await.last().map(String::as_str), Some("The environment stopped when the conversation closed."));
+}
+
+#[tokio::test]
+async fn starting_an_environment_in_an_archived_conversation_reopens_it() {
+    let fixture = fixture(Some(capable())).await;
+    let conversation = format!("/api/v1/conversations/{}", fixture.conversation_id);
+    fixture.server.user.json(fixture.server.user.patch(&conversation).json(&json!({"archived": true}))).await;
+
+    let (status, _) = fixture.start().await;
+    let (_, reopened) = fixture.server.user.json(fixture.server.user.get(&conversation)).await;
+
+    assert_eq!(status, 200);
+    assert!(reopened["archived_at"].is_null(), "{reopened}");
+}
+
+#[tokio::test]
+async fn stopping_by_hand_is_not_recorded_as_closing_with_the_conversation() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let (_, stopped) = fixture.server.user.json(fixture.server.user.delete(&fixture.url(""))).await;
+
+    assert!(stopped["closed_with_conversation"].is_null(), "{stopped}");
+}
+
+#[tokio::test]
+async fn the_screen_stream_is_view_only_until_the_person_takes_over() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let mut socket = fixture.stream_socket().await;
+    let ControlToNode::OpenEnvironmentStream { stream_id, .. } = fixture.link.next().await else {
+        panic!("expected the node to be asked to open the stream");
+    };
+    let encoding = base64::engine::general_purpose::STANDARD;
+    let key_press = vec![4u8, 1, 0, 0, 0, 0, 0, 97];
+    let refresh = vec![3u8, 1, 0, 0, 0, 0, 0, 100, 0, 100];
+
+    socket.send(Message::Binary([b"RFB 003.008\n".to_vec(), vec![1, 1]].concat().into())).await.unwrap();
+    assert!(matches!(fixture.link.next().await, ControlToNode::EnvironmentStreamInput { .. }));
+
+    socket.send(Message::Binary([key_press.clone(), refresh.clone()].concat().into())).await.unwrap();
+    assert_eq!(fixture.link.next().await, ControlToNode::EnvironmentStreamInput { stream_id, data: encoding.encode(&refresh) });
+
+    fixture.server.user.json(fixture.server.user.post(&fixture.url("/take-over"))).await;
+    socket.send(Message::Binary(key_press.clone().into())).await.unwrap();
+
+    assert_eq!(fixture.link.next().await, ControlToNode::EnvironmentStreamInput { stream_id, data: encoding.encode(&key_press) });
+}
+
+fn send_button_box() -> Value {
+    json!({"present": {"noul": 0.97}, "target": {"box": {"top": 0.1, "bottom": 0.2, "left": 0.5, "right": 0.55}, "confidence": 0.9}})
+}
+
+fn step(operation: &str, target: &str) -> Value {
+    json!({"operation": {"choice": operation}, "target": {"choice": target}})
+}
+
+async fn answer_screenshot(link: &mut NodeLink, png: &str) {
+    let ControlToNode::EnvironmentScreenshot { request_id, .. } = link.next().await else {
+        panic!("expected the node to be asked for a screenshot");
+    };
+    link.send(NodeToControl::EnvironmentScreenshotTaken { request_id, png: Some(png.to_string()), error: None }).await;
+}
+
+async fn flights_page(link: &mut NodeLink, acted: &mut Vec<BrowserAction>) {
+    loop {
+        match link.next().await {
+            ControlToNode::EnvironmentBrowserRead { request_id, .. } => {
+                let controls = vec![BrowserControl { index: 1, role: "textbox".into(), name: "From".into(), value: String::new() }, BrowserControl { index: 2, role: "button".into(), name: "Search flights".into(), value: String::new() }];
+                link.send(NodeToControl::EnvironmentBrowserControls { request_id, page: "Flights".into(), controls, error: None }).await;
+            }
+            ControlToNode::EnvironmentBrowserAct { request_id, action, .. } => {
+                acted.push(action);
+                link.send(NodeToControl::EnvironmentBrowserActed { request_id, error: None }).await;
+            }
+            other => panic!("unexpected message for the browser: {other:?}"),
+        }
+    }
+}
+
+async fn environment_of(fixture: &Fixture) -> Value {
+    fixture.server.user.json(fixture.server.user.get(&fixture.url(""))).await.1
+}
+
+#[tokio::test]
+async fn clicking_a_described_target_finds_it_on_a_screenshot_and_clicks_its_centre() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let (base, jev) = fake_jev().await;
+    add_decision_provider(&fixture.server, &base, "OpenJev", json!(["browser"])).await;
+    jev.scripted.lock().unwrap().push_back(send_button_box());
+    let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG fake");
+    let link = &mut fixture.link;
+
+    let (action, reply) = tokio::join!(
+        async {
+            answer_screenshot(link, &png).await;
+            answer_input(link).await
+        },
+        tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_click", json!({"target": "the Send button"}))
+    );
+    let asked = jev.asked.lock().unwrap().last().cloned().unwrap();
+    let environment = environment_of(&fixture).await;
+
+    assert_eq!(action, EnvironmentInputAction::Click { x: 672, y: 120, button: None });
+    assert!(text_of(&reply).starts_with("Clicked “the Send button”. Found at 672, 120 by OpenJev in "), "{reply}");
+    assert_eq!((asked["questions"]["target"]["type"].clone(), asked["assets"]["screen"]["data_base64"].clone()), (json!("box"), json!(png)));
+    assert_eq!(environment["target"], json!({"x": 672, "y": 120, "label": "the Send button"}));
+}
+
+#[tokio::test]
+async fn a_target_the_model_cannot_find_fails_without_clicking() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let (base, jev) = fake_jev().await;
+    add_decision_provider(&fixture.server, &base, "OpenJev", json!(["browser"])).await;
+    jev.scripted.lock().unwrap().push_back(json!({"present": {"noul": 0.04}, "target": {"box": {"top": 0.4, "bottom": 0.6, "left": 0.4, "right": 0.6}, "confidence": 0.8}}));
+    let link = &mut fixture.link;
+
+    let (_, reply) = tokio::join!(answer_screenshot(link, "cG5n"), tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_click", json!({"target": "the Send button"})));
+    let (_, actions) = fixture.server.user.json(fixture.server.user.get(&fixture.url("/actions"))).await;
+
+    assert_eq!((text_of(&reply), reply["result"]["isError"].clone(), actions), ("Could not find the Send button on screen".to_string(), json!(true), json!([])));
+}
+
+#[tokio::test]
+async fn a_target_with_no_browser_provider_tells_the_agent_to_click_by_position() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "environment_click", json!({"target": "the Send button"})).await;
+
+    assert!(text_of(&reply).contains("click with x and y instead"), "{reply}");
+    assert_eq!(reply["result"]["isError"], true);
+}
+
+#[tokio::test]
+async fn a_browser_task_picks_each_step_acts_by_number_and_ends_done() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let (base, jev) = fake_jev().await;
+    add_decision_provider(&fixture.server, &base, "OpenJev", json!(["browser"])).await;
+    jev.scripted.lock().unwrap().extend([step("click", "2"), step("done", "1")]);
+    let mut acted = Vec::new();
+
+    let reply = tokio::select! {
+        reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "browser_task", json!({"goal": "Search for flights"})) => reply,
+        _ = flights_page(&mut fixture.link, &mut acted) => unreachable!(),
+    };
+    let environment = environment_of(&fixture).await;
+    let (_, actions) = fixture.server.user.json(fixture.server.user.get(&fixture.url("/actions"))).await;
+    let asked = jev.asked.lock().unwrap().last().cloned().unwrap();
+
+    assert!(text_of(&reply).starts_with("Browser task done after 1 steps in "), "{reply}");
+    assert_eq!(acted, [BrowserAction::Click { index: 2 }]);
+    assert_eq!((environment["browser_task"]["state"].clone(), environment["browser_task"]["provider"].clone(), environment["browser_task"]["goal"].clone()), (json!("done"), json!("OpenJev"), json!("Search for flights")));
+    assert_eq!(environment["browser_task"]["steps"][0]["label"], "Click: Search flights");
+    assert!(environment["browser_task"]["result"].as_str().unwrap().contains("Flights"), "{environment}");
+    assert!(asked["state"]["controls"].as_str().unwrap().contains("2 | button | Search flights"), "{asked}");
+    assert!(asked["questions"]["target"]["criteria"]["2"].as_str().unwrap().contains("Search flights"), "{asked}");
+    assert_eq!(actions[1]["label"], "Clicked “Search flights”");
+}
+
+#[tokio::test]
+async fn a_browser_task_that_needs_the_person_ends_blocked_with_why() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let (base, jev) = fake_jev().await;
+    add_decision_provider(&fixture.server, &base, "OpenJev", json!(["browser"])).await;
+    jev.scripted.lock().unwrap().push_back(step("blocked", "1"));
+    let mut acted = Vec::new();
+
+    let reply = tokio::select! {
+        reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "browser_task", json!({"goal": "Search for flights"})) => reply,
+        _ = flights_page(&mut fixture.link, &mut acted) => unreachable!(),
+    };
+    let environment = environment_of(&fixture).await;
+
+    assert!(text_of(&reply).contains("Browser task blocked after 0 steps. Why: "), "{reply}");
+    assert_eq!(environment["browser_task"]["state"], "blocked");
+    assert!(environment["browser_task"]["why"].is_string(), "{environment}");
+    assert!(acted.is_empty());
+}
+
+#[tokio::test]
+async fn a_browser_task_with_no_browser_provider_points_the_agent_at_screenshots_and_clicks() {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+
+    let reply = tool(&fixture.server, &fixture.token, fixture.conversation_id, "browser_task", json!({"goal": "Search for flights"})).await;
+
+    assert!(text_of(&reply).contains("environment_screenshot and environment_click"), "{reply}");
+    assert_eq!(reply["result"]["isError"], true);
+}
+
+async fn interrupt_a_browser_task(interruption: &str) -> (String, Value, mycelium_proto::api::Environment) {
+    let mut fixture = fixture(Some(capable())).await;
+    fixture.running().await;
+    let (base, jev) = fake_jev().await;
+    add_decision_provider(&fixture.server, &base, "OpenJev", json!(["browser"])).await;
+    jev.scripted.lock().unwrap().extend((0..5).map(|_| step("wait", "1")));
+    let mut stream = fixture.server.user.stream().await;
+    let mut acted = Vec::new();
+    let interrupt = fixture.url(interruption);
+    let environment_url = fixture.url("");
+    let server = &fixture.server;
+    let token = fixture.token.clone();
+    let conversation_id = fixture.conversation_id;
+
+    let reply = tokio::select! {
+        reply = async {
+            let (reply, _) = tokio::join!(
+                tool(server, &token, conversation_id, "browser_task", json!({"goal": "Search for flights"})),
+                async {
+                    common::eventually("the browser task running", || async {
+                        let (_, environment) = server.user.json(server.user.get(&environment_url)).await;
+
+                        (environment["browser_task"]["state"] == "running").then_some(())
+                    })
+                    .await;
+                    server.user.json(server.user.post(&interrupt)).await;
+                }
+            );
+
+            reply
+        } => reply,
+        _ = flights_page(&mut fixture.link, &mut acted) => unreachable!(),
+    };
+    let published = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.browser_task.as_ref().is_some_and(|task| task.state == mycelium_proto::api::BrowserTaskState::Stopped) => Some(environment), _ => None }).await;
+
+    (text_of(&reply), environment_of(&fixture).await, published)
+}
+
+#[tokio::test]
+async fn taking_over_stops_a_browser_task_and_tells_the_agent_who_did() {
+    let (reply, environment, published) = interrupt_a_browser_task("/take-over").await;
+
+    assert!(reply.contains("Browser task stopped when") && reply.contains("took over, after "), "{reply}");
+    assert_eq!((environment["browser_task"]["state"].clone(), environment["browser_task"]["stopped_by"].clone()), (json!("stopped"), json!("took_over")));
+    assert_eq!(published.browser_task.unwrap().stopped_by.as_deref(), Some("took_over"));
+}
+
+#[tokio::test]
+async fn the_stop_task_route_ends_a_browser_task_without_taking_over() {
+    let (reply, environment, published) = interrupt_a_browser_task("/browser-task/stop").await;
+
+    assert!(reply.contains("stopped it, after "), "{reply}");
+    assert_eq!((environment["browser_task"]["stopped_by"].clone(), environment["controller"].clone()), (json!("stop"), json!("agent")));
+    assert_eq!(published.browser_task.unwrap().stopped_by.as_deref(), Some("stop"));
 }

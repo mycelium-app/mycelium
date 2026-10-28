@@ -14,6 +14,7 @@ mod coolify;
 mod chat_import;
 mod chat_tool_setup;
 mod chat_tools;
+mod chat_agents;
 mod chats;
 mod continue_elsewhere;
 mod conversations;

@@ -18,13 +18,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.border
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import mycelium.api.ApiException
 import mycelium.api.Conversation
+import mycelium.api.LoginState
 import mycelium.api.CreateChatRequest
 import mycelium.api.ModelProvider
+import mycelium.state.AgentPick
 import mycelium.state.Store
+import mycelium.state.agentPicks
 
 @Composable
-fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSettings: () -> Unit = {}) {
+fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSettings: () -> Unit = {}, onOpenNodes: () -> Unit = {}) {
     val colors = MyTheme.colors
     val state by store.state.collectAsState()
     var providers by remember { mutableStateOf<List<ModelProvider>?>(null) }
@@ -33,6 +43,10 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     var message by remember { mutableStateOf(TextFieldValue("")) }
     val attached = rememberAttachmentDrafts()
     var messageError by remember { mutableStateOf<String?>(null) }
+    var agentPick by remember { mutableStateOf<AgentPick?>(null) }
+    var agentProblem by remember { mutableStateOf<String?>(null) }
+    val accountFocus = remember { FocusRequester() }
+    val picks = remember(state.nodes) { agentPicks(state.nodes.values) }
 
     LaunchedEffect(Unit) {
         store.act { providers = store.api.modelProviders() }
@@ -42,8 +56,18 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
     val provider = loaded?.firstOrNull { it.id == providerId } ?: loaded?.firstOrNull { it.models.isNotEmpty() }
     val chosenModel = provider?.models?.firstOrNull { it == model } ?: provider?.defaultModel?.takeIf { it in provider.models } ?: provider?.models?.firstOrNull()
 
+    LaunchedEffect(state.nodes, agentPick) {
+        val picked = agentPick
+
+        if (agentProblem != null && picked != null && state.nodes.values.any { node -> node.online && node.logins.any { it.agent == picked.agent && it.state == LoginState.SignedIn && (picked.account == null || it.account == picked.account) } }) {
+            agentProblem = null
+        }
+    }
+
     fun create() {
-        if (provider == null || chosenModel == null) {
+        val picked = agentPick
+
+        if (picked == null && (provider == null || chosenModel == null)) {
             return
         }
 
@@ -55,15 +79,25 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
         }
 
         messageError = null
+        agentProblem = null
         val files = attached.drafts.map { it.file }
+        val request = if (picked != null) CreateChatRequest(agent = picked.agent, account = picked.account) else CreateChatRequest(provider?.id, chosenModel)
 
         store.act {
-            if (files.isEmpty()) {
-                onCreated(store.api.createChat(CreateChatRequest(provider.id, chosenModel, text)))
-            } else {
-                val created = store.api.createChat(CreateChatRequest(provider.id, chosenModel))
-                store.send(created.id, text, files)
-                onCreated(created)
+            try {
+                if (files.isEmpty()) {
+                    onCreated(store.api.createChat(request.copy(prompt = text)))
+                } else {
+                    val created = store.api.createChat(request)
+                    store.send(created.id, text, files)
+                    onCreated(created)
+                }
+            } catch (problem: ApiException) {
+                if (problem.code != "no_node_online") {
+                    throw problem
+                }
+
+                agentProblem = problem.message
             }
         }
     }
@@ -77,7 +111,7 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             return@Column
         }
 
-        if (provider == null) {
+        if (provider == null && picks.isEmpty()) {
             Column(Modifier.padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
                 Label("No chat model is set up. Add a provider in Settings, under Chat models, then start a chat.", color = colors.textMuted)
 
@@ -97,6 +131,19 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
             ) {
                 Label("What's on your mind?", style = Tokens.Type.Display)
 
+                agentProblem?.let { problem ->
+                    Column(
+                        Modifier.fillMaxWidth().border(Tokens.Size.Hairline, colors.statusFailed, ControlShape).padding(Tokens.Space.S3).semantics { liveRegion = LiveRegionMode.Assertive },
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+                    ) {
+                        Label("There is a problem", Modifier.semantics { heading() }, Tokens.Type.UiStrong, colors.statusFailed)
+                        MyButton({ runCatching { accountFocus.requestFocus() } }, text = problem, variant = ButtonVariant.Ghost, description = "Go to Account: $problem")
+                        Row {
+                            MyButton(onOpenNodes, text = "Nodes", icon = MyIcon.Server, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                        }
+                    }
+                }
+
                 ComposerCard(
                     value = message,
                     onValueChange = { message = it; messageError = null },
@@ -107,12 +154,17 @@ fun NewChatScreen(store: Store, onCreated: (Conversation) -> Unit, onOpenSetting
                     trailing = {
                         ModelPicker(
                             ModelPickerControls(
-                                loaded,
-                                provider.id,
+                                loaded.orEmpty(),
+                                provider?.id,
                                 chosenModel,
-                                recent = recentModels(state.conversations.values, loaded),
+                                recent = recentModels(state.conversations.values, loaded.orEmpty()),
                                 onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = providers?.let(change) }, picked, favouriteModel, on) },
-                            ) { picked, chosenPick -> providerId = picked.id; model = chosenPick },
+                                agents = picks,
+                                agent = agentPick,
+                                onSelectAgent = { agentPick = it; agentProblem = null },
+                                focus = accountFocus,
+                                problem = agentProblem,
+                            ) { picked, chosenPick -> agentPick = null; providerId = picked.id; model = chosenPick },
                         )
                     },
                 )

@@ -134,6 +134,25 @@ fn error_frame(id: &Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
+fn environment_tool_allowance(request: &Value) -> Option<String> {
+    let names = [request["toolCall"]["title"].as_str(), request["toolCall"]["_meta"]["claudeCode"]["toolName"].as_str()];
+    let own_environment_tool = names.into_iter().flatten().any(|name| {
+        let tool = name.rsplit(['/', ' ']).next().unwrap_or(name).rsplit("__").next().unwrap_or(name);
+
+        name.contains("mycelium") && (tool.starts_with("environment_") || tool == "browser_task")
+    });
+
+    if !own_environment_tool {
+        return None;
+    }
+
+    let options = request["options"].as_array()?;
+    let allow = |kind: &str| options.iter().find(|option| option["kind"] == kind);
+    let chosen = allow("allow_once").or_else(|| allow("allow_always"))?;
+
+    chosen["optionId"].as_str().map(str::to_string)
+}
+
 fn permission_request_id(id: &Value) -> String {
     match id {
         Value::String(text) => text.clone(),
@@ -576,6 +595,16 @@ impl SessionState {
         let key = id.to_string();
         self.unanswered_requests.insert(key, id.clone());
 
+        if method == "session/request_permission" && self.live {
+            let allowed = environment_tool_allowance(&params);
+
+            if let Some(option_id) = allowed {
+                let outcome = json!({"outcome": "selected", "optionId": option_id});
+
+                return vec![self.outgoing(result_frame(&id, json!({"outcome": outcome})))];
+            }
+        }
+
         if method == "session/request_permission" {
             let request_id = permission_request_id(&id);
             self.permissions.insert(request_id.clone(), id);
@@ -927,6 +956,19 @@ mod tests {
         let answer = state.on_command(Command::PermissionResponse { request_id: "9001".into(), outcome: outcome.clone() });
 
         assert_eq!(sent_frames(&answer), [json!({"jsonrpc": "2.0", "id": 9001, "result": {"outcome": outcome}})]);
+    }
+
+    #[test]
+    fn environment_tools_are_allowed_without_asking_but_other_tools_still_ask() {
+        let mut state = SessionState::new(conversation(), plan(None), 0);
+        started(&mut state, json!({"sessionId": "s1"}));
+        let options = json!([{"optionId": "always", "kind": "allow_always"}, {"optionId": "once", "kind": "allow_once"}, {"optionId": "no", "kind": "reject_once"}]);
+
+        let allowed = state.on_entry(4, Direction::In, json!({"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission", "params": {"toolCall": {"title": "mcp__mycelium__environment_click"}, "options": options}}));
+        let asked = state.on_entry(5, Direction::In, json!({"jsonrpc": "2.0", "id": 9002, "method": "session/request_permission", "params": {"toolCall": {"title": "mcp__mycelium__remember"}, "options": options}}));
+
+        assert_eq!(sent_frames(&allowed), [json!({"jsonrpc": "2.0", "id": 9001, "result": {"outcome": {"outcome": "selected", "optionId": "once"}}})]);
+        assert!(matches!(&asked[0], Action::Emit(5, NodeToControl::PermissionRequest { .. })));
     }
 
     #[test]

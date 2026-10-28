@@ -49,6 +49,7 @@ class WellnessClockTest {
         val onBreak = BreakClock().after(50, settings).startBreak()
 
         assertEquals(BreakPhase.OnBreak, onBreak.after(100, settings).phase)
-        assertEquals(BreakPhase.Idle, onBreak.endBreak().phase)
+        assertEquals(BreakPhase.Noting, onBreak.endBreak().phase)
+        assertEquals(BreakPhase.Idle, onBreak.endBreak().backToWork().phase)
     }
 }

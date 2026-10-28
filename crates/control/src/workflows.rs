@@ -772,7 +772,9 @@ async fn advance(state: &AppState, id: Uuid) -> ApiResult<()> {
                         state,
                         row.owner,
                         CreateChatRequest {
-                            provider_id: provider,
+                            provider_id: Some(provider),
+                            agent: None,
+                            account: None,
                             model: spec.model.clone(),
                             prompt: Some(text),
                             parent_id: None,

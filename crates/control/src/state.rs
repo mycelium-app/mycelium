@@ -115,8 +115,23 @@ pub struct EnvironmentInputAnswer {
     pub error: Option<String>,
 }
 
+pub struct EnvironmentLaunchAnswer {
+    pub window: Option<i64>,
+    pub error: Option<String>,
+}
+
 pub struct EnvironmentScreenshotAnswer {
     pub png: Option<String>,
+    pub error: Option<String>,
+}
+
+pub struct BrowserControlsAnswer {
+    pub page: String,
+    pub controls: Vec<mycelium_proto::link::BrowserControl>,
+    pub error: Option<String>,
+}
+
+pub struct BrowserActedAnswer {
     pub error: Option<String>,
 }
 
@@ -190,6 +205,9 @@ node_answers! {
     ResetAnswer => reset_requests,
     EnvironmentInputAnswer => environment_input_requests,
     EnvironmentScreenshotAnswer => environment_screenshot_requests,
+    BrowserControlsAnswer => browser_controls_requests,
+    BrowserActedAnswer => browser_acted_requests,
+    EnvironmentLaunchAnswer => environment_launch_requests,
 }
 
 #[derive(Default)]
@@ -214,6 +232,9 @@ pub struct Hub {
     reset_requests: PendingRequests<ResetAnswer>,
     environment_input_requests: PendingRequests<EnvironmentInputAnswer>,
     environment_screenshot_requests: PendingRequests<EnvironmentScreenshotAnswer>,
+    browser_controls_requests: PendingRequests<BrowserControlsAnswer>,
+    browser_acted_requests: PendingRequests<BrowserActedAnswer>,
+    environment_launch_requests: PendingRequests<EnvironmentLaunchAnswer>,
     pub(crate) environments: crate::environments::EnvironmentRegistry,
     resources: Mutex<HashMap<Uuid, WatchedResources>>,
     moves: Mutex<HashMap<Uuid, MoveProgress>>,

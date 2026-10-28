@@ -39,6 +39,7 @@ object EventKinds {
     const val TeachMode = "teach_mode"
     const val OpenOutline = "open_outline"
     const val GoalReport = "goal_report"
+    const val Environment = "environment"
 }
 
 @Serializable
@@ -189,6 +190,7 @@ data class Conversation(
     @SerialName("agent_active") val agentActive: Boolean = false,
     @SerialName("teach_me") val teachMe: Boolean = false,
     val routing: String? = null,
+    val scratch: Boolean = false,
 )
 
 @Serializable

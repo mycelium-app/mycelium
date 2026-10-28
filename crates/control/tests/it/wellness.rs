@@ -110,6 +110,42 @@ async fn overview_reports_seven_days_and_breaks() {
     assert!(after["last_break_at"].is_string());
 }
 
+#[tokio::test]
+async fn an_ended_break_awaits_a_note_until_one_is_given() {
+    let server = Server::start().await;
+
+    let (_, started) = server.user.json(server.user.post("/api/v1/wellness/breaks").json(&json!({"minutes": 5}))).await;
+    assert_eq!(overview(&server).await["awaiting_note"], Value::Null);
+
+    server.user.json(server.user.delete("/api/v1/wellness/breaks/current")).await;
+
+    let waiting = overview(&server).await;
+    assert_eq!((waiting["awaiting_note"]["id"].clone(), waiting["awaiting_note"]["ended_early"].clone(), waiting["awaiting_note"]["planned_minutes"].clone()), (started["id"].clone(), json!(true), json!(5)));
+    assert!(waiting["awaiting_note"]["ended_at"].is_string());
+
+    let path = format!("/api/v1/wellness/breaks/{}/note", started["id"].as_str().unwrap());
+    let (status, refused) = server.user.json(server.user.put(&path).json(&json!({"note": "  \n"}))).await;
+    assert_eq!((status, refused["error"].clone(), refused["message"].clone()), (400, json!("break_note_missing"), json!("Enter what you did in your break")));
+    assert_ne!(overview(&server).await["awaiting_note"], Value::Null);
+
+    let (status, saved) = server.user.json(server.user.put(&path).json(&json!({"note": "  Made a tea  "}))).await;
+    assert_eq!((status, saved["note"].clone()), (200, json!("Made a tea")));
+
+    let after = overview(&server).await;
+    assert_eq!(after["awaiting_note"], Value::Null);
+    assert_eq!(after["recent_breaks"][0]["note"], "Made a tea");
+}
+
+#[tokio::test]
+async fn a_break_still_running_cannot_be_noted() {
+    let server = Server::start().await;
+
+    let (_, started) = server.user.json(server.user.post("/api/v1/wellness/breaks").json(&json!({"minutes": 5}))).await;
+    let (status, _) = server.user.json(server.user.put(&format!("/api/v1/wellness/breaks/{}/note", started["id"].as_str().unwrap())).json(&json!({"note": "Too soon"}))).await;
+
+    assert_eq!(status, 404);
+}
+
 async fn puzzles(server: &Server) -> Value {
     server.user.json(server.user.get("/api/v1/wellness/puzzles?days=30")).await.1
 }

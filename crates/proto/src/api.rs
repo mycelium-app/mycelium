@@ -561,7 +561,7 @@ pub enum ModelProviderKind {
     Anthropic,
 }
 
-pub const DECISION_USES: [&str; 1] = ["decide"];
+pub const DECISION_USES: [&str; 2] = ["decide", "browser"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecisionProvider {
@@ -917,7 +917,12 @@ impl std::fmt::Debug for PatchChatToolServerRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateChatRequest {
-    pub provider_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2633,6 +2638,16 @@ pub struct Break {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ends_at: chrono::DateTime<chrono::Utc>,
     pub ended_early_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub planned_minutes: i32,
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub ended_early: bool,
+    pub note: Option<String>,
+    pub noted_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BreakNoteRequest {
+    pub note: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2648,6 +2663,10 @@ pub struct WellnessOverview {
     pub days: Vec<WellnessDay>,
     pub last_break_at: Option<chrono::DateTime<chrono::Utc>>,
     pub current_break: Option<Break>,
+    #[serde(default)]
+    pub awaiting_note: Option<Break>,
+    #[serde(default)]
+    pub recent_breaks: Vec<Break>,
     pub quiet_now: bool,
     pub held: i64,
     pub held_week: HeldWeek,
@@ -2893,6 +2912,33 @@ pub struct RunningEnvironment {
     pub memory_bytes: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentAppKind {
+    Browser,
+    FileManager,
+    Editor,
+    Office,
+    Mail,
+    Terminal,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentApp {
+    pub id: String,
+    pub name: String,
+    pub kind: EnvironmentAppKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentWindow {
+    pub id: i64,
+    pub app_id: String,
+    pub title: String,
+    pub focused: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentCapability {
     pub available: bool,
@@ -2904,6 +2950,8 @@ pub struct EnvironmentCapability {
     pub note: Option<String>,
     #[serde(default)]
     pub running: Vec<RunningEnvironment>,
+    #[serde(default)]
+    pub apps: Vec<EnvironmentApp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2929,6 +2977,46 @@ pub struct Environment {
     pub browser: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<EnvironmentTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_task: Option<BrowserTask>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub windows: Vec<EnvironmentWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_window: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closed_with_conversation: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserTaskState {
+    Running,
+    Done,
+    Blocked,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrowserTaskStep {
+    pub label: String,
+    pub millis: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrowserTask {
+    pub goal: String,
+    pub state: BrowserTaskState,
+    pub provider: String,
+    pub steps: Vec<BrowserTaskStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2950,6 +3038,13 @@ pub struct StartEnvironmentRequest {
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apps: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LaunchEnvironmentAppRequest {
+    pub app: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -41,6 +41,7 @@ import mycelium.state.conversationTitle
 import mycelium.state.compareVersions
 import mycelium.state.environmentCannotRunText
 import mycelium.state.environmentControl
+import mycelium.state.environmentOpenApps
 import mycelium.state.environmentRunningFor
 import mycelium.state.environmentVersionsText
 import mycelium.state.cpuSummary
@@ -276,6 +277,7 @@ private fun ResourcesTab(store: Store, node: NodeSummary, state: AppState, onOpe
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EnvironmentsSection(store: Store, node: NodeSummary, state: AppState, onOpenConversation: (String) -> Unit) {
     val colors = MyTheme.colors
@@ -288,8 +290,12 @@ private fun EnvironmentsSection(store: Store, node: NodeSummary, state: AppState
 
         DataTable(
             "Environments",
-            listOf(TableColumn("Conversation", 2.4f), TableColumn("Control", 1.2f), TableColumn("Running", numeric = true), TableColumn("Memory", numeric = true)),
-            running.mapIndexed { index, environment -> listOf(titles[index], environmentControl(environment.controller, null), environmentRunningFor(environment.startedAt, now), environment.memoryBytes?.let(::formatBytes).orEmpty()) },
+            listOf(TableColumn("Conversation", 2.4f), TableColumn("Control", 1.2f), TableColumn("Apps", 1.6f), TableColumn("Running", numeric = true), TableColumn("Memory", numeric = true)),
+            running.mapIndexed { index, environment ->
+                val held = state.environments[environment.conversationId]
+
+                listOf(titles[index], environmentControl(held?.controller ?: environment.controller, held?.person), held?.let { environmentOpenApps(it, capability.apps) }.orEmpty(), environmentRunningFor(environment.startedAt, now), environment.memoryBytes?.let(::formatBytes).orEmpty())
+            },
             "No environment is running on this node.",
             onRow = { onOpenConversation(running[it].conversationId) },
             rowDescription = { "Open ${titles[it]}" },
@@ -297,6 +303,20 @@ private fun EnvironmentsSection(store: Store, node: NodeSummary, state: AppState
                 MyButton({ store.stopEnvironment(running[index].conversationId) }, text = "Stop", size = ButtonSize.Sm, muted = true, description = "Stop the environment of ${titles[index]}")
             },
             status = "Can run environments  ·  ${environmentVersionsText(capability.versions)}",
+            footer = "An environment stops when its conversation closes or is deleted, or when ${node.name} shuts down.",
+            header = capability.apps.takeIf { it.isNotEmpty() }?.let { offered ->
+                {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S2), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                        Label("Offers", style = Tokens.Type.Meta, color = colors.textMuted)
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                            for (app in offered) {
+                                Tag(app.name, environmentAppIcon(app.kind))
+                            }
+                        }
+                    }
+                }
+            },
         )
 
         return

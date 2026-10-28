@@ -73,6 +73,7 @@ mod pricing;
 mod prompts;
 mod rate_limit;
 mod reflections;
+mod rfb;
 mod response_editor;
 mod response_filter;
 mod schedules;
@@ -247,6 +248,9 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/conversations/{id}/environment", post(environments::start).get(environments::get).delete(environments::stop))
         .route("/api/v1/conversations/{id}/environment/take-over", post(environments::take_over))
         .route("/api/v1/conversations/{id}/environment/hand-back", post(environments::hand_back))
+        .route("/api/v1/conversations/{id}/environment/browser-task/stop", post(environments::stop_browser_task))
+        .route("/api/v1/conversations/{id}/environment/apps", post(environments::open_app))
+        .route("/api/v1/conversations/{id}/environment/windows/{window}/focus", post(environments::focus_window))
         .route("/api/v1/conversations/{id}/environment/actions", get(environments::actions))
         .route("/api/v1/conversations/{id}/environment/stream", get(environments::stream))
         .route("/api/v1/conversations/{id}/environment/stream-ticket", post(environments::stream_ticket))
@@ -429,6 +433,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/wellness/heartbeat", post(wellness::heartbeat))
         .route("/api/v1/wellness/breaks", post(wellness::start_break))
         .route("/api/v1/wellness/breaks/current", delete(wellness::end_break))
+        .route("/api/v1/wellness/breaks/{id}/note", put(wellness::note_break))
         .route("/api/v1/wellness/overview", get(wellness::overview))
         .route("/api/v1/wellness/activity/day", get(wellness::activity_day))
         .route("/api/v1/wellness/activity/hours", get(wellness::activity_hours))

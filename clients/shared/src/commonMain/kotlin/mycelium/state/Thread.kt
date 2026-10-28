@@ -285,6 +285,7 @@ class ThreadBuilder {
             EventKinds.ModelChanged -> items += ThreadItem.ModelChanged(key, payload.string("provider_name").orEmpty(), payload.string("model").orEmpty())
             EventKinds.Continued -> items += continuedItem(key, payload)
             EventKinds.TeachMode -> items += ThreadItem.TeachMode(key, payload.boolean("on") ?: false)
+            EventKinds.Environment -> items += ThreadItem.Note(key, payload.string("text").orEmpty())
             EventKinds.GoalReport -> items += ThreadItem.GoalReport(key, payload.string("outcome").orEmpty(), payload.string("reason").orEmpty(), payload.string("at").orEmpty())
         }
     }
@@ -788,6 +789,7 @@ private fun continuedItem(key: String, payload: JsonObject): ThreadItem.Continue
     val source = from?.let { sideLabel(it.agent, it.account, it.model, it.provider) }
 
     return when {
+        payload.string("kind") == "scratch" -> ThreadItem.Continued(key, "Started in a scratch folder on $node. It is deleted with the chat.")
         reason != null -> ThreadItem.Continued(key, "Continued with ${node?.let { "$target on $it" } ?: target}", from, if (source != null) "From $source: $reason" else reason.replaceFirstChar { it.uppercase() })
         node != null -> ThreadItem.Continued(key, "Moved to $node", from)
         else -> ThreadItem.Continued(key, "Continued on $target", from)

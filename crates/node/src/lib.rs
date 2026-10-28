@@ -1,7 +1,9 @@
 pub mod acp;
+pub mod apps;
 pub mod agents;
 pub mod assistant_folder;
 pub mod attachments;
+pub mod browser_control;
 pub mod changes;
 pub mod codex_app_server;
 pub mod config;
@@ -21,6 +23,7 @@ pub mod session;
 pub mod ssh;
 pub mod ssh_proxy;
 pub mod status;
+pub mod sway;
 pub mod terminal;
 pub mod test_run;
 pub mod transcripts;

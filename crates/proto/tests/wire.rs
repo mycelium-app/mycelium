@@ -73,6 +73,7 @@ fn conversation() -> Conversation {
         assistant_id: None,
         teach_me: false,
         routing: None,
+        scratch: false,
     }
 }
 

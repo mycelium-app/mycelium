@@ -1,6 +1,7 @@
 package mycelium.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -36,6 +40,7 @@ import kotlinx.coroutines.delay
 import mycelium.Platform
 import mycelium.api.ConversationStatus
 import mycelium.api.Group
+import mycelium.state.BreakNoteMissing
 import mycelium.state.BreakPhase
 import mycelium.state.ClosedNotice
 import mycelium.state.HoursAction
@@ -43,6 +48,7 @@ import mycelium.state.HoursNotice
 import mycelium.state.HoursView
 import mycelium.state.OpeningMinutes
 import mycelium.state.Store
+import mycelium.state.breakEndedCaption
 import mycelium.state.clockOf
 import mycelium.state.countdownText
 import mycelium.state.displayName
@@ -135,13 +141,70 @@ fun BreakScreen(store: Store, platform: Platform?) {
     val state by store.state.collectAsState()
     val now = rememberNow(SecondMillis)
     val colors = MyTheme.colors
-    var confirming by remember { mutableStateOf(false) }
     val endEarly = remember { FocusRequester() }
+    val noteField = remember { FocusRequester() }
+    var note by remember { mutableStateOf("") }
+    var noteProblem by remember { mutableStateOf<String?>(null) }
+    val saving = rememberAction()
     val startedAt = wellness.breakStartedAt
     val endsAt = wellness.breakEndsAt
+    val ended = wellness.ended
 
     LaunchedEffect(now) {
         store.wellness.finishBreakIfOver(now)
+    }
+
+    if (wellness.clock.phase == BreakPhase.Noting && ended != null) {
+        LaunchedEffect(Unit) {
+            runCatching { noteField.requestFocus() }
+        }
+
+        fun backToWork() {
+            if (note.isBlank()) {
+                noteProblem = BreakNoteMissing
+
+                return
+            }
+
+            saving { store.wellness.saveBreakNote(note.trim()) }
+        }
+
+        Box(
+            Modifier.fillMaxSize().background(colors.bgContent).pointerInput(Unit) { detectTapGestures() }.onPreviewKeyEvent { event -> event.key == Key.Escape }.semantics { contentDescription = "Break" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(Modifier.widthIn(max = Tokens.Size.Popover).fillMaxWidth().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                noteProblem?.let { problem ->
+                    Column(
+                        Modifier.fillMaxWidth().border(Tokens.Size.Hairline * 2, colors.statusFailed, BlockShape).padding(Tokens.Space.S3).semantics { liveRegion = LiveRegionMode.Assertive },
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                    ) {
+                        Label("There is a problem", Modifier.semantics { heading() }, Tokens.Type.Title)
+                        MyButton({ runCatching { noteField.requestFocus() } }, text = problem, variant = ButtonVariant.Ghost)
+                    }
+                }
+
+                Icon(MyIcon.Cup, colors.leaf, Tokens.Size.IconMd * 2)
+                Label(breakEndedCaption(clockOf(localTimeOf(platform, ended.endedAt)), ended.earlyMinutes, wellness.held.size), color = colors.textMuted)
+                TextArea(
+                    note,
+                    { note = it; noteProblem = null },
+                    "What did you do in your break?",
+                    minLines = 5,
+                    error = noteProblem,
+                    errorAbove = true,
+                    focus = noteField,
+                    hint = "For example, made a tea and stood in the garden. Only you and the Wellness assistant see this.",
+                    labelAsHeading = true,
+                )
+
+                saving.failure?.let { Label(it, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, colors.statusFailed) }
+
+                MyButton(::backToWork, text = "Back to work", variant = ButtonVariant.Primary, size = ButtonSize.Lg)
+            }
+        }
+
+        return
     }
 
     if (wellness.clock.phase != BreakPhase.OnBreak || endsAt == null) {
@@ -168,18 +231,8 @@ fun BreakScreen(store: Store, platform: Platform?) {
 
             Label("Step away from the screen. Stand up, stretch, and look at something far away.", Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
             Label(stillWorkingOnBreak(working), Modifier.widthIn(max = Tokens.Size.FormColumn), color = colors.textMuted)
-            MyButton({ confirming = true }, Modifier.padding(top = Tokens.Space.S4).focusRequester(endEarly), text = "End break early", muted = true)
+            MyButton(store.wellness::endBreak, Modifier.padding(top = Tokens.Space.S4).focusRequester(endEarly), text = "End break early", muted = true)
         }
-    }
-
-    if (confirming) {
-        ConfirmDialog(
-            "End your break early?",
-            "${minutesLeftText(left)} left. Breaks ended early are counted in Wellness & Learning.",
-            "End break early",
-            onDismiss = { confirming = false },
-            onConfirm = { confirming = false; store.wellness.endBreak() },
-        )
     }
 }
 

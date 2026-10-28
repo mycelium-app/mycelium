@@ -82,6 +82,8 @@ fun AgentsSettings(store: Store) {
             Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
                 Label("Default mode", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
                 Label("New conversations start in this mode instead of the one in ~/.claude or ~/.codex.", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("Environment tools never ask, in any mode: they only reach the environment.", style = Tokens.Type.Meta, color = colors.textMuted)
+                Label("Environment tools never ask, in any mode: they only reach the environment.", style = Tokens.Type.Meta, color = colors.textMuted)
 
                 for (agent in listOf("claude", "codex")) {
                     val modes = fallbackModes(agent)

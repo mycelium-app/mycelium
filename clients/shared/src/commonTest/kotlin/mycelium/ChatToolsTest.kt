@@ -32,6 +32,15 @@ class ChatToolsTest {
     }
 
     @Test
+    fun environmentToolsAreHeadedByTheirActionInTheEnvironment() {
+        val click = chatToolName("mcp__mycelium__environment_click")
+        val launch = chatToolName("mcp.mycelium.environment_launch")
+
+        assertEquals("Click" to "environment", click?.heading to click?.source)
+        assertEquals("Open app" to "environment", launch?.heading to launch?.source)
+    }
+
+    @Test
     fun codexMcpTitlesNameTheirServerAndHumanHeading() {
         assertEquals(ChatToolName("mycelium", "get_instructions"), chatToolName("mcp.mycelium.get_instructions"))
         assertEquals(ChatToolName("lab", "get_weather"), chatToolName("mcp.lab.get_weather"))

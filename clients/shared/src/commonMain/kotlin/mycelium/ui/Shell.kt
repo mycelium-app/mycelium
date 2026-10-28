@@ -197,7 +197,7 @@ sealed interface Route {
 @Composable
 fun Shell(store: Store, platform: Platform, me: Me, onSignOut: () -> Unit, initialRoute: Route = Route.Empty) {
     val wellness by store.wellness.state.collectAsState()
-    val onBreak = wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null
+    val onBreak = (wellness.clock.phase == BreakPhase.OnBreak && wellness.breakEndsAt != null) || (wellness.clock.phase == BreakPhase.Noting && wellness.ended != null)
 
     CompositionLocalProvider(LocalAttachmentBytes provides store::attachmentBytes) {
         Box(Modifier.noticingInput(store.wellness).voiceShortcut(store.voice).focusProperties { onEnter = { if (onBreak) cancelFocusChange() } }.focusGroup().then(if (onBreak) Modifier.clearAndSetSemantics {} else Modifier)) {
@@ -528,7 +528,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
         attempt { store.refreshChatToolServers() }
     }
 
-    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppDeployments provides appDeployments) {
+    CompositionLocalProvider(LocalPlatform provides platform, LocalQuestionAnswers provides questionAnswers(store, state), LocalBrowserTasks provides browserTasks(store, state), LocalMessageProposals provides messageProposals(store, state), LocalStartProposals provides startProposals(store, state), LocalApiAccessRequests provides apiAccessRequests(store, state), LocalArtifactAccessControls provides ArtifactAccessControls(store, state), LocalSshAccessRequests provides sshAccessRequests(store, state), LocalArtifactOpener provides artifactOpener(state) { onRoute(Route.Artefact(it)) }, LocalReviewInstructions provides reviewInstructions, LocalGroupFilter provides groupFilter, LocalHoursView provides hours, LocalIdes provides ides, LocalAppsOpener provides { onRoute(Route.Apps) }, LocalAppOpener provides { uuid, deployment -> onRoute(Route.App(uuid, if (deployment != null) AppLogsTab else AppOverviewTab, deployment)) }, LocalAppDeployments provides appDeployments) {
         val selected = routeGroup(route, state, groupFilter)
         val closed = closedNotice(hours, selected, workingBehindClosedDoors(state.conversations.values, hours, selected), platform).takeIf { route.opensBehindHours() }
         val notice = hoursNotice(hours, groupChoiceOf(groupFilter), platform)
@@ -554,7 +554,7 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
                     is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
                     Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
-                    Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) })
+                    Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })

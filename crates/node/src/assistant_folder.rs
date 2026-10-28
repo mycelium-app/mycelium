@@ -55,6 +55,16 @@ pub fn write(projects_root: &Path, root: &str, files: &[FolderFile], replace: bo
     Ok(())
 }
 
+pub fn remove(projects_root: &Path, root: &str) -> Result<()> {
+    let folder = crate::git::within(projects_root, root)?;
+
+    if folder.is_dir() {
+        std::fs::remove_dir_all(&folder).map_err(|cause| anyhow!("{} cannot be deleted: {cause}.", folder.display()))?;
+    }
+
+    Ok(())
+}
+
 pub fn read(projects_root: &Path, root: &str) -> Result<FolderRead> {
     let folder = crate::git::within(projects_root, root)?;
     let mut read = FolderRead { files: Vec::new(), truncated: false };

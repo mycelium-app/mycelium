@@ -47,9 +47,11 @@ import kotlin.math.roundToInt
 import kotlin.time.Clock
 import kotlinx.coroutines.delay
 import mycelium.Platform
+import mycelium.api.BrowserTaskState
 import mycelium.api.Conversation
 import mycelium.api.Environment
 import mycelium.api.EnvironmentAction
+import mycelium.api.EnvironmentAppKind
 import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentSize
 import mycelium.api.EnvironmentTarget
@@ -59,14 +61,20 @@ import mycelium.state.EnvironmentStage
 import mycelium.state.Store
 import mycelium.state.catching
 import mycelium.state.environmentActionAge
+import mycelium.state.environmentAppsToStart
+import mycelium.state.environmentCurrentWindow
+import mycelium.state.environmentDefaultApps
 import mycelium.state.environmentDescription
 import mycelium.state.environmentMissingText
 import mycelium.state.environmentStage
-import mycelium.state.environmentStatus
+import mycelium.state.environmentKindText
+import mycelium.state.environmentStartHint
+import mycelium.state.environmentActivity
 import mycelium.state.environmentStoppedText
-import mycelium.state.environmentSummary
+import mycelium.state.environmentSizeText
 import mycelium.state.environmentTools
 import mycelium.state.environmentViewUrl
+import mycelium.state.environmentWindowApp
 import mycelium.state.nodeThatCanRunEnvironment
 
 private const val ActionsShownInPanel = 6
@@ -74,6 +82,7 @@ private const val ActionsShownExpanded = 3
 private const val ClockTickMillis = 1000L
 private const val LiveViewUnavailable = "The live view is available in the desktop app."
 private const val ControlNote = "The agent is paused and knows you took over. Your keyboard and pointer go to the environment while it has focus. Hand back when you are done and the agent carries on from what is on screen."
+private val WindowsMenuWidth = 320.dp
 private val TargetRadius = 14.dp
 private val TargetChipHeight = 24.dp
 
@@ -154,12 +163,31 @@ private fun ColumnScope.ClosedEnvironment(
 
         when (stage) {
             EnvironmentStage.Empty -> {
-                Label("Start a separate desktop on $nodeName with its own browser. The agent can look at it, click, type and scroll while you watch, and you can take over at any time. It never shows your own screen.", color = colors.textMuted)
-                MyButton({ store.startEnvironment(conversation.id) }, text = "Start environment", variant = ButtonVariant.Primary)
+                val offered = capability?.apps.orEmpty()
+                var ticked by remember(conversation.id, offered) { mutableStateOf(environmentDefaultApps(offered)) }
+
+                Label("Start a separate desktop on $nodeName. The agent can look at it, click, type and scroll while you watch, and you can take over at any time. It never shows your own screen.", color = colors.textMuted)
+
+                if (offered.isNotEmpty()) {
+                    Label("Start with", Modifier.padding(top = Tokens.Space.S2).semantics { heading() }, Tokens.Type.UiStrong)
+                    Label(environmentStartHint(nodeName), style = Tokens.Type.Meta, color = colors.textMuted)
+
+                    for (app in offered) {
+                        val isTicked = app.id in ticked
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(isTicked, app.name, { ticked = if (isTicked) ticked - app.id else ticked + app.id }, checkedState = "Ticked", uncheckedState = "Not ticked")
+                            Icon(environmentAppIcon(app.kind), colors.textMuted, Tokens.Size.IconMd, Modifier.clearAndSetSemantics {})
+                            Label(app.name)
+                        }
+                    }
+                }
+
+                MyButton({ store.startEnvironment(conversation.id, if (offered.isEmpty()) null else environmentAppsToStart(offered, ticked)) }, text = "Start environment", variant = ButtonVariant.Primary)
             }
 
             EnvironmentStage.Starting -> {
-                Label("Opening a Wayland session and a browser. This usually takes a few seconds.", color = colors.textMuted)
+                Label("Opening a Wayland session and your apps. This usually takes a few seconds.", color = colors.textMuted)
                 MyButton({ store.stopEnvironment(conversation.id) }, text = "Cancel", variant = ButtonVariant.Outline)
             }
 
@@ -171,7 +199,9 @@ private fun ColumnScope.ClosedEnvironment(
             EnvironmentStage.Stopped -> {
                 val stopped = environment?.let { environmentStoppedText(it) { millis -> platform?.localDateTime(millis) } }.orEmpty()
 
-                Label("$stopped Starting again opens a fresh one.", color = colors.textMuted)
+                val again = if (environment?.closedWithConversation == true) "Starting again reopens the conversation first." else "Starting again opens a fresh one."
+
+                Label("$stopped $again", color = colors.textMuted)
                 MyButton({ store.startEnvironment(conversation.id) }, text = "Start environment", variant = ButtonVariant.Primary)
             }
 
@@ -224,8 +254,12 @@ private fun ColumnScope.ActiveEnvironment(
     val colors = MyTheme.colors
     val platform = LocalPlatform.current
     val person = environment.controller == EnvironmentController.Person
+    val phone = LocalTouch.current && expanded
     var now by remember { mutableStateOf(Clock.System.now()) }
     val actions = state.environmentActions[conversation.id].orEmpty()
+    val apps = state.nodes[conversation.nodeId]?.environment?.apps.orEmpty()
+    val currentWindow = environmentCurrentWindow(environment)
+    var windowsOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -235,7 +269,10 @@ private fun ColumnScope.ActiveEnvironment(
     }
 
     Bar {
-        if (expanded) {
+        if (expanded && phone) {
+            MyButton({ onExpand(false) }, icon = MyIcon.ChevronLeft, description = "Back to conversation", muted = true)
+            Label("Environment", Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
+        } else if (expanded) {
             OpenListButton()
             MyButton({ onExpand(false) }, text = "Back to conversation", icon = MyIcon.ChevronLeft, muted = true)
             Label("Environment", Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
@@ -243,11 +280,11 @@ private fun ColumnScope.ActiveEnvironment(
             BarTitle("Environment")
         }
 
-        StatusMark(environmentStatus(environment.controller), if (person) Tone.Attention else Tone.Muted, if (person) MyIcon.Person else MyIcon.Agent, Modifier.weight(1f))
+        StatusMark(environmentActivity(environment), if (person) Tone.Attention else Tone.Muted, if (person) MyIcon.Person else MyIcon.Agent, Modifier.weight(1f))
 
-        if (person) {
+        if (!phone && person) {
             MyButton({ store.handBackEnvironment(conversation.id) }, text = "Hand back", size = ButtonSize.Sm, variant = ButtonVariant.Primary)
-        } else {
+        } else if (!phone) {
             MyButton({ store.takeOverEnvironment(conversation.id) }, text = "Take over", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
         }
 
@@ -262,9 +299,74 @@ private fun ColumnScope.ActiveEnvironment(
         }
     }
 
+    val browserTask = environment.browserTask?.takeIf { it.state == BrowserTaskState.Running }
+
+    if (browserTask != null) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+            Icon(MyIcon.Globe, colors.textMuted, Tokens.Size.IconSm)
+            Label(browserTask.goal, Modifier.weight(1f), Tokens.Type.Meta, colors.textMuted, maxLines = 1)
+            MyButton({ store.stopBrowserTask(conversation.id) }, text = "Stop task", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
+        }
+    }
+
     Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
         MyButton({ onOpenNode(environment.nodeId) }, text = environment.nodeName, size = ButtonSize.Sm, muted = true, description = "${environment.nodeName} node page")
-        Label(environmentSummary(environment), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+        Box {
+            MyButton(
+                { windowsOpen = true },
+                text = currentWindow?.title ?: "Windows",
+                icon = environmentAppIcon(apps.firstOrNull { it.id.equals(currentWindow?.appId, ignoreCase = true) }?.kind),
+                size = ButtonSize.Sm,
+                muted = true,
+                description = "Windows, ${currentWindow?.title ?: "none open"}",
+            )
+
+            if (windowsOpen) {
+                MenuPopup({ windowsOpen = false }, width = WindowsMenuWidth) {
+                    MenuLabel("Windows")
+
+                    if (environment.windows.isEmpty()) {
+                        MenuLabel("No window is open yet")
+                    }
+
+                    for (window in environment.windows) {
+                        MenuItem(
+                            window.title,
+                            {
+                                windowsOpen = false
+                                store.focusEnvironmentWindow(conversation.id, window.id)
+                            },
+                            checked = window.focused,
+                            hint = environmentWindowApp(environment, window, apps),
+                            leading = environmentAppIcon(apps.firstOrNull { it.id.equals(window.appId, ignoreCase = true) }?.kind),
+                        )
+                    }
+
+                    if (apps.isNotEmpty()) {
+                        MenuLabel("Open an app")
+                    }
+
+                    for (app in apps) {
+                        MenuItem(
+                            app.name,
+                            {
+                                windowsOpen = false
+                                store.openEnvironmentApp(conversation.id, app.id)
+                            },
+                            hint = environmentKindText(app.kind),
+                            leading = environmentAppIcon(app.kind),
+                        )
+                    }
+                }
+            }
+        }
+
+        if (currentWindow != null) {
+            Label(environmentWindowApp(environment, currentWindow, apps), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
+        }
+
+        Spacer(Modifier.weight(1f))
+        Label(environmentSizeText(environment), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
     }
 
     val ratio = environment.size.width.toFloat() / environment.size.height.coerceAtLeast(1)
@@ -272,6 +374,12 @@ private fun ColumnScope.ActiveEnvironment(
     if (expanded) {
         Box(Modifier.weight(1f).fillMaxWidth().padding(Tokens.Space.S3), contentAlignment = Alignment.Center) {
             LiveStage(store, environment, platform, Modifier.fillMaxHeight().aspectRatio(ratio, matchHeightConstraintsFirst = true))
+        }
+
+        if (phone && person) {
+            MyButton({ store.handBackEnvironment(conversation.id) }, text = "Hand back", modifier = Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), variant = ButtonVariant.Primary)
+        } else if (phone) {
+            MyButton({ store.takeOverEnvironment(conversation.id) }, text = "Take over", modifier = Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S3, vertical = Tokens.Space.S1), variant = ButtonVariant.Outline)
         }
 
         Hairline()
@@ -413,4 +521,13 @@ private fun ActionsLog(actions: List<EnvironmentAction>, limit: Int, now: kotlin
             }
         }
     }
+}
+
+internal fun environmentAppIcon(kind: EnvironmentAppKind?): MyIcon = when (kind) {
+    EnvironmentAppKind.Browser -> MyIcon.Globe
+    EnvironmentAppKind.FileManager -> MyIcon.Folder
+    EnvironmentAppKind.Editor -> MyIcon.Code
+    EnvironmentAppKind.Office -> MyIcon.FileText
+    EnvironmentAppKind.Terminal -> MyIcon.Terminal
+    EnvironmentAppKind.Mail, EnvironmentAppKind.Other, null -> MyIcon.AppWindow
 }

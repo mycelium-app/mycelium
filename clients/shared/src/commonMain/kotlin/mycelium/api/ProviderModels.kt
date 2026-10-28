@@ -37,8 +37,10 @@ data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
 
 @Serializable
 data class CreateChatRequest(
-    @SerialName("provider_id") val providerId: String,
-    val model: String,
+    @SerialName("provider_id") val providerId: String? = null,
+    val model: String? = null,
     val prompt: String? = null,
     @SerialName("parent_id") val parentId: String? = null,
+    val agent: String? = null,
+    val account: String? = null,
 )

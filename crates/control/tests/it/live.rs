@@ -33,6 +33,9 @@ const PUBLISHING_ROUTES: &[&str] = &[
     "DELETE /api/v1/conversations/{id}/environment",
     "POST /api/v1/conversations/{id}/environment/take-over",
     "POST /api/v1/conversations/{id}/environment/hand-back",
+    "POST /api/v1/conversations/{id}/environment/browser-task/stop",
+    "POST /api/v1/conversations/{id}/environment/apps",
+    "POST /api/v1/conversations/{id}/environment/windows/{window}/focus",
     "POST /api/v1/nodes/{id}/environment/check",
     "PUT /api/v1/conversations/{id}/goal",
     "PATCH /api/v1/conversations/{id}/goal",
@@ -217,6 +220,7 @@ const SILENT_ROUTES: &[&str] = &[
     "POST /api/v1/wellness/heartbeat",
     "POST /api/v1/wellness/breaks",
     "DELETE /api/v1/wellness/breaks/current",
+    "PUT /api/v1/wellness/breaks/{id}/note",
     "POST /api/v1/wellness/holds",
     "PUT /api/v1/wellness/puzzles/{puzzle}/today",
     "DELETE /api/v1/wellness/puzzles/{puzzle}/today",
@@ -1509,7 +1513,7 @@ async fn an_environment_is_streamed_as_it_starts_changes_hands_and_stops() {
     let server = Server::start().await;
     let mut link = server.online_node("laptop").await;
     let mut stream = server.user.stream().await;
-    link.send(NodeToControl::EnvironmentCapability { capability: mycelium_proto::api::EnvironmentCapability { available: true, missing: vec![], versions: Default::default(), note: None, running: vec![] } }).await;
+    link.send(NodeToControl::EnvironmentCapability { capability: mycelium_proto::api::EnvironmentCapability { available: true, missing: vec![], versions: Default::default(), note: None, running: vec![], apps: vec![] } }).await;
     let conversation = server.create_conversation(link.id, None).await;
     link.expect_start_session().await;
     let url = format!("/api/v1/conversations/{}/environment", conversation.id);
@@ -1521,6 +1525,21 @@ async fn an_environment_is_streamed_as_it_starts_changes_hands_and_stops() {
     stream.until(|message| match message { StreamMessage::Environment(environment) if environment.state == mycelium_proto::api::EnvironmentState::Running => Some(()), _ => None }).await;
     server.user.json(server.user.post(&format!("{url}/take-over"))).await;
     let taken = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.controller == mycelium_proto::api::EnvironmentController::Person => Some(environment), _ => None }).await;
+    link.send(NodeToControl::EnvironmentWindows { conversation_id: conversation.id, windows: vec![mycelium_proto::api::EnvironmentWindow { id: 4, app_id: "chromium".into(), title: "Inbox".into(), focused: true }] }).await;
+    let windowed = stream.until(|message| match message { StreamMessage::Environment(environment) if !environment.windows.is_empty() => Some(environment), _ => None }).await;
+    let focus = server.user.post(&format!("{url}/windows/4/focus"));
+    let (_, (_, focused)) = tokio::join!(
+        async {
+            let request_id = loop {
+                if let ControlToNode::EnvironmentFocus { request_id, .. } = link.next().await {
+                    break request_id;
+                }
+            };
+            link.send(NodeToControl::EnvironmentInputDone { request_id, error: None }).await;
+        },
+        server.user.json(focus)
+    );
+    assert_eq!(focused["windows"][0]["id"], 4);
     server.user.json(server.user.post(&format!("{url}/hand-back"))).await;
     let handed = stream.until(|message| match message { StreamMessage::Environment(environment) if environment.controller == mycelium_proto::api::EnvironmentController::Agent && environment.state == mycelium_proto::api::EnvironmentState::Running => Some(environment), _ => None }).await;
     server.user.json(server.user.delete(&url)).await;
@@ -1530,6 +1549,7 @@ async fn an_environment_is_streamed_as_it_starts_changes_hands_and_stops() {
     assert_eq!(node_with_environment.id, link.id);
     assert_eq!(starting.state, mycelium_proto::api::EnvironmentState::Starting);
     assert_eq!((taken.conversation_id, handed.conversation_id), (conversation.id, conversation.id));
+    assert_eq!(windowed.windows[0].title, "Inbox");
     assert!(stopped.stopped_at.is_some());
 }
 

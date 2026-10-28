@@ -89,11 +89,19 @@ data class ActivityHours(val days: List<ActivityHoursDay>)
 data class StartBreakRequest(val minutes: Int? = null)
 
 @Serializable
+data class BreakNoteRequest(val note: String)
+
+@Serializable
 data class WellnessBreak(
     val id: String,
     @SerialName("started_at") val startedAt: String,
     @SerialName("ends_at") val endsAt: String,
     @SerialName("ended_early_at") val endedEarlyAt: String? = null,
+    @SerialName("planned_minutes") val plannedMinutes: Int = 0,
+    @SerialName("ended_at") val endedAt: String? = null,
+    @SerialName("ended_early") val endedEarly: Boolean = false,
+    val note: String? = null,
+    @SerialName("noted_at") val notedAt: String? = null,
 )
 
 @Serializable
@@ -109,6 +117,8 @@ data class WellnessOverview(
     val days: List<WellnessDay>,
     @SerialName("last_break_at") val lastBreakAt: String? = null,
     @SerialName("current_break") val currentBreak: WellnessBreak? = null,
+    @SerialName("awaiting_note") val awaitingNote: WellnessBreak? = null,
+    @SerialName("recent_breaks") val recentBreaks: List<WellnessBreak> = emptyList(),
     @SerialName("quiet_now") val quietNow: Boolean = false,
     val held: Long = 0,
     @SerialName("held_week") val heldWeek: HeldWeek = HeldWeek(),

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.15.0
+
+Cowork follow-ups. Every screen in this release was designed in the canonical design artefact first.
+
+- Chats can run Claude Code and Codex: the Chat section of the account menu lists your agent accounts, and Mycelium picks a node with that account online and gives the chat a scratch folder there, deleted with the chat. Continue on moves it to another node or account. A chat on an agent can start an environment without choosing a folder.
+- Environments run any app the node offers, not only Chromium: choose what it starts with, see and switch its windows, and open more. Agents open apps with environment_launch. The node page lists the apps each node offers.
+- Fast actions with a decisions model: a decisions provider can take the new Browser use. Agents hand a goal to browser_task and the model picks each step from the page's controls, shown live in the thread with Stop task. environment_click can find a described target on a screenshot of any app. Box questions need Jev 1.14 (typesafe/jev-1.14 on OpenRouter).
+- The thread says when you started an environment, took it over and handed it back, and the agent is told with its next message.
+- An environment stops when its conversation is closed or deleted, or when its node shuts down; starting it again reopens an archived conversation.
+- While the agent has control the live view is view-only on the server too, and the node page names who is in control.
+- Environment tools never ask for permission, in any mode.
+- On the phone the environment opens full screen from the conversation bar.
+- Before a break ends, early or on time, the break screen asks what you did in it. The notes show in Time and focus and the weekly reflection draws on them.
+
 ## v0.14.0
 
 Every screen in this release was designed in the canonical design artefact first.

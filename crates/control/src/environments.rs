@@ -1,15 +1,17 @@
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
 use crate::nodes::node_offline;
-use crate::state::{AppState, Hub};
-use crate::store::find_owned;
+use crate::rfb::ClientFilter;
+use crate::state::{AppState, EnvironmentInputAnswer, EnvironmentLaunchAnswer, Hub};
+use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, find_owned};
 use axum::Json;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{FromRequestParts, Path, Request, State};
 use axum::response::Response;
 use base64::Engine;
 use chrono::Utc;
-use mycelium_proto::api::{Environment, EnvironmentAction, EnvironmentCapability, EnvironmentController, EnvironmentSize, EnvironmentState, StartEnvironmentRequest};
+use mycelium_proto::conversation::EventKind;
+use mycelium_proto::api::{BrowserTaskState, Environment, EnvironmentAction, EnvironmentApp, EnvironmentAppKind, EnvironmentCapability, EnvironmentController, EnvironmentSize, EnvironmentState, EnvironmentWindow, LaunchEnvironmentAppRequest, StartEnvironmentRequest};
 use mycelium_proto::link::ControlToNode;
 use mycelium_proto::stream::StreamMessage;
 use std::collections::{HashMap, VecDeque};
@@ -23,6 +25,7 @@ const DEFAULT_SIZE: EnvironmentSize = EnvironmentSize { width: 1280, height: 800
 const WIDTH_LIMITS: (u32, u32) = (320, 3840);
 const HEIGHT_LIMITS: (u32, u32) = (200, 2160);
 const CAPABILITY_WAIT: Duration = Duration::from_secs(5);
+const NODE_TIMEOUT: Duration = Duration::from_secs(15);
 const FALLBACK_PERSON: &str = "The person";
 
 #[derive(Clone)]
@@ -51,6 +54,7 @@ pub struct EnvironmentRegistry {
     records: Mutex<HashMap<Uuid, EnvironmentRecord>>,
     streams: Mutex<HashMap<Uuid, EnvironmentStream>>,
     tickets: Mutex<HashMap<Uuid, StreamTicket>>,
+    notes_for_agent: Mutex<HashMap<Uuid, Vec<String>>>,
     capability_arrived: broadcast::Sender<Uuid>,
 }
 
@@ -64,13 +68,22 @@ const TICKET_LIFETIME: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl Default for EnvironmentRegistry {
     fn default() -> Self {
-        EnvironmentRegistry { capabilities: Mutex::default(), records: Mutex::default(), streams: Mutex::default(), tickets: Mutex::default(), capability_arrived: broadcast::channel(16).0 }
+        EnvironmentRegistry { capabilities: Mutex::default(), records: Mutex::default(), streams: Mutex::default(), tickets: Mutex::default(), notes_for_agent: Mutex::default(), capability_arrived: broadcast::channel(16).0 }
     }
 }
 
 impl EnvironmentRecord {
     pub fn is_live(&self) -> bool {
         matches!(self.environment.state, EnvironmentState::Starting | EnvironmentState::Running)
+    }
+
+    pub fn end_browser_task(&mut self, by: &str) {
+        let Some(task) = self.environment.browser_task.as_mut().filter(|task| task.state == BrowserTaskState::Running) else {
+            return;
+        };
+
+        task.state = BrowserTaskState::Stopped;
+        task.stopped_by = Some(by.to_string());
     }
 }
 
@@ -126,6 +139,16 @@ impl Hub {
         }
     }
 
+    pub fn note_for_agent(&self, conversation_id: Uuid, note: String) {
+        if let Ok(mut notes) = self.environments.notes_for_agent.lock() {
+            notes.entry(conversation_id).or_default().push(note);
+        }
+    }
+
+    pub fn take_notes_for_agent(&self, conversation_id: Uuid) -> Vec<String> {
+        self.environments.notes_for_agent.lock().ok().and_then(|mut notes| notes.remove(&conversation_id)).unwrap_or_default()
+    }
+
     pub fn environment_of(&self, conversation_id: Uuid) -> Option<EnvironmentRecord> {
         self.environments.records.lock().ok().and_then(|records| records.get(&conversation_id).cloned())
     }
@@ -170,6 +193,23 @@ impl Hub {
         }
 
         Some(changed)
+    }
+
+    pub fn report_environment_windows(&self, node_id: Uuid, conversation_id: Uuid, windows: Vec<EnvironmentWindow>) -> Option<EnvironmentRecord> {
+        let mut records = self.environments.records.lock().ok()?;
+        let record = records.get_mut(&conversation_id).filter(|record| record.environment.node_id == node_id && record.is_live())?;
+
+        if record.environment.windows == windows {
+            return None;
+        }
+
+        if record.environment.agent_window.is_some_and(|agent| !windows.iter().any(|window| window.id == agent)) {
+            record.environment.agent_window = None;
+        }
+
+        record.environment.windows = windows;
+
+        Some(record.clone())
     }
 
     pub fn lose_environments_of(&self, node_id: Uuid) -> Vec<EnvironmentRecord> {
@@ -283,6 +323,59 @@ pub fn record_action(state: &AppState, conversation_id: Uuid, label: &str, updat
     Some(record)
 }
 
+pub async fn record_thread_line(state: &AppState, record: &EnvironmentRecord, text: &str, note_for_agent: Option<String>) {
+    let conversation_id = record.environment.conversation_id;
+    let appended = async {
+        let mut tx = state.pool.begin().await?;
+        let event = append_event(&mut tx, conversation_id, EventKind::Environment, &serde_json::json!({"text": text}), None).await?;
+
+        tx.commit().await?;
+
+        Ok::<_, sqlx::Error>(event)
+    };
+
+    match appended.await {
+        Ok(Some(event)) => state.publish(Some(record.user_id), StreamMessage::Event(event)),
+        Ok(None) => {}
+        Err(error) => tracing::warn!("could not record the environment line of {conversation_id}: {error}"),
+    }
+
+    if let Some(note) = note_for_agent {
+        state.hub.note_for_agent(conversation_id, note);
+    }
+}
+
+fn halt_environment(state: &AppState, record: EnvironmentRecord, closed_with_conversation: bool) -> EnvironmentRecord {
+    let id = record.environment.conversation_id;
+    let stopped = state.hub.change_environment(id, |record| {
+        record.environment.state = EnvironmentState::Stopped;
+        record.environment.stopped_at = Some(Utc::now());
+        record.environment.closed_with_conversation = closed_with_conversation;
+    });
+
+    state.hub.send(record.environment.node_id, ControlToNode::StopEnvironment { conversation_id: id });
+
+    for (stream_id, node_id) in state.hub.close_environment_streams(|stream| stream.conversation_id == id) {
+        state.hub.send(node_id, ControlToNode::CloseEnvironmentStream { stream_id });
+    }
+
+    let stopped = stopped.unwrap_or(record);
+    publish_environment(state, &stopped);
+
+    stopped
+}
+
+pub async fn stop_with_conversation(state: &AppState, conversation_id: Uuid, deleted: bool) {
+    let Some(record) = state.hub.environment_of(conversation_id).filter(EnvironmentRecord::is_live) else {
+        return;
+    };
+    let stopped = halt_environment(state, record, true);
+
+    if !deleted {
+        record_thread_line(state, &stopped, "The environment stopped when the conversation closed.", None).await;
+    }
+}
+
 pub fn finish_environments_of_node(state: &AppState, node_id: Uuid) {
     for record in state.hub.lose_environments_of(node_id) {
         publish_environment(state, &record);
@@ -314,8 +407,15 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         return Err(node_offline());
     }
 
+    if row.archived_at.is_some() {
+        let restored = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!("update conversations set archived_at = null where id = $1 returning {CONVERSATION_COLUMNS}"))).bind(id).fetch_one(&state.pool).await?;
+        state.publish(Some(user.id), StreamMessage::Conversation(restored.to_proto()?));
+    }
+
     let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(row.node_id).fetch_one(&state.pool).await?;
     let capability = state.hub.environment_capability_of(row.node_id);
+
+    let offered = capability.as_ref().map(|capability| capability.apps.clone()).unwrap_or_default();
 
     match capability {
         None => return Err(ApiError::conflict("environment_unavailable", format!("{node_name} has not said whether it can run an environment. Check again from the node page."))),
@@ -327,16 +427,26 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
         Some(_) => {}
     }
 
-    let requested = request.map(|Json(request)| request).unwrap_or(StartEnvironmentRequest { width: None, height: None });
+    let requested = request.map(|Json(request)| request).unwrap_or(StartEnvironmentRequest { width: None, height: None, apps: None });
     let size = EnvironmentSize {
         width: requested.width.map_or(DEFAULT_SIZE.width, |width| width.clamp(WIDTH_LIMITS.0, WIDTH_LIMITS.1)),
         height: requested.height.map_or(DEFAULT_SIZE.height, |height| height.clamp(HEIGHT_LIMITS.0, HEIGHT_LIMITS.1)),
     };
+    let apps = match requested.apps {
+        Some(chosen) => {
+            if let Some(unknown) = chosen.iter().find(|app| !offered.iter().any(|offer| &offer.id == *app)) {
+                return Err(unknown_app(unknown, &node_name, &offered));
+            }
+
+            chosen
+        }
+        None => offered.iter().find(|app| app.kind == EnvironmentAppKind::Browser).map(|app| app.id.clone()).into_iter().collect(),
+    };
     let person = Some(user.name.trim()).filter(|name| !name.is_empty()).unwrap_or(FALLBACK_PERSON).to_string();
     let record = EnvironmentRecord {
         user_id: user.id,
-        person,
-        environment: Environment { conversation_id: id, state: EnvironmentState::Starting, controller: EnvironmentController::Agent, node_id: row.node_id, node_name, size, started_at: Utc::now(), stopped_at: None, failure: None, browser: None, target: None },
+        person: person.clone(),
+        environment: Environment { conversation_id: id, state: EnvironmentState::Starting, controller: EnvironmentController::Agent, node_id: row.node_id, node_name, size, started_at: Utc::now(), stopped_at: None, failure: None, browser: None, target: None, browser_task: None, windows: Vec::new(), agent_window: None, person: Some(person), closed_with_conversation: false },
         actions: VecDeque::new(),
         handed_back: false,
         interrupted: false,
@@ -344,13 +454,14 @@ pub async fn start(State(state): State<AppState>, user: AuthUser, Path(id): Path
 
     state.hub.begin_environment(record.clone());
 
-    if !state.hub.send(row.node_id, ControlToNode::StartEnvironment { conversation_id: id, width: size.width, height: size.height }) {
+    if !state.hub.send(row.node_id, ControlToNode::StartEnvironment { conversation_id: id, width: size.width, height: size.height, apps }) {
         state.hub.change_environment(id, |record| record.environment.state = EnvironmentState::Stopped);
 
         return Err(node_offline());
     }
 
     publish_environment(&state, &record);
+    record_thread_line(&state, &record, &format!("You started the environment on {}.", record.environment.node_name), None).await;
 
     Ok(Json(record.environment))
 }
@@ -370,9 +481,16 @@ pub async fn actions(State(state): State<AppState>, user: AuthUser, Path(id): Pa
 pub async fn take_over(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Environment>> {
     live_environment(&state, id, user.id)?;
 
-    let record = record_action(&state, id, "You took over", |record| record.environment.controller = EnvironmentController::Person);
+    let record = record_action(&state, id, "You took over", |record| {
+        record.environment.controller = EnvironmentController::Person;
+        record.end_browser_task("took_over");
+    })
+    .ok_or_else(|| ApiError::not_found("An environment"))?;
+    let note = format!("{} took over the environment. Do not use it until they hand back.", record.person);
 
-    record.map(|record| Json(record.environment)).ok_or_else(|| ApiError::not_found("An environment"))
+    record_thread_line(&state, &record, "You took over the environment. The agent is paused until you hand back.", Some(note)).await;
+
+    Ok(Json(record.environment))
 }
 
 pub async fn hand_back(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Environment>> {
@@ -381,9 +499,78 @@ pub async fn hand_back(State(state): State<AppState>, user: AuthUser, Path(id): 
     let record = record_action(&state, id, "You handed back", |record| {
         record.environment.controller = EnvironmentController::Agent;
         record.handed_back = true;
+    })
+    .ok_or_else(|| ApiError::not_found("An environment"))?;
+    let note = format!("{} handed the environment back. Take a screenshot before relying on what you saw earlier.", record.person);
+
+    record_thread_line(&state, &record, "You handed back the environment.", Some(note)).await;
+
+    Ok(Json(record.environment))
+}
+
+pub fn unknown_app(app: &str, node_name: &str, offered: &[EnvironmentApp]) -> ApiError {
+    let names: Vec<&str> = offered.iter().map(|offer| offer.id.as_str()).collect();
+
+    ApiError::bad_request("unknown_app", format!("{node_name} does not offer \"{app}\". It offers: {}.", if names.is_empty() { "no apps".to_string() } else { names.join(", ") }))
+}
+
+pub async fn launch_app(state: &AppState, record: &EnvironmentRecord, app: &str, file: Option<String>) -> ApiResult<(EnvironmentApp, Option<i64>)> {
+    let node_id = record.environment.node_id;
+    let offered = state.hub.environment_capability_of(node_id).map(|capability| capability.apps).unwrap_or_default();
+    let Some(offer) = offered.iter().find(|offer| offer.id == app).cloned() else {
+        return Err(unknown_app(app, &record.environment.node_name, &offered));
+    };
+    let conversation_id = record.environment.conversation_id;
+    let answered = state.ask_node::<EnvironmentLaunchAnswer>(node_id, NODE_TIMEOUT, |request_id| ControlToNode::EnvironmentLaunch { request_id, conversation_id, app: app.to_string(), file }).await;
+    let Some(answer) = answered else {
+        return Err(node_offline());
+    };
+
+    match answer.error {
+        Some(error) => Err(ApiError::conflict("environment_app_failed", error)),
+        None => Ok((offer, answer.window)),
+    }
+}
+
+pub async fn open_app(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<LaunchEnvironmentAppRequest>) -> ApiResult<Json<Environment>> {
+    let record = live_environment(&state, id, user.id)?;
+    let (app, _) = launch_app(&state, &record, &request.app, None).await?;
+    let record = record_action(&state, id, &format!("Opened {}", app.name), |record| record.environment.controller = EnvironmentController::Person);
+
+    record.map(|record| Json(record.environment)).ok_or_else(|| ApiError::not_found("An environment"))
+}
+
+pub async fn focus_window(State(state): State<AppState>, user: AuthUser, Path((id, window)): Path<(Uuid, i64)>) -> ApiResult<Json<Environment>> {
+    let record = live_environment(&state, id, user.id)?;
+    let Some(target) = record.environment.windows.iter().find(|candidate| candidate.id == window).cloned() else {
+        return Err(ApiError::not_found("A window"));
+    };
+    let answered = state.ask_node::<EnvironmentInputAnswer>(record.environment.node_id, NODE_TIMEOUT, |request_id| ControlToNode::EnvironmentFocus { request_id, conversation_id: id, window }).await;
+    let Some(answer) = answered else {
+        return Err(node_offline());
+    };
+
+    if let Some(error) = answer.error {
+        return Err(ApiError::conflict("environment_window_failed", error));
+    }
+
+    let record = record_action(&state, id, &format!("Switched to {}", target.title), |record| {
+        record.environment.controller = EnvironmentController::Person;
+
+        for candidate in &mut record.environment.windows {
+            candidate.focused = candidate.id == window;
+        }
     });
 
     record.map(|record| Json(record.environment)).ok_or_else(|| ApiError::not_found("An environment"))
+}
+
+pub async fn stop_browser_task(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Environment>> {
+    live_environment(&state, id, user.id)?;
+
+    let record = record_action(&state, id, "You stopped the browser task", |record| record.end_browser_task("stop")).ok_or_else(|| ApiError::not_found("An environment"))?;
+
+    Ok(Json(record.environment))
 }
 
 pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>) -> ApiResult<Json<Environment>> {
@@ -393,19 +580,7 @@ pub async fn stop(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         return Ok(Json(record.environment));
     }
 
-    let stopped = state.hub.change_environment(id, |record| {
-        record.environment.state = EnvironmentState::Stopped;
-        record.environment.stopped_at = Some(Utc::now());
-    });
-
-    state.hub.send(record.environment.node_id, ControlToNode::StopEnvironment { conversation_id: id });
-
-    for (stream_id, node_id) in state.hub.close_environment_streams(|stream| stream.conversation_id == id) {
-        state.hub.send(node_id, ControlToNode::CloseEnvironmentStream { stream_id });
-    }
-
-    let stopped = stopped.unwrap_or(record);
-    publish_environment(&state, &stopped);
+    let stopped = halt_environment(&state, record, false);
 
     Ok(Json(stopped.environment))
 }
@@ -468,11 +643,12 @@ pub async fn stream(State(state): State<AppState>, Path(id): Path<Uuid>, request
         return Err(node_offline());
     }
 
-    Ok(upgrade.protocols(["binary"]).on_upgrade(move |socket| proxy(state, node_id, stream_id, events, socket)))
+    Ok(upgrade.protocols(["binary"]).on_upgrade(move |socket| proxy(state, node_id, id, stream_id, events, socket)))
 }
 
-async fn proxy(state: AppState, node_id: Uuid, stream_id: Uuid, mut events: mpsc::UnboundedReceiver<StreamEvent>, mut socket: WebSocket) {
+async fn proxy(state: AppState, node_id: Uuid, conversation_id: Uuid, stream_id: Uuid, mut events: mpsc::UnboundedReceiver<StreamEvent>, mut socket: WebSocket) {
     let encoding = base64::engine::general_purpose::STANDARD;
+    let mut filter = ClientFilter::default();
 
     loop {
         tokio::select! {
@@ -490,7 +666,14 @@ async fn proxy(state: AppState, node_id: Uuid, stream_id: Uuid, mut events: mpsc
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Binary(bytes))) => {
-                    let data = encoding.encode(&bytes);
+                    let person_controls = state.hub.environment_of(conversation_id).is_some_and(|record| record.environment.controller == EnvironmentController::Person);
+                    let allowed = filter.pass(&bytes, person_controls);
+
+                    if allowed.is_empty() {
+                        continue;
+                    }
+
+                    let data = encoding.encode(&allowed);
 
                     if !state.hub.send(node_id, ControlToNode::EnvironmentStreamInput { stream_id, data }) {
                         break;

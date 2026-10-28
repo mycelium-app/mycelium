@@ -133,7 +133,22 @@ pub async fn run_daemon(config: NodeConfig, config_file: PathBuf, options: Daemo
     tokio::spawn(follow_transcripts(daemon.clone()));
     tokio::spawn(follow_usage(daemon.clone()));
 
-    run_link(daemon, out_rx).await
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let linked = run_link(daemon.clone(), out_rx);
+
+    tokio::select! {
+        result = linked => result,
+        _ = terminate.recv() => {
+            daemon.environments.stop_all().await;
+
+            Ok(())
+        }
+        _ = tokio::signal::ctrl_c() => {
+            daemon.environments.stop_all().await;
+
+            Ok(())
+        }
+    }
 }
 
 fn watched_disks(projects_root: &Path) -> Vec<PathBuf> {
@@ -300,11 +315,15 @@ impl Daemon {
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
             ControlToNode::StopTerminal { terminal_id } => self.terminals.stop(terminal_id),
-            ControlToNode::StartEnvironment { conversation_id, width, height } => self.environments.start(conversation_id, width, height),
+            ControlToNode::StartEnvironment { conversation_id, width, height, apps } => self.environments.start(conversation_id, width, height, apps),
+            ControlToNode::EnvironmentLaunch { request_id, conversation_id, app, file } => self.environments.launch(request_id, conversation_id, app, file),
+            ControlToNode::EnvironmentFocus { request_id, conversation_id, window } => self.environments.focus(request_id, conversation_id, window),
             ControlToNode::StopEnvironment { conversation_id } => self.environments.stop(conversation_id),
             ControlToNode::CheckEnvironment => self.environments.report(),
             ControlToNode::EnvironmentInput { request_id, conversation_id, action } => self.environments.input(request_id, conversation_id, action),
             ControlToNode::EnvironmentScreenshot { request_id, conversation_id } => self.environments.screenshot(request_id, conversation_id),
+            ControlToNode::EnvironmentBrowserRead { request_id, conversation_id } => self.environments.browser_read(request_id, conversation_id),
+            ControlToNode::EnvironmentBrowserAct { request_id, conversation_id, action } => self.environments.browser_act(request_id, conversation_id, action),
             ControlToNode::OpenEnvironmentStream { stream_id, conversation_id } => self.environments.open_stream(stream_id, conversation_id),
             ControlToNode::EnvironmentStreamInput { stream_id, data } => self.environments.stream_input(stream_id, &data),
             ControlToNode::CloseEnvironmentStream { stream_id } => self.environments.close_stream(stream_id),
@@ -332,6 +351,11 @@ impl Daemon {
             ControlToNode::WriteFolder { root, files, replace } => {
                 if let Err(error) = crate::assistant_folder::write(&self.config.projects_root, &root, &files, replace) {
                     tracing::warn!("could not write the assistant folder {root}: {error}");
+                }
+            }
+            ControlToNode::DeleteFolder { root } => {
+                if let Err(error) = crate::assistant_folder::remove(&self.config.projects_root, &root) {
+                    tracing::warn!("could not delete the folder {root}: {error}");
                 }
             }
             ControlToNode::ReadFolder { request_id, root } => {
@@ -432,6 +456,7 @@ impl Daemon {
 
         let out = self.out.clone();
 
+        let environments = self.environments.clone();
         tokio::spawn(async move {
             let asset = crate::update::asset_name(std::env::consts::OS, std::env::consts::ARCH);
             let installed = match (asset, crate::update::running_binary()) {
@@ -445,6 +470,7 @@ impl Daemon {
 
             if ok {
                 tokio::time::sleep(UPDATE_EXIT_DELAY).await;
+                environments.stop_all().await;
                 std::process::exit(0);
             }
         });

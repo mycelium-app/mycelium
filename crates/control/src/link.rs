@@ -7,7 +7,7 @@ use crate::error::ApiResult;
 use crate::imports;
 use crate::prompts::pump;
 use crate::ssh_access;
-use crate::state::{AppState, EnvironmentInputAnswer, EnvironmentScreenshotAnswer, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
+use crate::state::{AppState, BrowserActedAnswer, BrowserControlsAnswer, EnvironmentInputAnswer, EnvironmentLaunchAnswer, EnvironmentScreenshotAnswer, FolderAnswer, GitAnswer, ProcessAnswer, ResetAnswer, SteerAnswer};
 use crate::store::{CONVERSATION_COLUMNS, TURN_HAS_ENDED, ConversationRow, append_event, enum_text, has_live_workflow_agent, highest_node_seq, highest_node_seqs, lock_on_node, merge_queue, publish_node, set_status, without_nul};
 use crate::transcripts::{WriteError, write_chunk};
 use axum::extract::{ConnectInfo, State};
@@ -293,6 +293,18 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
 
             Ok(())
         }
+        NodeToControl::EnvironmentWindows { conversation_id, windows } => {
+            if let Some(record) = state.hub.report_environment_windows(node_id, conversation_id, windows) {
+                environments::publish_environment(state, &record);
+            }
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentLaunched { request_id, window, error } => {
+            state.hub.answer(node_id, request_id, EnvironmentLaunchAnswer { window, error });
+
+            Ok(())
+        }
         NodeToControl::EnvironmentInputDone { request_id, error } => {
             state.hub.answer(node_id, request_id, EnvironmentInputAnswer { error });
 
@@ -300,6 +312,16 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
         }
         NodeToControl::EnvironmentScreenshotTaken { request_id, png, error } => {
             state.hub.answer(node_id, request_id, EnvironmentScreenshotAnswer { png, error });
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentBrowserControls { request_id, page, controls, error } => {
+            state.hub.answer(node_id, request_id, BrowserControlsAnswer { page, controls, error });
+
+            Ok(())
+        }
+        NodeToControl::EnvironmentBrowserActed { request_id, error } => {
+            state.hub.answer(node_id, request_id, BrowserActedAnswer { error });
 
             Ok(())
         }

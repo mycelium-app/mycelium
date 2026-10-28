@@ -1,10 +1,13 @@
+use crate::apps::{self, DesktopApp};
+use crate::browser_control;
 use crate::rfb;
+use crate::sway;
 use crate::terminal::find_in_path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
 use mycelium_proto::api::{EnvironmentCapability, EnvironmentController, EnvironmentState, EnvironmentVersions, RunningEnvironment};
-use mycelium_proto::link::{EnvironmentInputAction, NodeToControl};
+use mycelium_proto::link::{BrowserAction, EnvironmentInputAction, NodeToControl};
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use std::collections::{HashMap, HashSet};
@@ -22,9 +25,16 @@ use uuid::Uuid;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const READY_POLL: Duration = Duration::from_millis(100);
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
+const CAGE_OUTPUT: &str = "HEADLESS-1";
+const RESIZE_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(3);
 const SCREENSHOT_TIMEOUT: Duration = Duration::from_secs(15);
 const BROWSERS: [&str; 4] = ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"];
+const WINDOW_POLL: Duration = Duration::from_millis(1500);
+const LAUNCH_WINDOW_WAIT: Duration = Duration::from_secs(5);
+const LAUNCH_WINDOW_POLL: Duration = Duration::from_millis(200);
 const PAGE_SIZE: u64 = 4096;
 const NON_LINUX_NOTE: &str = "Environments need a Linux node";
 
@@ -52,6 +62,7 @@ pub struct Tools {
 struct SessionEnv {
     runtime_dir: PathBuf,
     display: String,
+    debug_port: u16,
 }
 
 struct SessionDirectory {
@@ -75,6 +86,7 @@ struct Entry {
     session: Option<SessionEnv>,
     browser: Option<String>,
     pids: Vec<u32>,
+    apps: Vec<Child>,
     stop: Option<oneshot::Sender<()>>,
 }
 
@@ -82,6 +94,7 @@ struct Entry {
 pub struct EnvironmentManager {
     out: mpsc::UnboundedSender<NodeToControl>,
     path: OsString,
+    data_dirs: Vec<PathBuf>,
     running: Arc<Mutex<HashMap<Uuid, Entry>>>,
     streams: Arc<Mutex<HashMap<Uuid, mpsc::UnboundedSender<Vec<u8>>>>>,
 }
@@ -164,9 +177,9 @@ async fn version_of(program: &str, major_only: bool) -> Option<String> {
     parse_version(&String::from_utf8_lossy(&output.stdout), major_only)
 }
 
-pub async fn probe(path: &OsStr, os: &str) -> EnvironmentCapability {
+pub async fn probe(path: &OsStr, os: &str, data_dirs: &[PathBuf]) -> EnvironmentCapability {
     if os != "linux" {
-        return EnvironmentCapability { available: false, missing: Vec::new(), versions: EnvironmentVersions::default(), note: Some(NON_LINUX_NOTE.to_string()), running: Vec::new() };
+        return EnvironmentCapability { available: false, missing: Vec::new(), versions: EnvironmentVersions::default(), note: Some(NON_LINUX_NOTE.to_string()), running: Vec::new(), apps: Vec::new() };
     }
 
     let tools = locate(path);
@@ -184,7 +197,7 @@ pub async fn probe(path: &OsStr, os: &str) -> EnvironmentCapability {
         None => None,
     };
 
-    EnvironmentCapability { available: missing.is_empty(), missing, versions: EnvironmentVersions { compositor, wayvnc, browser }, note: None, running: Vec::new() }
+    EnvironmentCapability { available: missing.is_empty(), missing, versions: EnvironmentVersions { compositor, wayvnc, browser }, note: None, running: Vec::new(), apps: apps::discover(path, data_dirs).iter().map(DesktopApp::offer).collect() }
 }
 
 fn session_command(program: &str, runtime_dir: &Path, display: Option<&str>) -> Command {
@@ -213,18 +226,37 @@ fn session_command(program: &str, runtime_dir: &Path, display: Option<&str>) -> 
     command
 }
 
-fn browser_arguments(runtime_dir: &Path) -> Vec<String> {
+fn browser_arguments(runtime_dir: &Path, debug_port: u16) -> Vec<String> {
     vec![
         "--ozone-platform=wayland".to_string(),
         "--no-first-run".to_string(),
         "--disable-gpu".to_string(),
         "--start-maximized".to_string(),
         format!("--user-data-dir={}", runtime_dir.join("profile").display()),
+        "--remote-debugging-address=127.0.0.1".to_string(),
+        format!("--remote-debugging-port={debug_port}"),
     ]
 }
 
 fn sway_config(width: u32, height: u32) -> String {
-    format!("output HEADLESS-1 resolution {width}x{height}\ndefault_border none\ndefault_floating_border none\nxwayland disable\n")
+    format!("output HEADLESS-1 resolution {width}x{height}\ndefault_border none\ndefault_floating_border none\n")
+}
+
+fn app_command(app: &DesktopApp, file: Option<&str>, session: &SessionEnv) -> Result<Command, String> {
+    let words = app.command_with(file);
+    let (Some(program), arguments) = (words.first(), words.get(1..).unwrap_or_default()) else {
+        return Err(format!("{} has no command to run.", app.name));
+    };
+    let mut command = session_command(program, &session.runtime_dir, Some(&session.display));
+    command.args(arguments);
+
+    let chromium_based = Path::new(program).file_name().is_some_and(|name| BROWSERS.iter().any(|browser| name == *browser));
+
+    if chromium_based {
+        command.args(browser_arguments(&session.runtime_dir, session.debug_port));
+    }
+
+    Ok(command)
 }
 
 fn spawn_into(command: &mut Command, launched: &mut Launched, name: &str) -> Result<(), String> {
@@ -289,7 +321,7 @@ fn free_loopback_port() -> Result<u16, String> {
     Ok(address.port())
 }
 
-async fn launch(tools: &Tools, width: u32, height: u32) -> Result<Launched, String> {
+async fn launch(tools: &Tools, width: u32, height: u32, apps: &[DesktopApp]) -> Result<Launched, String> {
     let missing = tools.missing();
 
     if !missing.is_empty() {
@@ -302,7 +334,8 @@ async fn launch(tools: &Tools, width: u32, height: u32) -> Result<Launched, Stri
     let directory = SessionDirectory::create()?;
     let runtime_dir = directory.path.clone();
     let port = free_loopback_port()?;
-    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new() }, port, browser: String::new() };
+    let debug_port = free_loopback_port()?;
+    let mut launched = Launched { children: Vec::new(), pids: Vec::new(), directory, session: SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port }, port, browser: String::new() };
     let browser_version = version_of(browser, true).await;
     launched.browser = browser_version.map(|major| format!("Chromium {major}")).unwrap_or_else(|| "Chromium".to_string());
 
@@ -320,8 +353,13 @@ async fn launch(tools: &Tools, width: u32, height: u32) -> Result<Launched, Stri
             command
         }
         CompositorKind::Cage => {
+            let [app] = apps else {
+                return Err("This node runs cage, which shows one app at a time. Start with one app, or install sway.".to_string());
+            };
+            let session = SessionEnv { runtime_dir: runtime_dir.clone(), display: String::new(), debug_port };
+            let process = app_command(app, None, &session)?;
             let mut command = session_command(&compositor.program, &runtime_dir, None);
-            command.arg("--").arg(browser).args(browser_arguments(&runtime_dir));
+            command.arg("--").arg(process.as_std().get_program()).args(process.as_std().get_args());
 
             command
         }
@@ -329,15 +367,22 @@ async fn launch(tools: &Tools, width: u32, height: u32) -> Result<Launched, Stri
     spawn_into(&mut compositor_command, &mut launched, name)?;
     launched.session.display = wait_for_socket(&mut launched, name).await?;
 
+    if compositor.kind == CompositorKind::Cage {
+        let mut resize = session_command("wlr-randr", &runtime_dir, Some(&launched.session.display));
+        resize.arg("--output").arg(CAGE_OUTPUT).arg("--custom-mode").arg(format!("{width}x{height}"));
+        let _ = tokio::time::timeout(RESIZE_TIMEOUT, resize.status()).await;
+    }
+
     let mut wayvnc_command = session_command(wayvnc, &runtime_dir, Some(&launched.session.display));
     wayvnc_command.arg("127.0.0.1").arg(port.to_string());
     spawn_into(&mut wayvnc_command, &mut launched, "wayvnc")?;
     wait_for_port(&mut launched).await?;
 
     if compositor.kind == CompositorKind::Sway {
-        let mut browser_command = session_command(browser, &runtime_dir, Some(&launched.session.display));
-        browser_command.args(browser_arguments(&runtime_dir));
-        spawn_into(&mut browser_command, &mut launched, "Chromium")?;
+        for app in apps {
+            let mut command = app_command(app, None, &launched.session)?;
+            spawn_into(&mut command, &mut launched, &app.name)?;
+        }
     }
 
     Ok(launched)
@@ -392,7 +437,7 @@ async fn capture(grim: Option<String>, session: Option<SessionEnv>) -> Result<St
 
 impl EnvironmentManager {
     pub fn new(out: mpsc::UnboundedSender<NodeToControl>, path: OsString) -> EnvironmentManager {
-        EnvironmentManager { out, path, running: Arc::new(Mutex::new(HashMap::new())), streams: Arc::new(Mutex::new(HashMap::new())) }
+        EnvironmentManager { out, path, data_dirs: apps::data_dirs(), running: Arc::new(Mutex::new(HashMap::new())), streams: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     fn entries(&self) -> MutexGuard<'_, HashMap<Uuid, Entry>> {
@@ -423,7 +468,7 @@ impl EnvironmentManager {
             .collect()
     }
 
-    pub fn start(&self, conversation_id: Uuid, width: u32, height: u32) {
+    pub fn start(&self, conversation_id: Uuid, width: u32, height: u32, apps: Vec<String>) {
         let generation = Uuid::new_v4();
 
         {
@@ -437,18 +482,32 @@ impl EnvironmentManager {
                 return;
             }
 
-            running.insert(conversation_id, Entry { generation, started_at: Utc::now(), ready: false, port: 0, session: None, browser: None, pids: Vec::new(), stop: None });
+            running.insert(conversation_id, Entry { generation, started_at: Utc::now(), ready: false, port: 0, session: None, browser: None, pids: Vec::new(), apps: Vec::new(), stop: None });
         }
 
         self.send_changed(conversation_id, EnvironmentState::Starting, None, None);
         let manager = self.clone();
 
-        tokio::spawn(async move { manager.run(conversation_id, generation, width, height).await });
+        tokio::spawn(async move { manager.run(conversation_id, generation, width, height, apps).await });
     }
 
-    async fn run(&self, conversation_id: Uuid, generation: Uuid, width: u32, height: u32) {
+    async fn run(&self, conversation_id: Uuid, generation: Uuid, width: u32, height: u32, chosen: Vec<String>) {
         let tools = locate(&self.path);
-        let launched = launch(&tools, width, height).await;
+        let installed = apps::discover(&self.path, &self.data_dirs);
+        let mut apps = Vec::new();
+
+        for id in &chosen {
+            let Some(app) = installed.iter().find(|app| &app.id == id) else {
+                self.forget(conversation_id, generation);
+                self.send_changed(conversation_id, EnvironmentState::Failed, Some(format!("{id} is not installed on this node. Start the environment again with the apps it offers.")), None);
+
+                return;
+            };
+
+            apps.push(app.clone());
+        }
+
+        let launched = launch(&tools, width, height, &apps).await;
         let mut launched = match launched {
             Ok(launched) => launched,
             Err(failure) => {
@@ -458,7 +517,7 @@ impl EnvironmentManager {
                 return;
             }
         };
-        let (stop, stopped) = oneshot::channel();
+        let (stop, mut stopped) = oneshot::channel();
 
         {
             let mut running = self.entries();
@@ -478,9 +537,26 @@ impl EnvironmentManager {
 
         self.send_changed(conversation_id, EnvironmentState::Running, None, Some(launched.browser.clone()));
 
-        tokio::select! {
-            _ = launched.children[0].wait() => {}
-            _ = stopped => {}
+        let swaymsg = find_in_path("swaymsg", &self.path).filter(|_| tools.compositor.as_ref().is_some_and(|compositor| compositor.kind == CompositorKind::Sway));
+        let mut ticker = tokio::time::interval(WINDOW_POLL);
+        let mut reported = None;
+
+        loop {
+            tokio::select! {
+                _ = launched.children[0].wait() => break,
+                _ = &mut stopped => break,
+                _ = ticker.tick(), if swaymsg.is_some() => {
+                    let Some(swaymsg) = &swaymsg else {
+                        continue;
+                    };
+                    let listed = sway::windows(swaymsg, &launched.directory.path).await;
+
+                    if let Ok(windows) = listed && reported.as_ref() != Some(&windows) {
+                        reported = Some(windows.clone());
+                        let _ = self.out.send(NodeToControl::EnvironmentWindows { conversation_id, windows });
+                    }
+                }
+            }
         }
 
         drop(launched);
@@ -501,7 +577,7 @@ impl EnvironmentManager {
         let manager = self.clone();
 
         tokio::spawn(async move {
-            let mut capability = probe(&manager.path, std::env::consts::OS).await;
+            let mut capability = probe(&manager.path, std::env::consts::OS, &manager.data_dirs).await;
             capability.running = manager.running_list();
             let _ = manager.out.send(NodeToControl::EnvironmentCapability { capability });
         });
@@ -531,6 +607,104 @@ impl EnvironmentManager {
                 Err(error) => (None, Some(error)),
             };
             let _ = out.send(NodeToControl::EnvironmentScreenshotTaken { request_id, png, error });
+        });
+    }
+
+    pub fn browser_read(&self, request_id: Uuid, conversation_id: Uuid) {
+        let debug_port = self.ready_session(conversation_id).map(|session| session.debug_port);
+        let out = self.out.clone();
+
+        tokio::spawn(async move {
+            let read = match debug_port {
+                Some(debug_port) => browser_control::read(debug_port).await,
+                None => Err("There is no environment running for this conversation. Start one, then read the page.".to_string()),
+            };
+            let message = match read {
+                Ok((page, controls)) => NodeToControl::EnvironmentBrowserControls { request_id, page, controls, error: None },
+                Err(error) => NodeToControl::EnvironmentBrowserControls { request_id, page: String::new(), controls: Vec::new(), error: Some(error) },
+            };
+            let _ = out.send(message);
+        });
+    }
+
+    pub fn browser_act(&self, request_id: Uuid, conversation_id: Uuid, action: BrowserAction) {
+        let debug_port = self.ready_session(conversation_id).map(|session| session.debug_port);
+        let out = self.out.clone();
+
+        tokio::spawn(async move {
+            let result = match debug_port {
+                Some(debug_port) => browser_control::act(debug_port, &action).await,
+                None => Err("There is no environment running for this conversation. Start one, then act on the page.".to_string()),
+            };
+            let _ = out.send(NodeToControl::EnvironmentBrowserActed { request_id, error: result.err() });
+        });
+    }
+
+    pub fn launch(&self, request_id: Uuid, conversation_id: Uuid, app: String, file: Option<String>) {
+        let manager = self.clone();
+
+        tokio::spawn(async move {
+            let launched = manager.launch_app(conversation_id, &app, file.as_deref()).await;
+            let (window, error) = match launched {
+                Ok(window) => (window, None),
+                Err(error) => (None, Some(error)),
+            };
+            let _ = manager.out.send(NodeToControl::EnvironmentLaunched { request_id, window, error });
+        });
+    }
+
+    async fn launch_app(&self, conversation_id: Uuid, id: &str, file: Option<&str>) -> Result<Option<i64>, String> {
+        let Some(session) = self.ready_session(conversation_id) else {
+            return Err("There is no environment running for this conversation. Start one, then open the app.".to_string());
+        };
+        let installed = apps::discover(&self.path, &self.data_dirs);
+        let Some(app) = installed.iter().find(|app| app.id == id) else {
+            return Err(format!("{id} is not installed on this node."));
+        };
+        let swaymsg = find_in_path("swaymsg", &self.path);
+        let before = match &swaymsg {
+            Some(swaymsg) => sway::windows(swaymsg, &session.runtime_dir).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let mut command = app_command(app, file, &session)?;
+        let child = command.spawn().map_err(|error| format!("{} did not start. The node could not run it: {error}.", app.name))?;
+
+        if let Some(entry) = self.entries().get_mut(&conversation_id) {
+            entry.apps.push(child);
+        }
+
+        let Some(swaymsg) = swaymsg else {
+            return Ok(None);
+        };
+        let deadline = tokio::time::Instant::now() + LAUNCH_WINDOW_WAIT;
+
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(LAUNCH_WINDOW_POLL).await;
+
+            let now = sway::windows(&swaymsg, &session.runtime_dir).await.unwrap_or_default();
+            let opened = now.iter().find(|window| !before.iter().any(|earlier| earlier.id == window.id));
+
+            if let Some(opened) = opened {
+                sway::focus(&swaymsg, &session.runtime_dir, opened.id).await?;
+
+                return Ok(Some(opened.id));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn focus(&self, request_id: Uuid, conversation_id: Uuid, window: i64) {
+        let session = self.ready_session(conversation_id);
+        let swaymsg = find_in_path("swaymsg", &self.path);
+        let out = self.out.clone();
+
+        tokio::spawn(async move {
+            let result = match (swaymsg, session) {
+                (Some(swaymsg), Some(session)) => sway::focus(&swaymsg, &session.runtime_dir, window).await,
+                _ => Err("There is no environment running for this conversation. Start one, then switch window.".to_string()),
+            };
+            let _ = out.send(NodeToControl::EnvironmentInputDone { request_id, error: result.err() });
         });
     }
 
@@ -613,11 +787,17 @@ impl EnvironmentManager {
         }
     }
 
-    pub fn stop_all(&self) {
+    pub async fn stop_all(&self) {
         let conversations: Vec<Uuid> = self.entries().keys().copied().collect();
 
         for conversation_id in conversations {
             self.stop(conversation_id);
+        }
+
+        let deadline = tokio::time::Instant::now() + SHUTDOWN_WAIT;
+
+        while !self.entries().is_empty() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(SHUTDOWN_POLL).await;
         }
     }
 }
@@ -648,7 +828,7 @@ mod tests {
     async fn a_node_with_every_tool_is_available_and_reports_versions() {
         let (_directory, path) = stocked_path();
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(capability.available);
         assert!(capability.missing.is_empty());
@@ -662,7 +842,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().as_os_str().to_os_string();
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(!capability.available);
         assert_eq!(capability.missing, vec!["sway", "wayvnc", "grim", "Chromium"]);
@@ -674,7 +854,7 @@ mod tests {
         let (directory, path) = stocked_path();
         std::fs::remove_file(directory.path().join("grim")).unwrap();
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(!capability.available);
         assert_eq!(capability.missing, vec!["grim"]);
@@ -686,7 +866,7 @@ mod tests {
         std::fs::remove_file(directory.path().join("sway")).unwrap();
         stub(directory.path(), "cage", "cage version 0.2.0");
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(capability.available);
         assert_eq!(capability.versions.compositor.as_deref(), Some("0.2.0"));
@@ -698,7 +878,7 @@ mod tests {
         std::fs::remove_file(directory.path().join("chromium")).unwrap();
         stub(directory.path(), "google-chrome-stable", "Google Chrome 130.0.1");
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(capability.available);
         assert_eq!(capability.versions.browser.as_deref(), Some("130"));
@@ -709,7 +889,7 @@ mod tests {
         let (directory, path) = stocked_path();
         stub(directory.path(), "wayvnc", "no number here");
 
-        let capability = probe(&path, "linux").await;
+        let capability = probe(&path, "linux", &[]).await;
 
         assert!(capability.available);
         assert_eq!(capability.versions.wayvnc, None);
@@ -719,7 +899,7 @@ mod tests {
     async fn a_node_that_is_not_linux_is_unavailable_with_a_note() {
         let (_directory, path) = stocked_path();
 
-        let capability = probe(&path, "macos").await;
+        let capability = probe(&path, "macos", &[]).await;
 
         assert!(!capability.available);
         assert!(capability.missing.is_empty());
@@ -758,7 +938,7 @@ mod tests {
         let manager = EnvironmentManager::new(out, directory.path().as_os_str().to_os_string());
         let conversation_id = Uuid::new_v4();
 
-        manager.start(conversation_id, 1280, 800);
+        manager.start(conversation_id, 1280, 800, Vec::new());
 
         assert!(matches!(messages.recv().await, Some(NodeToControl::EnvironmentChanged { state: EnvironmentState::Starting, .. })));
         let Some(NodeToControl::EnvironmentChanged { state, failure, .. }) = messages.recv().await else {

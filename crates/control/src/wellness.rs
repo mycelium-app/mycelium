@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
-use mycelium_proto::api::{ActivityBreak, ActivityDay, ActivityHours, ActivityHoursDay, ActivitySpan, Break, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
+use mycelium_proto::api::{ActivityBreak, ActivityDay, ActivityHours, ActivityHoursDay, ActivitySpan, Break, BreakNoteRequest, HeldWeek, HoldRequest, Hours, HoursDay, OutOfHoursOpen, PuzzleBucket, PuzzleDay, PuzzleResult, PuzzleStats, PuzzleSummary, StartBreakRequest, WellnessDay, WellnessHeartbeat, WellnessOverview, WellnessSettings};
 use mycelium_proto::stream::StreamMessage;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -29,6 +29,15 @@ type SettingsRow = (bool, i32, i32, i32, bool, bool, bool, bool, Option<String>)
 pub const OPENING_MINUTES: i64 = 15;
 const DAY_MINUTES: u32 = 24 * 60;
 const FLIP_SEARCH_DAYS: i64 = 8;
+
+const RECENT_BREAKS: i64 = 20;
+const BREAK_COLUMNS: &str = "id, started_at, ends_at, ended_early_at, planned_minutes, case when ended_early_at is not null or ends_at <= now() then coalesce(ended_early_at, ends_at) end, ended_early_at is not null, note, noted_at";
+
+type BreakRow = (Uuid, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>, i32, Option<DateTime<Utc>>, bool, Option<String>, Option<DateTime<Utc>>);
+
+fn to_break(row: BreakRow) -> Break {
+    Break { id: row.0, started_at: row.1, ends_at: row.2, ended_early_at: row.3, planned_minutes: row.4, ended_at: row.5, ended_early: row.6, note: row.7, noted_at: row.8 }
+}
 
 const SETTINGS_COLUMNS: &str = "break_reminders, break_after_minutes, snooze_minutes, break_minutes, app_always_open, quiet_hold_notifications, quiet_hold_schedules, quiet_hold_pings, time_zone";
 
@@ -385,9 +394,9 @@ pub async fn start_break(State(state): State<AppState>, user: AuthUser, Json(req
 
     require_range("break_length_invalid", "Choose a break between 1 and 120 minutes.", minutes, 1, 120)?;
 
-    let started = sqlx::query_as::<_, (Uuid, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>(
-        "insert into breaks (owner, ends_at) values ($1, now() + make_interval(mins => $2)) returning id, started_at, ends_at, ended_early_at",
-    )
+    let started = sqlx::query_as::<_, BreakRow>(sqlx::AssertSqlSafe(format!(
+        "insert into breaks (owner, ends_at, planned_minutes) values ($1, now() + make_interval(mins => $2), $2) returning {BREAK_COLUMNS}",
+    )))
     .bind(user.id)
     .bind(minutes)
     .fetch_one(&state.pool)
@@ -395,7 +404,7 @@ pub async fn start_break(State(state): State<AppState>, user: AuthUser, Json(req
 
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
 
-    Ok((StatusCode::CREATED, Json(Break { id: started.0, started_at: started.1, ends_at: started.2, ended_early_at: started.3 })))
+    Ok((StatusCode::CREATED, Json(to_break(started))))
 }
 
 pub async fn end_break(State(state): State<AppState>, user: AuthUser) -> ApiResult<StatusCode> {
@@ -405,6 +414,30 @@ pub async fn end_break(State(state): State<AppState>, user: AuthUser) -> ApiResu
     state.publish(Some(user.id), StreamMessage::WellnessChanged);
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn note_break(State(state): State<AppState>, user: AuthUser, Path(id): Path<Uuid>, Json(request): Json<BreakNoteRequest>) -> ApiResult<Json<Break>> {
+    user.require_full_access()?;
+
+    let note = request.note.trim();
+
+    if note.is_empty() {
+        return Err(ApiError::bad_request("break_note_missing", "Enter what you did in your break"));
+    }
+
+    let noted = sqlx::query_as::<_, BreakRow>(sqlx::AssertSqlSafe(format!(
+        "update breaks set note = $3, noted_at = now() where id = $1 and owner = $2 and (ended_early_at is not null or ends_at <= now()) returning {BREAK_COLUMNS}",
+    )))
+    .bind(id)
+    .bind(user.id)
+    .bind(note)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("That break"))?;
+
+    state.publish(Some(user.id), StreamMessage::WellnessChanged);
+
+    Ok(Json(to_break(noted)))
 }
 
 fn require_puzzle(puzzle: &str) -> ApiResult<()> {
@@ -692,11 +725,25 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
     let breaks = sqlx::query_as::<_, (DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>)>("select started_at, ended_early_at, ends_at from breaks where owner = $1 and started_at >= $2").bind(user.id).bind(since).fetch_all(&state.pool).await?;
     let spans = turns.into_iter().map(|(ended, working_ms)| (ended - Duration::milliseconds(working_ms), ended)).collect();
     let agent_minutes = union_minutes_per_day(spans, zone);
-    let current_break = sqlx::query_as::<_, (Uuid, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>("select id, started_at, ends_at, ended_early_at from breaks where owner = $1 and ends_at > now() and ended_early_at is null order by started_at desc limit 1")
+    let current_break = sqlx::query_as::<_, BreakRow>(sqlx::AssertSqlSafe(format!("select {BREAK_COLUMNS} from breaks where owner = $1 and ends_at > now() and ended_early_at is null order by started_at desc limit 1")))
         .bind(user.id)
         .fetch_optional(&state.pool)
         .await?
-        .map(|row| Break { id: row.0, started_at: row.1, ends_at: row.2, ended_early_at: row.3 });
+        .map(to_break);
+    let awaiting_note = sqlx::query_as::<_, BreakRow>(sqlx::AssertSqlSafe(format!(
+        "select {BREAK_COLUMNS} from breaks where owner = $1 and (ended_early_at is not null or ends_at <= now()) and noted_at is null order by started_at desc limit 1",
+    )))
+    .bind(user.id)
+    .fetch_optional(&state.pool)
+    .await?
+    .map(to_break);
+    let recent_breaks = sqlx::query_as::<_, BreakRow>(sqlx::AssertSqlSafe(format!("select {BREAK_COLUMNS} from breaks where owner = $1 and note is not null order by started_at desc limit {RECENT_BREAKS}")))
+        .bind(user.id)
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .map(to_break)
+        .collect();
     let last_break_at = sqlx::query_scalar::<_, Option<DateTime<Utc>>>("select max(coalesce(ended_early_at, ends_at)) from breaks where owner = $1 and coalesce(ended_early_at, ends_at) <= now()").bind(user.id).fetch_one(&state.pool).await?;
     let quiet = !is_open(&settings.hours, Utc::now().with_timezone(&zone).naive_local());
     let due = sqlx::query_scalar::<_, Uuid>("select id from schedules where owner = $1 and not paused and not proposed and next_run_at <= now()").bind(user.id).fetch_all(&state.pool).await?;
@@ -737,7 +784,7 @@ pub async fn overview(State(state): State<AppState>, user: AuthUser, Query(query
     .map(|row| OutOfHoursOpen { group_id: row.group_id, group_name: row.group_name, reason: row.reason, opened_at: row.opened_at, until: row.until, closed_at: row.closed_at })
     .collect();
 
-    Ok(Json(WellnessOverview { days, last_break_at, current_break, quiet_now: quiet, held, held_week, opened_out_of_hours }))
+    Ok(Json(WellnessOverview { days, last_break_at, current_break, awaiting_note, recent_breaks, quiet_now: quiet, held, held_week, opened_out_of_hours }))
 }
 
 #[derive(Deserialize)]

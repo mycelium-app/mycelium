@@ -71,10 +71,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 }
 
 pub async fn start(state: &AppState, owner: Uuid, request: CreateConversationRequest) -> ApiResult<Conversation> {
-    start_for(state, owner, request, None).await
+    start_for(state, owner, request, None, false).await
 }
 
-pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConversationRequest, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
+pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConversationRequest, assistant_id: Option<Uuid>, scratch: bool) -> ApiResult<Conversation> {
     let project = match request.project_id {
         Some(project_id) => Some(projects::find_owned(state, project_id, owner).await?),
         None => None,
@@ -88,9 +88,11 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
         return Err(ApiError::bad_request("project_required", "Choose a project to start a worktree from."));
     }
 
-    let mut cwd = match &project {
-        Some(project) => project.path.clone(),
-        None => request.cwd.trim().to_string(),
+    let scratch_id = scratch.then(Uuid::new_v4);
+    let mut cwd = match (&project, scratch_id) {
+        (_, Some(id)) => assistants::folder_of(id),
+        (Some(project), None) => project.path.clone(),
+        (None, None) => request.cwd.trim().to_string(),
     };
 
     if cwd.is_empty() {
@@ -173,7 +175,7 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     let mut tx = state.pool.begin().await?;
     let row = sqlx::query_as::<_, ConversationRow>(
         sqlx::AssertSqlSafe(format!(
-        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model, routing) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15, $16)
+        "insert into conversations (owner, node_id, agent, cwd, title, status, account, project_id, title_user_set, predicted_title, parent_id, side_kind, branch, assistant_id, model, routing, id, scratch) values ($1, $2, $3, $4, $5, $6, $7, coalesce($8, project_for_folder($1, $2, $4)), $9, $10, $11, $12, $13, $14, $15, $16, coalesce($17, gen_random_uuid()), $18)
          returning {CONVERSATION_COLUMNS}",
     )),
     )
@@ -193,8 +195,18 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
     .bind(assistant_id)
     .bind(request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()))
     .bind(request.routing.map(|routing| routing.as_str()))
+    .bind(scratch_id)
+    .bind(scratch)
     .fetch_one(&mut *tx)
     .await?;
+
+    let mut started_event = None;
+
+    if scratch {
+        let node_name = sqlx::query_scalar::<_, String>("select name from nodes where id = $1").bind(request.node_id).fetch_one(&mut *tx).await?;
+
+        started_event = append_event(&mut tx, row.id, EventKind::Continued, &json!({"kind": "scratch", "node_name": node_name}), None).await?;
+    }
 
     if let Some(prompt) = prompt {
         sqlx::query("insert into queued_prompts (conversation_id, position, text) values ($1, 1, $2)").bind(row.id).bind(prompt).execute(&mut *tx).await?;
@@ -204,6 +216,12 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
 
     if let Some(assistant_id) = assistant_id {
         assistants::copy_down(state, request.node_id, assistant_id).await?;
+    }
+
+    if scratch && !state.hub.send(request.node_id, ControlToNode::WriteFolder { root: cwd.clone(), files: Vec::new(), replace: true }) {
+        sqlx::query("delete from conversations where id = $1").bind(row.id).execute(&state.pool).await?;
+
+        return Err(node_offline());
     }
 
     let instructions = instructions::session_layer(state, row.id).await?;
@@ -218,6 +236,11 @@ pub async fn start_for(state: &AppState, owner: Uuid, mut request: CreateConvers
 
     let conversation = row.to_proto()?;
     state.publish(Some(owner), StreamMessage::Conversation(conversation.clone()));
+
+    if let Some(event) = started_event {
+        state.publish(Some(owner), StreamMessage::Event(event));
+    }
+
     publish_queue(state, owner, row.id).await?;
 
     Ok(conversation)
@@ -235,7 +258,7 @@ pub async fn side(State(state): State<AppState>, user: AuthUser, Path(id): Path<
         let Some(provider_id) = parent.provider_id else {
             return Err(ApiError::conflict("provider_removed", "This chat's model provider was removed. Choose another model in the message box to carry on."));
         };
-        let started = CreateChatRequest { provider_id, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
+        let started = CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, model: parent.model.clone(), prompt: text.map(str::to_string), parent_id: Some(id) };
         let conversation = chats::start(&state, user.id, started, Some(request.kind), None).await?;
 
         return Ok((StatusCode::CREATED, Json(conversation)));
@@ -418,6 +441,7 @@ pub async fn patch(State(state): State<AppState>, user: AuthUser, Path(id): Path
     if request.archived == Some(true) && before.is_idle() {
         state.hub.send(row.node_id, ControlToNode::CloseSession { conversation_id: id });
         state.remove_session(row.node_id, id).await?;
+        crate::environments::stop_with_conversation(&state, id, false).await;
     }
 
     let conversation = row.to_proto()?;
@@ -502,6 +526,9 @@ pub async fn close_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
 
     let active = matches!(row.status.as_str(), "working" | "input");
     if chats::is_chat(&row) || !(active || state.hub.has_session(row.node_id, id)) {
+        tx.commit().await?;
+        crate::environments::stop_with_conversation(state, id, false).await;
+
         return Ok(());
     }
 
@@ -517,6 +544,7 @@ pub async fn close_for(state: &AppState, owner: Uuid, id: Uuid) -> ApiResult<()>
 
     tx.commit().await?;
     state.remove_session(row.node_id, id).await?;
+    crate::environments::stop_with_conversation(state, id, false).await;
 
     Ok(())
 }
@@ -587,9 +615,14 @@ pub async fn delete(State(state): State<AppState>, user: AuthUser, Path(id): Pat
     for (removed_id, node_id) in removed {
         state.hub.send(node_id, ControlToNode::CloseSession { conversation_id: removed_id });
         state.remove_session(node_id, removed_id).await?;
+        crate::environments::stop_with_conversation(&state, removed_id, true).await;
         state.hub.forget_prompts_of(removed_id);
         state.hub.take_send_now(removed_id);
         state.publish(Some(user.id), StreamMessage::ConversationRemoved { conversation_id: removed_id });
+    }
+
+    if row.scratch {
+        state.hub.send(row.node_id, ControlToNode::DeleteFolder { root: row.cwd });
     }
 
     Ok(StatusCode::NO_CONTENT)

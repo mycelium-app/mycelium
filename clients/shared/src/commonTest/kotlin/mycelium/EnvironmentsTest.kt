@@ -7,12 +7,19 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
+import mycelium.api.EnvironmentApp
+import mycelium.api.EnvironmentAppKind
 import mycelium.api.EnvironmentCapability
 import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentState
 import mycelium.api.EnvironmentVersions
 import mycelium.api.MyceliumApi
 import mycelium.api.MyceliumJson
+import mycelium.state.buildThread
+import mycelium.state.ThreadItem
+import mycelium.api.EventKinds
+import mycelium.api.Event
+import kotlinx.serialization.json.Json
 import mycelium.api.NodeSummary
 import mycelium.api.StreamMessage
 import mycelium.api.parseStreamMessage
@@ -25,7 +32,12 @@ import mycelium.state.environmentMissingText
 import mycelium.state.environmentRunningFor
 import mycelium.state.environmentStage
 import mycelium.state.environmentStoppedText
-import mycelium.state.environmentSummary
+import mycelium.state.environmentAppsToStart
+import mycelium.state.environmentCurrentWindow
+import mycelium.state.environmentDefaultApps
+import mycelium.state.environmentOpenApps
+import mycelium.state.environmentSizeText
+import mycelium.state.environmentWindowApp
 import mycelium.state.environmentVersionsText
 import mycelium.state.environmentViewUrl
 import mycelium.state.nodeThatCanRunEnvironment
@@ -111,6 +123,20 @@ class EnvironmentsTest {
     }
 
     @Test
+    fun anEnvironmentStoppedWithItsConversationSaysSoAndNamesTheTime() {
+        val stopped = environment(EnvironmentState.Stopped).copy(stoppedAt = "2026-10-28T15:10:10Z", closedWithConversation = true)
+
+        assertEquals("It stopped when you closed this conversation at 15:10, so the apps in it closed too.", environmentStoppedText(stopped) { "2026-10-28T15:10:10" })
+    }
+
+    @Test
+    fun theEnvironmentLinesOfAThreadAreShownAsNotes() {
+        val thread = buildThread(listOf(Event("c1", 1, EventKinds.Environment, Json.parseToJsonElement("{\"text\":\"You handed back the environment.\"}"))))
+
+        assertEquals(ThreadItem.Note("e1", "You handed back the environment."), thread.single())
+    }
+
+    @Test
     fun theMissingToolsSentenceNamesEveryMissingToolAndTheNode() {
         assertEquals("sway and wayvnc are not installed on laptop", environmentMissingText(listOf("sway", "wayvnc"), "laptop"))
         assertEquals("wayvnc is not installed on laptop", environmentMissingText(listOf("wayvnc"), "laptop"))
@@ -130,7 +156,7 @@ class EnvironmentsTest {
 
     @Test
     fun theSummaryNamesTheSessionSizeAndBrowser() {
-        assertEquals("Wayland session  ·  1280 × 800  ·  Chromium", environmentSummary(environment()))
+        assertEquals("1280 × 800", environmentSizeText(environment()))
     }
 
     @Test
@@ -217,4 +243,36 @@ class EnvironmentsTest {
 
         assertNull(MyceliumApi("https://mycelium.test", "token", engine).environment("c1"))
     }
+
+    @Test
+    fun theFirstBrowserIsTickedByDefaultAndNothingElse() {
+        val apps = listOf(App("files", EnvironmentAppKind.FileManager), App("firefox", EnvironmentAppKind.Browser), App("chromium", EnvironmentAppKind.Browser))
+
+        assertEquals(setOf("firefox"), environmentDefaultApps(apps))
+        assertEquals(emptySet(), environmentDefaultApps(apps.take(1)))
+    }
+
+    @Test
+    fun theAppsToStartKeepTheOrderTheNodeOffersThem() {
+        val apps = listOf(App("files", EnvironmentAppKind.FileManager), App("chromium", EnvironmentAppKind.Browser))
+
+        assertEquals(listOf("files", "chromium"), environmentAppsToStart(apps, setOf("chromium", "files")))
+        assertEquals(emptyList(), environmentAppsToStart(apps, emptySet()))
+    }
+
+    @Test
+    fun anEnvironmentMessageCarriesItsWindowsAndMarksTheAgentsWindow() {
+        val windows = """"windows":[{"id":4,"app_id":"chromium","title":"Inbox","focused":false},{"id":9,"app_id":"files","title":"Downloads","focused":true}],"agent_window":4,"""
+        val message = parseStreamMessage(EnvironmentJson.replace(""""browser"""", windows + """"browser""""))
+        assertIs<StreamMessage.EnvironmentChanged>(message)
+        val apps = listOf(App("chromium", EnvironmentAppKind.Browser), App("files", EnvironmentAppKind.FileManager))
+        val environment = message.environment
+
+        assertEquals("Downloads", environmentCurrentWindow(environment)?.title)
+        assertEquals("Chromium · agent", environmentWindowApp(environment, environment.windows[0], apps))
+        assertEquals("Files", environmentWindowApp(environment, environment.windows[1], apps))
+        assertEquals("Chromium, Files", environmentOpenApps(environment, apps))
+    }
 }
+
+private fun App(id: String, kind: EnvironmentAppKind) = EnvironmentApp(id, id.replaceFirstChar { it.uppercase() }, kind)

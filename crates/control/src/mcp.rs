@@ -1,6 +1,7 @@
 mod api_access;
 mod artifacts;
 mod assistants;
+mod browser_task;
 mod call;
 mod conversations;
 mod decide;
@@ -62,6 +63,7 @@ enum Area {
     SshAccess,
     Artifacts,
     Environment,
+    BrowserTask,
 }
 
 fn area_of(tool: &str) -> Option<Area> {
@@ -83,7 +85,8 @@ fn area_of(tool: &str) -> Option<Area> {
         "decide" => Some(Area::Decide),
         "request_ssh_access" => Some(Area::SshAccess),
         "find_artifacts" | "request_artifact_access" | "create_artifact" | "update_artifact" | "design_set_artboard" | "design_remove_item" | "read_artifact" | "read_artifact_feedback" => Some(Area::Artifacts),
-        "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" => Some(Area::Environment),
+        "environment_screenshot" | "environment_click" | "environment_type" | "environment_scroll" | "environment_key" | "environment_launch" => Some(Area::Environment),
+        "browser_task" => Some(Area::BrowserTask),
         name if name.contains("__") => Some(Area::ServerTools),
         _ => None,
     }
@@ -110,6 +113,7 @@ async fn call_area(area: Area, call: ToolCall<'_>) -> ApiResult<ToolReply> {
         Area::SshAccess => ssh_access::call(call).await,
         Area::Artifacts => artifacts::call(call).await,
         Area::Environment => environment::call(call).await,
+        Area::BrowserTask => browser_task::call(call).await,
     }
 }
 
@@ -145,6 +149,7 @@ pub fn tool_definitions() -> Value {
         ssh_access::definitions(),
         artifacts::definitions(),
         environment::definitions(),
+        browser_task::definitions(),
     ];
 
     Value::Array(areas.into_iter().flat_map(|definitions| definitions.as_array().cloned().unwrap_or_default()).collect())

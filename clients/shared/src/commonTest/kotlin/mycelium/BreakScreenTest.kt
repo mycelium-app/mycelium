@@ -5,9 +5,13 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import mycelium.api.MyceliumApi
+import mycelium.api.WellnessBreak
 import mycelium.state.BreakPhase
 import mycelium.state.WellnessStore
+import mycelium.state.breakEndedCaption
+import mycelium.state.breakWhen
 import mycelium.state.countdownText
+import mycelium.state.lengthText
 import mycelium.state.minutesLeftText
 import mycelium.state.stillWorkingOnBreak
 import kotlin.test.Test
@@ -37,19 +41,39 @@ class BreakScreenTest {
 
         wellness.finishBreakIfOver(Clock.System.now() + 6.minutes)
 
-        assertEquals(BreakPhase.Idle, wellness.state.value.clock.phase)
+        assertEquals(BreakPhase.Noting, wellness.state.value.clock.phase)
         assertNull(wellness.state.value.breakEndsAt)
+        assertNull(wellness.state.value.ended?.earlyMinutes)
     }
 
     @Test
-    fun endingABreakEarlyLiftsTheBreakScreen() = runTest {
+    fun endingABreakEarlyAsksWhatYouDidAndSaysHowEarly() = runTest {
         val wellness = store(backgroundScope)
 
         wellness.startBreak()
         wellness.endBreak()
 
-        assertEquals(BreakPhase.Idle, wellness.state.value.clock.phase)
+        assertEquals(BreakPhase.Noting, wellness.state.value.clock.phase)
         assertNull(wellness.state.value.breakEndsAt)
+        assertEquals(5, wellness.state.value.ended?.earlyMinutes)
+    }
+
+    @Test
+    fun finishedAgentsAreCountedInTheCaptionOnlyWhenThereAreAny() {
+        assertEquals("Your break ended at 14:35.", breakEndedCaption("14:35", null, 0))
+        assertEquals("Your break ended at 14:35. 1 agent finished while you were away and its results are waiting.", breakEndedCaption("14:35", null, 1))
+        assertEquals("Your break ended at 14:35. 2 agents finished while you were away and their results are waiting.", breakEndedCaption("14:35", null, 2))
+        assertEquals("You ended your break 4 minutes early.", breakEndedCaption("14:31", 4, 2))
+        assertEquals("You ended your break 1 minute early.", breakEndedCaption("14:34", 1, 0))
+    }
+
+    @Test
+    fun recentBreaksSayWhenAndHowLongIncludingEarlyEnds() {
+        assertEquals("Today, 14:30", breakWhen("2026-10-28T14:30", "2026-10-28"))
+        assertEquals("Yesterday, 16:10", breakWhen("2026-10-27T16:10", "2026-10-28"))
+        assertEquals("25 Oct, 09:00", breakWhen("2026-10-25T09:00", "2026-10-28"))
+        assertEquals("5 min", WellnessBreak("b", "2026-10-28T14:30:00Z", "2026-10-28T14:35:00Z", plannedMinutes = 5).lengthText())
+        assertEquals("1 min, ended early", WellnessBreak("b", "2026-10-28T11:05:00Z", "2026-10-28T11:10:00Z", plannedMinutes = 5, endedAt = "2026-10-28T11:06:00Z", endedEarly = true).lengthText())
     }
 
     @Test

@@ -4,11 +4,17 @@ import io.ktor.http.encodeURLParameter
 import kotlin.time.Clock
 import kotlin.time.Instant
 import mycelium.Connection
+import kotlinx.serialization.json.JsonPrimitive
+import mycelium.api.BrowserTask
+import mycelium.api.BrowserTaskState
 import mycelium.api.Environment
 import mycelium.api.EnvironmentCapability
+import mycelium.api.EnvironmentApp
+import mycelium.api.EnvironmentAppKind
 import mycelium.api.EnvironmentController
 import mycelium.api.EnvironmentState
 import mycelium.api.EnvironmentVersions
+import mycelium.api.EnvironmentWindow
 import mycelium.api.NodeSummary
 
 enum class EnvironmentStage { CannotRun, Empty, Starting, Failed, Active, Stopped }
@@ -29,16 +35,45 @@ fun environmentStatus(controller: EnvironmentController): String = when (control
     EnvironmentController.Person -> "You are in control"
 }
 
+fun environmentActivity(environment: Environment): String =
+    if (environment.browserTask?.state == BrowserTaskState.Running) "Browser task" else environmentStatus(environment.controller)
+
+fun browserTaskSeconds(millis: Long): String {
+    val tenths = (millis + 50) / 100
+
+    return "${tenths / 10}.${tenths % 10} s"
+}
+
+fun browserTaskStepsTotal(task: BrowserTask): String = browserTaskSeconds(task.steps.sumOf { it.millis })
+
+fun browserTaskStopped(task: BrowserTask): String {
+    val steps = "${task.steps.size} ${if (task.steps.size == 1) "step" else "steps"}"
+
+    return if (task.stoppedBy == "took_over") "Stopped when you took over, after $steps." else "Stopped after $steps."
+}
+
+fun browserTaskGoal(call: ThreadItem.ToolCall): String? {
+    if (!call.title.contains("browser_task")) {
+        return null
+    }
+
+    return (call.input?.get("goal") as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
+
 fun environmentControl(controller: EnvironmentController, person: String?): String = when (controller) {
     EnvironmentController.Agent -> "Agent in control"
     EnvironmentController.Person -> "${person ?: "A person"} in control"
 }
 
 fun environmentStoppedText(environment: Environment, localDateTime: (Long) -> String?): String {
-    val moment = environment.stoppedAt?.let(::instantOrNull) ?: return "You stopped it. $EnvironmentStoppedAdvice"
-    val local = localDateTime(moment.toEpochMilliseconds()) ?: moment.toString()
+    val moment = environment.stoppedAt?.let(::instantOrNull)
+    val time = moment?.let { (localDateTime(it.toEpochMilliseconds()) ?: it.toString()).substringAfter('T').take(5) }
 
-    return "You stopped it at ${local.substringAfter('T').take(5)}. $EnvironmentStoppedAdvice"
+    if (environment.closedWithConversation) {
+        return "It stopped when you closed this conversation${time?.let { " at $it" }.orEmpty()}, so the apps in it closed too."
+    }
+
+    return if (time == null) "You stopped it. $EnvironmentStoppedAdvice" else "You stopped it at $time. $EnvironmentStoppedAdvice"
 }
 
 fun environmentTools(missing: List<String>): String = when (missing.size) {
@@ -62,8 +97,38 @@ fun environmentVersionsText(versions: EnvironmentVersions): String = listOfNotNu
 
 private fun named(name: String, version: String): String = if (version.firstOrNull()?.isLetter() == true) version else "$name $version"
 
-fun environmentSummary(environment: Environment): String =
-    "Wayland session  ·  ${environment.size.width} × ${environment.size.height}  ·  ${environment.browser?.substringBefore(' ')?.takeIf { it.isNotBlank() } ?: "Chromium"}"
+fun environmentSizeText(environment: Environment): String = "${environment.size.width} × ${environment.size.height}"
+
+fun environmentStartHint(nodeName: String): String = "Apps on $nodeName. You and the agent can open others once it is running."
+
+fun environmentDefaultApps(apps: List<EnvironmentApp>): Set<String> = setOfNotNull(apps.firstOrNull { it.kind == EnvironmentAppKind.Browser }?.id)
+
+fun environmentAppsToStart(apps: List<EnvironmentApp>, ticked: Set<String>): List<String> = apps.filter { it.id in ticked }.map { it.id }
+
+fun environmentAppName(apps: List<EnvironmentApp>, appId: String): String =
+    apps.firstOrNull { it.id.equals(appId, ignoreCase = true) }?.name ?: appId
+
+fun environmentKindText(kind: EnvironmentAppKind): String = when (kind) {
+    EnvironmentAppKind.Browser -> "Browser"
+    EnvironmentAppKind.FileManager -> "File manager"
+    EnvironmentAppKind.Editor -> "Editor"
+    EnvironmentAppKind.Office -> "Office"
+    EnvironmentAppKind.Mail -> "Mail"
+    EnvironmentAppKind.Terminal -> "Terminal"
+    EnvironmentAppKind.Other -> "Other"
+}
+
+fun environmentCurrentWindow(environment: Environment): EnvironmentWindow? =
+    environment.windows.firstOrNull { it.focused } ?: environment.windows.firstOrNull()
+
+fun environmentWindowApp(environment: Environment, window: EnvironmentWindow, apps: List<EnvironmentApp>): String {
+    val name = environmentAppName(apps, window.appId)
+
+    return if (window.id == environment.agentWindow) "$name · agent" else name
+}
+
+fun environmentOpenApps(environment: Environment, apps: List<EnvironmentApp>): String =
+    environment.windows.map { environmentAppName(apps, it.appId) }.distinct().joinToString(", ")
 
 fun environmentDescription(environment: Environment): String {
     val doing = when (environment.controller) {

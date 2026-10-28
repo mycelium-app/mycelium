@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.FlowRow
@@ -71,6 +72,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -442,14 +444,19 @@ fun Dot(color: Color, hollow: Boolean = false) {
 }
 
 @Composable
-fun Tag(text: String) {
-    Box(
+fun Tag(text: String, icon: MyIcon? = null) {
+    Row(
         Modifier
             .height(Tokens.Size.ControlSm)
             .border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape)
             .padding(horizontal = Tokens.Space.S1_5),
-        contentAlignment = Alignment.Center,
+        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (icon != null) {
+            Icon(icon, MyTheme.colors.textMuted, Tokens.Size.IconSm, Modifier.clearAndSetSemantics {})
+        }
+
         Label(text, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted, maxLines = 1)
     }
 }
@@ -544,6 +551,8 @@ fun TextArea(
     error: String? = null,
     errorAbove: Boolean = false,
     focus: FocusRequester? = null,
+    hint: String? = null,
+    labelAsHeading: Boolean = false,
 ) {
     val colors = MyTheme.colors
     val source = remember { MutableInteractionSource() }
@@ -552,7 +561,15 @@ fun TextArea(
     val base = if (mono) Tokens.Type.Code else Tokens.Type.Ui
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-        Label(label, style = Tokens.Type.MetaStrong, color = colors.textMuted)
+        if (labelAsHeading) {
+            Label(label, Modifier.semantics { heading() }, Tokens.Type.Display)
+        } else {
+            Label(label, style = Tokens.Type.MetaStrong, color = colors.textMuted)
+        }
+
+        if (hint != null) {
+            Label(hint, style = Tokens.Type.Meta, color = colors.textMuted)
+        }
 
         if (error != null && errorAbove) {
             Label(error, Modifier.semantics { liveRegion = LiveRegionMode.Assertive }, Tokens.Type.MetaStrong, colors.statusFailed)
@@ -769,6 +786,17 @@ fun BottomSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
                     content = content,
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun FullScreenSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val colors = MyTheme.colors
+
+    Popup(popupPositionProvider = ScreenPopup, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        CompositionLocalProvider(LocalOpenList provides null) {
+            Column(Modifier.fillMaxSize().background(colors.bgPanel).statusBarsPadding().navigationBarsPadding(), content = content)
         }
     }
 }

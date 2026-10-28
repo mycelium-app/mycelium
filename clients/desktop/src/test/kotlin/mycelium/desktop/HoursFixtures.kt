@@ -48,6 +48,8 @@ internal class HoursServer(private val groups: List<String>, private val convers
 
     var savedHoursResponse: String = "{}"
 
+    var breakAwaitingNote = false
+
     fun sent(method: String, suffix: String) = seen.toList().firstOrNull { it.first == method && it.second.endsWith(suffix) }
 
     fun store(scope: CoroutineScope, platform: Platform): Store {
@@ -70,6 +72,12 @@ internal class HoursServer(private val groups: List<String>, private val convers
 
                     respond("""{"id":"b1","started_at":"$breakStartedAt","ends_at":"${isoIn(5)}"}""", HttpStatusCode.Created, json)
                 }
+                request.method == HttpMethod.Put && path.endsWith("/note") -> {
+                    breakAwaitingNote = false
+
+                    respond("""{"id":"b1","started_at":"${isoIn(-5)}","ends_at":"${isoIn(0)}","planned_minutes":5}""", HttpStatusCode.OK, json)
+                }
+                path.endsWith("/wellness/overview") && breakAwaitingNote -> respond(WellnessOverviewJson.replace("\"current_break\":null", """"current_break":null,"awaiting_note":{"id":"b1","started_at":"${isoIn(-5)}","ends_at":"${isoIn(0)}","planned_minutes":5,"ended_at":"${isoIn(0)}"}"""), HttpStatusCode.OK, json)
                 path.endsWith("/wellness/overview") -> respond(breakStartedAt?.let { WellnessOverviewJson.replace("\"current_break\":null", """"current_break":{"id":"b1","started_at":"$it","ends_at":"${isoIn(5)}"}""") } ?: WellnessOverviewJson, HttpStatusCode.OK, json)
                 path.endsWith("/nodes") -> respond("""[{"id":"n1","name":"laptop","hostname":"laptop","os":"linux","arch":"x86_64","version":"0.1.0","online":true,"draining":false,"agents":[],"logins":[]}]""", HttpStatusCode.OK, json)
                 path.endsWith("/projects") -> respond(projects.joinToString(",", "[", "]"), HttpStatusCode.OK, json)

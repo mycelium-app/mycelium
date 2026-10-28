@@ -136,6 +136,12 @@ pub async fn pump(state: &AppState, conversation_id: Uuid, first_start: bool) ->
         state.hub.send(node_id, ControlToNode::StartSession { conversation_id, agent, cwd, resume: acp_session_id, fork: false, account, instructions, reload: reloads, env });
     }
 
+    let environment_notes = state.hub.take_notes_for_agent(conversation_id);
+    let sent_text = match environment_notes.is_empty() {
+        true => sent_text,
+        false => format!("{}\n\n{sent_text}", environment_notes.join("\n")),
+    };
+
     state.hub.await_prompt_acknowledgement(UnacknowledgedPrompt { node_id, conversation_id, prompt_id, text: sent_text.clone(), attachments });
     state.hub.send(node_id, ControlToNode::Prompt { conversation_id, prompt_id, text: sent_text, attachments: loaded });
 

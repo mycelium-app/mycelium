@@ -387,7 +387,30 @@ pub async fn reset(State(state): State<AppState>, user: AuthUser, Path((assistan
 
 pub async fn run(state: &AppState, owner: Uuid, assistant_id: Uuid, action_id: Uuid, values: &BTreeMap<String, String>, zone: Tz) -> ApiResult<Conversation> {
     let action = find(state, assistant_id, action_id).await?;
-    let text = expand(&action, values, zone, Utc::now())?;
+    let mut text = expand(&action, values, zone, Utc::now())?;
+
+    if action.builtin_key.as_deref() == Some(WEEKLY_REFLECTION) {
+        let week = values.get("week").and_then(|week| chrono::NaiveDate::parse_from_str(week.trim(), "%Y-%m-%d").ok()).unwrap_or_else(|| Utc::now().with_timezone(&zone).date_naive());
+        let notes = sqlx::query_as::<_, (String, i32, bool, String)>(
+            "select to_char(started_at at time zone $2, 'Dy DD Mon HH24:MI'), planned_minutes, ended_early_at is not null, note from breaks
+             where owner = $1 and note is not null and (started_at at time zone $2)::date >= date_trunc('week', $3::date)::date and (started_at at time zone $2)::date < date_trunc('week', $3::date)::date + 7
+             order by started_at",
+        )
+        .bind(owner)
+        .bind(zone.name())
+        .bind(week)
+        .fetch_all(&state.pool)
+        .await?;
+
+        if !notes.is_empty() {
+            text.push_str("\n\nWhat I wrote after my breaks that week:");
+
+            for (when, minutes, early, note) in notes {
+                text.push_str(&format!("\n- {when}, {minutes} min{}: {note}", if early { ", ended early" } else { "" }));
+            }
+        }
+    }
+
     let overrides = StartOverrides { model: action.model, node_id: action.node_id };
 
     assistants::wake(state, owner, assistant_id, PromptRequest { text, ..Default::default() }, &overrides).await

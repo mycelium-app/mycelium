@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::api::{EnvironmentCapability, EnvironmentState};
+use crate::api::{EnvironmentCapability, EnvironmentState, EnvironmentWindow};
 use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 use crate::usage_history::OrchestratorReading;
 
@@ -94,6 +94,17 @@ pub enum NodeToControl {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         browser: Option<String>,
     },
+    EnvironmentWindows {
+        conversation_id: Uuid,
+        windows: Vec<EnvironmentWindow>,
+    },
+    EnvironmentLaunched {
+        request_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     EnvironmentInputDone {
         request_id: Uuid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,6 +114,20 @@ pub enum NodeToControl {
         request_id: Uuid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         png: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    EnvironmentBrowserControls {
+        request_id: Uuid,
+        #[serde(default)]
+        page: String,
+        #[serde(default)]
+        controls: Vec<BrowserControl>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    EnvironmentBrowserActed {
+        request_id: Uuid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
@@ -503,6 +528,20 @@ pub enum ControlToNode {
         conversation_id: Uuid,
         width: u32,
         height: u32,
+        #[serde(default)]
+        apps: Vec<String>,
+    },
+    EnvironmentLaunch {
+        request_id: Uuid,
+        conversation_id: Uuid,
+        app: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
+    EnvironmentFocus {
+        request_id: Uuid,
+        conversation_id: Uuid,
+        window: i64,
     },
     StopEnvironment {
         conversation_id: Uuid,
@@ -516,6 +555,15 @@ pub enum ControlToNode {
     EnvironmentScreenshot {
         request_id: Uuid,
         conversation_id: Uuid,
+    },
+    EnvironmentBrowserRead {
+        request_id: Uuid,
+        conversation_id: Uuid,
+    },
+    EnvironmentBrowserAct {
+        request_id: Uuid,
+        conversation_id: Uuid,
+        action: BrowserAction,
     },
     OpenEnvironmentStream {
         stream_id: Uuid,
@@ -554,6 +602,9 @@ pub enum ControlToNode {
     },
     ReadFolder {
         request_id: Uuid,
+        root: String,
+    },
+    DeleteFolder {
         root: String,
     },
     Git {
@@ -601,6 +652,34 @@ pub enum ControlToNode {
     },
     Ping,
     Revoked,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrowserControl {
+    pub index: u32,
+    pub role: String,
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BrowserAction {
+    Click {
+        index: u32,
+    },
+    Type {
+        index: u32,
+        text: String,
+    },
+    Select {
+        index: u32,
+        text: String,
+    },
+    Scroll {
+        direction: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -318,7 +318,7 @@ fun inGroupFilter(conversation: Conversation, filter: String): Boolean = inGroup
 fun isWorktree(conversation: Conversation, project: Project?): Boolean = project != null && conversation.cwd.startsWith(project.path.trimEnd('/') + "-worktrees/")
 
 private fun topLevel(conversations: Collection<Conversation>, filter: String): List<Conversation> {
-    val active = conversations.filter { it.archivedAt == null && !it.isChat && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) }
+    val active = conversations.filter { it.archivedAt == null && !it.inChatList && !it.isAssistantSession && !it.isSubagent && inGroupFilter(it, filter) }
     val activeIds = active.map { it.id }.toSet()
 
     return active.filter { it.parentId == null || it.parentId !in activeIds }

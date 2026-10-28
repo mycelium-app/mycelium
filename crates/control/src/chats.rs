@@ -1,9 +1,10 @@
 use crate::continuation;
+use crate::routing;
 use crate::attachments;
 use crate::auth::AuthUser;
 use crate::activity::record_turn;
 use crate::chat_tools::{self, Toolbox};
-use crate::conversations::derived_title;
+use crate::conversations::{self, derived_title};
 use crate::error::{ApiError, ApiResult};
 use crate::instructions::{assistant_chat_layers, extensions_of, teach_me_layer};
 use crate::model_providers::{self, ChatImage, ChatMessage, ProviderError, ProviderRow, ReportedUsage, ToolCall, ToolResult};
@@ -12,9 +13,10 @@ use crate::store::{CONVERSATION_COLUMNS, ConversationRow, append_event, enqueue,
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use mycelium_proto::api::CreateChatRequest;
+use mycelium_proto::api::{CreateChatRequest, CreateConversationRequest};
+use mycelium_proto::routing::Routing;
 use base64::Engine;
-use mycelium_proto::conversation::{Attachment, Conversation, ConversationStatus, EventKind, SideKind};
+use mycelium_proto::conversation::{AgentId, Attachment, Conversation, ConversationStatus, EventKind, SideKind};
 use mycelium_proto::stream::StreamMessage;
 use serde_json::{Value, json};
 use std::future::Future;
@@ -82,6 +84,44 @@ pub async fn end_interrupted(state: &AppState) -> ApiResult<()> {
 }
 
 pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request): Json<CreateChatRequest>) -> ApiResult<(StatusCode, Json<Conversation>)> {
+    if let Some(agent) = request.agent {
+        let account = request.account.as_deref().map(str::trim).filter(|account| !account.is_empty());
+        let signed_in = routing::candidates(&state, user.id, agent, None).await?;
+        let matching: Vec<_> = signed_in.into_iter().filter(|candidate| account.is_none_or(|account| candidate.account == account)).collect();
+        let chosen = routing::best(&matching).or_else(|| routing::most_left(matching.iter()));
+        let Some(chosen) = chosen else {
+            let name = match agent {
+                AgentId::Claude => "Claude Code",
+                AgentId::Codex => "Codex",
+            };
+            let signed_in_as = account.map(|account| format!(" as {account}")).unwrap_or_default();
+
+            return Err(ApiError::conflict("no_node_online", format!("No node with {name} signed in{signed_in_as} is online. Start one from Nodes, or choose another account.")));
+        };
+        let smart = match (account, agent) {
+            (Some(_), _) => None,
+            (None, AgentId::Claude) => Some(Routing::ClaudeAny),
+            (None, AgentId::Codex) => Some(Routing::CodexAny),
+        };
+        let started = CreateConversationRequest {
+            node_id: chosen.node_id,
+            agent,
+            account: Some(chosen.account.clone()),
+            cwd: String::new(),
+            project_id: None,
+            branch: None,
+            title: None,
+            prompt: request.prompt,
+            parent_id: None,
+            side_kind: None,
+            model: request.model,
+            routing: smart,
+        };
+        let conversation = conversations::start_for(&state, user.id, started, None, true).await?;
+
+        return Ok((StatusCode::CREATED, Json(conversation)));
+    }
+
     let side_kind = request.parent_id.map(|_| SideKind::Side);
     let conversation = start(&state, user.id, request, side_kind, None).await?;
 
@@ -89,7 +129,10 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 }
 
 pub async fn start(state: &AppState, owner: Uuid, request: CreateChatRequest, side_kind: Option<SideKind>, assistant_id: Option<Uuid>) -> ApiResult<Conversation> {
-    let provider = model_providers::find_owned(state, request.provider_id, owner).await?;
+    let Some(provider_id) = request.provider_id else {
+        return Err(ApiError::bad_request("model_required", "Choose a model for this chat."));
+    };
+    let provider = model_providers::find_owned(state, provider_id, owner).await?;
     let model = request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()).map(str::to_string).or_else(|| provider.default_model.clone());
     let Some(model) = model else {
         return Err(ApiError::bad_request("model_required", "Choose a model for this chat."));

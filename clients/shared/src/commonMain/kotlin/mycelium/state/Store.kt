@@ -38,6 +38,7 @@ import mycelium.api.CreateTaskRequest
 import mycelium.api.ApiAccessRequest
 import mycelium.api.SshAccessRequest
 import mycelium.api.MessageProposal
+import mycelium.api.StartEnvironmentRequest
 import mycelium.api.StartProposal
 import mycelium.api.StartProposalChoice
 import mycelium.api.MoveProgress
@@ -1091,9 +1092,9 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
         }
     }
 
-    fun startEnvironment(conversationId: String) {
+    fun startEnvironment(conversationId: String, apps: List<String>? = null) {
         act {
-            val environment = api.startEnvironment(conversationId)
+            val environment = api.startEnvironment(conversationId, StartEnvironmentRequest(apps = apps))
 
             mutableState.update { it.copy(environments = it.environments + (conversationId to environment), environmentActions = it.environmentActions - conversationId) }
         }
@@ -1117,6 +1118,30 @@ class Store(val api: MyceliumApi, private val scope: CoroutineScope, private val
     fun handBackEnvironment(conversationId: String) {
         act {
             val environment = api.handBackEnvironment(conversationId)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+        }
+    }
+
+    fun stopBrowserTask(conversationId: String) {
+        act {
+            val environment = api.stopBrowserTask(conversationId)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+        }
+    }
+
+    fun openEnvironmentApp(conversationId: String, app: String) {
+        act {
+            val environment = api.openEnvironmentApp(conversationId, app)
+
+            mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
+        }
+    }
+
+    fun focusEnvironmentWindow(conversationId: String, window: Long) {
+        act {
+            val environment = api.focusEnvironmentWindow(conversationId, window)
 
             mutableState.update { it.copy(environments = it.environments + (conversationId to environment)) }
         }

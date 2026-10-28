@@ -73,6 +73,7 @@ import mycelium.state.Token
 import mycelium.state.ColumnAlign
 import mycelium.state.TokenKind
 import mycelium.state.highlight
+import mycelium.state.browserTaskGoal
 import mycelium.state.chatToolName
 import mycelium.state.myceliumCall
 import mycelium.state.toolSearchText
@@ -844,6 +845,13 @@ private fun ToolCall(call: ThreadItem.ToolCall, chat: Boolean) {
 
     if (mycelium != null) {
         MyceliumCard(call, mycelium)
+        return
+    }
+
+    val browserGoal = browserTaskGoal(call)
+
+    if (browserGoal != null) {
+        BrowserTaskCard(call, browserGoal)
         return
     }
 

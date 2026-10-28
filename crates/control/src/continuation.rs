@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::assistants;
 use crate::chats::{self, CHAT_AGENT};
 use crate::conversations::require_signed_in_account;
 use crate::error::{ApiError, ApiResult};
@@ -60,6 +61,7 @@ pub async fn continue_on(state: &AppState, owner: Uuid, id: Uuid, target: Target
 pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Target, reason: Option<&str>, detail: Value) -> ApiResult<ConversationRow> {
     let mut tx = state.pool.begin().await?;
     let before = lock_owned(&mut tx, id, owner).await?;
+    let scratch_folder = before.scratch.then(|| before.cwd.clone());
 
     if reason.is_none() && matches!(before.status.as_str(), "working" | "input") {
         return Err(ApiError::conflict("conversation_busy", "This conversation is still working. Wait for the turn to finish or stop it, then continue elsewhere."));
@@ -122,7 +124,7 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         let chat_node = chats::chat_node(state, owner).await?;
 
         row = sqlx::query_as::<_, ConversationRow>(sqlx::AssertSqlSafe(format!(
-            "update conversations set agent = $2, account = null, provider_id = $3, model = $4, node_id = $5, cwd = '', project_id = null,
+            "update conversations set agent = $2, account = null, provider_id = $3, model = $4, node_id = $5, cwd = '', project_id = null, scratch = false,
                  previous_session_ids = case when acp_session_id is null then previous_session_ids else array_append(previous_session_ids, acp_session_id) end, acp_session_id = null
              where id = $1 returning {CONVERSATION_COLUMNS}"
         )))
@@ -176,6 +178,11 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
         .fetch_one(&mut *tx)
         .await?;
         let moved = (node_id != before.node_id).then_some((node_id, node_name));
+
+        if let Some(folder) = scratch_folder.as_ref().filter(|_| moved.is_some()) {
+            assistants::copy_between_nodes(state, before.node_id, node_id, folder).await?;
+        }
+
         payload = json!({
             "kind": "handoff", "agent": target.agent, "account": target.account, "model": target.model, "cwd": cwd,
             "node_id": moved.as_ref().map(|(id, _)| id), "node_name": moved.as_ref().map(|(_, name)| name), "from": from, "reason": reason,
@@ -194,6 +201,10 @@ pub async fn continue_with(state: &AppState, owner: Uuid, id: Uuid, target: Targ
     if !from_chat {
         state.hub.send(before.node_id, ControlToNode::CloseSession { conversation_id: id });
         state.remove_session(before.node_id, id).await?;
+    }
+
+    if let Some(folder) = scratch_folder && (to_chat || row.node_id != before.node_id) {
+        state.hub.send(before.node_id, ControlToNode::DeleteFolder { root: folder });
     }
 
     if let Some(event) = event {

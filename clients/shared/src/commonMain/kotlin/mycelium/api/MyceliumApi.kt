@@ -233,6 +233,12 @@ class MyceliumApi(
     suspend fun startEnvironment(conversationId: String, request: StartEnvironmentRequest = StartEnvironmentRequest()): Environment =
         call("/conversations/$conversationId/environment") { client.post(it) { authorise(); json(request) } }.body()
 
+    suspend fun openEnvironmentApp(conversationId: String, app: String): Environment =
+        call("/conversations/$conversationId/environment/apps") { client.post(it) { authorise(); json(OpenEnvironmentAppRequest(app)) } }.body()
+
+    suspend fun focusEnvironmentWindow(conversationId: String, window: Long): Environment =
+        call("/conversations/$conversationId/environment/windows/$window/focus") { client.post(it) { authorise() } }.body()
+
     suspend fun environmentStreamTicket(conversationId: String): String =
         call("/conversations/$conversationId/environment/stream-ticket") { client.post(it) { authorise() } }.body<JsonObject>()["ticket"]!!.jsonPrimitive.content
 
@@ -252,6 +258,9 @@ class MyceliumApi(
 
     suspend fun handBackEnvironment(conversationId: String): Environment =
         call("/conversations/$conversationId/environment/hand-back") { client.post(it) { authorise() } }.body()
+
+    suspend fun stopBrowserTask(conversationId: String): Environment =
+        call("/conversations/$conversationId/environment/browser-task/stop") { client.post(it) { authorise() } }.body()
 
     suspend fun environmentActions(conversationId: String): List<EnvironmentAction> =
         call("/conversations/$conversationId/environment/actions") { client.get(it) { authorise() } }.body()
@@ -634,6 +643,9 @@ class MyceliumApi(
     suspend fun endWellnessBreak() {
         call("/wellness/breaks/current") { client.delete(it) { authorise() } }
     }
+
+    suspend fun saveBreakNote(id: String, note: String): WellnessBreak =
+        call("/wellness/breaks/$id/note") { client.put(it) { authorise(); json(BreakNoteRequest(note)) } }.body()
 
     suspend fun recordPuzzleResult(puzzle: String, result: PuzzleResult) {
         call("/wellness/puzzles/$puzzle/today") { client.put(it) { authorise(); json(result) } }

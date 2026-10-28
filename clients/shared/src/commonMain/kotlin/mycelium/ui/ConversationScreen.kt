@@ -96,6 +96,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     val platform = LocalPlatform.current
     var nodeSheetOpen by remember { mutableStateOf(false) }
     var moveOpen by remember { mutableStateOf(false) }
+    var phoneEnvironment by remember(id) { mutableStateOf(false) }
     var viewedArtefact by remember(id) { mutableStateOf<String?>(null) }
     var tab by remember(id) { mutableStateOf(ConversationTab) }
     var dismissedPins by remember(id) { mutableStateOf(store.pinDismissals[id]) }
@@ -259,6 +260,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
     }
 
     val node = if (chat) null else state.nodes[conversation.nodeId]
+    val continueControls = run {
+        val agentSettings = rememberAgentSettings(store)
+        val choices = remember(conversation, state.nodes, providers, agentSettings) { continueChoices(conversation, state.nodes.values, providers, agentSettings.anyModel) }
+        val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
+
+        ContinueControls(choices, currentContinueId(conversation), { choice -> store.act { store.continueOn(id, choice) } }, routedLabel(conversation, providers), routedStatus(conversation, login))
+    }
     val ides = LocalIdes.current
     val ideTarget = if (node != null && !chat && ides != null) IdeTarget(node, conversation.cwd) else null
     val ideMain = node?.let { ides?.main(it) }
@@ -364,11 +372,13 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     chat = chat,
                     compact = compact,
                     onNode = { nodeSheetOpen = true },
+                    continueOn = continueControls.takeIf { conversation.scratch },
                     moveSheet = { dismiss -> MoveSheet(store, state, conversation, dismiss, onOpenConversation) },
                     ide = ideControls,
                     onDetails = { openPanel(SidePanel.Details) },
                     onTerminal = { openPanel(SidePanel.Terminal) },
                     onGit = { openPanel(SidePanel.Git) },
+                    onEnvironment = { phoneEnvironment = true },
                     project = state.projects[conversation.projectId],
                     projects = state.projects.values.filter { it.nodeId == conversation.nodeId }.sortedBy { it.name },
                     nodes = state.nodes,
@@ -529,13 +539,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onSearchFiles = { query -> api.files(id, query) },
                         accounts = remember(node, state.nodes, conversation.agent) { node?.let { accountChoices(switchableAccounts(it, conversation.agent), accountsElsewhere(state.nodes.values, it, conversation.agent), it.name) }.orEmpty() },
                         accountLocked = conversation.acpSessionId != null,
-                        continueOn = run {
-                            val agentSettings = rememberAgentSettings(store)
-                            val choices = remember(conversation, state.nodes, providers, agentSettings) { continueChoices(conversation, state.nodes.values, providers, agentSettings.anyModel) }
-                            val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
-
-                            ContinueControls(choices, currentContinueId(conversation), { choice -> store.act { store.continueOn(id, choice) } }, routedLabel(conversation, providers), routedStatus(conversation, login))
-                        },
+                        continueOn = continueControls,
                         onSetAccount = { account ->
                             store.act {
                                 when {
@@ -551,7 +555,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                         onSetSetting = { setting, value -> store.act { api.setConfig(id, ConfigRequest(config = mapOf(setting to JsonPrimitive(value)))) } },
                         onSideChat = { kind, text -> store.act { onOpenConversation(api.startSideChat(id, sideKind(kind), text.ifEmpty { null }).id) } },
                         onTeachMe = { on -> store.act { api.patchConversation(id, PatchConversationRequest(teachMe = on)) } },
-                        goal = if (chat) null else GoalControls(
+                        goal = if (chat || conversation.scratch) null else GoalControls(
                             goal = state.goals[id],
                             onSet = { text, limits -> store.act { store.setGoal(id, text, limits) } },
                             onPause = { store.act { store.pauseGoal(id, true) } },
@@ -590,7 +594,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     }
                 }
 
-                Rail(if (narrow && chatForced) null else panel, outlinePage != null) { chosen ->
+                Rail(if (narrow && chatForced) null else panel, outlinePage != null, conversation.scratch) { chosen ->
                     if (narrow) {
                         if (panel == chosen && !chatForced) {
                             chatForced = true
@@ -620,6 +624,12 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }
 
+    if (compact && phoneEnvironment) {
+        FullScreenSheet({ phoneEnvironment = false }) {
+            EnvironmentPanel(store, state, conversation, true, { phoneEnvironment = it }, { phoneEnvironment = false }, onOpenNode, onOpenConversation)
+        }
+    }
+
     if (compact && nodeSheetOpen) {
         NodeSheet(node, onDismiss = { nodeSheetOpen = false }, onOpenNodes = { nodeSheetOpen = false; onOpenNodes() }, onMove = { nodeSheetOpen = false; moveOpen = true })
     }
@@ -637,11 +647,13 @@ private fun ConversationHeader(
     chat: Boolean,
     compact: Boolean,
     onNode: () -> Unit,
+    continueOn: ContinueControls?,
     moveSheet: @Composable (onDismiss: () -> Unit) -> Unit,
     ide: IdeControls?,
     onDetails: () -> Unit,
     onTerminal: () -> Unit,
     onGit: () -> Unit,
+    onEnvironment: () -> Unit,
     project: Project?,
     projects: List<Project>,
     nodes: Map<String, NodeSummary>,
@@ -699,14 +711,19 @@ private fun ConversationHeader(
             Box(Modifier.weight(0.001f))
         } else if (compact) {
             MyButton(onNode, icon = node?.let(::nodeIcon) ?: MyIcon.Server, description = "Running on ${node?.name ?: "an unknown node"}", muted = true)
-            MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
-            MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
+
+            if (!conversation.scratch) {
+                MyButton(onTerminal, icon = MyIcon.Terminal, description = "Terminal", muted = true)
+                MyButton(onGit, icon = MyIcon.Branch, description = "Git", muted = true)
+            }
+
+            MyButton(onEnvironment, icon = MyIcon.Desktop, description = "Environment", muted = true)
 
             MyButton(onDetails, icon = MyIcon.Info, description = "Details", muted = true)
         } else {
             if (chat) {
                 Label(conversation.model.orEmpty(), style = Tokens.Type.Meta, color = colors.textMuted, maxLines = 1)
-            } else {
+            } else if (!conversation.scratch) {
                 ProjectBreadcrumb(project, projects, nodes, onProject, setUpFolder = conversation.cwd.takeIf { project == null }, onSetUp = onSetUp)
             }
 
@@ -716,7 +733,12 @@ private fun ConversationHeader(
 
                     if (nodeMenuOpen) {
                         MenuPopup(onDismiss = { nodeMenuOpen = false }) {
-                            MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
+                            if (continueOn != null) {
+                                MenuLabel("Continue on")
+                                continueOn.choices.forEach { choice -> MenuItem(choice.name, onClick = { nodeMenuOpen = false; continueOn.onPick(choice.id) }, checked = choice.id == continueOn.current, hint = choice.description) }
+                            } else {
+                                MenuItem("Move", onClick = { nodeMenuOpen = false; moveOpen = true }, leading = MyIcon.Move)
+                            }
                         }
                     }
 
@@ -825,7 +847,7 @@ private const val WalkthroughTab = "Walkthrough"
 private enum class SidePanel { Details, Subagents, Terminal, Git, Artefacts, Outline, Environment }
 
 @Composable
-private fun Rail(open: SidePanel?, outlineOpen: Boolean, onToggle: (SidePanel) -> Unit) {
+private fun Rail(open: SidePanel?, outlineOpen: Boolean, environmentOnly: Boolean, onToggle: (SidePanel) -> Unit) {
     val colors = MyTheme.colors
 
     Row(Modifier.fillMaxHeight()) {
@@ -835,12 +857,15 @@ private fun Rail(open: SidePanel?, outlineOpen: Boolean, onToggle: (SidePanel) -
             Modifier.width(Tokens.Size.Rail).fillMaxHeight().background(colors.bgChrome).padding(top = Tokens.Space.S1),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
-            MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
+            if (!environmentOnly) {
+                MyButton({ onToggle(SidePanel.Details) }, icon = MyIcon.Info, description = if (open == SidePanel.Details) "Close details" else "Open details", muted = true, selected = open == SidePanel.Details)
+                MyButton({ onToggle(SidePanel.Subagents) }, icon = MyIcon.Agent, description = if (open == SidePanel.Subagents) "Close subagents" else "Open subagents", muted = true, selected = open == SidePanel.Subagents)
 
-            MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
-            MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
-            MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
+                MyButton({ onToggle(SidePanel.Terminal) }, icon = MyIcon.Terminal, description = if (open == SidePanel.Terminal) "Close terminal" else "Open terminal", muted = true, selected = open == SidePanel.Terminal)
+                MyButton({ onToggle(SidePanel.Git) }, icon = MyIcon.Branch, description = if (open == SidePanel.Git) "Close git" else "Open git", muted = true, selected = open == SidePanel.Git)
+                MyButton({ onToggle(SidePanel.Artefacts) }, icon = MyIcon.Layers, description = if (open == SidePanel.Artefacts) "Close artefacts" else "Open artefacts", muted = true, selected = open == SidePanel.Artefacts)
+            }
+
             MyButton({ onToggle(SidePanel.Environment) }, icon = MyIcon.Desktop, description = if (open == SidePanel.Environment) "Close the environment panel" else "Open environment", muted = true, selected = open == SidePanel.Environment)
 
             if (outlineOpen) {

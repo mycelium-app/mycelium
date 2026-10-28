@@ -16,6 +16,7 @@ import mycelium.api.PuzzleResult
 import mycelium.api.PuzzleSummary
 import mycelium.api.AlwaysOpenHours
 import mycelium.api.Hours
+import mycelium.api.WellnessBreak
 import mycelium.api.WellnessOverview
 import mycelium.api.WellnessHeartbeat
 import mycelium.api.WellnessSettings
@@ -82,6 +83,8 @@ internal fun isOpenAt(hours: Hours, weekday: Int, minute: Int): Boolean {
     return inToday || overnight
 }
 
+fun BreakPhase.holdsEverything(): Boolean = this == BreakPhase.OnBreak || this == BreakPhase.Noting
+
 sealed interface BreakPhase {
     data object Idle : BreakPhase
 
@@ -90,6 +93,8 @@ sealed interface BreakPhase {
     data class Snoozed(val minutesLeft: Int) : BreakPhase
 
     data object OnBreak : BreakPhase
+
+    data object Noting : BreakPhase
 }
 
 data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes: Int = 0, val blocksDone: Int = 0) {
@@ -113,7 +118,7 @@ data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes
             }
 
             is BreakPhase.Snoozed -> if (phase.minutesLeft <= 1) copy(phase = BreakPhase.Due) else copy(phase = BreakPhase.Snoozed(phase.minutesLeft - 1))
-            BreakPhase.Due, BreakPhase.OnBreak -> this
+            BreakPhase.Due, BreakPhase.OnBreak, BreakPhase.Noting -> this
         }
     }
 
@@ -125,7 +130,9 @@ data class BreakClock(val phase: BreakPhase = BreakPhase.Idle, val activeMinutes
 
     fun startBreak(): BreakClock = copy(phase = BreakPhase.OnBreak, activeMinutes = 0, blocksDone = blocksDone + 1)
 
-    fun endBreak(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
+    fun endBreak(): BreakClock = copy(phase = BreakPhase.Noting, activeMinutes = 0)
+
+    fun backToWork(): BreakClock = copy(phase = BreakPhase.Idle, activeMinutes = 0)
 }
 
 fun countdownText(left: Duration): String {
@@ -146,6 +153,46 @@ fun stillWorkingOnBreak(working: Int): String = when (working) {
     else -> "$working agents are still working. Their results and notifications wait until the break ends."
 }
 
+const val BreakNoteMissing = "Enter what you did in your break"
+
+fun breakEndedCaption(endedAt: String, earlyMinutes: Int?, finished: Int): String {
+    if (earlyMinutes != null) {
+        return "You ended your break $earlyMinutes ${if (earlyMinutes == 1) "minute" else "minutes"} early."
+    }
+
+    val ended = "Your break ended at $endedAt."
+
+    return when (finished) {
+        0 -> ended
+        1 -> "$ended 1 agent finished while you were away and its results are waiting."
+        else -> "$ended $finished agents finished while you were away and their results are waiting."
+    }
+}
+
+fun breakWhen(local: String, today: String): String {
+    val date = local.substringBefore('T')
+    val clock = clockOf(local)
+
+    return when (date) {
+        today -> "Today, $clock"
+        addDays(today, -1) -> "Yesterday, $clock"
+        else -> "${dayLabel(date)}, $clock"
+    }
+}
+
+fun WellnessBreak.lengthText(): String {
+    if (!endedEarly) {
+        return "$plannedMinutes min"
+    }
+
+    val ran = startedAt.let(::instantOrNull)?.let { start -> endedAt?.let(::instantOrNull)?.minus(start) }
+    val minutes = ran?.let { ((it.inWholeSeconds + 30) / 60).toInt() }?.coerceAtLeast(1) ?: 1
+
+    return "$minutes min, ended early"
+}
+
+data class BreakEnd(val endedAt: Instant, val earlyMinutes: Int? = null)
+
 data class HeldNotification(val title: String, val conversationId: String, val groupId: String? = null)
 
 data class WellnessState(
@@ -154,6 +201,8 @@ data class WellnessState(
     val clock: BreakClock = BreakClock(),
     val breakStartedAt: Instant? = null,
     val breakEndsAt: Instant? = null,
+    val breakId: String? = null,
+    val ended: BreakEnd? = null,
     val held: List<HeldNotification> = emptyList(),
     val puzzles: List<PuzzleSummary> = emptyList(),
     val unreadable: Set<String> = emptySet(),
@@ -173,10 +222,21 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
         val settings = catching { api.wellnessSettings() }.getOrNull() ?: return
         val overview = catching { api.wellnessOverview() }.getOrNull()
         val current = overview?.currentBreak
-        val phase = if (current != null) BreakPhase.OnBreak else mutableState.value.clock.phase.takeUnless { it == BreakPhase.OnBreak } ?: BreakPhase.Idle
+        val awaiting = overview?.awaitingNote
+        val previous = mutableState.value.clock.phase
+        val phase = when {
+            current != null -> BreakPhase.OnBreak
+            awaiting != null -> BreakPhase.Noting
+            overview == null && previous == BreakPhase.Noting -> BreakPhase.Noting
+            previous == BreakPhase.OnBreak || previous == BreakPhase.Noting -> BreakPhase.Idle
+            else -> previous
+        }
 
         val startedAt = current?.startedAt?.let(::instantOrNull)
         val endsAt = current?.endsAt?.let(::instantOrNull)
+        val endedAt = awaiting?.endedAt?.let(::instantOrNull) ?: Clock.System.now()
+        val ranFor = awaiting?.startedAt?.let(::instantOrNull)?.let { endedAt - it }
+        val earlyMinutes = if (awaiting?.endedEarly == true && ranFor != null) (awaiting.plannedMinutes - ranFor.inWholeMinutes.toInt()).coerceAtLeast(1) else null
 
         mutableState.update {
             it.copy(
@@ -185,6 +245,8 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
                 clock = it.clock.copy(phase = phase),
                 breakStartedAt = if (phase == BreakPhase.OnBreak) startedAt ?: it.breakStartedAt else null,
                 breakEndsAt = if (phase == BreakPhase.OnBreak) endsAt ?: it.breakEndsAt else null,
+                breakId = current?.id ?: awaiting?.id ?: it.breakId.takeIf { phase != BreakPhase.Idle },
+                ended = if (awaiting != null) BreakEnd(endedAt, earlyMinutes) else it.ended.takeIf { phase == BreakPhase.Noting },
                 loaded = true,
             )
         }
@@ -207,13 +269,13 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     fun holdsNotifications(closed: Boolean): Boolean {
         val current = mutableState.value
 
-        return current.clock.phase == BreakPhase.OnBreak || (current.settings.quietHoldNotifications && closed)
+        return current.clock.phase.holdsEverything() || (current.settings.quietHoldNotifications && closed)
     }
 
     fun holdsPings(closed: Boolean): Boolean {
         val current = mutableState.value
 
-        return current.clock.phase == BreakPhase.OnBreak || (current.settings.quietHoldPings && closed)
+        return current.clock.phase.holdsEverything() || (current.settings.quietHoldPings && closed)
     }
 
     fun hold(notification: HeldNotification, ping: Boolean = false) {
@@ -222,7 +284,7 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     }
 
     fun releaseHeld(closed: (String?) -> Boolean): List<HeldNotification> {
-        if (mutableState.value.clock.phase == BreakPhase.OnBreak) {
+        if (mutableState.value.clock.phase.holdsEverything()) {
             return emptyList()
         }
 
@@ -310,7 +372,11 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
     }
 
     fun endBreak() {
-        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null) }
+        val now = Clock.System.now()
+        val left = mutableState.value.breakEndsAt?.let { it - now } ?: Duration.ZERO
+        val earlyMinutes = ((left.inWholeSeconds + 59) / 60).toInt().coerceAtLeast(1)
+
+        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null, ended = BreakEnd(now, earlyMinutes)) }
         scope.launch {
             catching { api.endWellnessBreak() }
             load()
@@ -325,8 +391,20 @@ class WellnessStore(private val api: MyceliumApi, private val scope: CoroutineSc
             return
         }
 
-        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null) }
+        mutableState.update { it.copy(clock = it.clock.endBreak(), breakStartedAt = null, breakEndsAt = null, ended = BreakEnd(endsAt)) }
         reload()
+    }
+
+    suspend fun saveBreakNote(note: String) {
+        if (mutableState.value.breakId == null) {
+            load()
+        }
+
+        val id = mutableState.value.breakId ?: return
+
+        api.saveBreakNote(id, note)
+        mutableState.update { it.copy(clock = it.clock.backToWork(), breakId = null, ended = null) }
+        load()
     }
 
     suspend fun loadPuzzles() {

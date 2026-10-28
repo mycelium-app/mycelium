@@ -10,8 +10,20 @@ private const val MaxArgumentLength = 240
 private val chatToolTitle = Regex("^mcp__(.+?)__(.+)$")
 private val codexToolTitle = Regex("^mcp\\.([^.]+)\\.(.+)$")
 
+private const val EnvironmentToolPrefix = "environment_"
+
+private val environmentToolHeadings = mapOf("launch" to "Open app")
+
 data class ChatToolName(val server: String, val tool: String) {
-    val heading: String get() = if (server == "functions" && tool == "exec") "Run tools" else tool.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    private val environmentAction: String? get() = tool.removePrefix(EnvironmentToolPrefix).takeIf { server == "mycelium" && tool.startsWith(EnvironmentToolPrefix) }
+
+    val heading: String get() = when {
+        server == "functions" && tool == "exec" -> "Run tools"
+        environmentAction != null -> environmentToolHeadings[environmentAction] ?: environmentAction!!.replaceFirstChar { it.uppercase() }
+        else -> tool.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+
+    val source: String get() = if (environmentAction != null) "environment" else server
 }
 
 fun chatToolName(title: String): ChatToolName? {

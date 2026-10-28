@@ -62,7 +62,7 @@ class UsageHistoryTest {
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
         runBlocking { store.refresh() }
         rule.setContent { MyceliumTheme(true) { Shell(store, QuietPlatform, Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = Route.UsageHistory) } }
-        rule.waitForIdle()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Max 20x").fetchSemanticsNodes().isNotEmpty() }
 
         return store
     }

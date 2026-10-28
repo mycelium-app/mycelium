@@ -26,9 +26,12 @@ import mycelium.state.Store
 
 private val DecisionUses = listOf(
     Choice("decide", "The decide tool, for agents"),
+    Choice("browser", "Browser tasks and finding things on screen"),
 )
 
-private val UseSummaries = mapOf("decide" to "decide")
+private val UseSummaries = mapOf("decide" to "decide", "browser" to "browser")
+
+private val UseHints = mapOf("browser" to "Picks each click and typed value in an environment's browser, and finds a described control on a screenshot of any app, so agents do not spend a full turn on every step. Needs a model that answers box questions, such as Jev 1.14 (typesafe/jev-1.14 on OpenRouter).")
 
 @Composable
 fun DecisionsSettings(store: Store) {
@@ -47,7 +50,7 @@ fun DecisionsSettings(store: Store) {
             MyButton({ editing = DecisionDraft() }, text = "Add a decisions provider", icon = MyIcon.Plus, variant = ButtonVariant.Outline, size = ButtonSize.Sm)
         }
 
-        Label("An OpenJev or Jev-compatible server that answers yes or no, choice and score questions with a probability. Agents ask it through the decide tool.", style = Tokens.Type.Meta, color = colors.textMuted)
+        Label("An OpenJev or Jev-compatible server that answers yes or no, choice and score questions with a probability. Agents ask it through the decide tool. With the Browser use it also picks each step of a browser task and finds a described control on a screenshot.", style = Tokens.Type.Meta, color = colors.textMuted)
 
         Table(
             listOf(
@@ -177,6 +180,8 @@ private fun DecisionProviderDialog(store: Store, draft: DecisionDraft, onDismiss
                 Checkbox(on, use.name, { uses = if (on) uses - use.id else uses + use.id }, checkedState = "On", uncheckedState = "Off")
                 Label(use.name)
             }
+
+            UseHints[use.id]?.let { Label(it, style = Tokens.Type.Meta, color = colors.textMuted) }
         }
 
         runner.failure?.let { ErrorBanner(it, onDismiss = { runner.failure = null }) }

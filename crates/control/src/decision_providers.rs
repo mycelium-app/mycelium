@@ -12,7 +12,11 @@ use uuid::Uuid;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const PROVIDER_COLUMNS: &str = "id, name, base_url, api_key, model, uses, created_at";
-const QUESTION_TYPES: [&str; 3] = ["noul", "choice", "score"];
+const QUESTION_TYPES: [&str; 4] = ["noul", "choice", "score", "box"];
+const BROWSER_USE: &str = "browser";
+pub const SCREEN_ASSET: &str = "screen";
+const NO_BOX_MODEL: &str = "Choose a model that answers box questions, or untick Browser tasks";
+const PROBE_IMAGE: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 #[derive(sqlx::FromRow, Clone)]
 pub struct DecisionRow {
@@ -87,6 +91,23 @@ pub async fn list_models(state: &AppState, base_url: &str, key: Option<&str>) ->
     Ok(models)
 }
 
+pub fn box_of(answer: &Value) -> Option<(f64, f64, f64, f64)> {
+    let found = &answer["box"];
+
+    Some((found["top"].as_f64()?, found["bottom"].as_f64()?, found["left"].as_f64()?, found["right"].as_f64()?))
+}
+
+async fn check_box_model(state: &AppState, base_url: &str, key: Option<&str>, model: &str) -> ApiResult<()> {
+    let questions = json!({"probe": {"type": "box", "instructions": "The whole of `screen`."}});
+    let answers = ask(state, base_url, key, model, &json!("A one pixel image."), &questions, Some(PROBE_IMAGE)).await;
+
+    if answers.is_ok_and(|answers| box_of(&answers["probe"]).is_some()) {
+        return Ok(());
+    }
+
+    Err(ApiError::bad_request("browser_model_invalid", NO_BOX_MODEL))
+}
+
 pub async fn list_owned(state: &AppState, owner: Uuid) -> ApiResult<Vec<DecisionRow>> {
     let rows = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("select {PROVIDER_COLUMNS} from decision_providers where owner = $1 order by created_at, id"))).bind(owner).fetch_all(&state.pool).await?;
 
@@ -114,6 +135,11 @@ pub async fn create(State(state): State<AppState>, user: AuthUser, Json(request)
 
     let base_url = normalise_address(&request.base_url)?;
     let uses = check_uses(&request.uses)?;
+
+    if uses.iter().any(|used| used == BROWSER_USE) {
+        check_box_model(&state, &base_url, key, model).await?;
+    }
+
     let row = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("insert into decision_providers (owner, name, base_url, api_key, model, uses) values ($1, $2, $3, $4, $5, $6) returning {PROVIDER_COLUMNS}")))
         .bind(user.id)
         .bind(name)
@@ -142,6 +168,12 @@ pub async fn update(State(state): State<AppState>, user: AuthUser, Path(id): Pat
 
     if model.is_some_and(str::is_empty) {
         return Err(ApiError::bad_request("model_required", "Choose a model. Test the connection to list the server's models."));
+    }
+
+    if uses.as_ref().is_some_and(|uses| uses.iter().any(|used| used == BROWSER_USE)) {
+        let existing = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!("select {PROVIDER_COLUMNS} from decision_providers where id = $1 and owner = $2"))).bind(id).bind(user.id).fetch_optional(&state.pool).await?.ok_or_else(|| ApiError::not_found("That decisions provider"))?;
+
+        check_box_model(&state, base_url.as_deref().unwrap_or(&existing.base_url), key.or(existing.api_key.as_deref()), model.unwrap_or(&existing.model)).await?;
     }
 
     let row = sqlx::query_as::<_, DecisionRow>(sqlx::AssertSqlSafe(format!(
@@ -224,6 +256,40 @@ fn describe_failure(status: StatusCode, retry_after: Option<&str>, body: &str) -
     }
 }
 
+pub async fn ask(state: &AppState, base_url: &str, key: Option<&str>, model: &str, subject: &Value, questions: &Value, screen: Option<&str>) -> Result<Value, String> {
+    let body = match screen {
+        Some(png) => json!({"model": model, "state": {SCREEN_ASSET: SCREEN_ASSET, "about": subject}, "questions": questions, "assets": {SCREEN_ASSET: {"type": "image", "format": "png", "data_base64": png}}}),
+        None => json!({"model": model, "state": subject, "questions": questions}),
+    };
+    let mut request = state.http.post(format!("{base_url}/v1/systemone")).timeout(REQUEST_TIMEOUT).json(&body);
+
+    if screen.is_some() {
+        request = request.header("TypeSafe-Danger-Zone-Images", "true");
+    }
+
+    if let Some(key) = key {
+        request = request.bearer_auth(key);
+    }
+
+    let Ok(response) = request.send().await else {
+        return Err("The decisions server could not be reached. Ask the person to check it is running.".to_string());
+    };
+    let status = response.status();
+    let retry_after = response.headers().get("retry-after").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let body = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(describe_failure(status, retry_after.as_deref(), &body));
+    }
+
+    let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let Some(answers) = parsed["answers"].as_object() else {
+        return Err("The decisions server answered in a shape Mycelium does not know. Ask the person to check it is OpenJev or Jev-compatible.".to_string());
+    };
+
+    Ok(Value::Object(answers.clone()))
+}
+
 pub async fn decide(state: &AppState, owner: Uuid, usage: &str, subject: &Value, questions: &Value) -> ApiResult<Result<Value, String>> {
     if let Err(message) = check_questions(questions) {
         return Ok(Err(message));
@@ -232,27 +298,6 @@ pub async fn decide(state: &AppState, owner: Uuid, usage: &str, subject: &Value,
     let Some(provider) = provider_for(state, owner, usage).await? else {
         return Ok(Err("No decisions provider is set for this. Ask the person to add one in Settings, Providers.".to_string()));
     };
-    let mut request = state.http.post(format!("{}/v1/systemone", provider.base_url)).timeout(REQUEST_TIMEOUT).json(&json!({"model": provider.model, "state": subject, "questions": questions}));
 
-    if let Some(key) = &provider.api_key {
-        request = request.bearer_auth(key);
-    }
-
-    let Ok(response) = request.send().await else {
-        return Ok(Err("The decisions server could not be reached. Ask the person to check it is running.".to_string()));
-    };
-    let status = response.status();
-    let retry_after = response.headers().get("retry-after").and_then(|value| value.to_str().ok()).map(str::to_string);
-    let body = response.text().await.unwrap_or_default();
-
-    if !status.is_success() {
-        return Ok(Err(describe_failure(status, retry_after.as_deref(), &body)));
-    }
-
-    let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-    let Some(answers) = parsed["answers"].as_object() else {
-        return Ok(Err("The decisions server answered in a shape Mycelium does not know. Ask the person to check it is OpenJev or Jev-compatible.".to_string()));
-    };
-
-    Ok(Ok(Value::Object(answers.clone())))
+    Ok(ask(state, &provider.base_url, provider.api_key.as_deref(), &provider.model, subject, questions, None).await)
 }

@@ -462,7 +462,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
 
             match choice {
                 Choice::Chat { provider_id, model, .. } => {
-                    let started = chats::start(state, owner, CreateChatRequest { provider_id, model, prompt: None, parent_id: None }, None, Some(id)).await?;
+                    let started = chats::start(state, owner, CreateChatRequest { provider_id: Some(provider_id), agent: None, account: None, model, prompt: None, parent_id: None }, None, Some(id)).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
 
@@ -471,7 +471,7 @@ pub async fn wake(state: &AppState, owner: Uuid, id: Uuid, request: PromptReques
                 Choice::Workspace { agent, account, node_id, .. } => {
                     let account = account_for(state, owner, node_id, agent, account).await?;
                     let started = CreateConversationRequest { node_id, agent, account, cwd: folder_of(id), project_id: None, branch: None, title: None, prompt: None, parent_id: None, side_kind: None, model: None, routing: None };
-                    let started = conversations::start_for(state, owner, started, Some(id)).await?;
+                    let started = conversations::start_for(state, owner, started, Some(id), false).await?;
 
                     sqlx::query("update assistants set conversation_id = $2, updated_at = now() where id = $1").bind(id).bind(started.id).execute(&state.pool).await?;
                     prompts::send(state, owner, started.id, request.clone()).await?;
@@ -820,6 +820,41 @@ pub async fn copy_down(state: &AppState, node_id: Uuid, assistant_id: Uuid) -> A
 
     for (position, files) in chunks.into_iter().enumerate() {
         if !state.hub.send(node_id, ControlToNode::WriteFolder { root: root.clone(), files, replace: position == 0 }) {
+            return Err(crate::nodes::node_offline());
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn copy_between_nodes(state: &AppState, from_node: Uuid, to_node: Uuid, root: &str) -> ApiResult<()> {
+    let asked = state.ask_node::<FolderAnswer>(from_node, FOLDER_TIMEOUT, |request_id| ControlToNode::ReadFolder { request_id, root: root.to_string() }).await;
+    let Some(answer) = asked else {
+        return Err(ApiError::conflict("folder_unavailable", "The folder could not be copied because its node did not answer in time. Bring the node online, then try again."));
+    };
+
+    if let Some(error) = answer.error {
+        return Err(ApiError::conflict("folder_unavailable", format!("The folder could not be copied: {error}")));
+    }
+
+    let mut chunks: Vec<Vec<FolderFile>> = vec![Vec::new()];
+    let mut size = 0;
+
+    for file in answer.files {
+        if size + file.data_base64.len() > FOLDER_CHUNK_BYTES && chunks.last().is_some_and(|chunk| !chunk.is_empty()) {
+            chunks.push(Vec::new());
+            size = 0;
+        }
+
+        size += file.data_base64.len();
+
+        if let Some(chunk) = chunks.last_mut() {
+            chunk.push(file);
+        }
+    }
+
+    for (position, files) in chunks.into_iter().enumerate() {
+        if !state.hub.send(to_node, ControlToNode::WriteFolder { root: root.to_string(), files, replace: position == 0 }) {
             return Err(crate::nodes::node_offline());
         }
     }

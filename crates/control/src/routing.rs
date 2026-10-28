@@ -58,7 +58,7 @@ fn standing(candidate: &Candidate) -> (bool, f64, f64) {
     (candidate.usage.five_left.is_some(), candidate.usage.five_left.unwrap_or(UNKNOWN), candidate.usage.week_left.unwrap_or(UNKNOWN))
 }
 
-fn most_left<'a>(candidates: impl Iterator<Item = &'a Candidate>) -> Option<&'a Candidate> {
+pub fn most_left<'a>(candidates: impl Iterator<Item = &'a Candidate>) -> Option<&'a Candidate> {
     candidates.max_by(|left, right| standing(left).partial_cmp(&standing(right)).unwrap_or(std::cmp::Ordering::Equal).then_with(|| right.account.cmp(&left.account)))
 }
 
@@ -66,7 +66,7 @@ pub fn best(candidates: &[Candidate]) -> Option<&Candidate> {
     most_left(candidates.iter().filter(|candidate| !candidate.usage.limited))
 }
 
-async fn candidates(state: &AppState, owner: Uuid, agent: AgentId, node_id: Option<Uuid>) -> ApiResult<Vec<Candidate>> {
+pub async fn candidates(state: &AppState, owner: Uuid, agent: AgentId, node_id: Option<Uuid>) -> ApiResult<Vec<Candidate>> {
     let rows = sqlx::query_as::<_, (Uuid, String, Json<Vec<UsageWindow>>, Option<i16>)>(
         "select l.node_id, l.account, l.usage_windows, l.usage_left from logins l join nodes n on n.id = l.node_id
          where n.created_by = $1 and n.revoked_at is null and l.agent = $2 and l.state = 'signed_in' and l.account is not null and ($3::uuid is null or l.node_id = $3)

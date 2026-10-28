@@ -27,12 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import mycelium.api.Conversation
 import mycelium.api.ModelProvider
+import mycelium.state.AgentPick
 import mycelium.state.Store
 
 class ModelPickerControls(
@@ -41,6 +43,11 @@ class ModelPickerControls(
     val model: String?,
     val recent: List<Pair<ModelProvider, String>> = emptyList(),
     val onFavourite: (ModelProvider, String, Boolean) -> Unit = { _, _, _ -> },
+    val agents: List<AgentPick> = emptyList(),
+    val agent: AgentPick? = null,
+    val onSelectAgent: (AgentPick) -> Unit = {},
+    val focus: FocusRequester? = null,
+    val problem: String? = null,
     val onSelect: (ModelProvider, String) -> Unit,
 )
 
@@ -78,6 +85,10 @@ private sealed interface ModelMenuEntry {
         override val key = "heading|$text"
     }
 
+    data class Agent(val pick: AgentPick) : ModelMenuEntry {
+        override val key = "agent|${pick.agent}|${pick.account}"
+    }
+
     data class Choice(val section: String, val provider: ModelProvider, val model: String, val showProvider: Boolean) : ModelMenuEntry {
         override val key = "$section|${provider.id}|$model"
     }
@@ -86,11 +97,20 @@ private sealed interface ModelMenuEntry {
 @Composable
 fun ModelPicker(controls: ModelPickerControls) {
     val current = controls.providers.firstOrNull { it.id == controls.providerId }
-    val label = if (current != null && controls.model != null) "${current.name} · ${controls.model}" else "Choose a model"
+    val label = controls.agent?.label ?: if (current != null && controls.model != null) "${current.name} · ${controls.model}" else "Choose a model"
     var open by remember { mutableStateOf(false) }
 
     Box {
-        MyButton({ open = true }, text = label, description = "Model: $label", muted = true, trailingIcon = MyIcon.ChevronDown, selected = open, tooltip = "Model")
+        MyButton(
+            { open = true },
+            Modifier.then(controls.focus?.let { Modifier.focusRequester(it) } ?: Modifier).semantics { controls.problem?.let { error(it) } },
+            text = label,
+            description = "Model: $label",
+            muted = true,
+            trailingIcon = MyIcon.ChevronDown,
+            selected = open,
+            tooltip = "Model",
+        )
 
         if (open) {
             var query by remember { mutableStateOf("") }
@@ -98,6 +118,13 @@ fun ModelPicker(controls: ModelPickerControls) {
             val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
             val listed = controls.providers.filter { it.models.isNotEmpty() }
             val entries = buildList {
+                val agents = controls.agents.filter { pick -> terms.all { pick.label.contains(it, ignoreCase = true) } }
+
+                if (agents.isNotEmpty()) {
+                    add(ModelMenuEntry.Heading("Agents"))
+                    agents.forEach { add(ModelMenuEntry.Agent(it)) }
+                }
+
                 if (!searching) {
                     val favourites = listed.flatMap { provider -> provider.favourites.filter { it in provider.models }.map { provider to it } }
 
@@ -132,6 +159,11 @@ fun ModelPicker(controls: ModelPickerControls) {
                 }
             }
 
+            fun chooseAgent(pick: AgentPick) {
+                controls.onSelectAgent(pick)
+                open = false
+            }
+
             fun choose(provider: ModelProvider, model: String) {
                 controls.onSelect(provider, model)
                 open = false
@@ -145,6 +177,7 @@ fun ModelPicker(controls: ModelPickerControls) {
                     items(entries, key = { it.key }) { entry ->
                         when (entry) {
                             is ModelMenuEntry.Heading -> MenuLabel(entry.text)
+                            is ModelMenuEntry.Agent -> MenuItem(entry.pick.label, onClick = { chooseAgent(entry.pick) }, checked = entry.pick == controls.agent, hint = entry.pick.hint)
                             is ModelMenuEntry.Choice -> {
                                 val provider = entry.provider
                                 val model = entry.model
@@ -153,7 +186,7 @@ fun ModelPicker(controls: ModelPickerControls) {
                                 MenuItem(
                                     model,
                                     onClick = { choose(provider, model) },
-                                    checked = provider.id == controls.providerId && model == controls.model,
+                                    checked = controls.agent == null && provider.id == controls.providerId && model == controls.model,
                                     hint = if (entry.showProvider) provider.name else null,
                                     trailing = {
                                         MyButton(
