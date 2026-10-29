@@ -186,7 +186,7 @@ jobs:
   image:
     name: Control plane image
     if: github.ref_type == 'tag'
-    needs: [binary, desktop-web]
+    needs: [binary, desktop-web, sign-android, flake]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
