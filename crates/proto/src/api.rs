@@ -676,8 +676,6 @@ pub struct ModelProvider {
     pub default_model: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
-    pub favourites: Vec<String>,
-    #[serde(default)]
     pub model_class: ModelClass,
     #[serde(default)]
     pub speech_model: Option<String>,
@@ -705,12 +703,6 @@ pub struct UpdateModelProviderRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub model_class: Option<ModelClass>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SetFavouriteModelRequest {
-    pub model: String,
-    pub favourite: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

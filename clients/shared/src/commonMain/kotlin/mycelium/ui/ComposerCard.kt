@@ -187,13 +187,14 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                     Column(Modifier.semantics { contentDescription = "Account" }) {
                         MenuItem("Back to models", onClick = { choosingAccount = false; refusal = null }, leading = MyIcon.ChevronLeft)
                         MenuLabel("Runs on")
-                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, hint = "Switches as usage runs out")
+                        MenuItem(AnyAccount, onClick = { chooseAccount(null) }, checked = controls.account == null, hint = "Switches as usage runs out", leading = MyIcon.Person)
 
                         for (row in controls.accounts) {
                             val rowRefusal = refusal?.takeIf { it.rowId == row.id }
 
                             MenuItem(
                                 row.label,
+                                leading = agentIcon(row.agent),
                                 onClick = { chooseAccount(row.id) },
                                 checked = row.id == controls.account,
                                 description = row.description(),
@@ -250,7 +251,7 @@ fun ModelPicker(controls: ModelPickerControls, maxWidth: Dp = Tokens.Size.Accoun
                             items(starred, key = { "favourite|${it.key}" }) { ModelRow(it, controls, favourite = true, showHarness = true, onChoose = ::choose) }
                         }
 
-                        for ((harness, options) in found.groupBy { it.harness }) {
+                        for ((harness, options) in found.sortedBy { it.section ?: "" }.groupBy { it.section ?: it.harness }) {
                             item(key = "heading|$harness") { MenuHeading(harness) }
                             items(options, key = { "model|${it.key}" }) { ModelRow(it, controls, favourite = controls.favourites.isFavourite(it), showHarness = false, onChoose = ::choose) }
                         }

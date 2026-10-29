@@ -4,6 +4,7 @@ import mycelium.api.AgentInfo
 import mycelium.api.HarnessModel
 import mycelium.api.HarnessModels
 import mycelium.api.ModelChoice
+import mycelium.api.ModelProvider
 import mycelium.api.NodeSummary
 import mycelium.state.anyModelHint
 import mycelium.state.favouriteOptions
@@ -100,4 +101,17 @@ class ModelOptionsTest {
         assertEquals(listOf("Claude Opus 5.5", "Claude Sonnet 5.5"), options.matching("claude code").map { it.name })
         assertEquals(emptyList(), options.matching("nothing like this"))
     }
+
+    @Test
+    fun chatModelsAreSectionedByProviderAndVendorAndSearchableByProviderName() {
+        val providers = listOf(
+            ModelProvider("p1", "ollama", "Ollama", models = listOf("qwen3"), createdAt = "2026-01-01T00:00:00Z"),
+            ModelProvider("p2", "openrouter", "OpenRouter", models = listOf("anthropic/claude-sonnet-5-5", "anthropic/claude-haiku-5-5"), createdAt = "2026-01-01T00:00:00Z"),
+        )
+        val options = modelOptions(emptyList(), null, providers)
+
+        assertEquals(listOf("Ollama", "OpenRouter · anthropic", "OpenRouter · anthropic"), options.map { it.section })
+        assertEquals(listOf("anthropic/claude-sonnet-5-5"), options.matching("router sonnet").map { it.name })
+    }
 }
+

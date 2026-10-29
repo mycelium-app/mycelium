@@ -102,7 +102,7 @@ class ModelPickerTest {
 
         for (heading in listOf("Favourites", "Claude Code", "Codex", "Chat")) {
             rule.onNode(hasScrollAction()).performScrollToNode(hasText(heading))
-            rule.onNodeWithText(heading).assertIsDisplayed()
+            rule.onAllNodesWithText(heading).onFirst().assertIsDisplayed()
         }
     }
 

@@ -13,6 +13,8 @@ data class ModelOption(
     val name: String,
     val available: Boolean = true,
     val where: String? = null,
+    val section: String? = null,
+    val providerName: String? = null,
 ) {
     val key: String = "${agent.orEmpty()}|${providerId.orEmpty()}|$model"
 
@@ -40,7 +42,7 @@ fun modelOptions(nodes: Collection<NodeSummary>, node: NodeSummary?, providers: 
             }
         }
     }
-    val chat = providers.flatMap { provider -> provider.models.map { ModelOption(null, provider.id, it, it) } }
+    val chat = providers.flatMap { provider -> provider.models.map { ModelOption(null, provider.id, it, it, section = if ('/' in it) "${provider.name} · ${it.substringBefore('/')}" else provider.name, providerName = provider.name) } }
 
     return harness + chat
 }
@@ -64,7 +66,7 @@ fun List<ModelChoice>.withFavourite(option: ModelOption, on: Boolean): List<Mode
 fun List<ModelOption>.matching(query: String): List<ModelOption> {
     val terms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
 
-    return filter { option -> terms.all { term -> listOf(option.name, option.harness, option.model).any { it.contains(term, ignoreCase = true) } } }
+    return filter { option -> terms.all { term -> listOf(option.name, option.harness, option.model, option.providerName.orEmpty()).any { it.contains(term, ignoreCase = true) } } }
 }
 
 fun anyModelHint(favourites: List<ModelOption>): String =

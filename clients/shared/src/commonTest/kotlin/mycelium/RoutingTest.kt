@@ -91,7 +91,7 @@ class RoutingTest {
     fun theRoutedStatusNamesTheTightestWindowLeft() {
         val status = routedStatus(routed("claude", "work@example.org", "claude_any"), login("work@example.org", window("seven_day", 36.0)))
 
-        assertEquals("Claude Code, any account. On work@example.org now: 64% of the weekly window left", status)
+        assertEquals("On work, 64% of the weekly window left", status)
     }
 
     @Test

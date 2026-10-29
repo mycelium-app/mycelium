@@ -211,7 +211,8 @@ class ChatsTest {
 
         rule.onNodeWithContentDescription("Model: llama3.2").performClick()
 
-        rule.onNodeWithText("Chat").assertIsDisplayed()
+        rule.onAllNodesWithText("Ollama").onFirst().assertIsDisplayed()
+        rule.onNodeWithText("Anthropic").assertIsDisplayed()
 
         rule.onNodeWithText("claude-sonnet-5-5").performClick()
         rule.onNodeWithContentDescription("Model: claude-sonnet-5-5").assertIsDisplayed()
@@ -233,6 +234,30 @@ class ChatsTest {
         rule.onNodeWithContentDescription("Search models").performImeAction()
 
         rule.onNodeWithContentDescription("Model: qwen3").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchTermsMatchTheProviderAndTheModelTogether() {
+        providers = "[$Provider,$OpenRouter]"
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
+        rule.onNodeWithContentDescription("Search models").performTextInput("router sonnet")
+
+        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("anthropic/claude-haiku-5-5").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithText("qwen3").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun modelsWithAVendorPrefixAreGroupedUnderIt() {
+        providers = "[$Provider,$OpenRouter]"
+        newChatScreen()
+
+        rule.onNodeWithContentDescription("Model: llama3.2").performClick()
+
+        rule.onNodeWithText("OpenRouter · anthropic").assertIsDisplayed()
+        rule.onNodeWithText("anthropic/claude-sonnet-5-5").assertIsDisplayed()
     }
 
     @Test

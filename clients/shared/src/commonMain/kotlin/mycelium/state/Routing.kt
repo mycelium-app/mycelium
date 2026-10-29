@@ -162,7 +162,7 @@ fun routedStatus(conversation: Conversation, login: LoginInfo?): String? {
     val worst = login?.windows?.maxByOrNull { it.usedPercent }
     val usage = worst?.let { "${(Full - it.usedPercent).roundToInt().coerceIn(0, 100)}% of the ${windowName(it.name)} left" }
 
-    return listOfNotNull("${routingName(routing)}. On $account now", usage).joinToString(": ")
+    return listOfNotNull("On ${account.substringBefore('@')}", usage).joinToString(", ")
 }
 
 val PriceCurrencies = listOf("GBP" to "£", "USD" to "$", "EUR" to "€", "CAD" to "CA$", "AUD" to "A$", "CHF" to "CHF", "SEK" to "kr", "NOK" to "kr", "DKK" to "kr", "JPY" to "¥")
