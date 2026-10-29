@@ -212,6 +212,8 @@ pub struct LoginInfo {
     pub usage_read_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_credits: Option<ResetCredits>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub managed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

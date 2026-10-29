@@ -215,6 +215,10 @@ class MyceliumApi(
         call("/logins/$loginId") { client.delete(it) { authorise() } }
     }
 
+    suspend fun removeLogin(nodeId: String, agent: String, account: String) {
+        call("/nodes/$nodeId/logins/$agent/${account.encodeURLPathPart()}") { client.delete(it) { authorise() } }
+    }
+
     suspend fun startTerminal(conversationId: String, cols: Int, rows: Int): StartTerminalResponse =
         call("/conversations/$conversationId/terminal") { client.post(it) { authorise(); json(StartTerminalRequest(cols, rows)) } }.body()
 

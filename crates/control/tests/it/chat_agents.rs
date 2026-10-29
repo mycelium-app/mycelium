@@ -6,7 +6,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 fn claude_login(account: &str) -> LoginInfo {
-    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
+    LoginInfo { managed: false, agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state: LoginState::SignedIn, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
 }
 
 async fn node_signed_in(server: &Server, name: &str, account: &str) -> NodeLink {

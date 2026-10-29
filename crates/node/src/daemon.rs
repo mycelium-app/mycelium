@@ -350,6 +350,7 @@ impl Daemon {
             },
             ControlToNode::LoginInput { login_id, text } => self.logins.input(login_id, &text),
             ControlToNode::StopLogin { login_id } => self.logins.stop(login_id),
+            ControlToNode::RemoveLogin { agent, account } => self.remove_login(agent, &account),
             ControlToNode::StartTerminal { terminal_id, conversation_id, cwd, cols, rows } => self.terminals.start(terminal_id, conversation_id, &cwd, cols, rows),
             ControlToNode::TerminalInput { terminal_id, data } => self.terminals.input(terminal_id, &data),
             ControlToNode::ResizeTerminal { terminal_id, cols, rows } => self.terminals.resize(terminal_id, cols, rows),
@@ -621,6 +622,17 @@ impl Daemon {
                 self.logins.start(login_id, command, account_env(agent, &account), discard_on_failure);
             }
             Err(error) => self.logins.refuse(login_id, format!("Could not create a place for {label} on this node: {error}.")),
+        }
+    }
+
+    fn remove_login(&self, agent: AgentId, label: &str) {
+        let found = find_account(&self.options.home, &accounts_dir(&self.config.state_dir), agent, label);
+        let Some(account) = found.filter(|account| account.profile.is_some()) else {
+            return;
+        };
+
+        if let Err(error) = std::fs::remove_dir_all(&account.dir) {
+            tracing::warn!("could not remove the {} login {label}: {error}", agent.as_str());
         }
     }
 

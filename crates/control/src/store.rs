@@ -397,6 +397,7 @@ struct LoginRow {
     usage_windows: sqlx::types::Json<Vec<UsageWindow>>,
     usage_read_at: Option<chrono::DateTime<chrono::Utc>>,
     reset_credits: Option<sqlx::types::Json<ResetCredits>>,
+    managed: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -424,7 +425,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         .fetch_all(&state.pool)
         .await?;
     let logins = sqlx::query_as::<_, LoginRow>(
-        "select node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at, reset_credits from logins where node_id = any($1) order by agent",
+        "select node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at, reset_credits, managed from logins where node_id = any($1) order by agent",
     )
     .bind(&ids)
     .fetch_all(&state.pool)
@@ -460,7 +461,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
         for login in logins.iter().filter(|row| row.node_id == node.id) {
             let history = usage_history.iter().find(|group| group.0 == node.id && group.1 == login.agent && group.2 == login.account.clone().unwrap_or_default()).map(|group| group.3.as_slice()).unwrap_or_default();
             let windows = crate::account_usage::with_projections(login.usage_windows.0.clone(), history);
-            node_logins.push(LoginInfo { agent: parse_enum(&login.agent)?, account: login.account.clone(), method: login.method.clone(), state: parse_enum(&login.state)?, usage_left: login.usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: login.usage_read_at, reset_credits: login.reset_credits.as_ref().map(|credits| credits.0.clone()) });
+            node_logins.push(LoginInfo { agent: parse_enum(&login.agent)?, account: login.account.clone(), method: login.method.clone(), state: parse_enum(&login.state)?, usage_left: login.usage_left.and_then(|left| u8::try_from(left).ok()), windows, usage_read_at: login.usage_read_at, reset_credits: login.reset_credits.as_ref().map(|credits| credits.0.clone()), managed: login.managed });
         }
 
         let mut harness_models = Vec::new();

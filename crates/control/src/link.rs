@@ -1023,8 +1023,8 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
     for mut login in logins {
         crate::account_usage::cache(&mut tx, node_id, &mut login).await?;
         sqlx::query(
-            "insert into logins (node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at, reset_credits) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, usage_left = excluded.usage_left, usage_windows = excluded.usage_windows, usage_read_at = excluded.usage_read_at, reset_credits = excluded.reset_credits, updated_at = now()",
+            "insert into logins (node_id, agent, account, method, state, usage_left, usage_windows, usage_read_at, reset_credits, managed) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             on conflict (node_id, agent, coalesce(account, '')) do update set method = excluded.method, state = excluded.state, usage_left = excluded.usage_left, usage_windows = excluded.usage_windows, usage_read_at = excluded.usage_read_at, reset_credits = excluded.reset_credits, managed = excluded.managed, updated_at = now()",
         )
         .bind(node_id)
         .bind(enum_text(&login.agent))
@@ -1035,6 +1035,7 @@ async fn store_logins(state: &AppState, node_id: Uuid, logins: Vec<LoginInfo>) -
         .bind(sqlx::types::Json(&login.windows))
         .bind(login.usage_read_at)
         .bind(login.reset_credits.as_ref().map(sqlx::types::Json))
+        .bind(login.managed)
         .execute(&mut *tx)
         .await?;
     }

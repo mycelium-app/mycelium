@@ -186,7 +186,7 @@ pub fn login_state(home: &Path, accounts_dir: &Path, available: &[AgentInfo], us
             let usage_left = reading.as_ref().and_then(|reading| usage_left(&reading.windows));
             let (windows, usage_read_at, reset_credits) = reading.map_or((Vec::new(), None, None), |reading| (reading.windows, Some(reading.read_at), reading.reset_credits));
 
-            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left, windows, usage_read_at, reset_credits });
+            logins.push(LoginInfo { agent: info.agent, account: account_label(home, info.agent, &account), method: method.to_string(), state, usage_left, windows, usage_read_at, reset_credits, managed: account.profile.is_some() });
         }
     }
 

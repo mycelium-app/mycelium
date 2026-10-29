@@ -508,6 +508,10 @@ pub enum ControlToNode {
     StopLogin {
         login_id: Uuid,
     },
+    RemoveLogin {
+        agent: AgentId,
+        account: String,
+    },
     StartTerminal {
         terminal_id: Uuid,
         conversation_id: Uuid,

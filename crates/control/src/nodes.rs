@@ -6,6 +6,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use mycelium_proto::api::{DrainRequest, LoginInputRequest, NodeResources, NodeSummary, NODE_COLOURS, NODE_ICONS, StartLoginRequest, UpdateNodeRequest, StartLoginResponse};
+use mycelium_proto::conversation::AgentId;
 use mycelium_proto::link::{ControlToNode, GitCommand};
 use serde::Deserialize;
 use serde_json::Value;
@@ -162,6 +163,33 @@ pub async fn stop_login(State(state): State<AppState>, user: AuthUser, Path(logi
     state.hub.send(owner.node_id, ControlToNode::StopLogin { login_id });
     state.hub.finish_login(login_id);
     state.publish(Some(owner.user_id), StreamMessage::LoginFinished { login_id, ok: false });
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn remove_login(State(state): State<AppState>, user: AuthUser, Path((id, agent, account)): Path<(Uuid, String, String)>) -> ApiResult<StatusCode> {
+    let parsed: AgentId = crate::store::parse_enum(&agent).map_err(|_| ApiError::not_found("That login"))?;
+    let managed = sqlx::query_scalar::<_, bool>(
+        "select l.managed from logins l join nodes n on n.id = l.node_id where l.node_id = $1 and n.created_by = $2 and n.revoked_at is null and l.agent = $3 and l.account = $4",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(&agent)
+    .bind(&account)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| ApiError::not_found("That login"))?;
+
+    if !managed {
+        return Err(ApiError::conflict("login_not_managed", "This is the agent's own sign-in on the node, so Mycelium cannot remove it. Sign it out on the node itself."));
+    }
+
+    if !state.hub.send(id, ControlToNode::RemoveLogin { agent: parsed, account: account.clone() }) {
+        return Err(node_offline());
+    }
+
+    sqlx::query("delete from logins where node_id = $1 and agent = $2 and account = $3").bind(id).bind(&agent).bind(&account).execute(&state.pool).await?;
+    publish_node(&state, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1039,6 +1039,27 @@ async fn a_login_streams_its_output_and_reports_the_finish() {
 }
 
 #[tokio::test]
+async fn removing_a_login_deletes_its_account_folder_but_never_the_agents_home_login() {
+    let mut control = ControlServer::start().await;
+    let fixture = Fixture::new(&control.url);
+    let managed = fixture.config.state_dir.join("accounts").join("claude").join("account-1970");
+    let home = fixture.options.home.join(".claude");
+    std::fs::create_dir_all(&managed).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(fixture.options.home.join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "sam@example.com"}}"#).unwrap();
+    let _daemon = fixture.start_daemon();
+    let mut connection = control.accept().await;
+
+    connection.send(ControlToNode::RemoveLogin { agent: AgentId::Claude, account: "account-1970".into() });
+    connection.send(ControlToNode::RemoveLogin { agent: AgentId::Claude, account: "sam@example.com".into() });
+    connection.send(ControlToNode::StartLogin { login_id: Uuid::from_u128(14), agent: AgentId::Claude, method: "carrier_pigeon".into(), account: None });
+    connection.next_matching(|message| matches!(message, NodeToControl::LoginFinished { .. })).await;
+
+    assert!(!managed.exists());
+    assert!(home.exists());
+}
+
+#[tokio::test]
 async fn a_login_with_an_unknown_method_is_refused_with_an_explanation() {
     let mut control = ControlServer::start().await;
     let fixture = Fixture::new(&control.url);

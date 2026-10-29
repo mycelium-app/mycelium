@@ -152,7 +152,7 @@ async fn report_windows(link: &mut NodeLink, windows: &[(&str, f64)]) {
 
 async fn report_windows_for(link: &mut NodeLink, account: Option<&str>, windows: &[(&str, f64)]) {
     let windows = windows.iter().map(|(name, used)| mycelium_proto::conversation::UsageWindow { name: (*name).into(), used_percent: *used, resets_at: None, rate_per_hour: None, runs_out_at: None }).collect();
-    let login = mycelium_proto::conversation::LoginInfo { agent: mycelium_proto::conversation::AgentId::Claude, account: account.map(str::to_string), method: "token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()), reset_credits: None };
+    let login = mycelium_proto::conversation::LoginInfo { managed: false, agent: mycelium_proto::conversation::AgentId::Claude, account: account.map(str::to_string), method: "token".into(), state: mycelium_proto::conversation::LoginState::SignedIn, usage_left: None, windows, usage_read_at: Some(chrono::Utc::now()), reset_credits: None };
     link.send(NodeToControl::Logins { logins: vec![login] }).await;
 }
 
@@ -441,7 +441,7 @@ async fn fresh_account_usage_is_published_to_an_existing_goal_without_waiting_fo
     let id = working_conversation(&server, &mut link).await;
     set_goal(&server, id, "Track usage", 100_000).await;
     let mut stream = server.user.stream().await;
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo { agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedIn, usage_left: Some(58), windows: vec![UsageWindow { name: "five_hour".into(), used_percent: 42.0, resets_at: None, rate_per_hour: None, runs_out_at: None }], usage_read_at: Some(chrono::Utc::now()), reset_credits: None }] }).await;
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false, agent: AgentId::Claude, account: None, method: "token".into(), state: LoginState::SignedIn, usage_left: Some(58), windows: vec![UsageWindow { name: "five_hour".into(), used_percent: 42.0, resets_at: None, rate_per_hour: None, runs_out_at: None }], usage_read_at: Some(chrono::Utc::now()), reset_credits: None }] }).await;
     let updated = stream.until(|message| match message { StreamMessage::Goal(goal) if goal.conversation_id == id && goal.five_hour_used == Some(42.0) => Some(goal), _ => None }).await;
     assert_eq!(updated.five_hour_used, Some(42.0));
 }
@@ -453,7 +453,7 @@ async fn a_cached_window_that_has_reset_is_visible_but_is_not_used_by_a_goal() {
     let mut link = server.online_node("laptop").await;
     let id = working_conversation(&server, &mut link).await;
     let read_at = chrono::Utc::now() - chrono::Duration::hours(2);
-    link.send(NodeToControl::Logins { logins: vec![LoginInfo {
+    link.send(NodeToControl::Logins { logins: vec![LoginInfo { managed: false,
         agent: AgentId::Claude,
         account: None,
         method: "token".into(),

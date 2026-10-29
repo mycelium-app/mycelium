@@ -36,6 +36,7 @@ data class LoginInfo(
     val windows: List<UsageWindow> = emptyList(),
     @SerialName("usage_read_at") val usageReadAt: String? = null,
     @SerialName("reset_credits") val resetCredits: ResetCredits? = null,
+    val managed: Boolean = false,
 )
 
 @Serializable

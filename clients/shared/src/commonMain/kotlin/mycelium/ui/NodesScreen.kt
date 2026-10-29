@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -159,6 +160,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
                             sessions[node.id] = LoginSession(started.loginId, agent)
                         }
                     },
+                    onRemoveLogin = { agent, account -> store.act { api.removeLogin(node.id, agent, account) } },
                     onLoginInput = { text -> sessions[node.id]?.let { s -> store.act { api.loginInput(s.loginId, text) } } },
                     onLoginClose = {
                         sessions[node.id]?.let { s ->
@@ -268,6 +270,7 @@ private fun NodeGroup(
     platform: Platform,
     onOpen: () -> Unit,
     onLogin: (String, String?) -> Unit,
+    onRemoveLogin: (String, String) -> Unit,
     onLoginInput: (String) -> Unit,
     onLoginClose: () -> Unit,
     onDrain: () -> Unit,
@@ -281,6 +284,7 @@ private fun NodeGroup(
     val colors = MyTheme.colors
     var addOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<String?>(null) }
+    var removing by remember { mutableStateOf<LoginInfo?>(null) }
     val installed = node.agents.filter { it.available }
     val signedOut = installed.filter { agent -> node.logins.none { it.agent == agent.agent && it.state == LoginState.SignedIn } }
     val touch = LocalTouch.current
@@ -367,9 +371,21 @@ private fun NodeGroup(
             val accounts = node.logins.filter { it.agent == agent.agent }
 
             for (login in accounts.ifEmpty { listOf(null) }) {
-                AgentLoginRow(agent, login, onLogin = { onLogin(agent.agent, login?.account) })
+                AgentLoginRow(agent, login, onLogin = { onLogin(agent.agent, login?.account) }, onRemove = { removing = login })
                 Hairline()
             }
+        }
+
+        removing?.let { login ->
+            val account = login.account.orEmpty()
+
+            ConfirmDialog(
+                title = "Remove $account from ${node.name}?",
+                detail = "Mycelium signs this login out and deletes its folder on ${node.name}, including the agent's own history for it. Conversations that ran on it keep their messages in Mycelium.",
+                confirm = "Remove login",
+                onDismiss = { removing = null },
+                onConfirm = { removing = null; onRemoveLogin(login.agent, account) },
+            )
         }
 
         if (session != null) {
@@ -394,18 +410,21 @@ private fun NodeColumnHeads() {
         Label("Account", Modifier.weight(1.2f), Tokens.Type.MetaStrong, colors.textMuted)
         Label("Method", Modifier.weight(1f), Tokens.Type.MetaStrong, colors.textMuted)
         Label("State", Modifier.weight(1.2f), Tokens.Type.MetaStrong, colors.textMuted)
+        Box(Modifier.width(Tokens.Size.ControlSm))
     }
 
     Hairline()
 }
 
 @Composable
-private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Unit) {
+private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Unit, onRemove: () -> Unit) {
     val colors = MyTheme.colors
     val touch = LocalTouch.current
 
+    val menu = rememberRowMenuState()
+
     Row(
-        Modifier.fillMaxWidth().heightIn(min = rowHeight()).padding(start = NameIndent, end = Tokens.Space.S2),
+        Modifier.fillMaxWidth().background(if (menu.open) colors.bgSelected else Color.Transparent).heightIn(min = rowHeight()).padding(start = NameIndent, end = Tokens.Space.S2),
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -445,6 +464,14 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
             if (login?.state != LoginState.SignedIn) {
                 MyButton(onLogin, text = if (login == null) "Log in" else "Log in again", size = ButtonSize.Sm, variant = ButtonVariant.Outline, description = "Log in ${agentName(agent.agent)}")
             }
+        }
+
+        if (login?.managed == true) {
+            RowMenu("${agentName(agent.agent)} ${login.account.orEmpty()}", menu) { close ->
+                MenuItem("Remove login", onClick = { close(); onRemove() }, leading = MyIcon.Close)
+            }
+        } else {
+            Box(Modifier.width(Tokens.Size.ControlSm))
         }
     }
 }

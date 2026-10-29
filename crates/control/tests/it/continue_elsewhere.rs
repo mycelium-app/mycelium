@@ -49,7 +49,7 @@ async fn finished_turns(server: &Server, id: Uuid, turns: usize) {
 }
 
 pub fn login(account: &str, state: LoginState) -> LoginInfo {
-    LoginInfo { agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
+    LoginInfo { managed: false, agent: AgentId::Claude, account: Some(account.into()), method: "oauth_token".into(), state, usage_left: None, windows: vec![], usage_read_at: None, reset_credits: None }
 }
 
 pub async fn next_command(link: &mut NodeLink) -> ControlToNode {
@@ -426,7 +426,7 @@ async fn switch_on_usage_limit(server: &Server) {
 }
 
 pub fn with_usage(account: &str, left: u8) -> LoginInfo {
-    LoginInfo { usage_left: Some(left), ..login(account, LoginState::SignedIn) }
+    LoginInfo { managed: false, usage_left: Some(left), ..login(account, LoginState::SignedIn) }
 }
 
 async fn working_on(server: &Server, link: &mut NodeLink, account: &str) -> Uuid {
