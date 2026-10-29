@@ -17,7 +17,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use mycelium_proto::api::HarnessModel;
+use mycelium_proto::api::{HarnessModel, KubernetesNode};
 use mycelium_proto::conversation::{AgentInfo, ConversationStatus, EventKind, LoginInfo, SessionPosition};
 use mycelium_proto::link::{ControlToNode, NodeToControl, REPLACED_CLOSE_CODE};
 use mycelium_proto::stream::StreamMessage;
@@ -165,7 +165,7 @@ async fn run_link(state: AppState, node_id: Uuid, connection_id: Uuid, mut outgo
 
 async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiResult<()> {
     match message {
-        NodeToControl::Hello { version, hostname, os, arch, agents, sessions } => hello(state, node_id, version, hostname, os, arch, agents, sessions).await,
+        NodeToControl::Hello { version, hostname, os, arch, agents, sessions, kubernetes } => hello(state, node_id, version, hostname, os, arch, agents, sessions, kubernetes).await,
         NodeToControl::SessionStarted { conversation_id, acp_session_id, modes, models, config_options } => session_started(state, node_id, conversation_id, acp_session_id, modes, models, config_options).await,
         NodeToControl::PromptReceived { conversation_id, prompt_id } => {
             state.hub.acknowledge_prompt(node_id, conversation_id, prompt_id);
@@ -490,14 +490,15 @@ async fn stop_for_failure(state: &AppState, node_id: Uuid, conversation_id: Uuid
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: String, os: String, arch: String, agents: Vec<AgentInfo>, sessions: Vec<SessionPosition>) -> ApiResult<()> {
+async fn hello(state: &AppState, node_id: Uuid, version: String, hostname: String, os: String, arch: String, agents: Vec<AgentInfo>, sessions: Vec<SessionPosition>, kubernetes: Option<KubernetesNode>) -> ApiResult<()> {
     let mut tx = state.pool.begin().await?;
-    sqlx::query("update nodes set version = $2, hostname = $3, os = $4, arch = $5, last_seen_at = now() where id = $1")
+    sqlx::query("update nodes set version = $2, hostname = $3, os = $4, arch = $5, kubernetes = $6, last_seen_at = now() where id = $1")
         .bind(node_id)
         .bind(&version)
         .bind(hostname)
         .bind(os)
         .bind(arch)
+        .bind(kubernetes.map(sqlx::types::Json))
         .execute(&mut *tx)
         .await?;
     sqlx::query("delete from agents where node_id = $1").bind(node_id).execute(&mut *tx).await?;

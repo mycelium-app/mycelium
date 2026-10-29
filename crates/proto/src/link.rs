@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::api::{EnvironmentCapability, EnvironmentState, EnvironmentWindow};
+use crate::api::{EnvironmentCapability, KubernetesNode, EnvironmentState, EnvironmentWindow};
 use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
 
 pub const REPLACED_CLOSE_CODE: u16 = 4000;
@@ -17,6 +17,8 @@ pub enum NodeToControl {
         arch: String,
         agents: Vec<AgentInfo>,
         sessions: Vec<SessionPosition>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kubernetes: Option<KubernetesNode>,
     },
     SessionStarted {
         conversation_id: Uuid,

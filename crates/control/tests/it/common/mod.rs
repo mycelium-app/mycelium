@@ -271,6 +271,7 @@ impl NodeLink {
             arch: "x86_64".into(),
             agents: vec![AgentInfo { agent: AgentId::Claude, version: Some("2.1.308".into()), available: true, update_available: None }],
             sessions: sessions.into_iter().map(|(conversation_id, last_seq)| mycelium_proto::conversation::SessionPosition { conversation_id, last_seq, live: true }).collect(),
+            kubernetes: None,
         })
         .await;
     }

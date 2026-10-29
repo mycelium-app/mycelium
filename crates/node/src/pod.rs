@@ -5,6 +5,7 @@ use k8s_openapi::api::core::v1::{Container, EmptyDirVolumeSource, EnvVar, Persis
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{Api, AttachParams, DeleteParams, ListParams, LogParams, ObjectMeta, PostParams};
 use kube::{Client, ResourceExt};
+use mycelium_proto::api::{KubernetesNode, PodState, SessionPod};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -149,6 +150,17 @@ fn exit_code_of(pod: &Pod) -> Option<i64> {
     status.state.as_ref()?.terminated.as_ref().map(|terminated| i64::from(terminated.exit_code))
 }
 
+pub fn state_of(pod: &Pod) -> PodState {
+    if exit_code_of(pod).is_some() {
+        return PodState::Exited;
+    }
+
+    match started(pod) {
+        true => PodState::Running,
+        false => PodState::Pending,
+    }
+}
+
 fn started(pod: &Pod) -> bool {
     pod.status.as_ref().and_then(|status| status.phase.as_deref()).is_some_and(|phase| phase != "Pending")
 }
@@ -194,6 +206,20 @@ impl PodRuntime {
         self.pods.create(&PostParams::default(), &pod).await.context("create the session's pod")?;
 
         Ok(())
+    }
+
+    pub async fn report(&self, conversation_ids: &[Uuid]) -> KubernetesNode {
+        let mut pods = Vec::new();
+
+        for conversation_id in conversation_ids {
+            let Ok(Some(pod)) = self.find(*conversation_id).await else {
+                continue;
+            };
+
+            pods.push(SessionPod { conversation_id: *conversation_id, name: pod.name_any(), state: state_of(&pod) });
+        }
+
+        KubernetesNode { namespace: self.config.namespace.clone(), image: self.config.image.clone(), credentials_secret: self.config.credentials_secret.clone(), workspace_persistent: self.config.storage_class.is_some(), pods }
     }
 
     pub async fn find(&self, conversation_id: Uuid) -> Result<Option<Pod>> {
@@ -513,6 +539,20 @@ mod kube_tests {
         runtime.delete(conversation()).await.unwrap();
 
         assert!(requests.lock().unwrap().iter().all(|request| request.starts_with("GET")));
+    }
+
+    #[tokio::test]
+    async fn the_node_reports_its_cluster_settings_and_each_session_pods_state() {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut exited = pod_spec(&config(), node(), conversation(), &launch());
+        exited.status = Some(serde_json::from_value(json!({"phase": "Running", "containerStatuses": [{"name": "agent", "image": "i", "imageID": "i", "ready": false, "restartCount": 0, "state": {"terminated": {"exitCode": 1}}}]})).unwrap());
+        let list = json!({"apiVersion": "v1", "kind": "PodList", "metadata": {}, "items": [exited]});
+        let runtime = PodRuntime::with_client(fake_client(requests, list), config(), node());
+
+        let report = runtime.report(&[conversation()]).await;
+
+        assert_eq!((report.namespace.as_str(), report.image.as_str(), report.credentials_secret.as_str(), report.workspace_persistent), ("agents", "registry.example.com/agent:1", "agent-signins", false));
+        assert_eq!(report.pods, vec![SessionPod { conversation_id: conversation(), name: pod_name(conversation()), state: PodState::Exited }]);
     }
 
     #[test]

@@ -96,6 +96,32 @@ pub struct NodeSummary {
     pub harness_models: Vec<HarnessModels>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<EnvironmentCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubernetes: Option<KubernetesNode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PodState {
+    Pending,
+    Running,
+    Exited,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionPod {
+    pub conversation_id: Uuid,
+    pub name: String,
+    pub state: PodState,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KubernetesNode {
+    pub namespace: String,
+    pub image: String,
+    pub credentials_secret: String,
+    pub workspace_persistent: bool,
+    pub pods: Vec<SessionPod>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

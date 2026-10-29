@@ -1314,6 +1314,7 @@ async fn a_prompt_to_a_session_the_node_reports_as_ended_resumes_it_first() {
             arch: "x86_64".into(),
             agents: vec![],
             sessions: vec![mycelium_proto::conversation::SessionPosition { conversation_id: id, last_seq: 1, live: false }],
+            kubernetes: None,
         })
         .await;
     common::eventually("the node to be back online", || async {

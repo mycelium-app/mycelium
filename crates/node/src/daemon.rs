@@ -228,9 +228,15 @@ impl Daemon {
 
     pub async fn hello(&self) -> NodeToControl {
         let agents = self.agents().await;
-        let sessions = self.session_handles().into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked(), live: !handle.ended() }).collect();
+        let handles = self.session_handles();
+        let conversations: Vec<Uuid> = handles.iter().map(|(conversation_id, _)| *conversation_id).collect();
+        let sessions = handles.into_iter().map(|(conversation_id, handle)| SessionPosition { conversation_id, last_seq: handle.acked(), live: !handle.ended() }).collect();
+        let kubernetes = match &self.pods {
+            Some(pods) => Some(pods.report(&conversations).await),
+            None => None,
+        };
 
-        NodeToControl::Hello { version: VERSION.to_string(), hostname: hostname(), os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string(), agents, sessions }
+        NodeToControl::Hello { version: VERSION.to_string(), hostname: hostname(), os: std::env::consts::OS.to_string(), arch: std::env::consts::ARCH.to_string(), agents, sessions, kubernetes }
     }
 
     pub async fn logins_report(&self) -> NodeToControl {

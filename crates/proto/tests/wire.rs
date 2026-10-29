@@ -86,6 +86,7 @@ fn node_hello_is_tagged_snake_case_with_exact_fields() {
         arch: "x86_64".into(),
         agents: vec![AgentInfo { agent: AgentId::Codex, version: None, available: false, update_available: None }],
         sessions: vec![SessionPosition { conversation_id: id(), last_seq: 4, live: true }],
+        kubernetes: None,
     });
 
     assert_eq!(json["type"], "hello");
@@ -385,6 +386,7 @@ fn node_summary_carries_online_draining_agents_and_logins() {
         sessions_on_older_instructions: 0,
         harness_models: vec![],
         environment: None,
+        kubernetes: None,
     });
 
     assert_eq!(json["online"], true);

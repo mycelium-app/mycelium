@@ -1,7 +1,7 @@
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::versions::newer;
-use mycelium_proto::api::{HarnessModel, HarnessModels, NodeSummary};
+use mycelium_proto::api::{HarnessModel, HarnessModels, KubernetesNode, NodeSummary};
 use mycelium_proto::conversation::{AgentId, AgentInfo, Attachment, Conversation, ConversationStatus, Event, EventKind, LoginInfo, QueuedPrompt, ResetCredits, UsageWindow};
 use mycelium_proto::stream::StreamMessage;
 use serde::Serialize;
@@ -383,6 +383,7 @@ struct NodeRow {
     colour: Option<String>,
     instructions_revision: Option<String>,
     instructions_unmanaged: Vec<String>,
+    kubernetes: Option<sqlx::types::Json<KubernetesNode>>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -410,7 +411,7 @@ struct ReportedModelsRow {
 
 pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<Vec<NodeSummary>> {
     let nodes = sqlx::query_as::<_, NodeRow>(
-        "select id, name, hostname, os, arch, version, address, draining, last_seen_at, icon, colour, instructions_revision, instructions_unmanaged from nodes
+        "select id, name, hostname, os, arch, version, address, draining, last_seen_at, icon, colour, instructions_revision, instructions_unmanaged, kubernetes from nodes
          where revoked_at is null and ($1::uuid is null or id = $1) order by name",
     )
     .bind(only)
@@ -491,6 +492,7 @@ pub async fn node_summaries(state: &AppState, only: Option<Uuid>) -> ApiResult<V
             sessions_on_older_instructions: older as u32,
             harness_models,
             environment: state.hub.environment_capability_of(node.id),
+            kubernetes: node.kubernetes.map(|facts| facts.0),
         });
     }
 
