@@ -241,6 +241,7 @@ jobs:
   agent-image:
     name: Kubernetes agent image
     if: github.ref_type == 'tag'
+    needs: [binary, desktop-web, sign-android, flake]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
