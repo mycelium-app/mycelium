@@ -23,6 +23,7 @@ use std::process::{Command, Stdio};
 
 const MOST_DIFF_BYTES: usize = 200 * 1024;
 const MOST_MOVE_BYTES: usize = 8 * 1024 * 1024;
+const CREDENTIALED_GIT_CONFIG: [&str; 8] = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "http.proxy=", "-c", "http.sslVerify=true"];
 
 pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value> {
     match command {
@@ -36,7 +37,7 @@ pub fn run_in(root: &Path, cwd: &str, command: GitCommand) -> Result<Value> {
         GitCommand::Register => register(&within(root, cwd)?),
         GitCommand::Directories => directories(root, cwd),
         GitCommand::AddWorktree { branch } => add_worktree(&within(root, cwd)?, &branch),
-        other => run(Path::new(cwd), other),
+        other => run(&within(root, cwd)?, other),
     }
 }
 
@@ -69,7 +70,7 @@ pub fn run(cwd: &Path, command: GitCommand) -> Result<Value> {
         GitCommand::TownPropose => run_town(cwd, &["propose"]),
         GitCommand::MovePlan => move_plan(cwd),
         GitCommand::Snapshot { .. } => snapshot(cwd),
-        GitCommand::Apply { branch, head, patch, bundle, credentials } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref()),
+        GitCommand::Apply { branch, head, patch, bundle, credentials, approved_urls } => apply(cwd, &branch, &head, &patch, bundle.as_deref(), credentials.as_ref(), &approved_urls),
         GitCommand::Undo { branch, previous, branch_before } => undo(cwd, &branch, &previous, branch_before.as_deref()),
         GitCommand::ReadFile { path } => read_file(cwd, &path),
         GitCommand::FindLogo => Ok(crate::logo::find(cwd)),
@@ -92,9 +93,11 @@ pub(crate) fn git_with_input(cwd: &Path, args: &[&str], input: &[u8]) -> Result<
 
 fn git_with_stdin(cwd: &Path, args: &[&str], accepted: &[i32], env: &[(String, String)], input: &[u8]) -> Result<Vec<u8>> {
     let could_not_start = |cause: std::io::Error| anyhow!("Git could not be started: {cause}.");
+    let carries_credentials = env.iter().any(|(name, _)| name == "GIT_CONFIG_COUNT");
     let mut child = Command::new("git")
         .arg("-C")
         .arg(cwd)
+        .args(if carries_credentials { CREDENTIALED_GIT_CONFIG.as_slice() } else { &[] })
         .args(args)
         .envs(env.iter().map(|(name, value)| (name, value)))
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -128,13 +131,28 @@ pub(crate) fn within(root: &Path, requested: &str) -> Result<PathBuf> {
         return Err(outside());
     }
 
-    let inside_root = joined.starts_with(root) || root.canonicalize().is_ok_and(|canonical| joined.starts_with(canonical));
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let resolved = resolve(&joined).ok_or_else(outside)?;
 
-    if !inside_root || joined == root {
+    if !resolved.starts_with(&canonical_root) || resolved == canonical_root {
         return Err(outside());
     }
 
-    Ok(joined)
+    Ok(resolved)
+}
+
+fn resolve(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        return Some(canonical);
+    }
+
+    if path.symlink_metadata().is_ok() {
+        return None;
+    }
+
+    let name = path.file_name()?;
+
+    Some(resolve(path.parent()?)?.join(name))
 }
 
 #[cfg(test)]
@@ -163,5 +181,30 @@ mod tests {
 
             assert!(error.contains("outside"), "{requested}: {error}");
         }
+    }
+
+    #[test]
+    fn a_symlinked_folder_pointing_outside_the_projects_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), root.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("nowhere"), root.path().join("dangling")).unwrap();
+
+        for requested in ["link", "link/inner", "dangling"] {
+            let error = run_in(root.path(), requested, GitCommand::Register).unwrap_err().to_string();
+
+            assert!(error.contains("outside"), "{requested}: {error}");
+        }
+    }
+
+    #[test]
+    fn git_commands_run_only_inside_the_projects_root() {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        git(elsewhere.path(), &["init", "-q"], &[]).unwrap();
+
+        let error = run_in(root.path(), &elsewhere.path().to_string_lossy(), GitCommand::Status).unwrap_err().to_string();
+
+        assert!(error.contains("outside"), "{error}");
     }
 }

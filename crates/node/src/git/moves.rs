@@ -79,7 +79,7 @@ pub(super) fn snapshot(cwd: &Path) -> Result<Value> {
     Ok(json!({"branch": branch, "head": head, "changed_files": changed_files, "patch": engine.encode(&patch), "bundle": bundle.map(|bytes| engine.encode(bytes))}))
 }
 
-pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>, credentials: Option<&GitCredentials>) -> Result<Value> {
+pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: Option<&str>, credentials: Option<&GitCredentials>, approved_urls: &[String]) -> Result<Value> {
     let engine = base64::engine::general_purpose::STANDARD;
     let branch_ref = format!("refs/heads/{branch}");
 
@@ -99,7 +99,7 @@ pub(super) fn apply(cwd: &Path, branch: &str, head: &str, patch: &str, bundle: O
 
     if !has_head() {
         let origin = String::from_utf8_lossy(&git(cwd, &["remote", "get-url", "origin"], &[]).unwrap_or_default()).trim().to_string();
-        let env = credentials.and_then(|credentials| credential_env(&origin, credentials).ok()).unwrap_or_default();
+        let env = credentials.filter(|_| approved_urls.contains(&origin)).and_then(|credentials| credential_env(&origin, credentials).ok()).unwrap_or_default();
         let _ = git_with_env(cwd, &["fetch", "--quiet"], &[], &env);
     }
 
@@ -193,6 +193,7 @@ mod tests {
             patch: snapshot["patch"].as_str().unwrap().into(),
             bundle: snapshot["bundle"].as_str().map(str::to_string),
             credentials: None,
+            approved_urls: Vec::new(),
         }
     }
 
@@ -293,7 +294,7 @@ mod tests {
         let head = String::from_utf8_lossy(&git(target.path(), &["rev-parse", "HEAD"], &[]).unwrap()).trim().to_string();
         let patch = base64::engine::general_purpose::STANDARD.encode("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-not the line\n+replacement\n");
 
-        let error = run(target.path(), GitCommand::Apply { branch: "feature/new".into(), head, patch, bundle: None, credentials: None }).unwrap_err().to_string();
+        let error = run(target.path(), GitCommand::Apply { branch: "feature/new".into(), head, patch, bundle: None, credentials: None, approved_urls: Vec::new() }).unwrap_err().to_string();
 
         assert!(error.contains("did not apply"), "{error}");
         assert_eq!(run(target.path(), GitCommand::Status).unwrap()["branch"], "main");
@@ -388,9 +389,35 @@ mod tests {
         let target = clone_of(&origin);
         let head = "0123456789abcdef0123456789abcdef01234567".to_string();
 
-        let error = run(target.path(), GitCommand::Apply { branch: "main".into(), head, patch: String::new(), bundle: None, credentials: None }).unwrap_err().to_string();
+        let error = run(target.path(), GitCommand::Apply { branch: "main".into(), head, patch: String::new(), bundle: None, credentials: None, approved_urls: Vec::new() }).unwrap_err().to_string();
 
         assert!(error.contains("does not have commit 0123456789ab"), "{error}");
+    }
+
+    #[test]
+    fn a_rewritten_origin_never_receives_the_forge_credentials_while_applying() {
+        use std::io::{Read, Write};
+
+        let origin = bare_origin_with_a_commit();
+        let target = clone_of(&origin);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        git(target.path(), &["remote", "set-url", "origin", &format!("http://{}/stolen.git", listener.local_addr().unwrap())], &[]).unwrap();
+        let serving = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut bytes = [0; 8192];
+            let read = stream.read(&mut bytes).unwrap();
+            stream.write_all(b"HTTP/1.1 500 Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+
+            String::from_utf8_lossy(&bytes[..read]).to_lowercase().contains("authorization")
+        });
+        let credentials = Some(mycelium_proto::link::GitCredentials { username: "git".into(), password: "test-private-token".into() });
+        let approved_urls = vec!["https://forge.example/acme/app.git".to_string()];
+
+        let error = run(target.path(), GitCommand::Apply { branch: "main".into(), head: "0123456789abcdef0123456789abcdef01234567".into(), patch: String::new(), bundle: None, credentials, approved_urls }).unwrap_err().to_string();
+
+        assert!(error.contains("does not have commit"), "{error}");
+        assert!(!serving.join().unwrap());
     }
 
     #[test]

@@ -99,7 +99,7 @@ pub(super) fn remote(cwd: &Path, action: &str, force: bool, url: &str, allowed_u
             args.push("--force-with-lease");
         }
 
-        args.extend(["--set-upstream", "origin", "HEAD"]);
+        args.extend(["--no-verify", "--set-upstream", "origin", "HEAD"]);
     } else {
         args.push("origin");
     }
@@ -131,6 +131,25 @@ mod tests {
         let error = remote(dir.path(), "push", false, "https://forge.example/repo.git", &[], &credentials).unwrap_err().to_string();
         assert!(error.contains("remote has changed"));
         assert!(!error.contains(&credentials.password));
+    }
+
+    #[test]
+    fn pushing_with_forge_credentials_runs_no_hook_from_the_repository() {
+        let origin = bare_origin_with_a_commit();
+        let dir = clone_of(&origin);
+        let url = format!("file://{}", origin.path().display());
+        git(dir.path(), &["remote", "set-url", "origin", &url], &[]).unwrap();
+        let leaked = dir.path().join("leaked.txt");
+        let hook = dir.path().join(".git/hooks/pre-push");
+        std::fs::write(&hook, format!("#!/bin/sh\nenv > {}\n", leaked.display())).unwrap();
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        write(&dir, "a.txt", "new\n");
+        commit_all(&dir, "second");
+        let credentials = GitCredentials { username: "git".into(), password: "test-private-token".into() };
+
+        remote(dir.path(), "push", false, &url, &[], &credentials).unwrap();
+
+        assert!(!leaked.exists());
     }
 
     #[test]

@@ -388,6 +388,8 @@ pub enum GitCommand {
         bundle: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         credentials: Option<GitCredentials>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        approved_urls: Vec<String>,
     },
     Undo {
         branch: String,

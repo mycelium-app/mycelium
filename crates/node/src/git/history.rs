@@ -222,7 +222,13 @@ pub(super) fn switch(cwd: &Path, branch: &str, create: bool, track: Option<&str>
     git(cwd, &["check-ref-format", "--branch", branch], &[]).map_err(|_| anyhow!("{branch} is not a valid branch name."))?;
 
     let output = match (create, track) {
-        (true, Some(remote_branch)) => git(cwd, &["switch", "-c", branch, "--track", remote_branch], &[])?,
+        (true, Some(remote_branch)) => {
+            if remote_branch.starts_with('-') || git(cwd, &["check-ref-format", "--allow-onelevel", remote_branch], &[]).is_err() {
+                bail!("{remote_branch} is not a valid branch to track.");
+            }
+
+            git(cwd, &["switch", "-c", branch, "--track", remote_branch], &[])?
+        }
         (true, None) => git(cwd, &["switch", "-c", branch], &[])?,
         (false, _) => git(cwd, &["switch", branch], &[])?,
     };
@@ -454,6 +460,15 @@ mod tests {
         assert_eq!(run(dir.path(), GitCommand::Branches).unwrap()["current"], "fresh");
         assert!(switch_to(&dir, "bad name", true, None).is_err());
         assert!(switch_to(&dir, "-c", false, None).is_err());
+    }
+
+    #[test]
+    fn a_tracking_value_that_is_an_option_or_not_a_branch_is_refused() {
+        let dir = branchy_repository();
+
+        for track in ["--force", "-f", "bad..name"] {
+            assert!(switch_to(&dir, "fresh", true, Some(track)).is_err(), "{track}");
+        }
     }
 
     #[test]
