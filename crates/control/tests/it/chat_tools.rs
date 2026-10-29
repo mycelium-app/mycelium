@@ -432,6 +432,23 @@ async fn a_tool_call_waits_for_approval_and_runs_once_allowed() {
 }
 
 #[tokio::test]
+async fn a_tool_server_added_while_a_reply_is_running_reaches_the_next_round_of_that_reply() {
+    let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("It is sunny.")]).await;
+    let id = rig.chat("Weather in Paris?").await;
+    let request = rig.request_waiting(&id).await;
+    let (router, _) = remote_server(false);
+    let base = serve(router).await;
+    let (status, _) = rig.server.user.json(rig.server.user.post("/api/v1/chat-tool-servers").json(&json!({"name": "Docs", "url": format!("{base}/mcp"), "bearer_token": MCP_TOKEN}))).await;
+
+    rig.decide(&id, &request, "approve").await;
+    rig.turns_ended(&id, 1).await;
+
+    assert_eq!(status, 201);
+    assert!(!rig.model.request(0)["messages"][0]["content"].as_str().unwrap().contains("- Docs:"));
+    assert!(rig.model.request(1)["messages"][0]["content"].as_str().unwrap().contains("- Docs:"));
+}
+
+#[tokio::test]
 async fn a_denied_tool_call_never_runs_and_the_model_is_told_the_person_declined() {
     let rig = rig(vec![Reply::Call(WEATHER, json!({"city": "Paris"})), Reply::Say("Understood.")]).await;
     let id = rig.chat("Weather in Paris?").await;
