@@ -12,6 +12,7 @@ import mycelium.state.heatLevel
 import mycelium.state.heatName
 import mycelium.state.rangeOf
 import mycelium.state.stretchOf
+import mycelium.state.stretchesOf
 
 private fun span(kind: String, title: String, start: String, end: String, conversation: String? = null, project: String? = null) =
     ActivitySpan("2026-10-28T${start}:00Z", "2026-10-28T${end}:00Z", kind, title, project = project, conversationId = conversation)
@@ -78,5 +79,21 @@ class ActivityTimeTest {
 
         assertEquals(6, activityRows(spans).size)
         assertEquals("Task 8", activityRows(spans).first().title)
+    }
+
+    @Test
+    fun aStretchThatSpillsPastMidnightStopsAtTheEndOfTheDay() {
+        val spill = ActivitySpan("2026-10-28T23:30:00Z", "2026-10-29T00:20:00Z", "conversation", "late")
+        val stretch = stretchOf(spill, null)
+
+        assertEquals(23 * 60 + 30 to 24 * 60, stretch?.let { it.startMinute to it.endMinute })
+        assertEquals(24, rangeOf(listOfNotNull(stretch))?.endHour)
+    }
+
+    @Test
+    fun stretchesThatOverlapAreTrimmedSoNoneDrawsOverAnother() {
+        val stretches = stretchesOf(listOf(span("conversation", "a", "09:00", "10:00"), span("chat", "b", "09:30", "10:30"), span("chat", "c", "09:40", "09:50")), null)
+
+        assertEquals(listOf(540 to 600, 600 to 630), stretches.map { it.startMinute to it.endMinute })
     }
 }
