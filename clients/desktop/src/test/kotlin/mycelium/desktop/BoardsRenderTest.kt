@@ -252,7 +252,7 @@ class BoardsRenderTest {
         val details = boardCards(store(idle, board = true).state.value).getValue(Lane.Open).associate { it.title to it.details }
         assertEquals("mycelium · any idle conversation", details.getValue("Rebuild install.md for the new flags"))
         assertTrue(!details.getValue("Rotate the S3 keys").contains("idle"))
-        assertTrue(renderAt("board-schedules", true, false, content = shell(Route.Schedules, board = true)).length() > 1_000)
+        assertTrue(renderAt("board-schedules", true, false, content = shell(Route.Settings, board = true)).length() > 1_000)
     }
 
     @Test

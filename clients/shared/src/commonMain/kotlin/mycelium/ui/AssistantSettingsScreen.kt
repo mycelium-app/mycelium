@@ -193,7 +193,7 @@ private fun IdentitySection(store: Store, state: AppState, assistant: Assistant,
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Group", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
-            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Layers)
+            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Group)
 
             if (groupName != null) {
                 Label("Group instructions apply to its sessions, and the sidebar group filter shows it under $groupName.", style = Tokens.Type.Meta, color = colors.textMuted)

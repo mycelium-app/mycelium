@@ -166,8 +166,6 @@ sealed interface Route {
 
     data class Workflow(val id: String) : Route
 
-    data object Schedules : Route
-
     data object Wellness : Route
 
     data object Projects : Route
@@ -593,9 +591,8 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                 if (closed != null) {
                     ClosedScreen(closed, onSelect = onChooseGroup, onOpenOutOfHours = { onOpenOutOfHours(closed.groupId) })
                 } else when (route) {
-                    Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
+                    Route.Empty, Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
-                    Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
                     is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
@@ -603,7 +600,6 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                     Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })
                     Route.Workflows -> WorkflowsScreen(store, state, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
                     is Route.Workflow -> WorkflowScreen(store, state, route.id, onBack = { onRoute(Route.Workflows) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) }, onOpenProjects = { onRoute(Route.Projects) })
-                    Route.Schedules -> SchedulesScreen(store, state)
                     Route.Wellness -> WellnessScreen(store, platform, onOpenAssistant = { onRoute(Route.Assistant(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Projects -> ProjectsScreen(store, state, onNewConversation = { onRoute(Route.NewIn(it)) })
                     Route.Issues -> IssuesScreen(store, state, onOpened = { onRoute(Route.Chat(it.id)) })
@@ -639,7 +635,7 @@ internal fun screenTarget(path: String): Pair<Route, SettingsSection?>? {
         "nodes" -> Route.Nodes to null
         "tasks" -> Route.Tasks to null
         "workflows" -> Route.Workflows to null
-        "schedules" -> Route.Schedules to null
+        "schedules" -> Route.Settings to SettingsSection.Schedules
         "wellness" -> Route.Wellness to null
         "projects" -> Route.Projects to null
         "issues" -> Route.Issues to null
@@ -662,35 +658,6 @@ private fun routeGroup(route: Route, state: AppState, selected: String): String 
     is Route.Assistant -> state.assistants[route.id]?.groupId ?: NoGroup
     Route.NewChat -> NoGroup
     else -> groupChoiceOf(selected)
-}
-
-@Composable
-private fun EmptyMain(state: AppState, onNew: () -> Unit) {
-    val hasNode = state.nodes.values.any { it.online }
-
-    Column(Modifier.fillMaxSize()) {
-        if (LocalOpenList.current != null) {
-            Bar {
-                OpenListButton()
-                BarTitle("Mycelium")
-            }
-        }
-
-        Column(
-            Modifier.weight(1f).fillMaxWidth().padding(horizontal = Tokens.Space.S4),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Label(
-                if (hasNode) "Choose a conversation or start a new one." else "No node is online. Join a node from Nodes, then start a conversation.",
-                color = MyTheme.colors.textMuted,
-            )
-
-            if (hasNode) {
-                MyButton(onNew, text = "New conversation", icon = MyIcon.Plus, variant = ButtonVariant.Outline, modifier = Modifier.padding(top = Tokens.Space.S3))
-            }
-        }
-    }
 }
 
 private const val WorkspacesMode = "Workspaces"
@@ -786,7 +753,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     groupFilter.value,
                     groupFilter.choose,
                     title = "Show",
-                    icon = MyIcon.Layers,
+                    icon = MyIcon.Group,
                     fill = true,
                     label = state.groups[groupFilter.value]?.name,
                     footer = if (closedCount == 0) null else OptionFooter("Open a closed group", "$closedCount closed${untilEarliestOpening(hours, platform)?.let { " until $it" }.orEmpty()}", MyIcon.Moon) { onOpenOutOfHours(null) },
@@ -805,17 +772,21 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             } else {
                 SidebarLink("New conversation", MyIcon.Plus, selected = route == Route.New) { onRoute(Route.New) }
-                SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+                if (state.experiments.history) {
+                    SidebarLink("History", MyIcon.Clock, selected = route == Route.Archive) { onRoute(Route.Archive) }
+                }
+
                 if (appsLinkVisible(state.chatToolServers)) {
                     SidebarLink("Apps", MyIcon.AppWindow, selected = route == Route.Apps || route is Route.App) { onRoute(Route.Apps) }
                 }
 
                 SidebarLink("Artefacts", MyIcon.Layers, selected = route == Route.Artifacts || route is Route.Artefact) { onRoute(Route.Artifacts) }
 
-                SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
-                SidebarLink("Workflows", MyIcon.Workflow, selected = route == Route.Workflows || route is Route.Workflow) { onRoute(Route.Workflows) }
+                if (state.experiments.tasksAndWorkflows) {
+                    SidebarLink("Tasks", MyIcon.List, selected = route == Route.Tasks) { onRoute(Route.Tasks) }
+                    SidebarLink("Workflows", MyIcon.Workflow, selected = route == Route.Workflows || route is Route.Workflow) { onRoute(Route.Workflows) }
+                }
 
-                SidebarLink("Schedules", MyIcon.Calendar, selected = route == Route.Schedules) { onRoute(Route.Schedules) }
                 SidebarLink("Wellness & Learning", MyIcon.Leaf, selected = route == Route.Wellness, tint = MyTheme.colors.leaf) { onRoute(Route.Wellness) }
             }
         }
@@ -843,7 +814,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                 }
             } else {
                 item(key = "label") {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = Tokens.Size.ControlSm), verticalAlignment = Alignment.CenterVertically) {
                         Label("Conversations", Modifier.weight(1f).padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1), Tokens.Type.Meta, colors.textMuted)
                     }
                 }

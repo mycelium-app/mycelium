@@ -241,6 +241,7 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
                     ChangesList(
                         files = files,
                         shownPath = shownPath,
+                        onWalkThrough = { store.send(id, WalkMeThroughChangesPrompt) },
                         onViewDiff = { file ->
                             if (onOpenDiff != null) {
                                 onOpenDiff(changesTab(file.path))
@@ -361,8 +362,10 @@ fun GitPanel(store: Store, conversation: Conversation, modifier: Modifier = Modi
     }
 }
 
+private const val WalkMeThroughChangesPrompt = "Walk me through the changes in this folder."
+
 @Composable
-private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
+private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (GitFile) -> Unit, onWalkThrough: () -> Unit, onStageAll: () -> Unit, onToggle: (GitFile) -> Unit) {
     val colors = MyTheme.colors
     val additions = files.sumOf { it.additions }
     val deletions = files.sumOf { it.deletions }
@@ -374,7 +377,17 @@ private fun ChangesList(files: List<GitFile>, shownPath: String?, onViewDiff: (G
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-            MyButton({ first?.let(onViewDiff) }, text = "View diff", icon = MyIcon.Diff, size = ButtonSize.Sm)
+            SplitButton(
+                "View diff",
+                { first?.let(onViewDiff) },
+                listOf(
+                    SplitAlternative("View staged", { (files.firstOrNull { it.staged } ?: first)?.let(onViewDiff) }),
+                    SplitAlternative("Walk me through changes", onWalkThrough),
+                ),
+                icon = MyIcon.Diff,
+                size = ButtonSize.Sm,
+                variant = ButtonVariant.Outline,
+            )
             Label("+$additions", style = Tokens.Type.Code, color = colors.diffAdd)
             Label("−$deletions", style = Tokens.Type.Code, color = colors.diffDel)
         }

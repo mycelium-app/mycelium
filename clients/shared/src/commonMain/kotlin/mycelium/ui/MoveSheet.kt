@@ -122,7 +122,7 @@ fun MoveSheet(store: Store, state: AppState, conversation: Conversation, onDismi
                 if (progress?.state == MoveState.Waiting) {
                     MyButton({ scope.launch { failure = attempt { store.cancelMove(conversation.id) } } }, text = "Cancel move", size = ButtonSize.Sm, muted = true)
                 } else if (!busy) {
-                    MyButton({ submit(true) }, text = "Fork instead", size = ButtonSize.Sm)
+                    MyButton({ submit(true) }, text = "Fork instead", size = ButtonSize.Sm, tooltip = "Copy this conversation to the node and leave the original where it is")
                     MyButton({ submit(false) }, text = if (conversation.status == ConversationStatus.Working || conversation.status == ConversationStatus.Input) "Move after this turn" else "Move", size = ButtonSize.Sm, variant = ButtonVariant.Outline)
                 }
             }

@@ -24,6 +24,7 @@ import mycelium.state.recordInput
 import mycelium.state.secondsText
 import mycelium.state.wordleBoardDescription
 import mycelium.state.wordleGuessDescription
+import mycelium.state.wordleHardModeProblem
 import mycelium.state.wordleKeyMarks
 import mycelium.state.readingScript
 import mycelium.state.solutionLines
@@ -274,6 +275,16 @@ class PuzzlesTest {
         assertEquals("correct", wordleKeyMarks(guesses)['e'])
         assertEquals("absent", wordleKeyMarks(guesses)['c'])
         assertEquals(null, wordleKeyMarks(guesses)['z'])
+    }
+
+    @Test
+    fun hardModeDemandsRevealedLettersInTheirPlaceAndKeepsPresentLettersInTheGuess() {
+        val guesses = listOf(WordleGuess("crane", listOf("absent", "present", "absent", "absent", "correct")))
+
+        assertEquals("5th letter must be E", wordleHardModeProblem(guesses, "horsy"))
+        assertEquals("Guess must contain R", wordleHardModeProblem(guesses, "mouse"))
+        assertEquals(null, wordleHardModeProblem(guesses, "horse"))
+        assertEquals(null, wordleHardModeProblem(emptyList(), "horse"))
     }
 
     @Test

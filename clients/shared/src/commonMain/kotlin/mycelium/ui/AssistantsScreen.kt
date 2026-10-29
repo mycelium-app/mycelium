@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -128,7 +130,7 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AssistantAvatar(assistant.name)
+                AssistantAvatar(assistant.name, builtIn = assistant.builtinKey != null, voice = assistant.builtinKey == VoiceAssistantKey)
                 Label(assistant.name, Modifier.weight(1f), maxLines = 1)
 
                 when (assistant.state) {
@@ -142,6 +144,10 @@ internal fun LazyListScope.sidebarAssistantItems(store: Store, state: AppState, 
                 AssistantMenuItems(store, state, assistant, close, onSettings = { onRoute(Route.AssistantSettings(assistant.id)) })
             }
         }
+    }
+
+    item(key = "assistants-gap") {
+        Spacer(Modifier.height(Tokens.Space.S3))
     }
 }
 
@@ -187,7 +193,7 @@ fun AssistantsScreen(store: Store, state: AppState, onOpen: (Assistant) -> Unit,
         Column(Modifier.weight(1f).fillMaxWidth().verticalScrollWithBar().padding(Tokens.Space.S4), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
                 ListSearch(query, { query = it }, "assistants")
-                OptionMenu("Group", groupChoices, group, { group = it }, title = "Show", icon = MyIcon.Layers)
+                OptionMenu("Group", groupChoices, group, { group = it }, title = "Show", icon = MyIcon.Group)
                 OptionMenu("State", StateChoices, showing, { showing = it }, title = "State")
                 OptionMenu("Group by", GroupByChoices, groupBy, { groupBy = it }, title = "Group by")
             }

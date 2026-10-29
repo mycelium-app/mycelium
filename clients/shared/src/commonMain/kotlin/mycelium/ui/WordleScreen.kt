@@ -53,6 +53,7 @@ import mycelium.state.Store
 import mycelium.state.markPhrase
 import mycelium.state.wordleBoardDescription
 import mycelium.state.wordleGuessDescription
+import mycelium.state.wordleHardModeProblem
 import mycelium.state.wordleKeyMarks
 
 private const val WordLength = 5
@@ -111,6 +112,8 @@ fun WordleScreen(store: Store, puzzle: Puzzle, onBack: () -> Unit, onPlayOnSite:
         if (playing) {
             if (typed.length < WordLength) {
                 message = "Enter five letters"
+            } else if (wordleHardModeProblem(loaded?.guesses.orEmpty(), typed) != null) {
+                message = wordleHardModeProblem(loaded?.guesses.orEmpty(), typed).orEmpty()
             } else {
                 val word = typed
 

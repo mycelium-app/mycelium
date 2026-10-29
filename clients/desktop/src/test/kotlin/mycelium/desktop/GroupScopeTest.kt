@@ -2,6 +2,8 @@ package mycelium.desktop
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -94,6 +96,11 @@ class GroupScopeTest {
         rule.setContent { MyceliumTheme(true) { Shell(store, FilterPlatform(filter), Me("u", "sam@example.com", "Sam"), onSignOut = {}, initialRoute = route) } }
     }
 
+    private fun showSchedules(filter: String = "g1") {
+        show(Route.Settings, filter)
+        rule.onNodeWithText("Schedules").performClick()
+    }
+
     private fun shown(title: String): Int {
         rule.waitForIdle()
 
@@ -143,7 +150,7 @@ class GroupScopeTest {
 
     @Test
     fun schedulesShowOnlyThoseRunningInTheSelectedGroup() {
-        show(Route.Schedules)
+        showSchedules()
 
         waitFor("Slop schedule")
 
@@ -153,7 +160,7 @@ class GroupScopeTest {
 
     @Test
     fun noGroupShowsOnlySchedulesWithoutOne() {
-        show(Route.Schedules, filter = "none")
+        showSchedules("none")
 
         waitFor("Loose schedule")
 
@@ -163,7 +170,7 @@ class GroupScopeTest {
 
     @Test
     fun allGroupsShowsEverySchedule() {
-        show(Route.Schedules, filter = "all")
+        showSchedules("all")
 
         waitFor("Slop schedule")
 

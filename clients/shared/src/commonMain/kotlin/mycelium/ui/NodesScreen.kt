@@ -331,7 +331,7 @@ private fun NodeGroup(
                             MenuLabel("Sign in an agent on ${node.name}")
 
                             for (agent in signedOut) {
-                                MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent, null) })
+                                MenuItem(agentName(agent.agent), onClick = { addOpen = false; onLogin(agent.agent, null) }, leading = agentIcon(agent.agent))
                             }
                         }
                     }
@@ -412,6 +412,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
         if (touch) {
             Column(Modifier.weight(1f).padding(vertical = Tokens.Space.S1_5)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(agentIcon(agent.agent), colors.textMuted, Tokens.Size.IconSm)
                     Label(agentName(agent.agent), maxLines = 1)
                     Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
                     agent.updateAvailable?.let { UpdateBadge(it) }
@@ -425,6 +426,7 @@ private fun AgentLoginRow(agent: AgentInfo, login: LoginInfo?, onLogin: () -> Un
             }
         } else {
             Row(Modifier.weight(1.4f), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1_5), verticalAlignment = Alignment.CenterVertically) {
+                Icon(agentIcon(agent.agent), colors.textMuted, Tokens.Size.IconSm)
                 Label(agentName(agent.agent), maxLines = 1)
                 Label(agentVersion(agent.version), color = colors.textMuted, maxLines = 1)
                 agent.updateAvailable?.let { UpdateBadge(it) }

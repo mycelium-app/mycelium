@@ -41,7 +41,7 @@ class NavigationTest {
     val scopes = TestScopes()
 
     @Test
-    fun tasksAndSchedulesSitUnderNodesInTheSidebarAndOpenTheirPages() {
+    fun tasksSitUnderNodesInTheSidebarAndOpenTheirPages() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         val engine = MockEngine { request -> respond(if (request.url.encodedPath.endsWith("/experiments")) EnabledExperiments else "[]", HttpStatusCode.OK, json) }
         val store = Store(MyceliumApi("https://mycelium.test", "token", engine), scopes.create())
@@ -50,7 +50,5 @@ class NavigationTest {
 
         rule.onNodeWithText("Tasks").performClick()
         rule.onNodeWithText("Add a task").assertExists()
-        rule.onNodeWithText("Schedules").performClick()
-        rule.onNodeWithText("New schedule").assertExists()
     }
 }

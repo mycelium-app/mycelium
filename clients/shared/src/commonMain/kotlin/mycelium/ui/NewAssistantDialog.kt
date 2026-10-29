@@ -67,7 +67,7 @@ fun NewAssistantDialog(store: Store, state: AppState, onDismiss: () -> Unit, onC
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
             Label("Group", style = Tokens.Type.MetaStrong, color = colors.textMuted)
-            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Layers)
+            OptionMenu("Group", groupChoices, group, { group = it }, title = "Group", icon = MyIcon.Group)
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
