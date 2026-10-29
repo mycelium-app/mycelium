@@ -149,7 +149,11 @@ val NodeIcons: Map<String, MyIcon> by lazy {
     )
 }
 
-fun nodeIcon(node: NodeSummary): MyIcon = NodeIcons[node.icon] ?: if (isLaptop(node.os)) MyIcon.Laptop else MyIcon.Server
+fun nodeIcon(node: NodeSummary): MyIcon = NodeIcons[node.icon] ?: when {
+    node.kubernetes != null -> MyIcon.Cloud
+    isLaptop(node.os) -> MyIcon.Laptop
+    else -> MyIcon.Server
+}
 
 fun agentIcon(agent: String): MyIcon = when (agent) {
     "codex" -> MyIcon.CodexMark

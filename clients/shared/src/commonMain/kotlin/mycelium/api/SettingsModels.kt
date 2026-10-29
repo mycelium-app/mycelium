@@ -11,4 +11,7 @@ data class Extensions(
 )
 
 @Serializable
-data class Experiments(val voice: Boolean = false)
+data class Experiments(
+    val voice: Boolean = false,
+    @SerialName("kubernetes_nodes") val kubernetesNodes: Boolean = false,
+)

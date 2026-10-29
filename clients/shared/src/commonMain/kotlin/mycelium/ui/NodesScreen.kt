@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -54,6 +55,32 @@ fun withoutTerminalCodes(text: String): String =
 fun oneTimeCode(text: String): String? = Regex("\\b[A-Z0-9]{4}-[A-Z0-9]{4,}\\b").find(text)?.value
 
 private val JoinMethods = listOf("Shell", "Nix", "NixOS or nix-darwin")
+private const val KubernetesMethod = "Kubernetes"
+
+private class JoinStep(val title: String, val note: String?, val commands: List<Pair<String, String>>)
+
+private fun kubernetesJoinSteps(controlPlane: String) = listOf(
+    JoinStep(
+        "Create the namespace and permissions",
+        null,
+        listOf("Copy step 1" to "kubectl apply -f deploy/kubernetes/namespace.yaml\nkubectl apply -f deploy/kubernetes/rbac.yaml"),
+    ),
+    JoinStep(
+        "Join, then store the node's credential",
+        "Run the join on any machine. It writes node.toml; add the cluster paths and the [kubernetes] section, then store it.",
+        listOf(
+            "Copy the join command" to "mycelium node join $controlPlane",
+            "Copy the node.toml lines" to "state_dir = \"/var/lib/mycelium\"\nprojects_root = \"/var/lib/mycelium/projects\"\n\n[kubernetes]\nenabled = true",
+            "Copy the credential command" to "kubectl -n mycelium create secret generic mycelium-node-credential --from-file=node.toml=node.toml",
+        ),
+    ),
+    JoinStep(
+        "Add agent sign-ins",
+        "Every key is optional: claude-credentials.json, claude.json, codex-auth.json, codex-config.toml. All sessions share this one Secret.",
+        listOf("Copy step 3" to "kubectl -n mycelium create secret generic mycelium-agent-credentials \\\n  --from-file=claude-credentials.json=\$HOME/.claude/.credentials.json \\\n  --from-file=codex-auth.json=\$HOME/.codex/auth.json"),
+    ),
+    JoinStep("Start the node", null, listOf("Copy step 4" to "kubectl apply -f deploy/kubernetes/node.yaml")),
+)
 
 fun joinCommands(method: String, controlPlane: String): List<Pair<String, String>> = when (method) {
     "Shell" -> listOf("Install" to "curl -fsSL $controlPlane/install.sh | sh", "Join" to "mycelium node join $controlPlane")
@@ -94,7 +121,7 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
                 MyButton({ joinOpen = true }, text = if (touch) null else "Join a node", icon = MyIcon.Plus, variant = ButtonVariant.Outline, description = "Join a node")
 
                 if (joinOpen) {
-                    JoinPopup(api.baseUrl, platform, onDismiss = { joinOpen = false })
+                    JoinPopup(api.baseUrl, platform, state.experiments.kubernetesNodes, onDismiss = { joinOpen = false })
                 }
             }
         }
@@ -157,18 +184,38 @@ fun NodesScreen(store: Store, state: AppState, platform: Platform, onOpenNode: (
 }
 
 @Composable
-private fun JoinPopup(controlPlane: String, platform: Platform, onDismiss: () -> Unit) {
+private fun JoinPopup(controlPlane: String, platform: Platform, kubernetes: Boolean, onDismiss: () -> Unit) {
     var method by remember { mutableStateOf(JoinMethods.first()) }
+    val methods = if (kubernetes) JoinMethods + KubernetesMethod else JoinMethods
 
     MenuPopup(onDismiss = onDismiss, width = Tokens.Size.Popover) {
         Column(Modifier.padding(Tokens.Space.S3), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
             Label("Join a node", Modifier.semantics { heading() }, Tokens.Type.Title)
-            Segmented(JoinMethods, method, { method = it }, groupLabel = "How the machine runs Mycelium")
+            Segmented(methods, method, { method = it }, groupLabel = "How the machine runs Mycelium")
 
-            for ((label, command) in joinCommands(method, controlPlane)) {
-                Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
-                    Label(label, style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
-                    CopyableCode(command, label, platform::copyToClipboard)
+            if (method == KubernetesMethod) {
+                Label("The node runs as one Deployment and starts each session in its own pod, from ghcr.io/mycelium-app/mycelium-agent:latest unless you set another image. Run these from a checkout of the repository or an unpacked release.", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+                for ((index, step) in kubernetesJoinSteps(controlPlane).withIndex()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {
+                        Label("${index + 1}", Modifier.clearAndSetSemantics {}, Tokens.Type.MetaStrong, MyTheme.colors.textMuted)
+
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                            Label(step.title, style = Tokens.Type.UiStrong)
+                            step.note?.let { Label(it, style = Tokens.Type.Meta, color = MyTheme.colors.textMuted) }
+
+                            for ((description, command) in step.commands) {
+                                CopyableCode(command, step.title, platform::copyToClipboard, description = description)
+                            }
+                        }
+                    }
+                }
+            } else {
+                for ((label, command) in joinCommands(method, controlPlane)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                        Label(label, style = Tokens.Type.MetaStrong, color = MyTheme.colors.textMuted)
+                        CopyableCode(command, label, platform::copyToClipboard)
+                    }
                 }
             }
 

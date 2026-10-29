@@ -19,6 +19,7 @@ fun ExperimentsSettings(store: Store) {
     val held = state.experiments
     val choices = listOf(
         Experiment("Voice input", "Dictate into the composer. On Android and the web, audio may go to Google.", held.voice) { value -> store.updateExperiments { it.copy(voice = value) } },
+        Experiment("Kubernetes nodes", "Join a Kubernetes cluster as a node that runs each session in its own pod. Nodes, Join a node shows the steps.", held.kubernetesNodes) { value -> store.updateExperiments { it.copy(kubernetesNodes = value) } },
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S3)) {

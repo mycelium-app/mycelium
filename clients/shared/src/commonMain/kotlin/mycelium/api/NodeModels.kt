@@ -62,6 +62,35 @@ data class NodeSummary(
     @SerialName("sessions_on_older_instructions") val sessionsOnOlderInstructions: Int = 0,
     @SerialName("harness_models") val harnessModels: List<HarnessModels> = emptyList(),
     val environment: EnvironmentCapability? = null,
+    val kubernetes: KubernetesNode? = null,
+)
+
+@Serializable
+enum class PodState {
+    @SerialName("pending")
+    Pending,
+
+    @SerialName("running")
+    Running,
+
+    @SerialName("exited")
+    Exited,
+}
+
+@Serializable
+data class SessionPod(
+    @SerialName("conversation_id") val conversationId: String,
+    val name: String,
+    val state: PodState,
+)
+
+@Serializable
+data class KubernetesNode(
+    val namespace: String,
+    val image: String,
+    @SerialName("credentials_secret") val credentialsSecret: String,
+    @SerialName("workspace_persistent") val workspacePersistent: Boolean = false,
+    val pods: List<SessionPod> = emptyList(),
 )
 
 @Serializable

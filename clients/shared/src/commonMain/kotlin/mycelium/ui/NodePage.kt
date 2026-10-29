@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,11 +27,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlin.time.Clock
 import mycelium.Platform
+import mycelium.api.ConversationStatus
+import mycelium.api.KubernetesNode
 import mycelium.api.LoginState
 import mycelium.api.NodeSummary
+import mycelium.api.PodState
 import mycelium.api.ProcessUsage
 import mycelium.api.ResourceSample
 import mycelium.state.AppState
@@ -57,6 +62,7 @@ import kotlin.math.roundToInt
 
 private const val WatchHeartbeatMillis = 15_000L
 private val Tabs = listOf("Agents", "Resources", "Ports")
+private val KubernetesTabs = listOf("Agents", "Resources")
 
 @Composable
 fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
@@ -87,6 +93,10 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
                 Icon(nodeIcon(node), nodeColour(node), Tokens.Size.IconSm)
                 Label(node.name, Modifier.semantics { heading() }, Tokens.Type.Title, maxLines = 1)
 
+                if (node.kubernetes != null) {
+                    Tag("Kubernetes")
+                }
+
                 if (!LocalTouch.current) {
                     val presence = when {
                         node.draining -> "Draining"
@@ -115,7 +125,7 @@ fun NodePage(store: Store, state: AppState, nodeId: String, platform: Platform, 
             }
         }
 
-        TabRow(Tabs, tab, { tab = it }, groupLabel = "Node sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
+        TabRow(if (node.kubernetes != null) KubernetesTabs else Tabs, tab, { tab = it }, groupLabel = "Node sections", modifier = Modifier.padding(horizontal = Tokens.Space.S3))
 
         Hairline()
 
@@ -138,6 +148,15 @@ private fun isOlderThan(version: String, other: String): Boolean {
 
 @Composable
 private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (String) -> Unit) {
+    val cluster = node.kubernetes
+
+    if (cluster != null) {
+        ClusterSection(cluster)
+        PodsTable(cluster, state, onOpenConversation)
+
+        return
+    }
+
     val installed = node.agents.filter { it.available }
     val sessions = node.sessions.mapNotNull { state.conversations[it] }.sortedByDescending { it.updatedAt }
     val sample = state.resources[node.id]?.latest
@@ -165,6 +184,54 @@ private fun AgentsTab(node: NodeSummary, state: AppState, onOpenConversation: (S
         "Agent processes appear when this node reports its resources.",
     )
 }
+
+@Composable
+private fun ClusterSection(cluster: KubernetesNode) {
+    val colors = MyTheme.colors
+    val facts = listOf(
+        "Namespace" to cluster.namespace,
+        "Session image" to cluster.image,
+        "Agent sign-ins" to "Secret ${cluster.credentialsSecret}, shared by every session",
+        "Workspace" to if (cluster.workspacePersistent) "Kept on a volume for each conversation" else "Lost when a pod is removed",
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+        Label("Cluster", Modifier.semantics { heading() }, Tokens.Type.UiStrong)
+
+        for ((name, value) in facts) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S3), verticalAlignment = Alignment.CenterVertically) {
+                Label(name, Modifier.width(FactNameWidth), color = colors.textMuted)
+                Label(value, style = if (name == "Namespace" || name == "Session image") Tokens.Type.Code else Tokens.Type.Ui)
+            }
+        }
+
+        Label("Set in the [kubernetes] section of node.toml, stored in the Secret mycelium-node-credential. Change it there and restart the node.", style = Tokens.Type.Meta, color = colors.textMuted)
+    }
+}
+
+@Composable
+private fun PodsTable(cluster: KubernetesNode, state: AppState, onOpenConversation: (String) -> Unit) {
+    val running = cluster.pods.mapNotNull { pod -> state.conversations[pod.conversationId]?.let { it to pod } }
+
+    DataTable(
+        "Conversations running here",
+        listOf(TableColumn("Conversation", 2f), TableColumn("Agent"), TableColumn("Status", 1.4f), TableColumn("Pod", 2f), TableColumn("Folder", 1.5f)),
+        running.map { (conversation, pod) -> listOf(conversation.title, agentName(conversation.agent), podStatusName(pod.state, conversation.status), pod.name, conversation.cwd) },
+        "No conversation is running on this node.",
+        onRow = { onOpenConversation(running[it].first.id) },
+        rowDescription = { "Open ${running[it].first.title}" },
+        monospaceColumns = setOf(3, 4),
+        footer = "Closing a conversation deletes its pod.",
+    )
+}
+
+private fun podStatusName(pod: PodState, conversation: ConversationStatus): String = when (pod) {
+    PodState.Exited -> "Agent exited, pod kept"
+    PodState.Pending -> "Starting the pod"
+    PodState.Running -> statusSectionName(conversation)
+}
+
+private val FactNameWidth = 160.dp
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)

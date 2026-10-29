@@ -1015,7 +1015,7 @@ fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Mod
 }
 
 @Composable
-fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier: Modifier = Modifier) {
+fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier: Modifier = Modifier, description: String = "Copy the ${label.lowercase()} command") {
     val colors = MyTheme.colors
 
     Row(
@@ -1028,6 +1028,6 @@ fun CopyableCode(text: String, label: String, onCopy: (String) -> Unit, modifier
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Label(text, Modifier.weight(1f).horizontalScroll(rememberScrollState()), Tokens.Type.Code)
-        MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = "Copy the ${label.lowercase()} command", size = ButtonSize.Sm, muted = true)
+        MyButton({ onCopy(text) }, text = "Copy", icon = MyIcon.Copy, description = description, size = ButtonSize.Sm, muted = true)
     }
 }
