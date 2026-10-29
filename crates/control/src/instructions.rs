@@ -102,7 +102,7 @@ pub async fn on_older_revision(state: &AppState, conversation_id: Uuid) -> ApiRe
 }
 
 async fn layers_of(state: &AppState, user: &AuthUser) -> ApiResult<Vec<Layer>> {
-    let groups = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open from groups where owner = $1 order by lower(name), id").bind(user.id).fetch_all(&state.pool).await?;
+    let groups = sqlx::query_as::<_, GroupRow>("select id, name, created_at, always_open, icon from groups where owner = $1 order by lower(name), id").bind(user.id).fetch_all(&state.pool).await?;
     let mut layers = vec![Layer::global()];
     layers.extend(groups.into_iter().map(Layer::of_group));
 

@@ -117,6 +117,12 @@ private object DesktopPlatform : Platform {
         }
     }
 
+    override fun revealPath(path: String) {
+        val folder = path.trimEnd('/').substringBeforeLast('/', "/").ifEmpty { "/" }
+
+        runCatching { ProcessBuilder("xdg-open", folder).apply { environment().remove("LD_LIBRARY_PATH") }.start() }
+    }
+
     override val opensIdes = true
 
     override fun hostname(): String? = runCatching { InetAddress.getLocalHost().hostName }.getOrNull()

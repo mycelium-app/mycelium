@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,8 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     var newName by remember { mutableStateOf("") }
     var renaming by remember { mutableStateOf<String?>(null) }
     var renamed by remember { mutableStateOf("") }
+    var newIcon by remember { mutableStateOf("group") }
+    var renamedIcon by remember { mutableStateOf("group") }
     var deleting by remember { mutableStateOf<String?>(null) }
     var layer by remember { mutableStateOf<InstructionLayer?>(null) }
     var newFolder by remember { mutableStateOf("") }
@@ -84,7 +87,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
         if (open == null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Label("Groups", Modifier.weight(1f).semantics { heading() }, Tokens.Type.Title)
-                MyButton({ naming = true; newName = "" }, text = "New group", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
+                MyButton({ naming = true; newName = ""; newIcon = "group" }, text = "New group", icon = MyIcon.Plus, variant = ButtonVariant.Outline)
             }
         } else {
             BackButton("groups", { onOpenGroup(null) }, showText = true)
@@ -98,7 +101,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                 }
 
                 RowMenu("${open.name} group") { close ->
-                    MenuItem("Rename group", onClick = { close(); renaming = open.id; renamed = open.name; deleting = null })
+                    MenuItem("Rename group", onClick = { close(); renaming = open.id; renamed = open.name; renamedIcon = open.icon ?: "group"; deleting = null })
                     MenuItem("Delete group", onClick = { close(); deleting = open.id; renaming = null })
                 }
             }
@@ -152,7 +155,10 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
 
                         when (column) {
                             0 -> TableCell.Slot(group.name) {
-                                Label(group.name, Modifier.pressable({ onOpenGroup(group.id) }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), maxLines = 1)
+                                Row(Modifier.pressable({ onOpenGroup(group.id) }, role = Role.Button, description = "Open the ${group.name} group", shape = BlockShape).padding(vertical = Tokens.Space.S1), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(groupIcon(group.icon), colors.textMuted, Tokens.Size.IconSm)
+                                    Label(group.name, maxLines = 1)
+                                }
                             }
 
                             1 -> if (folders.isEmpty()) {
@@ -165,7 +171,7 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
                             3 -> TableCell.Text(hoursSummary(group.hours), color = colors.textMuted)
                             else -> TableCell.Slot {
                                 RowMenu("${group.name} group") { close ->
-                                    MenuItem("Rename", onClick = { close(); renaming = group.id; renamed = group.name; deleting = null })
+                                    MenuItem("Rename", onClick = { close(); renaming = group.id; renamed = group.name; renamedIcon = group.icon ?: "group"; deleting = null })
                                     MenuItem("Delete", onClick = { close(); deleting = group.id; renaming = null })
                                 }
                             }
@@ -262,26 +268,26 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
     if (naming) {
         fun create() {
             runner {
-                val group = store.api.createGroup(newName)
+                val group = store.api.createGroup(newName, newIcon)
                 store.refreshGroups()
                 onOpenGroup(group.id)
                 naming = false
             }
         }
 
-        RenameDialog("New group", "Group name", newName, { newName = it }, ::create, { naming = false })
+        GroupDialog("New group", "Group name", newName, { newName = it }, newIcon, { newIcon = it }, ::create, { naming = false })
     }
 
     if (forming != null) {
         fun rename() {
             runner {
-                store.api.renameGroup(forming.id, renamed)
+                store.api.renameGroup(forming.id, renamed, renamedIcon)
                 store.refreshGroups()
                 renaming = null
             }
         }
 
-        RenameDialog("Rename group", "New group name", renamed, { renamed = it }, ::rename, { renaming = null })
+        GroupDialog("Edit group", "Group name", renamed, { renamed = it }, renamedIcon, { renamedIcon = it }, ::rename, { renaming = null })
     }
 
     if (addingFolder && open != null) {
@@ -312,6 +318,29 @@ fun GroupsSettings(store: Store, openGroup: String?, onOpenGroup: (String?) -> U
             openingOutOfHours = false
         } else {
             OpenOutOfHoursDialog(store, platform, closed, open?.id, onDismiss = { openingOutOfHours = false }, onOpened = {})
+        }
+    }
+}
+
+@Composable
+private fun GroupDialog(title: String, nameLabel: String, name: String, onName: (String) -> Unit, icon: String, onIcon: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismiss) {
+        Label(title, Modifier.semantics { heading() }, Tokens.Type.Title)
+        TextInput(name, onName, label = nameLabel, onSubmit = onSave)
+
+        Column(Modifier.semantics { contentDescription = "Group icon" }, verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+            Label("Icon", style = Tokens.Type.Meta, color = MyTheme.colors.textMuted)
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1)) {
+                for (key in groupIconKeys()) {
+                    MyButton({ onIcon(key) }, icon = groupIcon(key), description = "${groupIconName(key)} icon", selected = key == icon, muted = key != icon, stateDescription = if (key == icon) "Selected" else null)
+                }
+            }
+        }
+
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2, Alignment.End), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S2)) {
+            MyButton(onDismiss, text = "Cancel", muted = true)
+            MyButton(onSave, text = "Save", variant = ButtonVariant.Outline)
         }
     }
 }

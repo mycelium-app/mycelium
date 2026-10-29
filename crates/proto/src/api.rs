@@ -1045,11 +1045,15 @@ pub struct Group {
     pub opens_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     pub opened_until: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupRequest {
     pub name: String,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

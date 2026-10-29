@@ -11,6 +11,9 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -59,6 +62,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+private val holdsOneCitationMarker = SemanticsMatcher("holds one citation marker") { it.config.getOrNull(SemanticsProperties.EditableText)?.text?.length == 1 }
+
 class AnnotationsTest {
     @get:Rule
     val rule = createComposeRule()
@@ -83,25 +88,18 @@ class AnnotationsTest {
     }
 
     @Test
-    fun attachedAnnotationsShowAsChipsAboveTheComposerAndCanBeRemoved() {
+    fun aCitationDropsIntoTheComposerAndIsSentAsAQuoteAroundWhatIsTyped() {
         val removed = mutableListOf<Annotation>()
-        val attached = Annotation("the retry delay", "make this 5000")
-        composer(listOf(attached), onRemove = { removed += it })
-
-        rule.onNodeWithContentDescription("Attached: \"the retry delay\": make this 5000").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Remove attachment: \"the retry delay\": make this 5000").performClick()
-
-        assertEquals(listOf(attached), removed)
-    }
-
-    @Test
-    fun theSendButtonSendsAttachmentsEvenWithoutTypedText() {
         val sent = mutableListOf<String>()
-        composer(listOf(Annotation("the retry delay", "")), onSend = { sent += it })
+        val cited = Annotation("the retry delay", "")
+        composer(listOf(cited), onSend = { sent += it }, onRemove = { removed += it })
 
+        rule.waitForIdle()
+        rule.onNode(hasSetTextAction()).performTextInput(" is too short")
         rule.onNodeWithContentDescription("Send").performClick()
 
-        assertEquals(listOf(""), sent)
+        assertEquals(listOf(cited), removed)
+        assertEquals(listOf("> the retry delay\n is too short"), sent)
     }
 
     private val memory = object : ClipboardManager {
@@ -115,7 +113,7 @@ class AnnotationsTest {
     }
 
     @Test
-    fun selectingTextInAMessageOffersToAddItToTheNextMessageWithAComment() {
+    fun selectingTextInAMessageOffersToCiteItInTheNextMessage() {
         val attached = mutableListOf<Annotation>()
         rule.setContent {
             MyceliumTheme(true) {
@@ -135,14 +133,11 @@ class AnnotationsTest {
         }
         rule.onAllNodesWithText("Ctrl+Shift+A", substring = true).assertCountEquals(0)
         waitForOffer()
-        rule.onNodeWithContentDescription("Add to message, Ctrl+Shift+A").assertExists()
+        rule.onNodeWithContentDescription("Cite, Ctrl+Shift+A").assertExists()
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed().performClick()
-        rule.onNode(hasSetTextAction()).performTextInput("make this 5000")
-        rule.onNodeWithText("Add").performClick()
+        rule.onNodeWithText("Cite").assertIsDisplayed().performClick()
 
-        assertEquals(1, attached.size)
-        assertEquals(Annotation("The retry delay is read from RESTORE_BACKOFF_MS", "make this 5000"), attached.single())
+        assertEquals(listOf(Annotation("The retry delay is read from RESTORE_BACKOFF_MS", "")), attached)
     }
 
     @Test
@@ -167,13 +162,13 @@ class AnnotationsTest {
             release()
         }
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
 
         rule.runOnIdle { focus!!.clearFocus() }
         rule.waitForIdle()
 
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
     }
 
     @Test
@@ -196,16 +191,16 @@ class AnnotationsTest {
             release()
         }
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
 
         rule.onNodeWithText("Another message").performClick()
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isEmpty() }
-        rule.onAllNodesWithText("Add to message").assertCountEquals(0)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Cite").fetchSemanticsNodes().isEmpty() }
+        rule.onAllNodesWithText("Cite").assertCountEquals(0)
     }
 
     private fun waitForOffer() {
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Cite").fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun dragAcrossTheMessage() {
@@ -236,7 +231,7 @@ class AnnotationsTest {
         dragAcrossTheMessage()
 
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
         rule.onNodeWithText("Copy").assertIsDisplayed()
         assertEquals("RESTORE_BACKOFF_MS", memory.getText()?.text)
     }
@@ -247,11 +242,11 @@ class AnnotationsTest {
 
         dragAcrossTheMessage()
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
         rule.onAllNodes(isRoot())[0].performKeyInput { pressKey(Key.Escape) }
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithText("Add to message").fetchSemanticsNodes().isEmpty() }
-        rule.onAllNodesWithText("Add to message").assertCountEquals(0)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Cite").fetchSemanticsNodes().isEmpty() }
+        rule.onAllNodesWithText("Cite").assertCountEquals(0)
     }
 
     @Test
@@ -267,12 +262,9 @@ class AnnotationsTest {
             keyUp(Key.ShiftLeft)
             keyUp(Key.CtrlLeft)
         }
-        rule.waitUntil(5_000) { rule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNode(hasSetTextAction()).performTextInput("why")
-        rule.onNodeWithText("Add").performClick()
 
         assertEquals(1, attached.size)
-        assertTrue(attached.single().comment == "why")
+        assertEquals("", attached.single().comment)
     }
 
     @Test
@@ -288,7 +280,7 @@ class AnnotationsTest {
         }
 
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
     }
 
     @Test
@@ -305,7 +297,7 @@ class AnnotationsTest {
         }
 
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
     }
 
     @Test
@@ -321,11 +313,11 @@ class AnnotationsTest {
         }
 
         waitForOffer()
-        rule.onNodeWithText("Add to message").assertIsDisplayed()
+        rule.onNodeWithText("Cite").assertIsDisplayed()
     }
 
     @Test
-    fun anAttachedChipSurvivesNewEventsAndTheConversationChangingStatus() {
+    fun aCitedChipSurvivesNewEventsAndTheConversationChangingStatus() {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         var status = "done"
         var events = listOf(chunk(1, "The retry delay is read from RESTORE_BACKOFF_MS"))
@@ -365,10 +357,8 @@ class AnnotationsTest {
             release()
         }
         waitForOffer()
-        rule.onNodeWithText("Add to message").performClick()
-        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Add to message"))).performTextInput("make this 5000")
-        rule.onNodeWithText("Add").performClick()
-        rule.onNodeWithContentDescription("Attached: \"The retry delay is read from RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
+        rule.onNodeWithText("Cite").performClick()
+        rule.onNode(hasSetTextAction()).assert(holdsOneCitationMarker)
 
         status = "working"
         events = events + chunk(2, " and it is 500")
@@ -381,7 +371,7 @@ class AnnotationsTest {
         runBlocking { store.refresh() }
         rule.waitForIdle()
 
-        rule.onNodeWithContentDescription("Attached: \"The retry delay is read from RESTORE_BACKOFF_MS\": make this 5000").assertIsDisplayed()
+        rule.onNode(hasSetTextAction()).assert(holdsOneCitationMarker)
     }
 
     private fun chunk(seq: Int, text: String) =

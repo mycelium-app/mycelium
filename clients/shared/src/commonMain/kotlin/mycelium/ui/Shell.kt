@@ -753,7 +753,7 @@ private fun Sidebar(store: Store, platform: Platform, state: AppState, route: Ro
                     groupFilter.value,
                     groupFilter.choose,
                     title = "Show",
-                    icon = MyIcon.Group,
+                    icon = groupIcon(state.groups[groupFilter.value]?.icon),
                     fill = true,
                     label = state.groups[groupFilter.value]?.name,
                     footer = if (closedCount == 0) null else OptionFooter("Open a closed group", "$closedCount closed${untilEarliestOpening(hours, platform)?.let { " until $it" }.orEmpty()}", MyIcon.Moon) { onOpenOutOfHours(null) },

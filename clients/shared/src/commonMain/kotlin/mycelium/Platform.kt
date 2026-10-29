@@ -57,6 +57,8 @@ interface Platform {
 
     fun openUrl(url: String)
 
+    fun revealPath(path: String) = Unit
+
     fun openSignIn(url: String, onCancelled: () -> Unit) = openUrl(url)
 
     fun copyToClipboard(text: String)

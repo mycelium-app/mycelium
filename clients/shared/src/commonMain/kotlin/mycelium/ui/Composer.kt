@@ -87,6 +87,7 @@ import mycelium.state.Choice
 import mycelium.state.Annotation
 import mycelium.state.SessionOptions
 import mycelium.state.annotationLabel
+import mycelium.state.citedText
 import mycelium.state.SideChatCommands
 import mycelium.state.sideChatOf
 import mycelium.state.SlashCommand
@@ -363,6 +364,29 @@ fun Composer(
     }
 
     val fieldFocus = remember { FocusRequester() }
+
+    LaunchedEffect(annotations) {
+        if (annotations.isEmpty()) {
+            return@LaunchedEffect
+        }
+
+        for (cited in annotations) {
+            val marker = freePasteMarker(pastes.keys + text.text.filter(::isPasteMarker).toSet())
+
+            if (marker != null) {
+                val cursor = text.selection.end
+                val before = ComposerEdit(text, pastes, images)
+
+                pastes = pastes + (marker to citedText(cited.quote))
+                text = TextFieldValue(text.text.substring(0, cursor) + marker + text.text.substring(cursor), TextRange(cursor + 1))
+                history = history.recorded(before, false, false)
+            }
+
+            onRemoveAnnotation(cited)
+        }
+
+        fieldFocus.requestFocus()
+    }
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         Column(fieldModifier) {
             Box {
@@ -491,7 +515,6 @@ fun Composer(
 
                 editStrip()
                 actionChips()
-                AnnotationChips(annotations, onRemoveAnnotation)
                 unmarked?.let { AttachmentChips(it) }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
@@ -561,7 +584,6 @@ fun Composer(
 
             Box(measured.padding(horizontal = Tokens.Space.S2)) {
                 actionChips()
-                AnnotationChips(annotations, onRemoveAnnotation)
             }
 
             Box(measured.padding(horizontal = Tokens.Space.S2)) {
@@ -940,31 +962,3 @@ private fun CompletionPopup(title: String, completions: List<Completion>, highli
     }
 }
 
-@Composable
-private fun AnnotationChips(annotations: List<Annotation>, onRemove: (Annotation) -> Unit) {
-    if (annotations.isEmpty()) {
-        return
-    }
-
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = Tokens.Space.S1),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        for (annotation in annotations) {
-            val label = annotationLabel(annotation)
-
-            Row(
-                Modifier
-                    .border(Tokens.Size.Hairline, MyTheme.colors.border, ControlShape)
-                    .padding(start = Tokens.Space.S2)
-                    .semantics { contentDescription = "Attached: $label" },
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Label(label, style = Tokens.Type.Meta, maxLines = 1)
-                MyButton({ onRemove(annotation) }, icon = MyIcon.Close, description = "Remove attachment: $label", size = ButtonSize.Sm, muted = true)
-            }
-        }
-    }
-}

@@ -67,6 +67,8 @@ import mycelium.state.hasOlderEvents
 import mycelium.state.mediaTypeOf
 import mycelium.state.AppState
 import mycelium.state.messageWithAnnotations
+import mycelium.state.pathWithoutLine
+import mycelium.state.parentFolder
 import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.continueAccountId
@@ -437,7 +439,23 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val agentOpener: (String) -> (() -> Unit)? = { agentId -> state.conversations.values.firstOrNull { it.parentId == id && it.agentId == agentId }?.let { agentConversation -> { onOpenConversation(agentConversation.id) } } }
 
-    CompositionLocalProvider(LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
+    var browsingPath by remember(id) { mutableStateOf<String?>(null) }
+    val pathOpener: ((String) -> Unit)? = if (chat || node == null) null else { path ->
+        val rooted = path.startsWith("/") || path.startsWith("~")
+        val full = if (rooted) path else conversation.cwd.trimEnd('/') + "/" + path.removePrefix("./")
+
+        if (platform?.hostname()?.equals(node.name, ignoreCase = true) == true) {
+            platform.revealPath(pathWithoutLine(full))
+        } else {
+            browsingPath = full
+        }
+    }
+
+    browsingPath?.let { path ->
+        node?.let { FolderBrowserDialog(store, it.id, it.name, parentFolder(path), onChoose = { browsingPath = null }, onDismiss = { browsingPath = null }) }
+    }
+
+    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalAnnotate provides annotate, LocalGeneratedUiActions provides generatedActions, LocalAttachmentBytes provides store::attachmentBytes, LocalArtifactOpener provides artefactOpener, LocalAgentOpener provides agentOpener, LocalConversationWorkflows provides conversationWorkflows, LocalOutlineOpener provides showOutline, LocalOutlinePage provides (outlinePage ?: liveOutline), LocalIdeTarget provides ideTarget) {
         val walkthrough = state.walkthroughs[id]?.takeIf { !it.dismissed && !chat }
 
         val density = LocalDensity.current

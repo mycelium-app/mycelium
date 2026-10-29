@@ -88,6 +88,10 @@ enum class MyIcon(vararg val paths: String) {
     Back("M19 12H5M12 19l-7-7 7-7"),
     Info(circle(12f, 12f, 9f), "M12 11v5M12 8h.01"),
     Layers("m12 3 9 5-9 5-9-5Z", "m3 13 9 5 9-5"),
+    Briefcase("M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16", rect(2f, 6f, 20f, 14f, 2f)),
+    Home("M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", "M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"),
+    Book("M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"),
+    Heart("M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"),
     Group("M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", rect(7f, 7f, 7f, 5f, 1f), rect(10f, 12f, 7f, 5f, 1f)),
     Workflow("M5 3H9a2 2 0 0 1 2 2V9a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2V5a2 2 0 0 1 2 -2Z", "M7 11v4a2 2 0 0 0 2 2h4", "M15 13H19a2 2 0 0 1 2 2V19a2 2 0 0 1 -2 2H15a2 2 0 0 1 -2 -2V15a2 2 0 0 1 2 -2Z"),
     Hand("M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2", "M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2", "M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8", "M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"),
@@ -155,6 +159,24 @@ fun nodeIcon(node: NodeSummary): MyIcon = NodeIcons[node.icon] ?: when {
     isLaptop(node.os) -> MyIcon.Laptop
     else -> MyIcon.Server
 }
+
+private val GroupIcons = linkedMapOf(
+    "group" to ("Group" to MyIcon.Group),
+    "folder" to ("Folder" to MyIcon.Folder),
+    "briefcase" to ("Briefcase" to MyIcon.Briefcase),
+    "home" to ("Home" to MyIcon.Home),
+    "book" to ("Book" to MyIcon.Book),
+    "code" to ("Code" to MyIcon.Code),
+    "heart" to ("Heart" to MyIcon.Heart),
+    "star" to ("Star" to MyIcon.Star),
+    "leaf" to ("Leaf" to MyIcon.Leaf),
+)
+
+fun groupIconKeys(): List<String> = GroupIcons.keys.toList()
+
+fun groupIconName(key: String): String = GroupIcons[key]?.first ?: "Group"
+
+fun groupIcon(key: String?): MyIcon = GroupIcons[key]?.second ?: MyIcon.Group
 
 fun agentIcon(agent: String): MyIcon = when (agent) {
     "codex" -> MyIcon.CodexMark
