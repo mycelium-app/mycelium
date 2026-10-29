@@ -7,6 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
@@ -292,6 +294,13 @@ class EnvironmentPanelTest {
         rule.onNodeWithContentDescription("Browsers, 2 apps").assertExists()
         rule.onNodeWithContentDescription("Terminals, 1 app").assertExists()
         rule.onNodeWithText("Recent apps").assertDoesNotExist()
+    }
+
+    @Test
+    fun theLauncherIsAnnouncedAsAppsAndWindows() {
+        openLauncher()
+
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Apps and windows")).assertExists()
     }
 
     @Test

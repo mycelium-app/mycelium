@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -395,7 +396,7 @@ private fun ColumnScope.ActiveEnvironment(
             )
 
             if (windowsOpen) {
-                MenuPopup({ windowsOpen = false }, width = WindowsMenuWidth) {
+                MenuPopup({ windowsOpen = false }, Modifier.semantics { paneTitle = "Apps and windows" }, width = WindowsMenuWidth) {
                     val searching = query.isNotBlank()
                     val windows = if (searching) environmentWindowsMatching(environment, apps, query) else environment.windows
                     val recent = environmentRecentApps(apps, state.recentEnvironmentApps[conversation.id].orEmpty())
