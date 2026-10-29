@@ -337,6 +337,9 @@ fun ComposerCard(
     modifier: Modifier = Modifier,
     error: String? = null,
     assistantActions: AssistantActionControls? = null,
+    project: (@Composable () -> Unit)? = null,
+    place: (@Composable () -> Unit)? = null,
+    notice: (@Composable () -> Unit)? = null,
     account: (@Composable () -> Unit)? = null,
     model: (@Composable () -> Unit)? = null,
 ) {
@@ -380,9 +383,13 @@ fun ComposerCard(
                 placeholder = placeholder,
             )
 
+            notice?.invoke()
+
             ComposerBar(barControls(kind, HarnessReport(models = model != null))) { which ->
                 when (which) {
                     BarControl.Attach -> MyButton({ platform?.pickFiles(attachments.onAdd) }, icon = MyIcon.Paperclip, description = "Attach files", muted = true)
+                    BarControl.Project -> project?.invoke()
+                    BarControl.Place -> place?.invoke()
                     BarControl.Actions -> assistantActions?.let { ActionsButton(it) }
                     BarControl.Account -> account?.invoke()
                     BarControl.Model -> model?.invoke()

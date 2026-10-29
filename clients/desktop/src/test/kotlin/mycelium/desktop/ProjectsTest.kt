@@ -329,8 +329,9 @@ class ProjectsTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$AtlasId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
@@ -342,6 +343,7 @@ class ProjectsTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
         rule.onNodeWithContentDescription("Message").performTextInput("Fix the build")
         rule.onNodeWithContentDescription("Message").performKeyInput { pressKey(Key.Enter) }

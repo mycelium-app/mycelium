@@ -133,7 +133,8 @@ class ConversationAreaInteractionTest {
     fun aNewWorktreeNamesItsFolderAndTheBranchItStartsFrom() {
         showNewConversation()
 
-        rule.onNodeWithContentDescription("New worktree", substring = true).performClick()
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithText("New worktree").performClick()
         rule.onNodeWithContentDescription("New branch", substring = true).performTextInput("fix/restore-copy")
 
         rule.onNodeWithText("Folder harbour-worktrees/fix-restore-copy", substring = true).assertExists()

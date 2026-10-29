@@ -6,7 +6,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -79,13 +82,18 @@ class WorktreesTest {
         }
     }
 
+    private fun chooseNewWorktree() {
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
+        rule.onNodeWithText("New worktree").performClick()
+    }
+
     @Test
     fun theBranchFieldAppearsOnlyWhenNewWorktreeIsOn() {
         show(store())
 
         assertEquals(0, rule.onAllNodesWithText("New branch").fetchSemanticsNodes().size)
 
-        rule.onNodeWithContentDescription("New worktree").performClick()
+        chooseNewWorktree()
 
         rule.onNodeWithContentDescription("New branch").assertExists()
     }
@@ -96,9 +104,9 @@ class WorktreesTest {
         var created = false
         show(store) { created = true }
 
-        rule.onNodeWithContentDescription("New worktree").performClick()
+        chooseNewWorktree()
         rule.onNodeWithContentDescription("New branch").performTextInput("  feature/restore ")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created }
         assertEquals("""{"node_id":"$LaptopId","agent":"claude","project_id":"p1","branch":"feature/restore"}""", bodies.single())
@@ -108,8 +116,9 @@ class WorktreesTest {
     fun anEmptyBranchNameIsRefusedBeforeAnythingIsSent() {
         show(store())
 
-        rule.onNodeWithContentDescription("New worktree").performClick()
-        rule.onNodeWithContentDescription("Send").performClick()
+        chooseNewWorktree()
+        rule.onNodeWithContentDescription("New branch").performClick()
+        rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.onNodeWithText("Enter a name for the new branch.").assertExists()
         assertEquals(0, bodies.size)
@@ -121,9 +130,9 @@ class WorktreesTest {
         val store = store()
         show(store)
 
-        rule.onNodeWithContentDescription("New worktree").performClick()
+        chooseNewWorktree()
         rule.onNodeWithContentDescription("New branch").performTextInput("x")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("New branch").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { store.problem.value != null }
         assertEquals("a branch named 'x' already exists", store.problem.value)
@@ -133,7 +142,7 @@ class WorktreesTest {
     fun theBranchHintNamesTheFolderTheWorktreeWillBeCreatedIn() {
         show(store())
 
-        rule.onNodeWithContentDescription("New worktree").performClick()
+        chooseNewWorktree()
 
         rule.onNodeWithContentDescription("New branch").performTextInput("fix/restore-copy")
 

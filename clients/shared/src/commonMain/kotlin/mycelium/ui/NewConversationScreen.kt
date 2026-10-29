@@ -3,8 +3,6 @@ package mycelium.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +16,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import mycelium.api.Conversation
 import mycelium.api.CreateConversationRequest
 import mycelium.api.LoginState
@@ -47,11 +49,14 @@ import mycelium.state.modelMenu
 
 private const val AgentAccountSeparator = "|"
 
+private const val RecentProjects = 3
+
+private val PlaceMenuWidth = 340.dp
+
 fun startableNodes(state: AppState) = state.nodes.values.filter { it.online && !it.draining }.sortedBy { it.name }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit, projectId: String? = null) {
+fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversation) -> Unit, projectId: String? = null, onOpenNodes: () -> Unit = {}) {
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
@@ -61,6 +66,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val attached = rememberAttachmentDrafts()
     var cwdError by remember { mutableStateOf<String?>(null) }
     var chosenProject by remember { mutableStateOf(projectId) }
+    var withoutProject by remember { mutableStateOf(false) }
+    var projectMenuOpen by remember { mutableStateOf(false) }
+    var placeMenuOpen by remember { mutableStateOf(false) }
+    var settingUpProject by remember { mutableStateOf(false) }
+    var browsing by remember { mutableStateOf(false) }
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
@@ -74,7 +84,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     val groupFilter = LocalGroupFilter.current
     val projects = state.projects.values.filter { inGroup(it.groupId, groupFilter) }.sortedBy { it.name }
-    val project = state.projects[chosenProject]
+    val recent = state.conversations.values.filter { it.projectId != null }.sortedByDescending { it.updatedAt }.mapNotNull { conversation -> projects.firstOrNull { it.id == conversation.projectId } }.distinct().take(RecentProjects)
+    val project = if (withoutProject) null else state.projects[chosenProject] ?: recent.firstOrNull()
     val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val agents = node?.agents?.filter { it.available }.orEmpty()
     val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
@@ -143,31 +154,11 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
 
     Column(Modifier.fillMaxSize()) {
         Bar {
-            val breadcrumb: @Composable () -> Unit = {
-                if (projects.isNotEmpty()) {
-                    ProjectBreadcrumb(project, projects, state.nodes, onSelect = { chosenProject = it })
-                }
-            }
-
             if (LocalOpenList.current != null) {
                 OpenListButton()
-                BarTitle("New conversation")
-                breadcrumb()
-            } else {
-                breadcrumb()
-
-                if (projects.isNotEmpty()) {
-                    Label("/", color = colors.textFaint)
-                }
-
-                BarTitle("New conversation")
             }
-        }
 
-        if (node == null) {
-            NoNodeNotice(colors.textMuted, Modifier.padding(Tokens.Space.S4))
-
-            return@Column
+            BarTitle("New conversation")
         }
 
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -186,6 +177,135 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         onSubmit = ::create,
                         attachments = attached.controls(),
                         kind = ConversationKind.NewConversation,
+                        error = cwdError ?: branchError,
+                        project = {
+                            Box {
+                                MyButton(
+                                    { projectMenuOpen = true },
+                                    text = project?.name ?: "No project",
+                                    icon = MyIcon.Folder,
+                                    description = "Project: ${project?.name ?: "No project"}",
+                                    muted = true,
+                                    trailingIcon = MyIcon.ChevronDown,
+                                )
+
+                                if (projectMenuOpen) {
+                                    ProjectMenu(
+                                        projects,
+                                        state.nodes,
+                                        project?.id,
+                                        "Project",
+                                        onDismiss = { projectMenuOpen = false },
+                                        recent = recent,
+                                        noProjectLabel = "No project, choose a folder",
+                                        onNewProject = { projectMenuOpen = false; settingUpProject = true },
+                                    ) {
+                                        projectMenuOpen = false
+                                        withoutProject = it == null
+                                        chosenProject = it
+                                        worktree = false
+                                        cwdError = null
+                                        branchError = null
+                                    }
+                                }
+                            }
+                        },
+                        place = node?.let { placed ->
+                            {
+                                val where = when {
+                                    project == null && cwd.isBlank() -> "Choose a folder"
+                                    project == null -> cwd.trim().trimEnd('/').substringAfterLast('/').ifEmpty { cwd.trim() }
+                                    worktree -> branch.trim().ifEmpty { "New worktree" }
+                                    else -> "Checkout"
+                                }
+                                val summary = when {
+                                    project == null && cwd.isBlank() -> "choose a folder"
+                                    project == null -> "folder $where"
+                                    worktree -> "new worktree"
+                                    else -> "existing checkout"
+                                }
+
+                                Box {
+                                    MyButton(
+                                        { placeMenuOpen = true },
+                                        text = "${placed.name} · $where",
+                                        icon = nodeIcon(placed),
+                                        description = "Place: ${placed.name}, $summary",
+                                        muted = true,
+                                        trailingIcon = MyIcon.ChevronDown,
+                                    )
+
+                                    if (placeMenuOpen) {
+                                        MenuPopup(onDismiss = { placeMenuOpen = false }, width = PlaceMenuWidth) {
+                                            MenuLabel("Run on")
+
+                                            for (option in nodes) {
+                                                MenuItem(
+                                                    option.name,
+                                                    onClick = {
+                                                        if (project != null && option.id != project.nodeId) {
+                                                            withoutProject = true
+                                                            worktree = false
+                                                        }
+
+                                                        nodeId = option.id
+                                                    },
+                                                    checked = option.id == placed.id,
+                                                    hint = if (project == null) null else if (option.id == project.nodeId) project.path else "No checkout, choose a folder",
+                                                    leading = nodeIcon(option),
+                                                )
+                                            }
+
+                                            Hairline(Modifier.padding(vertical = Tokens.Space.S1))
+
+                                            if (project != null) {
+                                                MenuLabel("Work in")
+                                                MenuItem("Existing checkout", onClick = { worktree = false }, checked = !worktree, leading = MyIcon.Folder)
+                                                MenuItem("New worktree", onClick = { worktree = true }, checked = worktree, leading = MyIcon.Branch)
+
+                                                if (worktree) {
+                                                    TextInput(
+                                                        branch,
+                                                        { branch = it },
+                                                        label = "New branch",
+                                                        modifier = Modifier.padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                                                        placeholder = "feature/restore-copy",
+                                                        mono = true,
+                                                        onSubmit = { placeMenuOpen = false; create() },
+                                                        hint = worktreeHint(project, branch, state.conversations.values),
+                                                    )
+                                                }
+                                            } else {
+                                                Row(
+                                                    Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.S2, vertical = Tokens.Space.S1),
+                                                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                                    verticalAlignment = Alignment.Bottom,
+                                                ) {
+                                                    TextInput(cwd, { cwd = it }, label = "Folder", modifier = Modifier.weight(1f), placeholder = "/home/you/project", mono = true, onSubmit = { placeMenuOpen = false; create() })
+                                                    MyButton({ placeMenuOpen = false; browsing = true }, text = "Browse", icon = MyIcon.Folder, description = "Browse folders on ${placed.name}", variant = ButtonVariant.Outline)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        notice = if (node == null) ({
+                            Row(
+                                Modifier.fillMaxWidth().padding(bottom = Tokens.Space.S2),
+                                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S2),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(MyIcon.Alert, colors.statusAttention, Tokens.Size.IconSm)
+
+                                Column(Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }) {
+                                    NoNodeNotice(colors.textMuted)
+                                    Label("Your message stays here.", color = colors.textMuted)
+                                }
+
+                                MyButton(onOpenNodes, text = "Nodes", description = "Nodes", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
+                            }
+                        }) else null,
                         account = {
                             if (agents.isNotEmpty()) {
                                 AccountPicker(
@@ -226,33 +346,24 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                         model = if (models != null) ({ OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title) }) else null,
                     )
 
-                    if (agents.isEmpty()) {
+                    if (node != null && agents.isEmpty()) {
                         NoAgentNotice(node)
-                    }
-
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalArrangement = Arrangement.spacedBy(Tokens.Space.S1), itemVerticalAlignment = Alignment.CenterVertically) {
-                        if (project == null) {
-                            NodeChooser(nodes, node) { nodeId = it }
-                        }
-
-                        if (project != null) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.S1), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(worktree, "New worktree", { worktree = !worktree }, checkedState = "On", uncheckedState = "Off")
-                                Label("New worktree")
-                            }
-                        }
-                    }
-
-                    if (project == null) {
-                        FolderField(store, node, cwd, { cwd = it }, label = "Folder", placeholder = "/home/you/project", error = cwdError, onSubmit = ::create)
-                    }
-
-                    if (project != null && worktree) {
-                        TextInput(branch, { branch = it }, label = "New branch", placeholder = "feature/restore-copy", mono = true, error = branchError, onSubmit = ::create, hint = worktreeHint(project, branch, state.conversations.values))
                     }
                 }
             }
         }
+    }
+
+    if (browsing && node != null) {
+        FolderBrowserDialog(store, node.id, node.name, cwd, onChoose = { cwd = it; browsing = false }, onDismiss = { browsing = false })
+    }
+
+    if (settingUpProject) {
+        NewProjectDialog(store, state, onDismiss = { settingUpProject = false }, onCreated = { created ->
+            chosenProject = created.id
+            withoutProject = false
+            settingUpProject = false
+        })
     }
 
     signIn?.let { session -> AccountSignInDialog(store, session, onClose = { signIn = null }) }

@@ -595,9 +595,9 @@ private fun RouteContent(store: Store, state: AppState, platform: Platform, me: 
                 } else when (route) {
                     Route.Empty -> EmptyMain(state, onNew = { onRoute(Route.New) })
                     is Route.Chat -> ConversationScreen(store, state, route.id, onArchived = { onRoute(Route.Empty) }, onOpenNodes = { onRoute(Route.Nodes) }, onOpenNode = { onRoute(Route.Node(it)) }, onOpenConversation = { onRoute(Route.Chat(it)) }, onOpenArtefact = { onRoute(Route.Artefact(it)) }, onOpenWorkflow = { onRoute(Route.Workflow(it)) })
-                    Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) })
+                    Route.New -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.NewChat -> NewChatScreen(store, onCreated = { onRoute(Route.Chat(it.id)) }, onOpenSettings = { onRoute(Route.Settings) }, onOpenNodes = { onRoute(Route.Nodes) })
-                    is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId)
+                    is Route.NewIn -> NewConversationScreen(store, state, onCreated = { onRoute(Route.Chat(it.id)) }, projectId = route.projectId, onOpenNodes = { onRoute(Route.Nodes) })
                     Route.Nodes -> NodesScreen(store, state, platform, onOpenNode = { onRoute(Route.Node(it)) })
                     is Route.Node -> NodePage(store, state, route.id, platform, onBack = { onRoute(Route.Nodes) }, onOpenConversation = { onRoute(Route.Chat(it)) })
                     Route.Tasks -> TasksScreen(store, state, platform, onOpen = { onRoute(Route.Chat(it)) })

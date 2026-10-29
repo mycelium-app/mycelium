@@ -177,7 +177,7 @@ class ComposerBarTest {
     fun aNewConversationFoldsAgentAndAccountIntoOneControlAndKeepsModel() {
         val everything = HarnessReport(voice = true, working = true, models = true, modes = true, settings = true)
 
-        assertEquals(listOf(BarControl.Attach, BarControl.Account, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewConversation, everything))
+        assertEquals(listOf(BarControl.Attach, BarControl.Project, BarControl.Place, BarControl.Account, BarControl.Model, BarControl.Send), barControls(ConversationKind.NewConversation, everything))
     }
 
     @Test

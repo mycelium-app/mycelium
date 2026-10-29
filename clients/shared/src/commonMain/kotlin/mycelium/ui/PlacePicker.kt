@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -145,13 +146,16 @@ fun PlacePicker(store: Store, state: AppState, place: Place, withBranch: Boolean
 }
 
 @Composable
-fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, onSelect: (String?) -> Unit) {
+fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, selected: String?, label: String, onDismiss: () -> Unit, setUpFolder: String? = null, onSetUp: () -> Unit = {}, recent: List<Project> = emptyList(), noProjectLabel: String = "No project", onNewProject: (() -> Unit)? = null, onSelect: (String?) -> Unit) {
     var query by remember { mutableStateOf("") }
     val matching = projects.filter { project ->
         listOf(project.name, project.path, nodes[project.nodeId]?.name.orEmpty()).any { it.contains(query.trim(), ignoreCase = true) }
     }
 
     val severalNodes = projects.map { it.nodeId }.distinct().size > 1
+    val searching = query.isNotBlank()
+    val recentShown = recent.filter { it in matching }.takeIf { !searching }.orEmpty()
+    val rest = matching.filter { it !in recentShown }
 
     MenuPopup(onDismiss = onDismiss) {
         MenuLabel(label)
@@ -159,8 +163,21 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
         val scroll = rememberLazyListState()
 
         LazyColumn(Modifier.heightIn(max = 320.dp).scrollbar(scroll), state = scroll) {
-            items(matching, key = { it.id }) { option ->
-                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name?.takeIf { severalNodes }, leadingContent = { ProjectIcon(option) })
+            if (recentShown.isNotEmpty()) {
+                item { MenuLabel("Recent projects") }
+
+                items(recentShown, key = { "recent-${it.id}" }) { option ->
+                    MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name, leadingContent = { ProjectIcon(option) })
+                }
+
+                if (rest.isNotEmpty()) {
+                    item { Hairline(Modifier.padding(vertical = Tokens.Space.S1)) }
+                    item { MenuLabel("All projects") }
+                }
+            }
+
+            items(rest, key = { it.id }) { option ->
+                MenuItem(option.name, onClick = { onSelect(option.id) }, checked = option.id == selected, hint = nodes[option.nodeId]?.name?.takeIf { severalNodes || recentShown.isNotEmpty() }, leadingContent = { ProjectIcon(option) })
             }
 
             if (matching.isEmpty()) {
@@ -168,10 +185,14 @@ fun ProjectMenu(projects: List<Project>, nodes: Map<String, NodeSummary>, select
             }
         }
 
-        MenuItem("No project", onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
+        MenuItem(noProjectLabel, onClick = { onSelect(null) }, checked = selected == null, leading = MyIcon.Folder)
 
         if (setUpFolder != null) {
             MenuItem("Set up ${projectName(setUpFolder)} as a project", onClick = onSetUp, leading = MyIcon.Plus)
+        }
+
+        if (onNewProject != null) {
+            MenuItem("Set up a project", onClick = onNewProject, leading = MyIcon.Plus)
         }
     }
 }

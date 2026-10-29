@@ -6,7 +6,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performTextInput
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -107,6 +110,7 @@ class FolderBrowserTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithText("notes").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Choose this folder").performClick()
@@ -122,8 +126,9 @@ class FolderBrowserTest {
         var created: Conversation? = null
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = { created = it }) } }
 
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Folder").performTextInput("/work/midden")
-        rule.onNodeWithContentDescription("Send").performClick()
+        rule.onNodeWithContentDescription("Folder").performKeyInput { pressKey(Key.Enter) }
 
         rule.waitUntil(5_000) { created != null }
         assertEquals("""{"node_id":"$NodeId","agent":"claude","cwd":"/work/midden"}""", posts.single().second)
@@ -135,6 +140,7 @@ class FolderBrowserTest {
         val store = store()
         rule.setContent { MyceliumTheme(true) { val state by store.state.collectAsState(); NewConversationScreen(store, state, onCreated = {}) } }
 
+        rule.onNodeWithContentDescription("Place: ", substring = true).performClick()
         rule.onNodeWithContentDescription("Browse folders on laptop").performClick()
 
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Update laptop to browse its folders, or enter the path.").fetchSemanticsNodes().isNotEmpty() }
