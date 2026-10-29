@@ -39,5 +39,3 @@ fun modelMenu(node: NodeSummary, agent: String, account: String?, now: Instant =
 fun reportedModelChoices(node: NodeSummary?, agent: String, account: String?): List<Choice> =
     node?.let { reportFor(it, agent, account) }?.models.orEmpty().map { Choice(it.id, it.name) }
 
-fun harnessModelChoices(nodes: Collection<NodeSummary>, agent: String): List<Choice> =
-    listOf(Choice(DefaultModelId, "Default model")) + nodes.flatMap { it.harnessModels }.filter { it.agent == agent }.flatMap { it.models }.distinctBy { it.id }.map { Choice(it.id, it.name) }

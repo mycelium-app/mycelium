@@ -1,5 +1,12 @@
 package mycelium.ui
 
+import mycelium.api.ModelChoice
+import mycelium.api.Routing
+import mycelium.state.ContinueModelPrefix
+import mycelium.state.RoutingPrefix
+import mycelium.state.anyAccountId
+import mycelium.state.conversationModelLabel
+import mycelium.state.modelOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,15 +80,11 @@ import mycelium.state.Store
 import mycelium.state.ThreadItem
 import mycelium.state.continueAccountId
 import mycelium.state.pickerAccounts
-import mycelium.state.reachableLogins
-import mycelium.state.routingChoices
 import mycelium.state.signInAccounts
 import mycelium.state.ContinueChatPrefix
-import mycelium.state.routedLabel
 import mycelium.state.routedStatus
 import mycelium.state.currentContinueId
 import mycelium.state.agentName
-import mycelium.state.currentContinueLabel
 import mycelium.state.ContinueAccountPrefix
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
@@ -273,48 +276,56 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
 
     val node = if (chat) null else state.nodes[conversation.nodeId]
     val accountPicker = run {
-        val agentSettings = rememberAgentSettings(store)
+        val favourites = rememberFavouriteModels(store)
         val login = node?.logins?.firstOrNull { it.agent == conversation.agent && it.account == conversation.account }
         val accounts = remember(conversation, state.nodes) {
             pickerAccounts(state.nodes.values, conversation.nodeId) { pickedNode, pickedLogin -> continueAccountId(conversation, pickedNode, pickedLogin) } +
                 node?.let { signInAccounts(state.nodes.values, it, conversation.agent) }.orEmpty()
         }
+        val options = remember(state.nodes, providers, node) { modelOptions(state.nodes.values, node, providers) }
+        val sessionModel = remember(conversation, state.events[id], state.sessionUpdates[id], node) {
+            sessionOptions(conversation, state.events[id].orEmpty(), state.sessionUpdates[id].orEmpty(), reportedModelChoices(node, conversation.agent, conversation.account)).currentModel
+        }
+        val anyModel = conversation.routing == Routing.AnyModel
+        val current = if (chat) ModelChoice(providerId = conversation.providerId, model = conversation.model) else ModelChoice(agent = conversation.agent, model = sessionModel?.ifEmpty { null })
 
-        AccountPickerControls(
-            title = "Continue on",
-            label = routedLabel(conversation, providers) ?: currentContinueLabel(conversation, providers).takeUnless { chat && providers.none { it.id == conversation.providerId } },
+        ModelPickerControls(
+            label = conversationModelLabel(conversation, sessionModel, options),
             tooltip = routedStatus(conversation, login),
-            accounts = accounts,
-            routing = routingChoices(reachableLogins(state.nodes.values).map { it.second }, agentSettings.anyModel, "moves to"),
-            current = currentContinueId(conversation),
+            options = options,
+            favourites = favourites.list,
             providers = providers,
-            providerId = conversation.providerId.takeIf { chat },
-            model = conversation.model.takeIf { chat },
-            recent = recentModels(state.conversations.values, providers),
-            onFavourite = { picked, favouriteModel, on -> store.setFavouriteModel({ change -> providers = change(providers) }, picked, favouriteModel, on) },
-            onPickModel = { chosen, picked ->
+            chosen = current.takeIf { !anyModel },
+            anyChosen = anyModel,
+            onFavourite = favourites.toggle,
+            onPickAny = { store.act { store.continueOn(id, "$RoutingPrefix${Routing.AnyModel}") } },
+            onPickModel = { option ->
                 store.act {
-                    if (chat) {
-                        api.patchConversation(id, PatchConversationRequest(providerId = chosen.id, model = picked))
-                    } else {
-                        store.continueOn(id, "$ContinueChatPrefix${chosen.id}:$picked")
+                    when {
+                        option.providerId != null && chat -> api.patchConversation(id, PatchConversationRequest(providerId = option.providerId, model = option.model))
+                        option.providerId != null -> store.continueOn(id, "$ContinueChatPrefix${option.providerId}:${option.model}")
+                        option.agent == conversation.agent && !chat -> api.setConfig(id, ConfigRequest(model = option.model))
+                        else -> store.continueOn(id, "$ContinueModelPrefix${option.agent}:${option.model}")
                     }
                 }
             },
+            accounts = accounts,
+            account = accounts.firstOrNull { it.id == currentContinueId(conversation) }?.id,
             onMove = { moveTo = it },
-            onPick = { picked, done ->
+            onPickAccount = { picked, done ->
                 store.act {
-                    val row = accounts.firstOrNull { it.id == picked }
+                    val chosen = picked ?: anyAccountId(conversation.agent)
+                    val row = accounts.firstOrNull { it.id == chosen }
 
                     try {
                         when {
-                            picked.startsWith(SignInPrefix) && node != null -> {
-                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), picked.removePrefix(SignInPrefix))
+                            chosen.startsWith(SignInPrefix) && node != null -> {
+                                val started = api.startLogin(node.id, conversation.agent, loginMethodFor(conversation.agent), chosen.removePrefix(SignInPrefix))
                                 signIn = LoginSession(started.loginId, conversation.agent)
                             }
-                            conversation.acpSessionId == null && picked == "$ContinueAccountPrefix$DefaultAccountId" -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
-                            conversation.acpSessionId == null && picked.startsWith(ContinueAccountPrefix) -> api.patchConversation(id, PatchConversationRequest(account = picked.removePrefix(ContinueAccountPrefix)))
-                            else -> store.continueOn(id, picked)
+                            conversation.acpSessionId == null && chosen == "$ContinueAccountPrefix$DefaultAccountId" -> api.patchConversation(id, PatchConversationRequest(useDefaultAccount = true))
+                            conversation.acpSessionId == null && chosen.startsWith(ContinueAccountPrefix) -> api.patchConversation(id, PatchConversationRequest(account = chosen.removePrefix(ContinueAccountPrefix)))
+                            else -> store.continueOn(id, chosen)
                         }
 
                         done(null)
@@ -325,7 +336,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                             throw refused
                         }
 
-                        done(PickerRefusal(refused.message, picked, target.id, target.name))
+                        done(PickerRefusal(refused.message, chosen, target.id, target.name))
                     }
                 }
             },
@@ -591,6 +602,7 @@ fun ConversationScreen(store: Store, state: AppState, id: String, onArchived: ()
                     onResume = { store.act { api.scheduleResume(id) } },
                     onRetryNow = { store.act { api.retryConversation(id) } },
                     onCancelResume = { store.act { api.cancelResume(id) } },
+                    continueOn = accountPicker,
                 )
 
                 CompositionLocalProvider(LocalResponseActions provides responses, LocalPausedWorkflow provides PausedWorkflow(conversation.agent, limitActions)) {

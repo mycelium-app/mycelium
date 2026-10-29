@@ -15,8 +15,6 @@ import mycelium.api.UsageWindow
 
 const val RoutingPrefix = "routing:"
 
-const val RoutingGroup = "Switch as usage runs out"
-
 private const val FiveHour = "five_hour"
 
 private const val SevenDay = "seven_day"
@@ -82,47 +80,6 @@ fun modelChoiceName(choice: ModelChoice, providers: List<ModelProvider>): String
     return listOfNotNull(provider, choice.model).joinToString(" · ")
 }
 
-fun routingChoices(logins: List<LoginInfo>, anyModel: List<ModelChoice>, verb: String): List<Choice> {
-    fun startsOn(agent: String): String? = bestLogin(logins.filter { it.agent == agent })?.account?.let { "$verb $it" }
-
-    val claude = startsOn("claude")
-    val codex = startsOn("codex")
-    val first = anyModel.firstOrNull { entry ->
-        val agent = entry.agent
-
-        agent == null || bestLogin(logins.filter { it.agent == agent && (entry.account == null || it.account == entry.account) }) != null
-    }
-    val anyHint = first?.let { "$verb ${it.agent?.let(::agentName) ?: "a chat model"}" } ?: "Add models in Settings, Agents"
-
-    return listOfNotNull(
-        claude?.let { Choice("$RoutingPrefix${Routing.ClaudeAny}", routingName(Routing.ClaudeAny), it, group = RoutingGroup) },
-        codex?.let { Choice("$RoutingPrefix${Routing.CodexAny}", routingName(Routing.CodexAny), it, group = RoutingGroup) },
-        Choice("$RoutingPrefix${Routing.AnyModel}", routingName(Routing.AnyModel), anyHint, group = RoutingGroup),
-    )
-}
-
-fun addModelChoices(nodes: Collection<NodeSummary>, providers: List<ModelProvider>, includeAnyModel: Boolean): List<Choice> {
-    val routing = listOfNotNull(
-        Choice("any:claude", routingName(Routing.ClaudeAny), group = RoutingGroup),
-        Choice("any:codex", routingName(Routing.CodexAny), group = RoutingGroup),
-        Choice("any_model", routingName(Routing.AnyModel), group = RoutingGroup).takeIf { includeAnyModel },
-    )
-    val accounts = agentAccounts(nodes)
-        .filter { account -> account.label != UnnamedAccount && account.nodes.any { it.state == LoginState.SignedIn } }
-        .map { Choice("account:${it.agent}:${it.label}", it.label, group = agentName(it.agent)) }
-    val chat = providers.flatMap { provider -> provider.models.map { model -> Choice("chat:${provider.id}:$model", "${provider.name} · $model", group = "Chat") } }
-
-    return routing + accounts + chat
-}
-
-fun modelChoiceFrom(id: String): ModelChoice? = when {
-    id == "any_model" -> ModelChoice(anyModel = true)
-    id.startsWith("any:") -> ModelChoice(agent = id.removePrefix("any:"))
-    id.startsWith("account:") -> id.removePrefix("account:").let { ModelChoice(agent = it.substringBefore(':'), account = it.substringAfter(':')) }
-    id.startsWith("chat:") -> id.removePrefix("chat:").let { ModelChoice(providerId = it.substringBefore(':'), model = it.substringAfter(':')) }
-    else -> null
-}
-
 fun anyAccountId(agent: String): String = RoutingPrefix + if (agent == "codex") Routing.CodexAny else Routing.ClaudeAny
 
 fun routingButtonText(id: String?): String? = when (id?.removePrefix(RoutingPrefix)?.takeIf { id.startsWith(RoutingPrefix) }) {
@@ -143,8 +100,6 @@ fun scheduleAccountChoice(node: NodeSummary, agent: String, picked: String?): St
     return picked?.takeIf { it.isNotEmpty() } ?: anyAccountId(agent).takeIf { named.isNotEmpty() }
 }
 
-fun groupedByAgent(choices: List<Choice>, agent: String): List<Choice> = choices.map { if (it.group == null) it.copy(group = agentName(agent)) else it }
-
 fun routedLabel(conversation: Conversation, providers: List<ModelProvider>): String? {
     val routing = conversation.routing ?: return null
     val account = conversation.account
@@ -162,7 +117,7 @@ fun routedStatus(conversation: Conversation, login: LoginInfo?): String? {
     val worst = login?.windows?.maxByOrNull { it.usedPercent }
     val usage = worst?.let { "${(Full - it.usedPercent).roundToInt().coerceIn(0, 100)}% of the ${windowName(it.name)} left" }
 
-    return listOfNotNull("${routingName(routing)}. On $account now", usage).joinToString(": ")
+    return listOfNotNull("On ${account.substringBefore('@')}", usage).joinToString(", ")
 }
 
 val PriceCurrencies = listOf("GBP" to "£", "USD" to "$", "EUR" to "€", "CAD" to "CA$", "AUD" to "A$", "CHF" to "CHF", "SEK" to "kr", "NOK" to "kr", "DKK" to "kr", "JPY" to "¥")

@@ -169,6 +169,22 @@ async fn preferences_naming_an_unknown_node_or_a_model_less_choice_are_refused()
 }
 
 #[tokio::test]
+async fn a_new_assistant_with_no_models_chosen_uses_auto_which_picks_from_favourites() {
+    let server = Server::start().await;
+    let created = create(&server.user, json!({"name": "Stand-up"})).await;
+
+    assert_eq!(created["preferences"]["models"], json!([{"any_model": true}]));
+}
+
+#[tokio::test]
+async fn an_assistant_can_keep_auto_alongside_a_named_model() {
+    let server = Server::start().await;
+    let created = create(&server.user, json!({"name": "Stand-up", "preferences": {"models": [{"agent": "claude", "model": "opus"}, {"any_model": true}]}})).await;
+
+    assert_eq!(created["preferences"]["models"], json!([{"agent": "claude", "model": "opus"}, {"any_model": true}]));
+}
+
+#[tokio::test]
 async fn the_first_prompt_starts_a_chat_session_and_later_prompts_reuse_it() {
     let server = Server::start().await;
     let (provider, fake) = chat_provider(&server).await;

@@ -181,3 +181,23 @@ async fn a_resumed_session_is_put_back_on_the_conversations_model() {
         other => panic!("expected set_config, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn provider_favourites_from_before_the_merge_become_any_model_entries_once() {
+    let server = Server::start().await;
+    let provider_id: Uuid = sqlx::query_scalar(
+        "insert into model_providers (owner, kind, name, base_url, models, favourite_models) select id, 'openai_compatible', 'Local', 'http://127.0.0.1:1', array['llama3', 'qwen3'], array['qwen3', 'llama3'] from users order by created_at limit 1 returning id",
+    )
+    .fetch_one(&server.pool)
+    .await
+    .unwrap();
+    let migration = include_str!("../../migrations/0140_favourites_into_any_model.sql");
+
+    sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
+    sqlx::raw_sql(migration).execute(&server.pool).await.unwrap();
+
+    let (_, settings) = server.user.json(server.user.get("/api/v1/agent-settings")).await;
+
+    assert_eq!(settings["any_model"], json!([{"provider_id": provider_id, "model": "qwen3"}, {"provider_id": provider_id, "model": "llama3"}]));
+}
+

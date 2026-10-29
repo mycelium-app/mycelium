@@ -23,6 +23,7 @@ import mycelium.Platform
 import mycelium.api.Conversation
 import mycelium.api.ConversationStatus
 import mycelium.api.MyceliumApi
+import mycelium.state.ModelOption
 import mycelium.state.PickerAccount
 import mycelium.state.DefaultAccountId
 import mycelium.state.SignInPrefix
@@ -31,7 +32,7 @@ import mycelium.state.Store
 import mycelium.state.accountsElsewhere
 import mycelium.ui.AccountsSettings
 import mycelium.ui.Composer
-import mycelium.ui.AccountPickerControls
+import mycelium.ui.ModelPickerControls
 import mycelium.ui.MyceliumTheme
 import mycelium.ui.NodesScreen
 import mycelium.ui.SessionsSettings
@@ -132,7 +133,13 @@ class AccountsAndSessionsTest {
                     onSendQueuedNow = {}, onEditQueued = {}, onRemoveQueued = {},
                     options = SessionOptions(emptyList(), null, emptyList(), null, emptyList()), commands = emptyList(),
                     onSetMode = {}, onSetModel = {}, onSetSetting = { _, _ -> }, onSearchFiles = { emptyList() },
-                    accountPicker = AccountPickerControls("Continue on", { picked, done -> onSetAccount(picked); done(null) }, "work@example.net", accounts = accounts, current = "work@example.net"),
+                    accountPicker = ModelPickerControls(
+                        label = "Claude Opus 5.5",
+                        options = listOf(ModelOption("claude", null, "opus", "Claude Opus 5.5")),
+                        favourites = emptyList(), providers = emptyList(), onPickModel = {}, onFavourite = { _, _ -> },
+                        accounts = accounts, account = "work@example.net",
+                        onPickAccount = { picked, done -> onSetAccount(picked.orEmpty()); done(null) },
+                    ),
                 )
             }
         }
@@ -237,7 +244,8 @@ class AccountsAndSessionsTest {
         var picked: String? = null
         composerWith(accounts = listOf(account("sam@example.com", "sam@example.com"), account("work@example.net", "work@example.net")), started = false, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Claude Code · sam@example.com").performClick()
 
         assertEquals("sam@example.com", picked)
@@ -248,7 +256,8 @@ class AccountsAndSessionsTest {
         var picked: String? = null
         composerWith(accounts = listOf(account("sam@example.com", "sam@example.com"), account("work@example.net", "work@example.net")), started = true, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Claude Code · sam@example.com").performClick()
 
         assertEquals("sam@example.com", picked)
@@ -281,7 +290,8 @@ class AccountsAndSessionsTest {
             onSetAccount = { picked = it },
         )
 
-        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Sign in on willow").performClick()
 
         assertEquals("sign in:side@example.com", picked)
@@ -291,7 +301,8 @@ class AccountsAndSessionsTest {
     fun thePickerShowsEachAccountsUsageLeftOrThatItIsUnknown() {
         composerWith(accounts = listOf(account("sam@example.com", "sam@example.com", "18% left"), account("work@example.net", "work@example.net")), started = false)
 
-        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
+        rule.onNodeWithText("Account").performClick()
 
         rule.onNodeWithContentDescription("Claude Code · sam@example.com on this device, 18% left").assertExists()
         rule.onNodeWithContentDescription("Claude Code · work@example.net on this device, Usage unknown").assertExists()
@@ -302,7 +313,8 @@ class AccountsAndSessionsTest {
         var picked: String? = null
         composerWith(accounts = listOf(account(DefaultAccountId, null), account("work@example.net", "work@example.net")), started = false, onSetAccount = { picked = it })
 
-        rule.onNodeWithContentDescription("Account: work@example.net").performClick()
+        rule.onNodeWithContentDescription("Model: Claude Opus 5.5").performClick()
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Claude Code · Default account").performClick()
 
         assertEquals(DefaultAccountId, picked)

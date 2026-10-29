@@ -329,7 +329,6 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/usage/history", get(usage_history::get))
         .route("/api/v1/model-providers/{id}", patch(model_providers::update).delete(model_providers::delete))
         .route("/api/v1/model-providers/{id}/refresh", post(model_providers::refresh))
-        .route("/api/v1/model-providers/{id}/favourites", put(model_providers::set_favourite))
         .route("/api/v1/chat-tool-servers", get(chat_tool_servers::list).post(chat_tool_servers::create))
         .route("/api/v1/chat-tool-servers/oauth", post(mcp_oauth::start))
         .route("/api/v1/chat-tool-servers/probe", post(chat_tool_setup::probe))

@@ -1,5 +1,7 @@
 package mycelium.ui
 
+import mycelium.state.favouriteOptions
+import mycelium.state.modelOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,8 +33,6 @@ import mycelium.state.SignInPrefix
 import mycelium.state.RoutingPrefix
 import mycelium.state.accountChoiceId
 import mycelium.state.anyAccountId
-import mycelium.state.routingAgent
-import mycelium.state.routingChoices
 import mycelium.api.Routing
 import mycelium.state.PickerAccount
 import mycelium.state.UsageUnknown
@@ -45,7 +45,6 @@ import mycelium.state.inGroup
 import mycelium.state.switchableAccounts
 import mycelium.state.worktreeHint
 import mycelium.state.isLaptop
-import mycelium.state.modelMenu
 
 private const val AgentAccountSeparator = "|"
 
@@ -60,7 +59,8 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val colors = MyTheme.colors
     val nodes = startableNodes(state)
     var nodeId by remember { mutableStateOf<String?>(null) }
-    var agent by remember { mutableStateOf<String?>(null) }
+    var pickedKey by remember { mutableStateOf<String?>(null) }
+    var anyModel by remember { mutableStateOf(false) }
     var cwd by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf(TextFieldValue("")) }
     val attached = rememberAttachmentDrafts()
@@ -74,8 +74,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     var worktree by remember { mutableStateOf(false) }
     var branch by remember { mutableStateOf("") }
     var branchError by remember { mutableStateOf<String?>(null) }
-    var account by remember { mutableStateOf<String?>(null) }
-    var model by remember { mutableStateOf("") }
+    var pinnedAccount by remember { mutableStateOf<String?>(null) }
     var signIn by remember { mutableStateOf<LoginSession?>(null) }
 
     LaunchedEffect(Unit) {
@@ -89,14 +88,21 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
     val node = if (project != null) state.nodes[project.nodeId] else nodes.firstOrNull { it.id == nodeId } ?: nodes.firstOrNull()
     val lastNode = if (project != null) state.nodes[project.nodeId] else state.nodes.values.minByOrNull { it.name }
     val agents = node?.agents?.filter { it.available }.orEmpty()
-    val chosenAgent = agents.firstOrNull { it.agent == agent }?.agent ?: agents.firstOrNull()?.agent
-
-    val agentSettings = rememberAgentSettings(store)
+    val favourites = rememberFavouriteModels(store)
+    val options = remember(state.nodes, node) { modelOptions(state.nodes.values, node, emptyList()) }
+    val favouriteOptions = favourites.list.favouriteOptions(options, emptyList()).filter { it.available }
+    val chosenOption = if (anyModel) null else options.firstOrNull { it.key == pickedKey && it.available } ?: favouriteOptions.firstOrNull() ?: options.firstOrNull { it.available && it.agent in agents.map { held -> held.agent } }
+    val chosenAgent = if (anyModel) agents.firstOrNull()?.agent else chosenOption?.agent?.takeIf { picked -> agents.any { it.agent == picked } } ?: agents.firstOrNull()?.agent
     val accounts = switchableAccounts(node, chosenAgent.orEmpty())
-    val routing = account?.takeIf { it.startsWith(RoutingPrefix) }?.removePrefix(RoutingPrefix)?.takeIf { it == Routing.AnyModel || it == anyAccountId(chosenAgent.orEmpty()).removePrefix(RoutingPrefix) }
-    val chosenAccount = if (routing != null) null else accounts.firstOrNull { accountChoiceId(it) == account } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+    val named = accounts.any { it.state == LoginState.SignedIn && it.account != null }
+    val routing = when {
+        anyModel -> Routing.AnyModel
+        pinnedAccount == null && named -> anyAccountId(chosenAgent.orEmpty()).removePrefix(RoutingPrefix)
+        else -> null
+    }
+    val chosenAccount = if (routing != null) null else accounts.firstOrNull { accountChoiceId(it) == pinnedAccount } ?: accounts.firstOrNull { it.state == LoginState.SignedIn }
+    val pinned = if (anyModel) null else accounts.firstOrNull { accountChoiceId(it) == pinnedAccount }
 
-    val shownAccount = chosenAccount ?: node?.let { accountsOn(it, chosenAgent.orEmpty()) }.orEmpty().firstOrNull { it.state == LoginState.SignedIn }
     val accountRows = node?.let { held ->
         agents.flatMap { info ->
             val signedIn = accountsOn(held, info.agent).filter { it.state == LoginState.SignedIn }
@@ -107,8 +113,7 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
         }
     }.orEmpty()
 
-    val models = if (node != null && chosenAgent != null) modelMenu(node, chosenAgent, chosenAccount?.account) else null
-    val chosenModel = model.takeIf { picked -> models?.choices?.any { it.id == picked } == true }.orEmpty()
+    val chosenModel = chosenOption?.model.orEmpty()
 
     fun create() {
         if (nodes.isEmpty() || node == null || chosenAgent == null) {
@@ -318,34 +323,39 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 MyButton(onOpenNodes, text = "Nodes", description = "Nodes", variant = ButtonVariant.Outline, size = ButtonSize.Sm)
                             }
                         }) else null,
-                        account = {
+                        model = {
                             if (agents.isNotEmpty()) {
-                                AccountPicker(
-                                    AccountPickerControls(
-                                        title = "Start on",
-                                        label = when {
-                                            routing == Routing.AnyModel -> "Any model"
-                                            routing != null -> "${agentName(chosenAgent.orEmpty())}, any account"
-                                            else -> "${agentName(chosenAgent.orEmpty())} · ${shownAccount?.account ?: "Default account"}"
-                                        },
-                                        accounts = accountRows,
-                                        routing = routingChoices(node?.logins.orEmpty(), agentSettings.anyModel, "starts on"),
-                                        current = routing?.let { "$RoutingPrefix$it" } ?: chosenAgent?.let { "$it$AgentAccountSeparator${shownAccount?.let(::accountChoiceId) ?: DefaultAccountId}" },
-                                        onPick = { picked, done ->
-                                            val pickedAgent = picked.substringBefore(AgentAccountSeparator)
-                                            val pickedAccount = picked.substringAfter(AgentAccountSeparator)
+                                ModelPicker(
+                                    ModelPickerControls(
+                                        label = if (anyModel) "Any model" else listOfNotNull(chosenOption?.name ?: agentName(chosenAgent.orEmpty()), pinned?.account?.substringBefore('@')).joinToString(" · "),
+                                        options = options,
+                                        favourites = favourites.list,
+                                        providers = emptyList(),
+                                        chosen = chosenOption?.choice(),
+                                        anyChosen = anyModel,
+                                        onFavourite = favourites.toggle,
+                                        onPickAny = { anyModel = true; pinnedAccount = null },
+                                        onPickModel = { picked ->
+                                            if (picked.agent != chosenAgent) {
+                                                pinnedAccount = null
+                                            }
 
-                                            if (picked.startsWith(RoutingPrefix)) {
-                                                account = picked
-                                                routingAgent(picked)?.let { agent = it }
-                                            } else if (pickedAccount.startsWith(SignInPrefix) && node != null) {
+                                            anyModel = false
+                                            pickedKey = picked.key
+                                        },
+                                        accounts = accountRows.filter { it.agent == chosenAgent },
+                                        account = pinned?.let { "$chosenAgent$AgentAccountSeparator${accountChoiceId(it)}" },
+                                        onPickAccount = { picked, done ->
+                                            val pickedAccount = picked?.substringAfter(AgentAccountSeparator)
+
+                                            if (pickedAccount != null && pickedAccount.startsWith(SignInPrefix) && node != null && chosenAgent != null) {
                                                 store.act {
-                                                    val started = store.api.startLogin(node.id, pickedAgent, loginMethodFor(pickedAgent), pickedAccount.removePrefix(SignInPrefix))
-                                                    signIn = LoginSession(started.loginId, pickedAgent)
+                                                    val started = store.api.startLogin(node.id, chosenAgent, loginMethodFor(chosenAgent), pickedAccount.removePrefix(SignInPrefix))
+                                                    signIn = LoginSession(started.loginId, chosenAgent)
                                                 }
                                             } else {
-                                                agent = pickedAgent
-                                                account = pickedAccount
+                                                anyModel = false
+                                                pinnedAccount = pickedAccount
                                             }
 
                                             done(null)
@@ -354,7 +364,6 @@ fun NewConversationScreen(store: Store, state: AppState, onCreated: (Conversatio
                                 )
                             }
                         },
-                        model = if (models != null) ({ OptionMenu("Model", models.choices, chosenModel, { model = it }, title = models.title) }) else null,
                     )
 
                     if (node != null && nodes.isNotEmpty() && agents.isEmpty()) {

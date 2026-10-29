@@ -13,7 +13,6 @@ data class ModelProvider(
     val models: List<String> = emptyList(),
     @SerialName("default_model") val defaultModel: String? = null,
     @SerialName("created_at") val createdAt: String,
-    val favourites: List<String> = emptyList(),
     @SerialName("model_class") val modelClass: String = "cloud",
     @SerialName("speech_model") val speechModel: String? = null,
 )
@@ -31,9 +30,6 @@ data class CreateModelProviderRequest(
 
 @Serializable
 data class UpdateModelProviderRequest(val name: String? = null, @SerialName("model_class") val modelClass: String? = null)
-
-@Serializable
-data class SetFavouriteModelRequest(val model: String, val favourite: Boolean)
 
 @Serializable
 data class CreateChatRequest(

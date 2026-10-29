@@ -339,9 +339,6 @@ class MyceliumApi(
     suspend fun updateModelProvider(id: String, request: UpdateModelProviderRequest): ModelProvider =
         call("/model-providers/$id") { client.patch(it) { authorise(); json(request) } }.body()
 
-    suspend fun setFavouriteModel(id: String, model: String, favourite: Boolean): ModelProvider =
-        call("/model-providers/$id/favourites") { client.put(it) { authorise(); json(SetFavouriteModelRequest(model, favourite)) } }.body()
-
     suspend fun refreshModelProvider(id: String): ModelProvider =
         call("/model-providers/$id/refresh") { client.post(it) { authorise() } }.body()
 

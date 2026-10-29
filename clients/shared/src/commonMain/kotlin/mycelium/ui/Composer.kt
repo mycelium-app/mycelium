@@ -152,7 +152,7 @@ fun Composer(
     onSetSetting: (String, String) -> Unit,
     onSearchFiles: suspend (String) -> List<String>,
     modifier: Modifier = Modifier,
-    accountPicker: AccountPickerControls? = null,
+    accountPicker: ModelPickerControls? = null,
     onSideChat: (kind: String, text: String) -> Unit = { _, _ -> },
     pendingCitations: List<Annotation> = emptyList(),
     onCitationPlaced: (Annotation) -> Unit = {},
@@ -480,8 +480,7 @@ fun Composer(
                 muted = !conversation.teachMe,
             )
             BarControl.Goal -> goal?.let { GoalButton(it) }
-            BarControl.Account -> accountPicker?.let { AccountPicker(it) }
-            BarControl.Model -> OptionMenu("Model", options.models, options.currentModel, onSetModel)
+            BarControl.Model -> accountPicker?.let { ModelPicker(it) }
             BarControl.Mode -> OptionMenu("Mode", modes, options.currentMode, onSetMode)
             BarControl.Settings -> {
                 for (setting in settings) {
@@ -499,7 +498,7 @@ fun Composer(
         var optionsOpen by remember(conversation.id) { mutableStateOf(false) }
         val accountName = accountPicker?.label
         val harnessChoices = listOfNotNull(
-            (options.models.firstOrNull { it.id == options.currentModel }?.name ?: options.currentModel).takeIf { BarControl.Model in controls },
+            accountName,
             (modes.firstOrNull { it.id == options.currentMode }?.name ?: options.currentMode).takeIf { BarControl.Mode in controls },
         )
 
@@ -533,9 +532,9 @@ fun Composer(
                     if (controls.inGroups(BarGroup.Pickers, BarGroup.Usage).isNotEmpty()) {
                         MyButton(
                             { optionsOpen = true },
-                            text = harnessChoices.joinToString(" · ").ifEmpty { accountName ?: "Options" },
+                            text = harnessChoices.joinToString(" · ").ifEmpty { "Options" },
                             icon = MyIcon.Sliders,
-                            description = "Conversation options: ${(listOfNotNull(accountName) + harnessChoices).joinToString(", ")}",
+                            description = "Conversation options: ${harnessChoices.joinToString(", ")}",
                             muted = true,
                             selected = optionsOpen,
                             maxWidth = Tokens.Size.AccountControl,

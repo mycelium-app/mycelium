@@ -139,6 +139,8 @@ const val ContinueAgentPrefix = "agent:"
 
 const val ContinueChatPrefix = "chat:"
 
+const val ContinueModelPrefix = "model:"
+
 const val ContinueNodePrefix = "on:"
 
 fun currentContinueId(conversation: Conversation): String? = when {
@@ -278,12 +280,6 @@ fun nextUsageTick(windows: List<UsageWindow>, now: Instant = Clock.System.now())
         .minOrNull() ?: UsageTickCeiling
 
     return minOf(untilReset, UsageTickCeiling).coerceAtLeast(UsageTickFloor)
-}
-
-fun accountMenuTitle(agent: String): String = when (agent) {
-    "claude" -> "Claude account"
-    "codex" -> "Codex account"
-    else -> "Account"
 }
 
 fun newAccountName(): String = "account-${Random.nextInt(1000, 10000)}"

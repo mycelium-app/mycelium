@@ -87,20 +87,21 @@ class ContinueOnTest {
     fun continuingOnTheOtherHarnessSendsTheRequest() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
-        rule.onNodeWithText("Codex · codex@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.onNodeWithContentDescription("Codex: Codex").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
-        assertEquals("""{"agent":"codex","account":"codex@example.com"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
+        assertEquals("""{"agent":"codex","routing":"codex_any"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
     }
 
     @Test
     fun aConversationWithoutASessionChangesAccountFromTheSameMenu() {
         shell(EnabledExperiments, started = Started.replace("\"acp_session_id\":\"s\",", ""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.onNodeWithText("Account").performClick()
         rule.onNodeWithText("Claude Code · work@example.org").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "PATCH /api/v1/conversations/c1" } }
@@ -143,19 +144,20 @@ class ContinueOnTest {
     fun anyAccountIsOfferedFirstAndSentAsARoutingChoice() {
         shell(EnabledExperiments)
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Claude Code · sam@example.com").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Account: Claude Code · sam@example.com").performClick()
-        rule.onNodeWithText("Claude Code, any account").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code · sam").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Claude Code · sam").performClick()
+        rule.onNodeWithText("Account").performClick()
+        rule.onNodeWithText("Any account").performClick()
 
         rule.waitUntil(5_000) { requests.toList().any { it.first == "POST /api/v1/conversations/c1/continue" } }
         assertEquals("""{"agent":"claude","routing":"claude_any"}""", requests.toList().last { it.first == "POST /api/v1/conversations/c1/continue" }.second)
     }
 
     @Test
-    fun aRoutedConversationShowsAnyAccountWithTheAccountItIsOn() {
+    fun aRoutedConversationShowsNoPinnedAccountInTheModelControl() {
         shell(EnabledExperiments, started = Started.replace("\"account\":\"sam@example.com\"", "\"account\":\"work@example.org\",\"routing\":\"claude_any\""))
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Account: Any account: work@example.org").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Claude Code").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

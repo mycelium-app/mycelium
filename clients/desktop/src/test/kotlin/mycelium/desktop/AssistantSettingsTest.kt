@@ -117,8 +117,8 @@ class AssistantSettingsTest {
         shell()
         openSection("Models and nodes")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for Ollama · qwen").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("More for Ollama · qwen").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("More for qwen").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("More for qwen").performClick()
         rule.onNodeWithText("Move up").performClick()
         rule.onNodeWithText("Save").performScrollTo().performClick()
 
@@ -151,9 +151,9 @@ class AssistantSettingsTest {
         shell()
         openSection("Models and nodes")
 
-        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Add a model: Add a model").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithContentDescription("Add a model: Add a model").performScrollTo().performClick()
-        rule.onNodeWithText("Claude Code, any account").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithContentDescription("Model: Add a model").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithContentDescription("Model: Add a model").performScrollTo().performClick()
+        rule.onNodeWithContentDescription("Claude Code: Claude Code").performClick()
         rule.onNodeWithText("Add node").performScrollTo().performClick()
         rule.onNodeWithText("willow").performClick()
         rule.onNodeWithContentDescription("Chat first when no files are needed").performScrollTo().performClick()

@@ -21,7 +21,7 @@ use mycelium_proto::stream::StreamMessage;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id, action_id, action_inputs, account, routing";
+const SCHEDULE_COLUMNS: &str = "id, owner, node_id, agent, cwd, project_id, prompt, cron, each_run, paused, time_zone, proposed, conversation_id, next_run_at, last_run_at, last_conversation_id, created_at, assistant_id, action_id, action_inputs, account, routing, model";
 const RUN_COLUMNS: &str = "id, schedule_id, ran_at, outcome, reason, conversation_id";
 const DUE_BATCH: i64 = 20;
 const RECENT_RUNS: i64 = 50;
@@ -50,6 +50,7 @@ struct ScheduleRow {
     action_inputs: sqlx::types::Json<std::collections::BTreeMap<String, String>>,
     account: Option<String>,
     routing: Option<String>,
+    model: Option<String>,
 }
 
 impl ScheduleRow {
@@ -60,6 +61,7 @@ impl ScheduleRow {
             agent: self.agent.as_deref().map(parse_enum).transpose()?,
             account: self.account,
             routing: self.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse),
+            model: self.model,
             cwd: self.cwd,
             project_id: self.project_id,
             prompt: self.prompt,
@@ -271,7 +273,7 @@ pub async fn insert(state: &AppState, owner: Uuid, request: CreateScheduleReques
 
     let assistant_schedule = request.assistant_id.is_some();
     let row = sqlx::query_as::<_, ScheduleRow>(sqlx::AssertSqlSafe(format!(
-        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, assistant_id, action_id, action_inputs, account, routing) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) returning {SCHEDULE_COLUMNS}",
+        "insert into schedules (owner, node_id, agent, cwd, project_id, prompt, cron, each_run, next_run_at, time_zone, assistant_id, action_id, action_inputs, account, routing, model) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) returning {SCHEDULE_COLUMNS}",
     )))
     .bind(owner)
     .bind(request.node_id.filter(|_| !assistant_schedule))
@@ -288,6 +290,7 @@ pub async fn insert(state: &AppState, owner: Uuid, request: CreateScheduleReques
     .bind(sqlx::types::Json(&request.action_inputs))
     .bind(request.account.as_deref().map(str::trim).filter(|account| !account.is_empty()).filter(|_| !assistant_schedule && request.routing.is_none()))
     .bind(request.routing.filter(|_| !assistant_schedule).map(|routing| routing.as_str()))
+    .bind(request.model.as_deref().map(str::trim).filter(|model| !model.is_empty()).filter(|_| !assistant_schedule))
     .fetch_one(&state.pool)
     .await?;
     publish(state, row)
@@ -590,7 +593,7 @@ async fn start_run(state: &AppState, row: &ScheduleRow) -> ApiResult<Uuid> {
         }
     }
 
-    let request = CreateConversationRequest { account: row.account.clone(), node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: None, routing: row.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse) };
+    let request = CreateConversationRequest { account: row.account.clone(), node_id, agent: parse_enum(agent)?, cwd: row.cwd.clone(), project_id: row.project_id, branch: None, title: None, prompt: Some(row.prompt.clone()), parent_id: None, side_kind: None, model: row.model.clone(), routing: row.routing.as_deref().and_then(mycelium_proto::routing::Routing::parse) };
     let conversation = conversations::start(state, row.owner, request).await?;
 
     Ok(conversation.id)

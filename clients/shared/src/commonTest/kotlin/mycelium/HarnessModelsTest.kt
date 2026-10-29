@@ -3,7 +3,6 @@ package mycelium
 import mycelium.api.HarnessModel
 import mycelium.api.HarnessModels
 import mycelium.api.NodeSummary
-import mycelium.state.harnessModelChoices
 import mycelium.state.modelMenu
 import kotlin.time.Instant
 import kotlin.test.Test
@@ -39,10 +38,4 @@ class HarnessModelsTest {
         assertEquals(listOf("Default model"), modelMenu(node(Claude), "codex", null, Now).choices.map { it.name })
     }
 
-    @Test
-    fun assistantsOfferTheModelsAnyNodeReportedForTheAgentOnce() {
-        val other = node(Claude.copy(models = listOf(HarnessModel("sonnet", "Sonnet 5.5"), HarnessModel("haiku", "Haiku 4.5"))))
-
-        assertEquals(listOf("", "opus", "sonnet", "haiku"), harnessModelChoices(listOf(node(Claude), other), "claude").map { it.id })
-    }
 }

@@ -13,12 +13,10 @@ import mycelium.state.bestLogin
 import mycelium.state.formatAmount
 import mycelium.state.formatMoney
 import mycelium.state.loginStanding
-import mycelium.state.modelChoiceFrom
 import mycelium.state.parseAmount
 import mycelium.state.priceLabel
 import mycelium.state.routedLabel
 import mycelium.state.routedStatus
-import mycelium.state.routingChoices
 import mycelium.state.scheduleAccountChoice
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -68,16 +66,6 @@ class RoutingTest {
     }
 
     @Test
-    fun theAnyModelChoiceHintNamesTheFirstEntryThatCanRun() {
-        val logins = listOf(login("work@example.org", window("five_hour", 10.0)), login("codex@example.com", agent = "codex"))
-        val list = listOf(ModelChoice(agent = "codex", account = "missing@example.com"), ModelChoice(agent = "claude"))
-
-        val choices = routingChoices(logins, list, "starts on")
-
-        assertEquals("starts on Claude Code", choices.first { it.id == "routing:any_model" }.description)
-    }
-
-    @Test
     fun aRoutedConversationShowsTheAccountItIsOnNow() {
         assertEquals("Any account: work@example.org", routedLabel(routed("claude", "work@example.org", "claude_any"), emptyList()))
         assertEquals("Any model: Claude Code, work@example.org", routedLabel(routed("claude", "work@example.org", "any_model"), emptyList()))
@@ -91,7 +79,7 @@ class RoutingTest {
     fun theRoutedStatusNamesTheTightestWindowLeft() {
         val status = routedStatus(routed("claude", "work@example.org", "claude_any"), login("work@example.org", window("seven_day", 36.0)))
 
-        assertEquals("Claude Code, any account. On work@example.org now: 64% of the weekly window left", status)
+        assertEquals("On work, 64% of the weekly window left", status)
     }
 
     @Test
@@ -101,14 +89,6 @@ class RoutingTest {
         assertEquals("routing:claude_any", scheduleAccountChoice(withAccounts, "claude", null))
         assertEquals("routing:any_model", scheduleAccountChoice(withAccounts, "claude", "routing:any_model"))
         assertNull(scheduleAccountChoice(nodeWith(), "claude", null))
-    }
-
-    @Test
-    fun anAddedModelBecomesTheMatchingChoice() {
-        assertEquals(ModelChoice(agent = "codex"), modelChoiceFrom("any:codex"))
-        assertEquals(ModelChoice(agent = "claude", account = "a@b.c"), modelChoiceFrom("account:claude:a@b.c"))
-        assertEquals(ModelChoice(providerId = "p1", model = "opus:5"), modelChoiceFrom("chat:p1:opus:5"))
-        assertEquals(ModelChoice(anyModel = true), modelChoiceFrom("any_model"))
     }
 
     @Test
