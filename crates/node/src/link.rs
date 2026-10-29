@@ -108,10 +108,6 @@ async fn connect_once(daemon: &Daemon, outgoing: &mut mpsc::UnboundedReceiver<No
     send(&mut socket, &daemon.hello().await).await?;
     send(&mut socket, &daemon.logins_report().await).await?;
 
-    if let Some(orchestrator_usage) = daemon.orchestrator_usage_report().await {
-        send(&mut socket, &orchestrator_usage).await?;
-    }
-
     daemon.on_connected();
     *established = true;
 

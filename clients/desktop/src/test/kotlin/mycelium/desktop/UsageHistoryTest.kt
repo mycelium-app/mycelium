@@ -29,7 +29,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 internal const val HistoryAccounts = """{"accounts":[
-{"agent":"claude","account":"me@example.com","plan":"max_20x","plan_price_usd":200.0,"plan_price_as_of":"2026-10-27","readings_since":"2026-09-03T08:00:00Z","orchestrator_until":"2026-10-14T00:00:00Z",
+{"agent":"claude","account":"me@example.com","plan":"max_20x","plan_price_usd":200.0,"plan_price_as_of":"2026-10-27","readings_since":"2026-09-03T08:00:00Z",
 "readings":[{"at":"2026-10-26T08:00:00Z","window":"five_hour","percent":4.0},{"at":"2026-10-26T10:00:00Z","window":"five_hour","percent":61.0},{"at":"2026-10-26T08:00:00Z","window":"seven_day","percent":20.0},{"at":"2026-10-26T10:00:00Z","window":"seven_day","percent":31.0}],
 "windows":[{"window":"five_hour","started_at":"2026-10-26T08:00:00Z","peak_percent":61.0,"tokens":118000000,"tokens_per_point":1900000.0,"api_equivalent_usd":52.0}],
 "tokens_per_point":{"five_hour":1900000.0,"seven_day":22000000.0,"five_hour_samples":41,"seven_day_samples":7},

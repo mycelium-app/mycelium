@@ -4,7 +4,6 @@ use uuid::Uuid;
 
 use crate::api::{EnvironmentCapability, EnvironmentState, EnvironmentWindow};
 use crate::conversation::{AgentId, AgentInfo, LoginInfo, SessionPosition};
-use crate::usage_history::OrchestratorReading;
 
 pub const REPLACED_CLOSE_CODE: u16 = 4000;
 
@@ -61,12 +60,6 @@ pub enum NodeToControl {
     },
     Logins {
         logins: Vec<LoginInfo>,
-    },
-    OrchestratorUsage {
-        agent: AgentId,
-        account: Option<String>,
-        fine: Vec<OrchestratorReading>,
-        coarse: Vec<OrchestratorReading>,
     },
     LoginOutput {
         login_id: Uuid,

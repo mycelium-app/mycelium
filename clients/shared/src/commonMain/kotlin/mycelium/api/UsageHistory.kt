@@ -15,7 +15,6 @@ data class UsageHistoryAccount(
     @SerialName("plan_price_as_of") val planPriceAsOf: String? = null,
     @SerialName("your_price") val yourPrice: YourPrice? = null,
     @SerialName("readings_since") val readingsSince: String? = null,
-    @SerialName("orchestrator_until") val orchestratorUntil: String? = null,
     val readings: List<UsageReading> = emptyList(),
     val windows: List<UsageHistoryWindow> = emptyList(),
     @SerialName("tokens_per_point") val tokensPerPoint: TokensPerPoint = TokensPerPoint(),

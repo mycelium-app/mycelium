@@ -21,8 +21,6 @@ pub struct UsageHistoryAccount {
     pub your_price: Option<crate::routing::YourPrice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readings_since: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub orchestrator_until: Option<chrono::DateTime<chrono::Utc>>,
     pub readings: Vec<UsageReading>,
     pub windows: Vec<UsageHistoryWindow>,
     pub tokens_per_point: TokensPerPoint,
@@ -59,15 +57,4 @@ pub struct TokensPerPoint {
     pub seven_day: Option<f64>,
     pub five_hour_samples: i64,
     pub seven_day_samples: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OrchestratorReading {
-    pub at: i64,
-    pub five: f64,
-    pub seven: f64,
-    #[serde(default)]
-    pub five_resets: Option<i64>,
-    #[serde(default)]
-    pub seven_resets: Option<i64>,
 }

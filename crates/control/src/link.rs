@@ -244,11 +244,6 @@ async fn handle(state: &AppState, node_id: Uuid, message: NodeToControl) -> ApiR
             Ok(())
         }
         NodeToControl::Logins { logins } => store_logins(state, node_id, logins).await,
-        NodeToControl::OrchestratorUsage { agent, account, fine, coarse } => {
-            crate::usage_history::store_orchestrator_readings(state, node_id, agent, account.as_deref().unwrap_or_default(), coarse.iter().chain(fine.iter())).await?;
-
-            Ok(())
-        }
         NodeToControl::LoginOutput { login_id, data } => {
             if let Some(owner) = state.hub.login_owner(login_id).filter(|owner| owner.node_id == node_id) {
                 state.publish(Some(owner.user_id), StreamMessage::LoginOutput { login_id, data });

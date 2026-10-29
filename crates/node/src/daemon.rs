@@ -229,14 +229,6 @@ impl Daemon {
         NodeToControl::Logins { logins: self.logins_for(&agents) }
     }
 
-    pub async fn orchestrator_usage_report(&self) -> Option<NodeToControl> {
-        let (fine, coarse) = crate::usage::orchestrator_readings(&crate::usage::orchestrator_limits_path(&self.options.home))?;
-        let agents = self.agents().await;
-        let login = self.logins_for(&agents).into_iter().find(|login| login.agent == AgentId::Claude)?;
-
-        Some(NodeToControl::OrchestratorUsage { agent: login.agent, account: login.account, fine, coarse })
-    }
-
     fn use_reset(&self, request_id: Uuid, agent: AgentId, account: Option<String>, idempotency_key: String) {
         let accounts = accounts_dir(&self.config.state_dir);
         let found = match &account {

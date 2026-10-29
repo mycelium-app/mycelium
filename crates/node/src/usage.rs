@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use mycelium_proto::conversation::{ResetCredits, UsageWindow};
-use mycelium_proto::usage_history::OrchestratorReading;
 use serde::Deserialize;
 use crate::codex_app_server::read_reset_credits;
 use std::collections::HashMap;
@@ -19,25 +18,6 @@ pub struct Reading {
     pub windows: Vec<UsageWindow>,
     pub read_at: DateTime<Utc>,
     pub reset_credits: Option<ResetCredits>,
-}
-
-#[derive(Deserialize)]
-struct OrchestratorLimits {
-    #[serde(default)]
-    fine: Vec<OrchestratorReading>,
-    #[serde(default)]
-    coarse: Vec<OrchestratorReading>,
-}
-
-pub fn orchestrator_limits_path(home: &Path) -> PathBuf {
-    home.join(".local/share/orchestrator/limits.json")
-}
-
-pub fn orchestrator_readings(path: &Path) -> Option<(Vec<OrchestratorReading>, Vec<OrchestratorReading>)> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let limits: OrchestratorLimits = serde_json::from_str(&text).ok()?;
-
-    (!limits.fine.is_empty() || !limits.coarse.is_empty()).then_some((limits.fine, limits.coarse))
 }
 
 pub struct UsageCache {
@@ -189,23 +169,6 @@ mod tests {
     use std::sync::Arc;
 
     type Seen = Arc<Mutex<Vec<(String, String)>>>;
-
-    #[test]
-    fn orchestrator_limits_become_readings_and_a_missing_or_empty_file_gives_none() {
-        let dir = std::env::temp_dir().join(format!("orchestrator-limits-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("limits.json");
-
-        assert!(orchestrator_readings(&path).is_none());
-
-        std::fs::write(&path, r#"{"schema":2,"fine":[{"at":10,"five":27,"seven":45,"five_resets":20,"seven_resets":30,"units":1.0}],"coarse":[{"at":5,"five":1,"seven":2}]}"#).unwrap();
-        let (fine, coarse) = orchestrator_readings(&path).unwrap();
-
-        assert_eq!((fine.len(), coarse.len(), fine[0].five_resets, coarse[0].five_resets), (1, 1, Some(20), None));
-
-        std::fs::write(&path, r#"{"schema":2,"fine":[],"coarse":[]}"#).unwrap();
-        assert!(orchestrator_readings(&path).is_none());
-    }
 
     async fn serve(status: u16, body: serde_json::Value, seen: Seen) -> String {
         let router = Router::new().route(

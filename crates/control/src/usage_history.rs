@@ -6,7 +6,7 @@ use axum::Json;
 use axum::extract::{Query, State};
 use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
 use mycelium_proto::conversation::{AgentId, UsageWindow};
-use mycelium_proto::usage_history::{OrchestratorReading, TokensPerPoint, UsageHistory, UsageHistoryAccount, UsageHistoryWindow, UsageReading};
+use mycelium_proto::usage_history::{TokensPerPoint, UsageHistory, UsageHistoryAccount, UsageHistoryWindow, UsageReading};
 use serde::Deserialize;
 use sqlx::types::Json as Sql;
 use uuid::Uuid;
@@ -173,8 +173,8 @@ async fn account_history(state: &AppState, owner: Uuid, agent: AgentId, account:
     .fetch_all(&state.pool)
     .await?;
     let rows: Vec<(DateTime<Utc>, Vec<UsageWindow>)> = rows.into_iter().map(|(at, windows)| (at, windows.0)).collect();
-    let (readings_since, orchestrator_until) = sqlx::query_as::<_, (Option<DateTime<Utc>>, Option<DateTime<Utc>>)>(
-        "select min(h.read_at), max(h.read_at) filter (where h.source = 'orchestrator') from login_usage_history h join nodes n on n.id = h.node_id where n.revoked_at is null and h.agent = $1 and h.account = $2",
+    let readings_since = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+        "select min(h.read_at) from login_usage_history h join nodes n on n.id = h.node_id where n.revoked_at is null and h.agent = $1 and h.account = $2",
     )
     .bind(enum_text(&agent))
     .bind(&account)
@@ -241,39 +241,12 @@ async fn account_history(state: &AppState, owner: Uuid, agent: AgentId, account:
         your_price,
         plan,
         readings_since,
-        orchestrator_until,
         readings,
         windows,
         tokens_per_point: TokensPerPoint { five_hour: median(five_hour_values.clone()), seven_day: median(seven_day_values.clone()), five_hour_samples: five_hour_values.len() as i64, seven_day_samples: seven_day_values.len() as i64 },
         api_equivalent_month_usd,
         api_equivalent_per_window_usd,
     })
-}
-
-fn window_of(name: &str, percent: f64, resets: Option<i64>) -> UsageWindow {
-    UsageWindow { name: name.into(), used_percent: percent, resets_at: resets.filter(|epoch| *epoch > 0).and_then(|epoch| DateTime::from_timestamp(epoch, 0)), rate_per_hour: None, runs_out_at: None }
-}
-
-pub async fn store_orchestrator_readings<'a>(state: &AppState, node_id: Uuid, agent: AgentId, account: &str, readings: impl Iterator<Item = &'a OrchestratorReading>) -> ApiResult<i64> {
-    let mut imported = 0;
-
-    for reading in readings {
-        let Some(read_at) = DateTime::from_timestamp(reading.at, 0) else {
-            continue;
-        };
-        let windows = vec![window_of(FIVE_HOUR, reading.five, reading.five_resets), window_of(SEVEN_DAY, reading.seven, reading.seven_resets)];
-        let inserted = sqlx::query("insert into login_usage_history (node_id, agent, account, read_at, windows, source) values ($1, $2, $3, $4, $5, 'orchestrator') on conflict do nothing")
-            .bind(node_id)
-            .bind(enum_text(&agent))
-            .bind(account)
-            .bind(read_at)
-            .bind(Sql(&windows))
-            .execute(&state.pool)
-            .await?;
-        imported += inserted.rows_affected() as i64;
-    }
-
-    Ok(imported)
 }
 
 #[cfg(test)]
